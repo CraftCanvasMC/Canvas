@@ -1,6 +1,46 @@
-[Purpur]: https://purpurmc.org
+<br>
+<div align="center">
+  <a href="https://gyazo.com/d7be938a9e911f14b106d5c8f1bf12b1"><img src="https://i.gyazo.com/d7be938a9e911f14b106d5c8f1bf12b1.png" alt="Image from Gyazo" width="620"/></a>
+</div>
+<!DOCTYPE html>
+<html>
+<body>
+  <h1>Welcome to Canvas</h1>
+  <p><em>A unique Minecraft server platform that empowers creativity and innovation.</em></p>
 
-## Tentacles
-Template to create a mantainable fork of [Purpur].
+  <h2>Introduction</h2>
 
-This readme will eventually contain instructions regarding the patch system. For now, visit Purpur's [CONTRIBUTING.md](https://github.com/PurpurMC/Purpur/blob/HEAD/CONTRIBUTING.md).
+  <p>Introducing Canvas, a unique new Minecraft server type that will completely transform the multiplayer experience!</p>
+
+  <p>Canvas is not your standard server fork; it is an expanding platform based on Paper with a stunning twist of customization and innovation. With Canvas, we're putting the power of Minecraft into your hands, offering an extensive array of APIs, mixin compatibility, and more. Everything is intended to improve your gameplay and give plugin creators an unparalleled experience.</p>
+
+  <h2>Our Mission</h2>
+  <p>Our mission with Canvas is clear: to empower plugin developers like never before. Canvas provides you with the tools you need to paint your most ambitious Minecraft ideas, whether you're an experienced programmer or just getting started. With expanded APIs and mixin compatibility, you have the freedom to craft unique, immersive adventures that have never been seen before in the Minecraft universe.</p>
+
+  <h2>Unleash Your Creativity</h2>
+  <p>Get ready to unleash your creativity and explore a world where the possibilities are truly endless. Welcome to a new era of Minecraft adventure!</p>
+
+  <h2>Resources</h2>
+  <ul>
+    <li>GitHub Repository: <a href="https://github.com/Dueris/Canvas">https://github.com/Dueris/Canvas</a></li>
+    <li>Donation: <a href="https://ko-fi.com/dueris">https://ko-fi.com/dueris</a></li>
+  </ul>
+
+  <h2>Join Our Community</h2>
+  <p>Join our Discord server to stay updated and connect with the Canvas community:</p>
+  <a href="https://discord.gg/KRmDA95zM2"><img src="https://1000logos.net/wp-content/uploads/2021/06/Discord-logo-2015.png" alt="Discord Icon" width="250" height="150"></a>
+
+  <h2>Contributing</h2>
+  <p>We welcome contributions from the community. If you'd like to contribute to Canvas, please read our <a href="CONTRIBUTING.md">contributing guidelines</a> for more information.</p>
+
+  <h2>License</h2>
+  <p>Canvas is open-source software licensed under the GNU General Public License version 3 License</a>.</p>
+
+  <hr>
+  <p align="center">
+    <em>Canvas - Empowering the Impossibe</em>
+    <br>
+    <img src="canvas-logo.png" alt="Canvas Logo">
+  </p>
+</body>
+</html>

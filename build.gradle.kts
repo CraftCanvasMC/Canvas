@@ -1,11 +1,21 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+import io.papermc.paperweight.tasks.CreateBundlerJar
+import io.papermc.paperweight.tasks.RemapJar
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import org.gradle.api.DefaultTask
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     java
     `maven-publish`
     id("com.github.johnrengelman.shadow") version "8.1.1" apply false
-    id("io.papermc.paperweight.patcher") version "1.5.8"
+    id("io.papermc.paperweight.patcher") version "1.5.9"
+    id("ignite.parent-build-logic")
 }
 
 allprojects {
@@ -49,6 +59,7 @@ subprojects {
 
 repositories {
     mavenCentral()
+    jcenter()
     maven(paperMavenPublicUrl) {
         content {
             onlyForConfigurations(configurations.paperclip.name)
@@ -63,7 +74,7 @@ dependencies {
 }
 
 paperweight {
-    serverProject.set(project(":tentacles-server"))
+    serverProject.set(project(":canvas-server"))
 
     remapRepo.set(paperMavenPublicUrl)
     decompileRepo.set(paperMavenPublicUrl)
@@ -73,19 +84,19 @@ paperweight {
         ref.set(providers.gradleProperty("purpurCommit"))
 
         withStandardPatcher {
-            baseName("Purpur")
+            baseName("Canvas")
 
             apiPatchDir.set(layout.projectDirectory.dir("patches/api"))
-            apiOutputDir.set(layout.projectDirectory.dir("Tentacles-API"))
+            apiOutputDir.set(layout.projectDirectory.dir("Canvas-API"))
 
             serverPatchDir.set(layout.projectDirectory.dir("patches/server"))
-            serverOutputDir.set(layout.projectDirectory.dir("Tentacles-Server"))
+            serverOutputDir.set(layout.projectDirectory.dir("Canvas-Server"))
         }
     }
 }
 
 tasks.generateDevelopmentBundle {
-    apiCoordinates.set("org.purpurmc.tentacles:tentacles-api")
+    apiCoordinates.set("me.dueris.canvas:canvas-api")
     mojangApiCoordinates.set("io.papermc.paper:paper-mojangapi")
     libraryRepositories.set(
         listOf(
@@ -96,33 +107,104 @@ tasks.generateDevelopmentBundle {
     )
 }
 
-allprojects {
-    publishing {
-        repositories {
-            maven("https://repo.purpurmc.org/snapshots") {
-                name = "tentacles"
-                credentials(PasswordCredentials::class)
-            }
-        }
-    }
-}
-
-publishing {
-    publications.create<MavenPublication>("devBundle") {
-        artifact(tasks.generateDevelopmentBundle) {
-            artifactId = "dev-bundle"
-        }
-    }
-}
-
 tasks.register("printMinecraftVersion") {
     doLast {
         println(providers.gradleProperty("mcVersion").get().trim())
     }
 }
 
-tasks.register("printTentaclesVersion") {
+tasks.register<DefaultTask>("createCanvasBundler") {
+    dependsOn(tasks.withType<CreateBundlerJar>())
+
     doLast {
-        println(project.version)
+        val shadowJar: CreateBundlerJar = tasks.getByName<CreateBundlerJar>("createReobfBundlerJar")
+        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("Canvas-Launcher/src/main/resources")
+
+        Files.createDirectories(targetJarDirectory)
+        Files.copy(
+            shadowJar.outputZip.asFile.get().toPath().toAbsolutePath(),
+            targetJarDirectory.resolve("canvas-server.jar"),
+            StandardCopyOption.REPLACE_EXISTING
+        )
     }
 }
+
+tasks.register<DefaultTask>("createCanvasServer") {
+    // Specify the project path for createCanvasBundler in the dependsOn statement
+//    dependsOn(":createCanvasBundler", ":generateDevelopmentBundle", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
+//
+//    doLast {
+//        val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
+//        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
+//
+//        Files.createDirectories(targetJarDirectory)
+//        Files.copy(
+//            shadowJar.archiveFile.get().asFile.toPath().toAbsolutePath(),
+//            targetJarDirectory.resolve(shadowJar.archiveBaseName.get() + ".jar"),
+//            StandardCopyOption.REPLACE_EXISTING
+//        )
+//    }
+}
+
+tasks.register<Copy>("renameServer") {
+    from("build/libs/paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip")
+    into("Canvas-Server/build/libs")
+    include("paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip")
+
+    eachFile {
+        val fileName = name
+        name = fileName.replace("paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip", "canvas-server.zip")
+    }
+}
+
+tasks.register<Copy>("renameApi") {
+    from("Canvas-API/build/libs/canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar")
+    into("Canvas-API/build/libs")
+    include("canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar")
+
+    eachFile {
+        val fileName = name
+        name = fileName.replace("canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar", "canvas-api.jar")
+    }
+}
+
+tasks.register<Copy>("unzipLauncherData") {
+    from(zipTree(file("work/launcherData.csd")))
+    into(file("./Canvas-Launcher/"))
+}
+
+tasks.register<Zip>("repackLauncherData") {
+    from(file("./Canvas-Launcher/")) {
+        exclude("**/build/**")
+        exclude("**/bin/**")
+        exclude("**/src/main/resources/canvas-server.jar")
+    }
+    archiveFileName.set("launcherData.csd")
+    destinationDirectory.set(file("work"))
+}
+
+publishing {
+    publications.create<MavenPublication>("devBundle") {
+        artifact(tasks.generateDevelopmentBundle) {
+            groupId = "io.github.dueris"
+            artifactId = "canvas-devBundle"
+        }
+    }
+    repositories {
+        maven {
+            name = "sonatype"
+            if (version.toString().endsWith("SNAPSHOT")) {
+                url = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+            } else {
+                url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
+            }
+            credentials {
+                username=System.getenv("OSSRH_USERNAME")
+                password=System.getenv("OSSRH_PASSWORD")
+            }
+        }
+    }
+}
+
+tasks.getByName("rebuildPatches").dependsOn("repackLauncherData")
+tasks.getByName("applyPatches").dependsOn("unzipLauncherData")
