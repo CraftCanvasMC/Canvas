@@ -84,7 +84,7 @@ paperweight {
         ref.set(providers.gradleProperty("purpurCommit"))
 
         withStandardPatcher {
-            baseName("Canvas")
+            baseName("Purpur")
 
             apiPatchDir.set(layout.projectDirectory.dir("patches/api"))
             apiOutputDir.set(layout.projectDirectory.dir("Canvas-API"))
@@ -131,19 +131,19 @@ tasks.register<DefaultTask>("createCanvasBundler") {
 
 tasks.register<DefaultTask>("createCanvasServer") {
     // Specify the project path for createCanvasBundler in the dependsOn statement
-//    dependsOn(":createCanvasBundler", ":generateDevelopmentBundle", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
-//
-//    doLast {
-//        val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
-//        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
-//
-//        Files.createDirectories(targetJarDirectory)
-//        Files.copy(
-//            shadowJar.archiveFile.get().asFile.toPath().toAbsolutePath(),
-//            targetJarDirectory.resolve(shadowJar.archiveBaseName.get() + ".jar"),
-//            StandardCopyOption.REPLACE_EXISTING
-//        )
-//    }
+    dependsOn(":createCanvasBundler", ":generateDevelopmentBundle", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
+
+    doLast {
+        val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
+        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
+
+        Files.createDirectories(targetJarDirectory)
+        Files.copy(
+            shadowJar.archiveFile.get().asFile.toPath().toAbsolutePath(),
+            targetJarDirectory.resolve(shadowJar.archiveBaseName.get() + ".jar"),
+            StandardCopyOption.REPLACE_EXISTING
+        )
+    }
 }
 
 tasks.register<Copy>("renameServer") {
