@@ -8,6 +8,7 @@ plugins {
   id("signing")
 }
 
+/* // Canvas start - change to canvas sonatype/remove ignite sonatype integration
 signing {
   val signingKey: String? by project
   val signingPassword: String? by project
@@ -49,3 +50,4 @@ tasks {
     }
   }
 }
+*/ // Canvas end
