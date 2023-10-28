@@ -13,13 +13,13 @@ repositories {
 
 java {
   toolchain {
-    languageVersion.set(JavaLanguageVersion.of(8))
+    languageVersion.set(JavaLanguageVersion.of(17))
   }
 }
 
 indra {
   javaVersions {
-    target(8)
+    target(17)
   }
 
   github("vectrix-space", "ignite") {
