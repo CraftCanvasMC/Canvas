@@ -29,9 +29,9 @@ val launcherJava9 by sourceSets.register("java9") {
   compileClasspath += main.runtimeClasspath
 
   tasks.named(compileJavaTaskName, JavaCompile::class) {
-    options.release.set(9)
-    if (JavaVersion.current() < JavaVersion.VERSION_11) {
-      javaCompiler.set(javaToolchains.compilerFor { languageVersion.set(JavaLanguageVersion.of(11)) })
+    options.release.set(17)
+    if (JavaVersion.current() < JavaVersion.VERSION_17) {
+      javaCompiler.set(javaToolchains.compilerFor { languageVersion.set(JavaLanguageVersion.of(17)) })
     }
   }
 
