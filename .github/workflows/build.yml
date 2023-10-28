@@ -1,0 +1,57 @@
+name: Build
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - "ver/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: gradle/wrapper-validation-action@v1
+      - uses: actions/setup-java@v3.6.0
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: 'gradle'
+      - name: Configure Git
+        run: git config --global user.email "no-reply@github.com" && git config --global user.name "Github Actions"
+      - name: Apply Patches
+        run: ./gradlew applyPatches --no-daemon --stacktrace
+      - name: Build
+        run: ./gradlew createCanvasServer --no-daemon --stacktrace
+      - name: Rebuild on Failure
+        if: ${{ failure() }}
+        run: |
+          ./gradlew clean cleanCache
+          ./gradlew applyPatches --no-daemon --stacktrace 
+          ./gradlew createCanvasServer --no-daemon --stacktrace
+      - name: Set Commit Hash
+        id: set_commit_hash
+        run: echo "COMMIT_HASH=$(git log --format='%H' -n 1)" >> $GITHUB_ENV
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Build ${{ github.run_number }}
+          tag_name: ${{ github.run_number }}
+          body: "[\"artifact_name\"=canvas-launcher.jar]/[\"changes\"=${{ github.event.head_commit.message }}]/[\"commit_hash\"=${{ env.COMMIT_HASH }}]/[\"version\"=MC1.20.2]"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: target/*.jar
+      - name: Upload to sonatype
+        run: |
+          ./gradlew publishDevBundlePublicationToSonatypeRepository --stacktrace --info
+          ./gradlew :canvas-api:publishMavenJavaPublicationToSonatypeRepository --stacktrace --info
+          ./gradlew :canvas-server:publishMavenJavaPublicationToSonatypeRepository --stacktrace --info
+        env:
+         OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+         OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+      - name: Notify Discord
+        if: ${{ (success() || failure()) }}
+        uses: Tim203/actions-git-discord-webhook@70f38ded3aca51635ec978ab4e1a58cd4cd0c2ff
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: ${{ job.status }}
+          embed-description: New build available for Canvas! https://canvasmc-project.github.io
