@@ -131,7 +131,7 @@ tasks.register<DefaultTask>("createCanvasBundler") {
 
 tasks.register<DefaultTask>("createCanvasServer") {
     // Specify the project path for createCanvasBundler in the dependsOn statement
-    dependsOn(":createCanvasBundler", ":generateDevelopmentBundle", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
+    dependsOn(":createCanvasBundler", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
 
     doLast {
         val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
