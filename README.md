@@ -28,7 +28,7 @@
 
   <h2>Join Our Community</h2>
   <p>Join our Discord server to stay updated and connect with the Canvas community:</p>
-  <a href="https://discord.gg/KRmDA95zM2"><img src="https://1000logos.net/wp-content/uploads/2021/06/Discord-logo-2015.png" alt="Discord Icon" width="250" height="150"></a>
+  <a href="https://discord.com/invite/hs7EYwWf4G"><img src="https://1000logos.net/wp-content/uploads/2021/06/Discord-logo-2015.png" alt="Discord Icon" width="250" height="150"></a>
 
   <h2>Contributing</h2>
   <p>We welcome contributions from the community. If you'd like to contribute to Canvas, please read our <a href="CONTRIBUTING.md">contributing guidelines</a> for more information.</p>
