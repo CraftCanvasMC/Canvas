@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 2No2Name <2No2Name@web.de>
+Date: Wed, 15 Dec 2021 11:20:48 -0500
+Subject: [PATCH] lithium: fast retrieval
+
+Original code by CaffeineMC, licensed under LGPL v3
+You can find the original code on https://github.com/CaffeineMC/lithium-fabric (Yarn mappings)
+
+diff --git a/src/main/java/net/minecraft/world/level/entity/EntitySectionStorage.java b/src/main/java/net/minecraft/world/level/entity/EntitySectionStorage.java
+index ee692b49c62f36287bf9d008861f5d47e0e42c00..fc19193602514717588aa6e407cbd3e5e8192635 100644
+--- a/src/main/java/net/minecraft/world/level/entity/EntitySectionStorage.java
++++ b/src/main/java/net/minecraft/world/level/entity/EntitySectionStorage.java
+@@ -33,7 +33,7 @@ public class EntitySectionStorage<T extends EntityAccess> {
+     }
+ 
+     public void forEachAccessibleNonEmptySection(AABB box, AbortableIterationConsumer<EntitySection<T>> consumer) {
+-        int i = 2;
++        // Mirai start - lithium: fast retrieval
+         int j = SectionPos.posToSectionCoord(box.minX - 2.0D);
+         int k = SectionPos.posToSectionCoord(box.minY - 4.0D);
+         int l = SectionPos.posToSectionCoord(box.minZ - 2.0D);
+@@ -41,25 +41,67 @@ public class EntitySectionStorage<T extends EntityAccess> {
+         int n = SectionPos.posToSectionCoord(box.maxY + 0.0D);
+         int o = SectionPos.posToSectionCoord(box.maxZ + 2.0D);
+ 
+-        for(int p = j; p <= m; ++p) {
+-            long q = SectionPos.asLong(p, 0, 0);
+-            long r = SectionPos.asLong(p, -1, -1);
+-            LongIterator longIterator = this.sectionIds.subSet(q, r + 1L).iterator();
+-
+-            while(longIterator.hasNext()) {
+-                long s = longIterator.nextLong();
+-                int t = SectionPos.y(s);
+-                int u = SectionPos.z(s);
+-                if (t >= k && t <= n && u >= l && u <= o) {
+-                    EntitySection<T> entitySection = this.sections.get(s);
+-                    if (entitySection != null && !entitySection.isEmpty() && entitySection.getStatus().isAccessible() && consumer.accept(entitySection).shouldAbort()) {
+-                        return;
++        if (m >= j + 4 || o >= l + 4) {
++            // Vanilla is likely more optimized when shooting entities with TNT cannons over huge distances.
++            // Choosing a cutoff of 4 chunk size, as it becomes more likely that these entity sections do not exist when
++            // they are far away from the shot entity (player despawn range, position maybe not on the ground, etc)
++            for (int p = j; p <= m; p++) {
++                long q = SectionPos.asLong(p, 0, 0);
++                long r = SectionPos.asLong(p, -1, -1);
++                LongIterator longIterator = this.sectionIds.subSet(q, r + 1L).iterator();
++
++                while (longIterator.hasNext()) {
++                    long s = longIterator.nextLong();
++                    int t = SectionPos.y(s);
++                    int u = SectionPos.z(s);
++                    if (t >= k && t <= n && u >= l && u <= o) {
++                        EntitySection<T> entitySection = this.sections.get(s);
++                        if (entitySection != null && !entitySection.isEmpty() && entitySection.getStatus().isAccessible()) {
++                            consumer.accept(entitySection);
++                        }
+                     }
+                 }
+             }
++        } else {
++            // Vanilla order of the AVL long set is sorting by ascending long value. The x, y, z positions are packed into
++            // a long with the x position's lowest 22 bits placed at the MSB.
++            // Therefore the long is negative iff the 22th bit of the x position is set, which happens iff the x position
++            // is negative. A positive x position will never have its 22th bit set, as these big coordinates are far outside
++            // the world. y and z positions are treated as unsigned when sorting by ascending long value, as their sign bits
++            // are placed somewhere inside the packed long
++            for (int x = j; x <= m; x++) {
++                for (int z = Math.max(l, 0); z <= o; z++) {
++                    this.forEachInColumn(x, k, n, z, consumer);
++                }
++
++                int bound = Math.min(-1, o);
++                for (int z = l; z <= bound; z++) {
++                    this.forEachInColumn(x, k, n, z, consumer);
++                }
++            }
+         }
++        // Mirai end
++    }
+ 
++    // Mirai start - lithium: fast retrieval
++    private void forEachInColumn(int x, int k, int n, int z, AbortableIterationConsumer<EntitySection<T>> consumer) {
++        //y from negative to positive, but y is treated as unsigned
++        for (int y = Math.max(k, 0); y <= n; y++) {
++            this.consumeSection(SectionPos.asLong(x, y, z), consumer);
++        }
++        int bound = Math.min(-1, n);
++        for (int y = k; y <= bound; y++) {
++            this.consumeSection(SectionPos.asLong(x, y, z), consumer);
++        }
++    }
++
++    private void consumeSection(long pos, AbortableIterationConsumer<EntitySection<T>> consumer) {
++        EntitySection<T> entitySection = this.sections.get(pos);
++        if (entitySection != null && 0 != entitySection.size() && entitySection.getStatus().isAccessible()) {
++            consumer.accept(entitySection);
++        }
+     }
++    // Mirai end
+ 
+     public LongStream getExistingSectionPositionsInChunk(long chunkPos) {
+         int i = ChunkPos.getX(chunkPos);
