@@ -36,7 +36,14 @@
   <h2>License</h2>
   <p>Canvas is open-source software licensed under the GNU General Public License version 3 License</a>.</p>
 
-  <hr>
+  <h2>Patch contributions</h2>
+  <p>Canvas wouldnt have a large portion of its patches without help from the community. Some patches included are from others who gave me permission to use in Canvas. Those are:</p>
+  <ul>
+    <li>Mirai - Introduced many optimizations to Canvas from C2ME, Lithium, and Gale</li>
+    <li>PlazmaMC - Added more optimizations to Canvas from FerriteCore</li>
+  </ul>
+
+<hr>
   <p align="center">
     <em>Canvas - Empowering the Impossibe</em>
     <br>
