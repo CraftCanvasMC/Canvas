@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris MC <purplewolf.mc1@gmail.com>
+Date: Thu, 9 Nov 2023 21:31:59 +0000
+Subject: [PATCH] Use LinkedBlockingDeque in AsyncTaskHandler
+
+
+diff --git a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java b/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
+index 83701fbfaa56a232593ee8f11a3afb8941238bfa..02304c154e79550d8b39d3065c27139a49aabfea 100644
+--- a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
++++ b/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
+@@ -1,13 +1,13 @@
+ package net.minecraft.util.thread;
+ 
+ import com.google.common.collect.ImmutableList;
+-import com.google.common.collect.Queues;
++//import com.google.common.collect.Queues; - JettPack
+ import com.mojang.logging.LogUtils;
+ import java.util.List;
+-import java.util.Queue;
++//import java.util.Queue; - JettPack
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.Executor;
+-import java.util.concurrent.locks.LockSupport;
++// import java.util.concurrent.locks.LockSupport; - JettPack
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Supplier;
+ import net.minecraft.util.profiling.metrics.MetricCategory;
+@@ -15,12 +15,15 @@ import net.minecraft.util.profiling.metrics.MetricSampler;
+ import net.minecraft.util.profiling.metrics.MetricsRegistry;
+ import net.minecraft.util.profiling.metrics.ProfilerMeasured;
+ import org.slf4j.Logger;
++import java.util.concurrent.LinkedBlockingDeque; // JettPack
++import java.util.concurrent.TimeUnit; // JettPack
+ 
+ public abstract class BlockableEventLoop<R extends Runnable> implements ProfilerMeasured, ProcessorHandle<R>, Executor {
+     private final String name;
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private final Queue<R> pendingRunnables = Queues.newConcurrentLinkedQueue();
++    private final LinkedBlockingDeque<R> pendingRunnables = new LinkedBlockingDeque(); // JettPack
+     private int blockingCount;
++    private R next = null; // JettPack
+ 
+     protected BlockableEventLoop(String name) {
+         this.name = name;
+@@ -89,7 +92,7 @@ public abstract class BlockableEventLoop<R extends Runnable> implements Profiler
+     @Override
+     public void tell(R runnable) {
+         this.pendingRunnables.add(runnable);
+-        LockSupport.unpark(this.getRunningThread());
++        // LockSupport.unpark(this.getRunningThread()); - JettPack
+     }
+ 
+     @Override
+@@ -117,15 +120,19 @@ public abstract class BlockableEventLoop<R extends Runnable> implements Profiler
+     }
+ 
+     public boolean pollTask() {
+-        R runnable = this.pendingRunnables.peek();
+-        if (runnable == null) {
+-            return false;
+-        } else if (this.blockingCount == 0 && !this.shouldRun(runnable)) {
++        // JettPack start
++        if (this.next == null && !this.pendingRunnables.isEmpty()) {
++            this.waitForTasks();
++        }
++        if (this.next == null) {
+             return false;
+         } else {
+-            this.doRunTask(this.pendingRunnables.remove());
++            R r2 = this.next;
++            this.next = null;
++            this.doRunTask(r2);
+             return true;
+         }
++        // JettPack end
+     }
+ 
+     public void managedBlock(BooleanSupplier stopCondition) {
+@@ -144,8 +151,17 @@ public abstract class BlockableEventLoop<R extends Runnable> implements Profiler
+     }
+ 
+     protected void waitForTasks() {
+-        Thread.yield();
+-        LockSupport.parkNanos("waiting for tasks", 100000L);
++        // JettPack start
++        if (this.next != null) {
++            throw new IllegalStateException("next != null");
++        }
++        try {
++            this.next = this.pendingRunnables.poll(100L, TimeUnit.MICROSECONDS);
++            return;
++        } catch (InterruptedException interruptedException) {
++            return;
++        }
++        // JettPack end
+     }
+ 
+     protected void doRunTask(R task) {

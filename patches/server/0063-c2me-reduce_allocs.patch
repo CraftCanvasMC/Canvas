@@ -1,0 +1,256 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ishland <ishlandmc@yeah.net>
+Date: Mon, 24 Jan 2022 10:56:10 -0500
+Subject: [PATCH] c2me: reduce_allocs
+
+Original code by RelativityMC, licensed under MIT
+You can find the original code on https://github.com/RelativityMC/C2ME-fabric (Yarn mappings)
+
+diff --git a/src/main/java/com/ishland/c2me/opts/allocs/common/ObjectCachingUtils.java b/src/main/java/com/ishland/c2me/opts/allocs/common/ObjectCachingUtils.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1229bae2e74d22065c723c6d3eaf9a97d572b04
+--- /dev/null
++++ b/src/main/java/com/ishland/c2me/opts/allocs/common/ObjectCachingUtils.java
+@@ -0,0 +1,23 @@
++package com.ishland.c2me.opts.allocs.common;
++
++import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
++
++import java.util.BitSet;
++import java.util.function.IntFunction;
++
++public class ObjectCachingUtils {
++
++    private static final IntFunction<BitSet> bitSetConstructor = BitSet::new;
++
++    public static ThreadLocal<Int2ObjectOpenHashMap<BitSet>> BITSETS = ThreadLocal.withInitial(Int2ObjectOpenHashMap::new);
++
++    private ObjectCachingUtils() {
++    }
++
++    public static BitSet getCachedOrNewBitSet(int bits) {
++        final BitSet bitSet = BITSETS.get().computeIfAbsent(bits, bitSetConstructor);
++        bitSet.clear();
++        return bitSet;
++    }
++
++}
+diff --git a/src/main/java/com/ishland/c2me/opts/allocs/common/PooledFeatureContext.java b/src/main/java/com/ishland/c2me/opts/allocs/common/PooledFeatureContext.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..4c84006c90bda4849b27879d5218f98e6d98f1dc
+--- /dev/null
++++ b/src/main/java/com/ishland/c2me/opts/allocs/common/PooledFeatureContext.java
+@@ -0,0 +1,68 @@
++package com.ishland.c2me.opts.allocs.common;
++
++import java.util.Optional;
++import net.minecraft.core.BlockPos;
++import net.minecraft.util.RandomSource;
++import net.minecraft.world.level.WorldGenLevel;
++import net.minecraft.world.level.chunk.ChunkGenerator;
++import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
++import net.minecraft.world.level.levelgen.feature.FeaturePlaceContext;
++import net.minecraft.world.level.levelgen.feature.configurations.FeatureConfiguration;
++
++public class PooledFeatureContext<FC extends FeatureConfiguration> extends FeaturePlaceContext<FC> {
++
++    public static final ThreadLocal<SimpleObjectPool<PooledFeatureContext<?>>> POOL = ThreadLocal.withInitial(() -> new SimpleObjectPool<>(unused -> new PooledFeatureContext<>(), unused -> {}, 2048));
++
++    private Optional<ConfiguredFeature<?, ?>> feature;
++    private WorldGenLevel world;
++    private ChunkGenerator generator;
++    private RandomSource random;
++    private BlockPos origin;
++    private FC config;
++
++    public PooledFeatureContext() {
++        super(null, null, null, null, null, null);
++    }
++
++    public void reInit(Optional<ConfiguredFeature<?, ?>> feature, WorldGenLevel world, ChunkGenerator generator, RandomSource random, BlockPos origin, FC config) {
++        this.feature = feature;
++        this.world = world;
++        this.generator = generator;
++        this.random = random;
++        this.origin = origin;
++        this.config = config;
++    }
++
++    public void reInit() {
++        this.feature = null;
++        this.world = null;
++        this.generator = null;
++        this.random = null;
++        this.origin = null;
++        this.config = null;
++    }
++
++    public WorldGenLevel level() {
++        return this.world;
++    }
++
++    public ChunkGenerator chunkGenerator() {
++        return this.generator;
++    }
++
++    public RandomSource random() {
++        return this.random;
++    }
++
++    public BlockPos origin() {
++        return this.origin;
++    }
++
++    public FC config() {
++        return this.config;
++    }
++
++    public Optional<ConfiguredFeature<?, ?>> topFeature() {
++        return this.feature;
++    }
++}
+diff --git a/src/main/java/com/ishland/c2me/opts/allocs/common/SimpleObjectPool.java b/src/main/java/com/ishland/c2me/opts/allocs/common/SimpleObjectPool.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..b989019847f73ba3af57f7428699c9c869d6332f
+--- /dev/null
++++ b/src/main/java/com/ishland/c2me/opts/allocs/common/SimpleObjectPool.java
+@@ -0,0 +1,57 @@
++package com.ishland.c2me.opts.allocs.common;
++
++import com.google.common.base.Preconditions;
++
++import java.util.Objects;
++import java.util.function.Consumer;
++import java.util.function.Function;
++
++public class SimpleObjectPool<T> {
++
++    private final Function<SimpleObjectPool<T>, T> constructor;
++    private final Consumer<T> initializer;
++    private final int size;
++
++    private final Object[] cachedObjects;
++    private int allocatedCount = 0;
++
++    public SimpleObjectPool(Function<SimpleObjectPool<T>, T> constructor, Consumer<T> initializer, int size) {
++        this.constructor = Objects.requireNonNull(constructor);
++        this.initializer = Objects.requireNonNull(initializer);
++        Preconditions.checkArgument(size > 0);
++        this.cachedObjects = new Object[size];
++        this.size = size;
++
++        for (int i = 0; i < size; i++) {
++            final T object = constructor.apply(this);
++            this.cachedObjects[i] = object;
++        }
++    }
++
++    public T alloc() {
++        final T object;
++        synchronized (this) {
++            if (this.allocatedCount >= this.size) { // oversized, falling back to normal alloc
++                object = this.constructor.apply(this);
++                return object;
++            }
++
++            // get an object from the array
++            final int ordinal = this.allocatedCount++;
++            object = (T) this.cachedObjects[ordinal];
++            this.cachedObjects[ordinal] = null;
++        }
++
++        this.initializer.accept(object); // initialize the object
++
++        return object;
++    }
++
++    public void release(T object) {
++        synchronized (this) {
++            if (this.allocatedCount == 0) return; // pool is full
++            this.cachedObjects[--this.allocatedCount] = object; // store the object into the pool
++        }
++    }
++
++}
+diff --git a/src/main/java/net/minecraft/resources/ResourceLocation.java b/src/main/java/net/minecraft/resources/ResourceLocation.java
+index 38e2a8cec48bc779b8154d6d719031f457a2403e..c3255ff691025b61ea1a4bd835ef0bd405e00282 100644
+--- a/src/main/java/net/minecraft/resources/ResourceLocation.java
++++ b/src/main/java/net/minecraft/resources/ResourceLocation.java
+@@ -29,6 +29,7 @@ public class ResourceLocation implements Comparable<ResourceLocation> {
+     public static final String PAPER_NAMESPACE = "paper"; // Paper
+     private final String namespace;
+     private final String path;
++    private String cachedString = null; // Mirai - c2me: opts allocs
+ 
+     protected ResourceLocation(String namespace, String path, @Nullable ResourceLocation.Dummy extraData) {
+         this.namespace = namespace;
+@@ -118,7 +119,16 @@ public class ResourceLocation implements Comparable<ResourceLocation> {
+ 
+     @Override
+     public String toString() {
+-        return this.namespace + ":" + this.path;
++        // Mirai start - c2me: opts allocs
++        /**
++         * @author ishland
++         * @reason cache toString
++         */
++        if (this.cachedString != null) return this.cachedString;
++        final String s = this.namespace + ":" + this.path;
++        this.cachedString = s;
++        return s;
++        // Mirai end
+     }
+ 
+     @Override
+diff --git a/src/main/java/net/minecraft/world/level/levelgen/feature/ConfiguredFeature.java b/src/main/java/net/minecraft/world/level/levelgen/feature/ConfiguredFeature.java
+index f9ee7e23e69a36730c5585a2989cebdc6b2f3342..e84a8bf780dbdcbb5ee1b1260928dc2b3ad21b39 100644
+--- a/src/main/java/net/minecraft/world/level/levelgen/feature/ConfiguredFeature.java
++++ b/src/main/java/net/minecraft/world/level/levelgen/feature/ConfiguredFeature.java
+@@ -13,6 +13,10 @@ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.level.WorldGenLevel;
+ import net.minecraft.world.level.chunk.ChunkGenerator;
+ import net.minecraft.world.level.levelgen.feature.configurations.FeatureConfiguration;
++// Mirai start - c2me: opts allocs
++import com.ishland.c2me.opts.allocs.common.PooledFeatureContext;
++import com.ishland.c2me.opts.allocs.common.SimpleObjectPool;
++// Mirai end
+ 
+ public record ConfiguredFeature<FC extends FeatureConfiguration, F extends Feature<FC>>(F feature, FC config) {
+     public static final Codec<ConfiguredFeature<?, ?>> DIRECT_CODEC = BuiltInRegistries.FEATURE.byNameCodec().dispatch((configuredFeature) -> {
+@@ -22,7 +26,22 @@ public record ConfiguredFeature<FC extends FeatureConfiguration, F extends Featu
+     public static final Codec<HolderSet<ConfiguredFeature<?, ?>>> LIST_CODEC = RegistryCodecs.homogeneousList(Registries.CONFIGURED_FEATURE, DIRECT_CODEC);
+ 
+     public boolean place(WorldGenLevel world, ChunkGenerator chunkGenerator, RandomSource random, BlockPos origin) {
+-        return this.feature.place(this.config, world, chunkGenerator, random, origin);
++        // Mirai start - c2me: opts allocs
++        /**
++         * @author ishland
++         * @reason pool FeatureContext
++         */
++        if (!world.ensureCanWrite(origin)) return false;
++        final SimpleObjectPool<PooledFeatureContext<?>> pool = PooledFeatureContext.POOL.get();
++        final PooledFeatureContext<FC> context = (PooledFeatureContext<FC>) pool.alloc();
++        try {
++            context.reInit(java.util.Optional.empty(), world, chunkGenerator, random, origin, this.config);
++            return this.feature.place(context);
++        } finally {
++            context.reInit();
++            pool.release(context);
++        }
++        // Mirai end
+     }
+ 
+     public Stream<ConfiguredFeature<?, ?>> getFeatures() {
+diff --git a/src/main/java/net/minecraft/world/level/levelgen/feature/OreFeature.java b/src/main/java/net/minecraft/world/level/levelgen/feature/OreFeature.java
+index 4be60b8d321d8f8cdd97deee16f4b42e428e57cf..1b3242bd8ce5443c622ee08050955cfe56133744 100644
+--- a/src/main/java/net/minecraft/world/level/levelgen/feature/OreFeature.java
++++ b/src/main/java/net/minecraft/world/level/levelgen/feature/OreFeature.java
+@@ -54,7 +54,7 @@ public class OreFeature extends Feature<OreConfiguration> {
+ 
+     protected boolean doPlace(WorldGenLevel world, RandomSource random, OreConfiguration config, double startX, double endX, double startZ, double endZ, double startY, double endY, int x, int y, int z, int horizontalSize, int verticalSize) {
+         int i = 0;
+-        BitSet bitSet = new BitSet(horizontalSize * verticalSize * horizontalSize);
++        BitSet bitSet = com.ishland.c2me.opts.allocs.common.ObjectCachingUtils.getCachedOrNewBitSet(horizontalSize * verticalSize * horizontalSize); // Mirai - c2me: opts allocs
+         BlockPos.MutableBlockPos mutableBlockPos = new BlockPos.MutableBlockPos();
+         int j = config.size;
+         double[] ds = new double[j * 4];
