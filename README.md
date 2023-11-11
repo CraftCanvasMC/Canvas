@@ -41,6 +41,7 @@
   <ul>
     <li>Mirai - Introduced many optimizations to Canvas from C2ME, Lithium, and Gale</li>
     <li>PlazmaMC - Added more optimizations to Canvas from FerriteCore</li>
+    <li>Graphene - Added krypton implementation and lithium fast_math</li>
   </ul>
 
 <hr>
