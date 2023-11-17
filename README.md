@@ -48,7 +48,7 @@
   <p align="center">
     <em>Canvas - Empowering the Impossibe</em>
     <br>
-    <img src="canvas-logo.png" alt="Canvas Logo">
+    <img src="canvas-logo.png" alt="Canvas Logo" width="30" height="30">
   </p>
 </body>
 </html>
