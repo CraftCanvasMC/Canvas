@@ -96,7 +96,7 @@ paperweight {
 }
 
 tasks.generateDevelopmentBundle {
-    apiCoordinates.set("me.dueris.canvas:canvas-api")
+    apiCoordinates.set("io.github.dueris:canvas-api")
     mojangApiCoordinates.set("io.papermc.paper:paper-mojangapi")
     libraryRepositories.set(
         listOf(
