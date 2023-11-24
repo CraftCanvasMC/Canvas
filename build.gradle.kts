@@ -187,7 +187,7 @@ publishing {
     publications.create<MavenPublication>("devBundle") {
         artifact(tasks.generateDevelopmentBundle) {
             groupId = "io.github.dueris"
-            artifactId = "canvas-devBundle"
+            artifactId = "dev-bundle"
         }
     }
     repositories {
