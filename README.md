@@ -22,7 +22,7 @@
 
   <h2>Resources</h2>
   <ul>
-    <li>GitHub Repository: <a href="https://github.com/Dueris/CanvasMC">https://github.com/Dueris/Canvas</a></li>
+    <li>GitHub Repository: <a href="https://github.com/CraftCanvasMC/Canvas">https://github.com/CraftCanvasMC/Canvas</a></li>
     <li>Donation: <a href="https://ko-fi.com/dueris">https://ko-fi.com/dueris</a></li>
   </ul>
 

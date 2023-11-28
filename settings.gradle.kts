@@ -24,7 +24,7 @@ if (!file(".git").exists()) {
          Built Canvas jars are available for download at
          https://canvas-project.github.io/downloads
          
-         See https://github.com/Dueris/Canvas/blob/HEAD/CONTRIBUTING.md
+         See https://github.com/CraftCanvasMC/Canvas/blob/HEAD/CONTRIBUTING.md
          for further information on building and modifying Canvas.
         ===================================================
     """.trimIndent()
