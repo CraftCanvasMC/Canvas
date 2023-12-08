@@ -24,7 +24,7 @@ allprojects {
 
     java {
         toolchain {
-            languageVersion.set(JavaLanguageVersion.of(17))
+            languageVersion = JavaLanguageVersion.of(17)
         }
     }
 }
@@ -34,7 +34,7 @@ val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 subprojects {
     tasks.withType<JavaCompile>().configureEach {
         options.encoding = Charsets.UTF_8.name()
-        options.release.set(17)
+        options.release = 17
     }
     tasks.withType<Javadoc> {
         options.encoding = Charsets.UTF_8.name()
@@ -74,30 +74,30 @@ dependencies {
 }
 
 paperweight {
-    serverProject.set(project(":canvas-server"))
+    serverProject = project(":canvas-server")
 
-    remapRepo.set(paperMavenPublicUrl)
-    decompileRepo.set(paperMavenPublicUrl)
+    remapRepo = paperMavenPublicUrl
+    decompileRepo = paperMavenPublicUrl
 
     useStandardUpstream("purpur") {
-        url.set(github("PurpurMC", "Purpur"))
-        ref.set(providers.gradleProperty("purpurCommit"))
+        url = github("PurpurMC", "Purpur")
+        ref = providers.gradleProperty("purpurCommit")
 
         withStandardPatcher {
             baseName("Purpur")
 
-            apiPatchDir.set(layout.projectDirectory.dir("patches/api"))
-            apiOutputDir.set(layout.projectDirectory.dir("Canvas-API"))
+            apiPatchDir = layout.projectDirectory.dir("patches/api")
+            apiOutputDir = layout.projectDirectory.dir("Canvas-API")
 
-            serverPatchDir.set(layout.projectDirectory.dir("patches/server"))
-            serverOutputDir.set(layout.projectDirectory.dir("Canvas-Server"))
+            serverPatchDir = layout.projectDirectory.dir("patches/server")
+            serverOutputDir = layout.projectDirectory.dir("Canvas-Server")
         }
     }
 }
 
 tasks.generateDevelopmentBundle {
-    apiCoordinates.set("io.github.dueris:canvas-api")
-    mojangApiCoordinates.set("io.papermc.paper:paper-mojangapi")
+    apiCoordinates = "io.github.dueris:canvas-api"
+    mojangApiCoordinates = "io.papermc.paper:paper-mojangapi"
     libraryRepositories.set(
         listOf(
             "https://repo.maven.apache.org/maven2/",
@@ -147,24 +147,24 @@ tasks.register<DefaultTask>("createCanvasServer") {
 }
 
 tasks.register<Copy>("renameServer") {
-    from("build/libs/paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip")
+    from("build/libs/paperweight-development-bundle-1.20.4-R0.1-SNAPSHOT.zip")
     into("Canvas-Server/build/libs")
-    include("paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip")
+    include("paperweight-development-bundle-1.20.4-R0.1-SNAPSHOT.zip")
 
     eachFile {
         val fileName = name
-        name = fileName.replace("paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip", "canvas-server.zip")
+        name = fileName.replace("paperweight-development-bundle-1.20.4-R0.1-SNAPSHOT.zip", "canvas-server.zip")
     }
 }
 
 tasks.register<Copy>("renameApi") {
-    from("Canvas-API/build/libs/canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar")
+    from("Canvas-API/build/libs/canvas-api-1.20.4-R0.1-SNAPSHOT-sources.jar")
     into("Canvas-API/build/libs")
-    include("canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar")
+    include("canvas-api-1.20.4-R0.1-SNAPSHOT-sources.jar")
 
     eachFile {
         val fileName = name
-        name = fileName.replace("canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar", "canvas-api.jar")
+        name = fileName.replace("canvas-api-1.20.4-R0.1-SNAPSHOT-sources.jar", "canvas-api.jar")
     }
 }
 

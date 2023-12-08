@@ -1,0 +1,173 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris MC <purplewolf.mc1@gmail.com>
+Date: Thu, 9 Nov 2023 18:53:30 +0000
+Subject: [PATCH] Implement Mirai patches
+
+
+diff --git a/src/main/java/org/bukkit/entity/Player.java b/src/main/java/org/bukkit/entity/Player.java
+index 84da948c59789887cab301561d7bd7365edcef5b..5a2510c1778b8c22eaa5af5c84678152ecffd090 100644
+--- a/src/main/java/org/bukkit/entity/Player.java
++++ b/src/main/java/org/bukkit/entity/Player.java
+@@ -3283,6 +3283,19 @@ public interface Player extends HumanEntity, Conversable, OfflinePlayer, PluginM
+     String getClientBrandName();
+     // Paper end
+ 
++    /**
++     * This abuses some of how Minecraft works and allows teleporting a player to another world without
++     * triggering typical respawn packets. All of natural state of chunk resends, entity adds/removes, etc still
++     * happen but the visual "refresh" of a world change is hidden. Depending on the destination location/world,
++     * this can act as a "smooth teleport" to a world if the new world is very similar looking to the old one.
++     *
++     * @param location New location to teleport this Player to
++     */
++    // Slice start
++    @org.jetbrains.annotations.ApiStatus.Experimental
++    void teleportWithoutRespawn(@NotNull Location location);
++    // Slice end
++
+     // Paper start - Teleport API
+     /**
+      * Sets the player's rotation.
+diff --git a/src/main/java/org/bukkit/event/Event.java b/src/main/java/org/bukkit/event/Event.java
+index 8ec56cd6b8e0f5c5dd8c7c88b4671e18dcf109d0..a3bacd6e2cda243df7e712e33254a2ad0dbf3799 100644
+--- a/src/main/java/org/bukkit/event/Event.java
++++ b/src/main/java/org/bukkit/event/Event.java
+@@ -14,7 +14,9 @@ import org.jetbrains.annotations.NotNull;
+  */
+ public abstract class Event {
+     private String name;
+-    private final boolean async;
++    // Canvas start - impliment Mirai patches
++    // private final boolean async;
++    private final net.kyori.adventure.util.TriState async;
+ 
+     /**
+      * The default constructor is defined for cleaner code. This constructor
+@@ -32,7 +34,31 @@ public abstract class Event {
+      *     by default from default constructor
+      */
+     public Event(boolean isAsync) {
+-        this.async = isAsync;
++        this(net.kyori.adventure.util.TriState.byBoolean(isAsync));
++    }
++
++    /**
++     * This constructor is used to explicitly declare an event as synchronous
++     * or asynchronous or potentially unset.
++     *
++     * @param isAsync true indicates the event will fire asynchronously, false
++     *                by default from default constructor, unset indicates that the event may be called on either the server thread or off the server
++     *                thread.
++     */
++    public Event(@NotNull final net.kyori.adventure.util.TriState isAsync) {
++         this.async = isAsync;
++     }
++ 
++    /**
++     * Returns a tristate that, when resolving to true or false, has the exact indications defined by {@link #isAsynchronous()}.
++     * <p>
++     * If the tristate resolves to NOT_SET, the event may or may not have been fired off the main thread, meaning a plugin would have
++     * to validate what thread the spigot event bus was called on.
++     *
++     * @return the tristate enum.
++     */
++    public final @NotNull net.kyori.adventure.util.TriState asynchronous() {
++        return this.async;
+     }
+ 
+     // Paper start
+@@ -92,8 +118,9 @@ public abstract class Event {
+      * @return false by default, true if the event fires asynchronously
+      */
+     public final boolean isAsynchronous() {
+-        return async;
++        return this.async == net.kyori.adventure.util.TriState.TRUE;
+     }
++    // Canvas end
+ 
+     public enum Result {
+ 
+diff --git a/src/main/java/org/bukkit/plugin/RegisteredListener.java b/src/main/java/org/bukkit/plugin/RegisteredListener.java
+index 3b3d9642a8d63798dc28f2f8df77f0466451cbff..99ce31fe9d0c5f60ad04a0286340c556d6d68904 100644
+--- a/src/main/java/org/bukkit/plugin/RegisteredListener.java
++++ b/src/main/java/org/bukkit/plugin/RegisteredListener.java
+@@ -62,8 +62,8 @@ public class RegisteredListener {
+      * @throws EventException If an event handler throws an exception.
+      */
+     public void callEvent(@NotNull final Event event) throws EventException {
+-        if (event instanceof Cancellable) {
+-            if (((Cancellable) event).isCancelled() && isIgnoringCancelled()) {
++        if (isIgnoringCancelled()) {
++            if (event instanceof Cancellable cancellable && cancellable.isCancelled()) {
+                 return;
+             }
+         }
+diff --git a/src/main/java/org/bukkit/plugin/SimplePluginManager.java b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+index fc2dae69165776d08274e34a69962cc70445f411..31324086e30d137c6ca53116b4b17c31c60ab3f7 100644
+--- a/src/main/java/org/bukkit/plugin/SimplePluginManager.java
++++ b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+@@ -633,6 +633,19 @@ public final class SimplePluginManager implements PluginManager {
+         HandlerList handlers = event.getHandlers();
+         RegisteredListener[] listeners = handlers.getRegisteredListeners();
+ 
++        // Gale start - JettPack - skip events without listeners
++        if (listeners.length == 0) {
++            return;
++        }
++        // Gale end - JettPack - skip events without listeners
++
++        // Paper - replace callEvent by merging to below method
++        if (event.isAsynchronous() && server.isPrimaryThread()) {
++            throw new IllegalStateException(event.getEventName() + " may only be triggered asynchronously.");
++        } else if (!event.isAsynchronous() && !server.isPrimaryThread() && !server.isStopping() ) {
++            throw new IllegalStateException(event.getEventName() + " may only be triggered synchronously.");
++        }
++
+         for (RegisteredListener registration : listeners) {
+             if (!registration.getPlugin().isEnabled()) {
+                 continue;
+diff --git a/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java b/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
+index f9b57b872780aa6b9b959494874b57c7a8ff0c53..57fe7d86928dae0bb411156ec922a1bb2616341f 100644
+--- a/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
++++ b/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
+@@ -107,6 +107,11 @@ public final class PluginClassLoader extends URLClassLoader implements io.paperm
+         }
+     }
+ 
++    @Override
++    public void addURL(final URL url) {
++        super.addURL(url);
++    }
++
+     @Override
+     public URL getResource(String name) {
+         // Paper start
+diff --git a/src/main/java/org/bukkit/scoreboard/Team.java b/src/main/java/org/bukkit/scoreboard/Team.java
+index cacb58d25c249e2ecd6083ed0f30d5ffb345220a..5192fdb618f09c40da501b42c3ed3c66f270b269 100644
+--- a/src/main/java/org/bukkit/scoreboard/Team.java
++++ b/src/main/java/org/bukkit/scoreboard/Team.java
+@@ -514,6 +514,24 @@ public interface Team extends net.kyori.adventure.audience.ForwardingAudience {
+     boolean hasEntity(@NotNull org.bukkit.entity.Entity entity) throws IllegalStateException, IllegalArgumentException;
+     // Paper end - improve scoreboard entries
+ 
++    //Slice start
++    /**
++     * Fully set all team options, combining all 5 options into one packet send, rather than one packet sent
++     * for every single option change.
++     * @param displayName New display name
++     * @param prefix New prefix
++     * @param suffix New suffix
++     * @param color new color
++     * @param options A Paired list of options
++     * @throws IllegalStateException
++     */
++    void teamOptions(@Nullable net.kyori.adventure.text.Component displayName,
++                     @Nullable net.kyori.adventure.text.Component prefix,
++                     @Nullable net.kyori.adventure.text.Component suffix,
++                     @Nullable net.kyori.adventure.text.format.NamedTextColor color,
++                     @NotNull java.util.List<org.apache.commons.lang3.tuple.Pair<Option, OptionStatus>> options) throws IllegalStateException;
++    //Slice end
++
+     /**
+      * Represents an option which may be applied to this team.
+      */

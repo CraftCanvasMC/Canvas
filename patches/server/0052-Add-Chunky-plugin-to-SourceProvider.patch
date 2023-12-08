@@ -1,0 +1,407 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <jedimastertoothless@hotmail.com>
+Date: Sun, 12 Nov 2023 13:06:50 -0800
+Subject: [PATCH] Add Chunky plugin to SourceProvider
+
+
+diff --git a/src/main/java/com/dueris/canvas/CanvasConfig.java b/src/main/java/com/dueris/canvas/CanvasConfig.java
+index caae656d62922a73fd7ee7c228261fb67e2613d6..802ff0817997aa0dd15a56a8466b5147d986effb 100644
+--- a/src/main/java/com/dueris/canvas/CanvasConfig.java
++++ b/src/main/java/com/dueris/canvas/CanvasConfig.java
+@@ -171,6 +171,7 @@ public class CanvasConfig {
+     public static boolean disableMixin = false;
+     public static boolean obfuscateIps = false;
+     public static boolean bypassStartupCheck = false;
++    public static boolean wantChunky = true;
+ 
+     private static void mixin(){
+         disableMixin = getBoolean("mixin.disableMixins", disableMixin);
+@@ -181,4 +182,7 @@ public class CanvasConfig {
+     private static void general(){
+         bypassStartupCheck = getBoolean("bypassStartupCheck", bypassStartupCheck);
+     }
++    private static void plugins(){
++        wantChunky = getBoolean("plugins.use_provided_chunky", wantChunky);
++    }
+ }
+diff --git a/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java b/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java
+index e35da199be67e04c34df6bc09afd8d8122cb0487..8c654ed57b04ab28a569f8c337a1ad3085624ccb 100644
+--- a/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java
++++ b/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java
+@@ -5,6 +5,7 @@ import io.papermc.paper.configuration.PaperConfigurations;
+ import io.papermc.paper.plugin.entrypoint.Entrypoint;
+ import io.papermc.paper.plugin.entrypoint.LaunchEntryPointHandler;
+ import io.papermc.paper.plugin.provider.PluginProvider;
++import io.papermc.paper.plugin.provider.source.ChunkyProviderSource;
+ import io.papermc.paper.plugin.provider.type.paper.PaperPluginParent;
+ import joptsimple.OptionSet;
+ import net.minecraft.server.dedicated.DedicatedServer;
+@@ -102,6 +103,7 @@ public class PluginInitializerManager {
+         java.util.List<File> files = (java.util.List<File>) optionSet.valuesOf("add-plugin");
+         // Register plugins from the flag
+         io.papermc.paper.plugin.util.EntrypointUtil.registerProvidersFromSource(io.papermc.paper.plugin.provider.source.PluginFlagProviderSource.INSTANCE, files);
++        io.papermc.paper.plugin.util.EntrypointUtil.registerProvidersFromSource(ChunkyProviderSource.INSTANCE, new File("cache", "chunky.jar").toPath()); // Canvas - include Chunky
+         io.papermc.paper.plugin.util.EntrypointUtil.registerProvidersFromSource(io.papermc.paper.plugin.provider.source.SparkProviderSource.INSTANCE, new File("cache", "spark.jar").toPath()); // Purpur
+     }
+ 
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/source/ChunkyProviderSource.java b/src/main/java/io/papermc/paper/plugin/provider/source/ChunkyProviderSource.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..437373e85f3ec84c1a08cd9c4a33e1dd78224b8c
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/plugin/provider/source/ChunkyProviderSource.java
+@@ -0,0 +1,73 @@
++package io.papermc.paper.plugin.provider.source;
++
++import com.mojang.logging.LogUtils;
++import io.papermc.paper.plugin.entrypoint.Entrypoint;
++import io.papermc.paper.plugin.entrypoint.EntrypointHandler;
++import io.papermc.paper.plugin.entrypoint.LaunchEntryPointHandler;
++import io.papermc.paper.plugin.provider.PluginProvider;
++import me.dueris.canvas.CanvasConfig;
++import org.bukkit.plugin.java.JavaPlugin;
++import org.slf4j.Logger;
++import java.io.File;
++import java.net.URL;
++import java.net.URLConnection;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.nio.file.StandardCopyOption;
++
++public class ChunkyProviderSource extends FileProviderSource{
++    public static final ChunkyProviderSource INSTANCE = new ChunkyProviderSource();
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++
++    public ChunkyProviderSource() {
++        super("File '%s' specified by Canvas"::formatted);
++    }
++
++    @Override
++    public void registerProviders(EntrypointHandler entrypointHandler, Path context) throws Exception {
++        if(CanvasConfig.wantChunky){
++            if (Boolean.getBoolean("Canvas.IReallyDontWantChunky")) {
++                return;
++            }
++
++            if (hasChunky()) {
++                LOGGER.info("Canvas: Using user-provided chunky plugin instead of our own.");
++                return;
++            }
++
++            try {
++
++                File file = context.toFile();
++                file.getParentFile().mkdirs();
++
++                boolean shouldDownload = false;
++
++                if (!file.exists()) {
++                    shouldDownload = true;
++                }
++
++                if (shouldDownload) {
++                    URLConnection urlConnection = new URL("https://cdn.modrinth.com/data/fALzjamp/versions/B0xkCkk4/Chunky-1.3.92.jar").openConnection();
++                    urlConnection.setReadTimeout(5000);
++                    urlConnection.setConnectTimeout(5000);
++                    Files.copy(urlConnection.getInputStream(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
++                }
++
++                super.registerProviders(entrypointHandler, context);
++
++            } catch (Throwable e) {
++                LOGGER.error("Canvas: Failed to download and install chunky plugin", e);
++            }
++        }
++    }
++
++    private static boolean hasChunky() {
++        for (PluginProvider<JavaPlugin> provider : LaunchEntryPointHandler.INSTANCE.get(Entrypoint.PLUGIN).getRegisteredProviders()) {
++            if (provider.getMeta().getName().equalsIgnoreCase("chunky")) {
++                return true;
++            }
++        }
++        return false;
++    }
++}
+diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
+index d064ad6b6a425d790d52119637c5624c60134495..3fc2cf43e1fefee532ad1b639539b388b79c113f 100644
+--- a/src/main/java/net/minecraft/server/MinecraftServer.java
++++ b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -54,6 +54,7 @@ import java.util.stream.Collectors;
+ import java.util.stream.Stream;
+ import javax.annotation.Nullable;
+ import javax.imageio.ImageIO;
++import me.dueris.canvas.CanvasConfig;
+ import net.minecraft.CrashReport;
+ import net.minecraft.ReportedException;
+ import net.minecraft.SharedConstants;
+@@ -152,6 +153,7 @@ import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
+ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
+ import net.minecraft.world.level.storage.WorldData;
+ import net.minecraft.world.level.storage.loot.LootDataManager;
++import org.bukkit.World;
+ import org.slf4j.Logger;
+ 
+ // CraftBukkit start
+@@ -1153,6 +1155,18 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+             // Spigot start
+             // Paper start - move done tracking
++            // Canvas start
++                for(World world : Bukkit.getWorlds()){
++                    if(CanvasConfig.wantChunky){
++                        Bukkit.dispatchCommand(new CraftServer.SilentCommandSender(), "chunky radius 35");
++                        Bukkit.dispatchCommand(new CraftServer.SilentCommandSender(), "chunky shape circle");
++                        Bukkit.dispatchCommand(new CraftServer.SilentCommandSender(), "chunky quiet 20");
++                        Bukkit.dispatchCommand(new CraftServer.SilentCommandSender(), "chunky start %w"
++                            .replace("%w", world.getName())
++                        );
++                    }
++                }
++            // Canvas end
+             LOGGER.info("Running delayed init tasks");
+             this.server.getScheduler().mainThreadHeartbeat(this.tickCount); // run all 1 tick delay tasks during init,
+             // this is going to be the first thing the tick process does anyways, so move done and run it after
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index a03394f4751c6688761bbb8c0a4d4e6b4938d433..d8e30e507ffaea697edce2ffc240a0b1e1fe5493 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -47,11 +47,20 @@ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
+ import java.util.function.Consumer;
++import java.util.function.Predicate;
+ import java.util.logging.Level;
+ import java.util.logging.Logger;
+ import java.util.stream.Collectors;
+ import javax.imageio.ImageIO;
+ // import jline.console.ConsoleReader;
++import net.kyori.adventure.audience.Audience;
++import net.kyori.adventure.chat.ChatType;
++import net.kyori.adventure.chat.SignedMessage;
++import net.kyori.adventure.identity.Identified;
++import net.kyori.adventure.identity.Identity;
++import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.ComponentLike;
++import net.kyori.adventure.util.TriState;
+ import net.minecraft.advancements.AdvancementHolder;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+@@ -151,6 +160,7 @@ import org.bukkit.boss.BossBar;
+ import org.bukkit.boss.KeyedBossBar;
+ import org.bukkit.command.Command;
+ import org.bukkit.command.CommandException;
++import org.bukkit.command.CommandExecutor;
+ import org.bukkit.command.CommandSender;
+ import org.bukkit.command.ConsoleCommandSender;
+ import org.bukkit.command.PluginCommand;
+@@ -251,6 +261,8 @@ import org.bukkit.map.MapView;
+ import org.bukkit.packs.DataPackManager;
+ import org.bukkit.permissions.Permissible;
+ import org.bukkit.permissions.Permission;
++import org.bukkit.permissions.PermissionAttachment;
++import org.bukkit.permissions.PermissionAttachmentInfo;
+ import org.bukkit.plugin.Plugin;
+ import org.bukkit.plugin.PluginLoadOrder;
+ import org.bukkit.plugin.PluginManager;
+@@ -676,6 +688,200 @@ public final class CraftServer implements Server {
+         }
+     }
+ 
++    // Canvas start
++    public static class SilentCommandSender implements CommandSender{
++        @Override
++        public void sendMessage(@NotNull String message) {
++
++        }
++
++        @Override
++        public void sendMessage(@NotNull String... messages) {
++
++        }
++
++        @Override
++        public void sendMessage(@Nullable UUID sender, @NotNull String message) {
++
++        }
++
++        @Override
++        public void sendMessage(@Nullable UUID sender, @NotNull String... messages) {
++
++        }
++
++        @Override
++        public @NotNull Server getServer() {
++            return null;
++        }
++
++        @Override
++        public @NotNull String getName() {
++            return null;
++        }
++
++        @Override
++        public @NotNull Spigot spigot() {
++            return null;
++        }
++
++        @Override
++        public @NotNull Component name() {
++            return null;
++        }
++
++        @Override
++        public void sendRichMessage(@NotNull String message) {
++            CommandSender.super.sendRichMessage(message);
++        }
++
++        @Override
++        public void sendPlainMessage(@NotNull String message) {
++            CommandSender.super.sendPlainMessage(message);
++        }
++
++        @Override
++        public boolean isPermissionSet(@NotNull String name) {
++            return false;
++        }
++
++        @Override
++        public boolean isPermissionSet(@NotNull Permission perm) {
++            return false;
++        }
++
++        @Override
++        public boolean hasPermission(@NotNull String name) {
++            return false;
++        }
++
++        @Override
++        public boolean hasPermission(@NotNull Permission perm) {
++            return false;
++        }
++
++        @Override
++        public @NotNull PermissionAttachment addAttachment(@NotNull Plugin plugin, @NotNull String name, boolean value) {
++            return null;
++        }
++
++        @Override
++        public @NotNull PermissionAttachment addAttachment(@NotNull Plugin plugin) {
++            return null;
++        }
++
++        @Override
++        public @Nullable PermissionAttachment addAttachment(@NotNull Plugin plugin, @NotNull String name, boolean value, int ticks) {
++            return null;
++        }
++
++        @Override
++        public @Nullable PermissionAttachment addAttachment(@NotNull Plugin plugin, int ticks) {
++            return null;
++        }
++
++        @Override
++        public void removeAttachment(@NotNull PermissionAttachment attachment) {
++
++        }
++
++        @Override
++        public void recalculatePermissions() {
++
++        }
++
++        @Override
++        public @NotNull Set<PermissionAttachmentInfo> getEffectivePermissions() {
++            return null;
++        }
++
++        @Override
++        public @NotNull TriState permissionValue(@NotNull Permission permission) {
++            return CommandSender.super.permissionValue(permission);
++        }
++
++        @Override
++        public @NotNull TriState permissionValue(@NotNull String permission) {
++            return CommandSender.super.permissionValue(permission);
++        }
++
++        @Override
++        public boolean isOp() {
++            return false;
++        }
++
++        @Override
++        public void setOp(boolean value) {
++
++        }
++
++        @Override
++        public @NotNull Audience filterAudience(@NotNull Predicate<? super Audience> filter) {
++            return CommandSender.super.filterAudience(filter);
++        }
++
++        @Override
++        public void forEachAudience(@NotNull Consumer<? super Audience> action) {
++            CommandSender.super.forEachAudience(action);
++        }
++
++        @Override
++        public void sendMessage(@NotNull ComponentLike message) {
++            CommandSender.super.sendMessage(message);
++        }
++
++        @Override
++        public void sendMessage(@NotNull Component message) {
++            CommandSender.super.sendMessage(message);
++        }
++
++        @Override
++        public void sendMessage(@NotNull Identified source, @NotNull ComponentLike message) {
++            CommandSender.super.sendMessage(source, message);
++        }
++
++        @Override
++        public void sendMessage(@NotNull Identity source, @NotNull ComponentLike message) {
++            CommandSender.super.sendMessage(source, message);
++        }
++
++        @Override
++        public void sendMessage(@NotNull Identified source, @NotNull Component message) {
++            CommandSender.super.sendMessage(source, message);
++        }
++
++        @Override
++        public void sendMessage(@NotNull Identity source, @NotNull Component message) {
++            CommandSender.super.sendMessage(source, message);
++        }
++
++        @Override
++        public void sendMessage(@NotNull Component message, ChatType.@NotNull Bound boundChatType) {
++            CommandSender.super.sendMessage(message, boundChatType);
++        }
++
++        @Override
++        public void sendMessage(@NotNull ComponentLike message, ChatType.@NotNull Bound boundChatType) {
++            CommandSender.super.sendMessage(message, boundChatType);
++        }
++
++        @Override
++        public void sendMessage(@NotNull SignedMessage signedMessage, ChatType.@NotNull Bound boundChatType) {
++            CommandSender.super.sendMessage(signedMessage, boundChatType);
++        }
++
++        @Override
++        public void deleteMessage(@NotNull SignedMessage signedMessage) {
++            CommandSender.super.deleteMessage(signedMessage);
++        }
++
++        @Override
++        public void deleteMessage(SignedMessage.@NotNull Signature signature) {
++            CommandSender.super.deleteMessage(signature);
++        }
++    }
++    // Canvas end
++
+     @Override
+     public String getName() {
+         return this.serverName;
