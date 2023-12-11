@@ -1,0 +1,1938 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris MC <purplewolf.mc1@gmail.com>
+Date: Thu, 7 Dec 2023 03:35:19 +0000
+Subject: [PATCH] Registry Builder API
+
+
+diff --git a/src/main/java/io/papermc/paper/plugin/storage/BootstrapProviderStorage.java b/src/main/java/io/papermc/paper/plugin/storage/BootstrapProviderStorage.java
+index 2e96308696e131f3f013469a395e5ddda2c5d529..3666010d54c55a6ba93bf9a3e00b76bb6a6926e5 100644
+--- a/src/main/java/io/papermc/paper/plugin/storage/BootstrapProviderStorage.java
++++ b/src/main/java/io/papermc/paper/plugin/storage/BootstrapProviderStorage.java
+@@ -34,6 +34,7 @@ public class BootstrapProviderStorage extends SimpleProviderStorage<PluginBootst
+                 try {
+                     BootstrapContext context = PluginBootstrapContextImpl.create(provider, PluginInitializerManager.instance().pluginDirectoryPath());
+                     provided.bootstrap(context);
++                    LOGGER.info("Bootstrap started successfully");
+                     return true;
+                 } catch (Throwable e) {
+                     LOGGER.error("Failed to run bootstrapper for %s. This plugin will not be loaded.".formatted(provider.getSource()), e);
+diff --git a/src/main/java/me/dueris/canvas/registry/CanvasRegistryImpl.java b/src/main/java/me/dueris/canvas/registry/CanvasRegistryImpl.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..224043029155efb7de41c8f58a0c98fdfc270234
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/CanvasRegistryImpl.java
+@@ -0,0 +1,268 @@
++package me.dueris.canvas.registry;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.IOException;
++import java.nio.file.FileVisitOption;
++import java.nio.file.FileVisitResult;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.nio.file.Paths;
++import java.nio.file.SimpleFileVisitor;
++import java.nio.file.attribute.BasicFileAttributes;
++import java.util.ArrayList;
++import java.util.EnumSet;
++import java.util.HashMap;
++import java.util.Map;
++import java.util.Optional;
++import java.util.Properties;
++
++import me.dueris.canvas.registry.builder.BiomeRegistry;
++import me.dueris.canvas.registry.builders.biome.*;
++import org.bukkit.NamespacedKey;
++import org.slf4j.Logger;
++
++import com.destroystokyo.paper.NamespacedTag;
++import com.google.common.base.Preconditions;
++import com.mojang.logging.LogUtils;
++
++import joptsimple.OptionSet;
++import me.dueris.canvas.registry.builder.DamageRegistry;
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.advancement.AdvancementTypeBuilder;
++import me.dueris.canvas.registry.builders.damage_type.DamageTypeBuilder;
++import me.dueris.canvas.registry.builders.damage_type.DeathMessageType;
++import me.dueris.canvas.registry.builders.tag.ResourceLocationType;
++import me.dueris.canvas.registry.builders.tag.TagTypeBuilder;
++import net.minecraft.SharedConstants;
++import net.minecraft.core.registries.BuiltInRegistries;
++import net.minecraft.core.registries.Registries;
++import net.minecraft.server.packs.PackType;
++import net.minecraft.server.*;
++import net.minecraft.world.level.storage.LevelResource;
++
++public class CanvasRegistryImpl implements RegistryProvider{
++    public static File CANVAS_PACK;
++    public static File DATA_DIR;
++    public static final Logger LOGGER = LogUtils.getClassLogger();
++    protected static Map<String, Boolean> registeredPlugins = new HashMap();
++    private String namespace;
++    protected static boolean frozen = false;
++
++    public static void freeze(){
++        frozen = true;
++    }
++
++    public File getDataSource(String s){
++        File source = new File(CanvasRegistryImpl.DATA_DIR, this.getNamespace(s) + File.separator + s);
++        if(source.exists()){
++            return source;
++        }else{
++            return null;
++        }
++    }
++
++    private String getNamespace(String s){
++        if(s == "dimension_type"){
++            return "minecraft";
++        }else{
++            return this.getNamespace();
++        }
++    }
++
++    @Override
++    public PluginRegistryUser initPlugin(String namespace){
++        if(!frozen){
++            if(namespace == null){
++                namespace = "canvas";
++            }
++            Preconditions.checkArgument(
++                NamespacedTag.VALID_NAMESPACE.matcher(namespace).matches(),
++                "Invalid namespace. Must be [a-z0-9._-]: %s",
++                namespace
++            );
++            File file = new File(CanvasRegistryImpl.DATA_DIR, namespace);
++    
++            if(!file.exists()){
++                file.mkdirs();
++            }
++    
++            CanvasRegistryImpl.LOGGER.info("Plugin with namespace{%n} has successfully hooked!"
++                .replace("%n", namespace)
++            );
++            registeredPlugins.put(namespace, true);
++            this.namespace = namespace;
++            return new CanvasRegistryUser(namespace, this);
++        }else{
++            throw new RuntimeException("Registries are frozen, please run this in the PluginBootstrapper");
++        }
++    }
++
++    public String getNamespace(){
++        return this.namespace;
++    }
++
++    public String parseDatapackPath(){
++        OptionSet optionset = Main.optionSet;
++        try {
++            org.bukkit.configuration.file.YamlConfiguration bukkitConfiguration = io.papermc.paper.configuration.PaperConfigurations.loadLegacyConfigFile((File) optionset.valueOf("bukkit-settings"));
++            File container;
++            if (optionset.has("universe")) {
++                container = (File) optionset.valueOf("universe");
++            } else {
++                container = new File(bukkitConfiguration.getString("settings.world-container", "."));
++            }
++            String s = (String) Optional.ofNullable(
++                (String) optionset.valueOf("world")
++            ).orElseGet(
++                () -> {
++                    Path propPath = Paths.get("server.properties");
++                    if(propPath.toFile().exists()){
++                        Properties properties = new Properties();
++
++                        try (FileInputStream input = new FileInputStream(propPath.toFile())) {
++                            properties.load(input);
++                        } catch (IOException e) {
++                            e.printStackTrace();
++                        }
++
++                        return properties.getProperty("level-name", "world");
++                    }else{
++                        return "world";
++                    }
++                }
++            );
++
++            Path datapackFolder = Paths.get(container.getAbsolutePath() + File.separator + s + File.separator + "datapacks");
++            return datapackFolder.toString();
++        } catch (Exception e) {
++            e.printStackTrace();
++        }
++        return null;
++    }
++
++    protected static void tryReset(Path folderPath){
++        if (!Files.exists(folderPath)) {
++            return;
++        }
++
++        try {
++            Files.walkFileTree(folderPath, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE, new SimpleFileVisitor<Path>() {
++                @Override
++                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
++                    Files.delete(file);
++                    return FileVisitResult.CONTINUE;
++                }
++
++                @Override
++                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
++                    if (exc == null) {
++                        Files.delete(dir);
++                        return FileVisitResult.CONTINUE;
++                    } else {
++                        throw exc;
++                    }
++                }
++            });
++        } catch (IOException e) {
++            e.printStackTrace();
++        }
++    }
++
++    public static void init(){
++        RegistryBuilder builder = new RegistryBuilder();
++        CanvasRegistryImpl regimpl = new CanvasRegistryImpl();
++        builder.setRegistryProvider(regimpl);
++        File datapackDir = new File(regimpl.parseDatapackPath());
++        File canvasPack = new File(datapackDir, "canvas-plugins");
++        CanvasRegistryImpl.tryReset(canvasPack.toPath());
++        CanvasRegistryImpl.CANVAS_PACK = canvasPack;
++
++        if(!canvasPack.exists()){
++            canvasPack.mkdirs();
++        }
++        File mcMeta = new File(canvasPack, "pack.mcmeta");
++            try {
++                com.google.common.io.Files.write("{\n"
++                        + "    \"pack\": {\n"
++                        + "        \"description\": \"Datapack repo for Canvas Plugins, allowing plugins to register things\",\n"
++                        + "        \"pack_format\": " + SharedConstants.getCurrentVersion().getPackVersion(PackType.SERVER_DATA) + "\n"
++                        + "    }\n"
++                        + "}\n", mcMeta, com.google.common.base.Charsets.UTF_8);
++            } catch (java.io.IOException ex) {
++                throw new RuntimeException("Could not initialize Canvas datapack", ex);
++            }
++        
++        File dataFile = new File(canvasPack, "data");
++        if(!dataFile.exists()){
++            dataFile.mkdirs();
++        }
++        CanvasRegistryImpl.DATA_DIR = dataFile;
++        /* // Canvas testing stuff
++
++        RegistryProvider provider = RegistryBuilder.getRegistryProvider();
++        PluginRegistryUser user = provider.initPlugin("canvas-testing");
++        user.registerBuilder(
++            user.createDamageBuilder("testing")
++                .setExhaustion(1.4f)
++                .setEffects(me.dueris.canvas.registry.builders.damage_type.Effects.DROWNING)
++                .build()
++        );
++        TagTypeBuilder tagTest = user.createTagBuilder("testTag", ResourceLocationType.ENTITY_TYPES);
++        tagTest.addValue("minecraft:cow");
++        tagTest.addValue("minecraft:pig");
++        user.registerBuilder(tagTest.build());
++
++        AdvancementTypeBuilder advancementTest = user.createAdvancementBuilder("advancement");
++        advancementTest.setAnnounceToChat(false);
++        advancementTest.setDisplayTitle("tsett");
++        advancementTest.setCriterion(
++            "\"criteria\": {\n" +
++            "    \"get_stone\": {\n" +
++            "      \"conditions\": {\n" +
++            "        \"items\": [\n" +
++            "          {\n" +
++            "            \"tag\": \"minecraft:stone_tool_materials\"\n" +
++            "          }\n" +
++            "        ]\n" +
++            "      },\n" +
++            "      \"trigger\": \"minecraft:inventory_changed\"\n" +
++            "    }\n" +
++            "  },\n" +
++            "\"requirements\": [\n" +
++            "    [\n" +
++            "       \"get_stone\"\n" +
++            "    ]\n" +
++            "]\n"
++        );
++        user.registerBuilder(advancementTest.build());
++
++        me.dueris.canvas.registry.builders.dimension_type.DimensionTypeBuilder reg = user.createDimensionBuilder("dtukhj");
++        reg.setAmbientLight(3);
++        reg.setHasCeiling(false);
++        reg.setMinY(16);
++        reg.setBedWorks(false);
++        reg.setNatural(true);
++        user.registerBuilder(reg.build());
++
++        BiomeTypeBuilder bi = user.createBiomeBuilder("dgfssss");
++        bi.setHasPrecipitation(true);
++        bi.setTemperature(1f);
++        bi.setTempModifier(BiomeTempModifier.NONE);
++        bi.setDownfall(1f);
++        bi.setSkyColor(BiomeColorPresets.RED.getValue());
++        bi.setGrassColorModifier(BiomeGrassColorModifier.NONE);
++        BiomeParticle particle = new BiomeParticle();
++        particle.setParticleId("minecraft:white_ash");
++        particle.setProbability(1f);
++        bi.setParticleOptions(particle);
++        bi.getAirCarvers().add("minecraft:nether_cave");
++        BiomeGenerator gen = new BiomeGenerator();
++        gen.getLocalModifications().add("minecraft:amethyst_geode");
++        bi.setCreatureSpawnProb(1f);
++        bi.setGenerator(gen);
++        bi.addSpawner(new BiomeMobSpawner(BiomeMobSpawner.SpawnerCategory.AXOLOTLS, NamespacedKey.minecraft("pig"), 100, 5, 1));
++        user.registerBuilder(bi.build());
++        */ // Canvas test end
++    }
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/CanvasRegistryUser.java b/src/main/java/me/dueris/canvas/registry/CanvasRegistryUser.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..6800f3dfd5679909b4ce1f10d27c330d0c082470
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/CanvasRegistryUser.java
+@@ -0,0 +1,151 @@
++package me.dueris.canvas.registry;
++
++import java.io.File;
++import java.util.ArrayList;
++
++import com.google.common.base.Preconditions;
++
++import me.dueris.canvas.registry.builder.AdvancementRegistry;
++import me.dueris.canvas.registry.builder.BiomeRegistry;
++import me.dueris.canvas.registry.builder.DamageRegistry;
++import me.dueris.canvas.registry.builder.DimensionRegistry;
++import me.dueris.canvas.registry.builder.TagRegistry;
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.advancement.*;
++import me.dueris.canvas.registry.builder.FunctionRegistry;
++import me.dueris.canvas.registry.builders.biome.BiomeTypeBuilder;
++import me.dueris.canvas.registry.builders.damage_type.*;
++import me.dueris.canvas.registry.builders.dimension_type.*;
++import me.dueris.canvas.registry.builders.tag.*;
++import me.dueris.canvas.registry.builders.mcfunction.*;
++
++public class CanvasRegistryUser implements PluginRegistryUser{
++    private String namespace;
++    private RegistryProvider provider;
++
++    public CanvasRegistryUser(String namespace, RegistryProvider provider){
++        this.namespace = namespace;
++        this.provider = provider;
++    }
++
++    @Override
++    public String getNamespace(){
++        return this.namespace;
++    }
++
++    @Override
++    public void setNamespace(String namespace){
++        this.namespace = namespace;
++    }
++
++    @Override
++    public RegistryProvider getProvider(){
++        return this.provider;
++    }
++
++    @Override
++    public void setProvider(){
++        this.provider = provider;
++    }
++
++    @Override
++    public ArrayList<RegistrySource> getRegisteredBuilders() {
++        return null;
++    }
++
++    @Override
++    public DamageTypeBuilder createDamageBuilder(String key){
++        return new DamageRegistry(this, key);
++    }
++
++    @Override
++    public TagTypeBuilder createTagBuilder(String key, ResourceLocationType type){
++        return new TagRegistry(this, key, type);
++    }
++
++    @Override
++    public AdvancementTypeBuilder createAdvancementBuilder(String key){
++        return new AdvancementRegistry(this, key);
++    }
++
++    @Override
++    public BiomeTypeBuilder createBiomeBuilder(final String key) {
++        return new BiomeRegistry(this, key);
++    }
++
++    @Override
++    public FunctionTypeBuilder createFunctionBuilder(String key){
++        return new FunctionRegistry(this, key);
++    }
++
++    @Override
++    public DimensionTypeBuilder createDimensionBuilder(String key){
++        return new DimensionRegistry(this, key);
++    }
++
++    @Override
++    public void registerBuilder(RegistrySource source){
++        if(!CanvasRegistryImpl.frozen){
++            Preconditions.checkArgument(CanvasRegistryImpl.registeredPlugins.containsKey(source.getUser().getNamespace()));
++            SourceBuilder sourceBuilder = new SourceBuilder();
++            CanvasRegistryImpl regimpl = (CanvasRegistryImpl) getProvider();
++            if(source instanceof DamageTypeBuilder){
++                sourceBuilder.buildDamageSource(source);
++                File dmgSource = regimpl.getDataSource("damage_type");
++                File dmgJson = new File(dmgSource, source.getKey() + ".json");
++                try {
++                    com.google.common.io.Files.write(source.getCompiledOutputData(), dmgJson, com.google.common.base.Charsets.UTF_8);
++                } catch (java.io.IOException ex) {
++                    throw new RuntimeException("Could not create new damage_type", ex);
++                }
++            } else if(source instanceof TagTypeBuilder){
++                sourceBuilder.buildTagSource(source);
++                File tagSource = regimpl.getDataSource("tags");
++                File tagJson = new File(tagSource, source.getKey() + ".json");
++                try {
++                    com.google.common.io.Files.write(source.getCompiledOutputData(), tagJson, com.google.common.base.Charsets.UTF_8);
++                } catch (java.io.IOException ex) {
++                    throw new RuntimeException("Could not create new tag", ex);
++                }
++            } else if(source instanceof AdvancementTypeBuilder){
++                sourceBuilder.buildAdvancementSource(source);
++                File adSource = regimpl.getDataSource("advancements" + File.separator + "plugins");
++                File adJson = new File(adSource, source.getKey() + ".json");
++                try {
++                    com.google.common.io.Files.write(source.getCompiledOutputData(), adJson, com.google.common.base.Charsets.UTF_8);
++                } catch (java.io.IOException ex) {
++                    throw new RuntimeException("Could not create new advancement", ex);
++                }
++            } else if(source instanceof FunctionTypeBuilder){
++                sourceBuilder.buildFunctionSource(source);
++                File funSource = regimpl.getDataSource("functions");
++                File function = new File(funSource, source.getKey() + ".mcfunction");
++                try {
++                    com.google.common.io.Files.write(source.getCompiledOutputData(), function, com.google.common.base.Charsets.UTF_8);
++                } catch (java.io.IOException ex) {
++                    throw new RuntimeException("Could not create new function", ex);
++                }
++            } else if(source instanceof DimensionTypeBuilder){
++                sourceBuilder.buildDimensionSource(source);
++                File diSource = regimpl.getDataSource("dimension_type");
++                File diJson = new File(diSource, source.getKey() + ".json");
++                try {
++                    com.google.common.io.Files.write(source.getCompiledOutputData(), diJson, com.google.common.base.Charsets.UTF_8);
++                } catch (java.io.IOException ex) {
++                    throw new RuntimeException("Could not create new dimension", ex);
++                }
++            } else if(source instanceof BiomeTypeBuilder){
++                sourceBuilder.buildBiomeSource(source);
++                File biSource = regimpl.getDataSource("worldgen" + File.separator + "biome");
++                File biJson = new File(biSource, source.getKey() + ".json");
++                try {
++                    com.google.common.io.Files.write(source.getCompiledOutputData(), biJson, com.google.common.base.Charsets.UTF_8);
++                } catch (java.io.IOException ex) {
++                    throw new RuntimeException("Could not create new biome", ex);
++                }
++            }
++        }else{
++            throw new RuntimeException("Registries are frozen, please run this in the PluginBootstrapper");
++        }
++    }
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/SourceBuilder.java b/src/main/java/me/dueris/canvas/registry/SourceBuilder.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..72a13f65d7ae9549e33c1c7a5efb519a67729c3c
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/SourceBuilder.java
+@@ -0,0 +1,57 @@
++package me.dueris.canvas.registry;
++
++import java.io.File;
++
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.advancement.AdvancementTypeBuilder;
++import me.dueris.canvas.registry.builders.tag.TagTypeBuilder;
++
++public class SourceBuilder {
++    public void buildDamageSource(RegistrySource source){
++        CanvasRegistryUser regImpl = (CanvasRegistryUser) source.getUser();
++        File damageSource = new File(CanvasRegistryImpl.DATA_DIR, regImpl.getNamespace() + File.separator + "damage_type");
++        if(!damageSource.exists()){
++            damageSource.mkdirs();
++        }
++    }
++
++    public void buildTagSource(RegistrySource source){
++        CanvasRegistryUser regImpl = (CanvasRegistryUser) source.getUser();
++        File tagSource = new File(CanvasRegistryImpl.DATA_DIR, regImpl.getNamespace() + File.separator + "tags");
++        if(!tagSource.exists()){
++            tagSource.mkdirs();
++        }
++    }
++
++    public void buildAdvancementSource(RegistrySource source){
++        CanvasRegistryUser regImpl = (CanvasRegistryUser) source.getUser();
++        File adSource = new File(CanvasRegistryImpl.DATA_DIR, regImpl.getNamespace() + File.separator + "advancements" + File.separator + "plugins");
++        if(!adSource.exists()){
++            adSource.mkdirs();
++        }
++    }
++
++    public void buildFunctionSource(RegistrySource source){
++        CanvasRegistryUser regImpl = (CanvasRegistryUser) source.getUser();
++        File funSource = new File(CanvasRegistryImpl.DATA_DIR, regImpl.getNamespace() + File.separator + "functions");
++        if(!funSource.exists()){
++            funSource.mkdirs();
++        }
++    }
++
++    public void buildDimensionSource(RegistrySource source){
++        CanvasRegistryUser regImpl = (CanvasRegistryUser) source.getUser();
++        File diSource = new File(CanvasRegistryImpl.DATA_DIR, "minecraft" + File.separator + "dimension_type");
++        if(!diSource.exists()){
++            diSource.mkdirs();
++        }
++    }
++
++    public void buildBiomeSource(RegistrySource source){
++        CanvasRegistryUser regImpl = (CanvasRegistryUser) source.getUser();
++        File biSource = new File(CanvasRegistryImpl.DATA_DIR, regImpl.getNamespace() + File.separator + "worldgen" + File.separator + "biome");
++        if(!biSource.exists()){
++            biSource.mkdirs();
++        }
++    }
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/builder/AdvancementRegistry.java b/src/main/java/me/dueris/canvas/registry/builder/AdvancementRegistry.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b8c8bf80b0333a0d75e40a76fb6435702faa05a
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/builder/AdvancementRegistry.java
+@@ -0,0 +1,214 @@
++package me.dueris.canvas.registry.builder;
++
++import org.bukkit.Material;
++
++import com.google.common.base.Preconditions;
++
++import io.papermc.paper.advancement.AdvancementDisplay.Frame;
++import me.dueris.canvas.registry.PluginRegistryUser;
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.advancement.AdvancementTypeBuilder;
++
++public class AdvancementRegistry implements AdvancementTypeBuilder{
++    private String key;
++    private PluginRegistryUser provider;
++    private Material displayIcon;
++    private String title;
++    private Frame frame;
++    private String description;
++    private boolean showToast;
++    private boolean announce;
++    private boolean hidden;
++    private String parent;
++    private String criterionTag;
++    private String itemNBT;
++    private String compileData;
++
++    public AdvancementRegistry(PluginRegistryUser provider, String key){
++        Preconditions.checkArgument(key != null, "Key must not be null for new AdvancementBuilder");
++        this.key = key;
++        this.provider = provider;
++        presetDefaults();
++    }
++
++    private String getShouldComma(boolean bool){
++        if(bool){
++            return ",";
++        }else{
++            return " ";
++        }
++    }
++
++    @Override
++    public RegistrySource build() {
++        String output = "{\n";
++        if(this.parent != null){
++            output = output + "    \"parent\": \"{p}\",\n"
++            .replace("{p}", this.parent);
++        }
++        output = output + "    \"display\": {\n";
++        // Display settings
++        output = output + "        \"announce_to_chat\": {a},\n"
++        .replace("{a}", String.valueOf(this.announce));
++        output = output + "        \"description\": \"{d}\",\n"
++        .replace("{d}", this.description);
++        output = output + "        \"frame\": \"{f}\",\n"
++        .replace("{f}", this.frame.toString().toLowerCase());
++        output = output + "        \"hidden\": {h},\n"
++        .replace("{h}", String.valueOf(this.hidden));
++        output = output + "        \"icon\": {\n";
++            output = output + "            \"item\": \"{m}\""
++            .replace("{m}", this.displayIcon.getKey().asString())
++             + getShouldComma(this.itemNBT != null)+ "\n";
++            if(this.itemNBT != null){
++                output = output + "            \"nbt\":\"{n}\"\n"
++                .replace("{n}", this.itemNBT);
++            }
++        output = output + "        },\n";
++        output = output + "        \"show_toast\": {s},\n"
++        .replace("{s}", String.valueOf(this.showToast));
++        output = output + "        \"title\": \"{s}\"\n"
++        .replace("{s}", this.title);
++        output = output + "    },\n";
++        // Display settings end and now that one thing i rly dont wanna do
++        output = output + this.criterionTag;
++        output = output + "}\n";
++        this.compileData = output;
++        return this;
++    }
++
++    @Override
++    public String getCompiledOutputData() {
++        return this.compileData;
++    }
++
++    @Override
++    public void presetDefaults() {
++        this.displayIcon = Material.DIRT;
++        this.title = "default";
++        this.frame = Frame.TASK;
++        this.description = "default";
++        this.showToast = true;
++        this.announce = true;
++        this.hidden = false;
++        this.parent = null;
++        this.criterionTag = null;
++        this.itemNBT = null;
++    }
++
++    @Override
++    public String getKey() {
++        return this.key;
++    }
++
++    @Override
++    public void setKey(String key) {
++        this.key = key;
++    }
++
++    @Override
++    public PluginRegistryUser getUser() {
++        return this.provider;
++    }
++
++    @Override
++    public Material getDisplayIcon() {
++        return this.displayIcon;
++    }
++
++    @Override
++    public String getItemNBT(){
++        return this.itemNBT;
++    }
++
++    @Override
++    public void setItemNBT(String nbt){
++        this.itemNBT = nbt;
++    }
++
++    @Override
++    public void setDisplayIcon(Material mat) {
++        this.displayIcon = mat;
++    }
++
++    @Override
++    public String getDisplayTitle() {
++        return this.title;
++    }
++
++    @Override
++    public void setDisplayTitle(String title) {
++        this.title = title;
++    }
++
++    @Override
++    public Frame getFrame() {
++        return this.frame;
++    }
++
++    @Override
++    public void setFrame(Frame frame) {
++        this.frame = frame;
++    }
++
++    @Override
++    public String getDescription() {
++        return this.description;
++    }
++
++    @Override
++    public void setDescription(String description) {
++        this.description = description;
++    }
++
++    @Override
++    public boolean getShowToast() {
++        return this.showToast;
++    }
++
++    @Override
++    public void setShowToast(boolean show) {
++        this.showToast = show;
++    }
++
++    @Override
++    public boolean getAnnounceToChat() {
++        return this.announce;
++    }
++
++    @Override
++    public void setAnnounceToChat(boolean announce) {
++        this.announce = announce;
++    }
++
++    @Override
++    public boolean getHidden() {
++        return this.hidden;
++    }
++
++    @Override
++    public void setHidden(boolean hidden) {
++        this.hidden = hidden;
++    }
++
++    @Override
++    public String getParent() {
++        return this.parent;
++    }
++
++    @Override
++    public void setAdvancementParent(String parent) {
++        this.parent = parent;
++    }
++
++    @Override
++    public String getCriterion() {
++        return this.criterionTag;
++    }
++
++    @Override
++    public void setCriterion(String criteria) {
++        this.criterionTag = criteria;
++    }
++    
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/builder/BiomeRegistry.java b/src/main/java/me/dueris/canvas/registry/builder/BiomeRegistry.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..7c16c86525b73d9d5db33da0890d18d03df43f03
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/builder/BiomeRegistry.java
+@@ -0,0 +1,423 @@
++package me.dueris.canvas.registry.builder;
++
++import me.dueris.canvas.registry.PluginRegistryUser;
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.biome.BiomeGenerator;
++import me.dueris.canvas.registry.builders.biome.BiomeGrassColorModifier;
++import me.dueris.canvas.registry.builders.biome.BiomeMobSpawner;
++import me.dueris.canvas.registry.builders.biome.BiomeParticle;
++import me.dueris.canvas.registry.builders.biome.BiomeTempModifier;
++import me.dueris.canvas.registry.builders.biome.BiomeTypeBuilder;
++import net.minecraft.world.level.biome.BiomeSpecialEffects.GrassColorModifier;
++
++import java.util.ArrayList;
++
++public class BiomeRegistry implements BiomeTypeBuilder {
++    private boolean hasPrecip;
++    private float temp;
++    private BiomeTempModifier tempModifier;
++    private float downfall;
++    private int fogColor;
++    private int skyColor;
++    private int waterColor;
++    private int waterFogColor;
++    private int foliageColor;
++    private int grassColor;
++    private BiomeGrassColorModifier grassColorModifier;
++    private BiomeParticle biomeParticle;
++    private BiomeGenerator biomeGenerator;
++    private ArrayList<BiomeMobSpawner> spawners = new ArrayList();
++    private float creatureSpawnProbability;
++    private ArrayList<String> liquidCarver = new ArrayList();
++    private ArrayList<String> airCarver = new ArrayList();
++
++    private String compilerOutput;
++    private String key;
++    private PluginRegistryUser provider;
++
++    public BiomeRegistry(PluginRegistryUser provider, String key){
++        this.provider = provider;
++        this.key = key;
++    }
++
++    @Override
++    public RegistrySource build() {
++        String output = "{\n";
++        output = output + "  \"has_precipitation\": {u},\n"
++            .replace("{u}", String.valueOf(hasPrecip));
++        output = output + "  \"temperature\": {u},\n"
++            .replace("{u}", String.valueOf(temp));
++        output = output + "  \"temperature_modifier\": \"{u}\",\n"
++            .replace("{u}", String.valueOf(tempModifier).toLowerCase());
++        output = output + "  \"downfall\": {u},\n"
++            .replace("{u}", String.valueOf(downfall));
++            // Effects start
++            output = output + "  \"effects\": {\n";
++            output = output + "    \"fog_color\": {u},\n"
++                .replace("{u}", String.valueOf(fogColor));
++            output = output + "    \"sky_color\": {u},\n"
++                .replace("{u}", String.valueOf(skyColor));
++            output = output + "    \"water_color\": {u},\n"
++                .replace("{u}", String.valueOf(waterColor));
++            output = output + "    \"water_fog_color\": {u},\n"
++                .replace("{u}", String.valueOf(waterFogColor));
++            output = output + "    \"foliage_color\": {u},\n"
++                .replace("{u}", String.valueOf(foliageColor));
++            output = output + "    \"grass_color\": {u},\n"
++                .replace("{u}", String.valueOf(grassColor));
++            output = output + "    \"grass_color_modifier\": \"{u}\",\n"
++                .replace("{u}", String.valueOf(grassColorModifier).toLowerCase());
++                // Particle start
++                if(this.biomeParticle != null){
++                    output = output + "    \"particle\": {\n";
++                    output = output + "      \"probability\": {u}, \n"
++                        .replace("{u}", String.valueOf(biomeParticle.probability));
++                        // Particle options start
++                        output = output + "      \"options\": {\n";
++                        output = output + "        \"type\": \"{u}\" \n"
++                            .replace("{u}", String.valueOf(biomeParticle.id));
++                        output = output + "     }\n";
++                        // Particle options end
++                    output = output + "    }\n";
++                }
++                // Particle end
++            output = output + "  },\n";
++            // Effects end
++            // Features start
++            output = output + "  \"features\": [\n";
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getRawGen()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getLakes()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getLocalModifications()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getUndergroundStructures()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getSurfaceStructures()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getStrongholds()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getUndergroundOres()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getUndergroundDecoration()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getFluidSprings()));
++            output = output + "  {gen},\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getVegetalDecoration()));
++            output = output + "  {gen}\n"
++                .replace("{gen}", arrayToValidString(biomeGenerator.getTopLayerModification()));
++            output = output + "  ],\n";
++            // Features end
++            // Spawners start
++            output = output + "  \"spawners\": {\n";
++            ArrayList<BiomeMobSpawner> monster = new ArrayList<>();
++            ArrayList<BiomeMobSpawner> creature = new ArrayList<>();
++            ArrayList<BiomeMobSpawner> ambient = new ArrayList<>();
++            ArrayList<BiomeMobSpawner> water_creature = new ArrayList<>();
++            ArrayList<BiomeMobSpawner> underground_water_creature = new ArrayList<>();
++            ArrayList<BiomeMobSpawner> water_ambient = new ArrayList<>();
++            ArrayList<BiomeMobSpawner> misc = new ArrayList<>();
++            ArrayList<BiomeMobSpawner> axolotls = new ArrayList<>();
++
++            for (BiomeMobSpawner spawner : this.getAllSpawners()) {
++                if (spawner.category.toString().toLowerCase().equals("monster")) {
++                    monster.add(spawner);
++                } else if (spawner.category.toString().toLowerCase().equals("creature")) {
++                    creature.add(spawner);
++                } else if (spawner.category.toString().toLowerCase().equals("ambient")) {
++                    ambient.add(spawner);
++                } else if (spawner.category.toString().toLowerCase().equals("water_creature")) {
++                    water_creature.add(spawner);
++                } else if (spawner.category.toString().toLowerCase().equals("underground_water_creature")) {
++                    underground_water_creature.add(spawner);
++                } else if (spawner.category.toString().toLowerCase().equals("water_ambient")) {
++                    water_ambient.add(spawner);
++                } else if (spawner.category.toString().toLowerCase().equals("misc")) {
++                    misc.add(spawner);
++                } else if (spawner.category.toString().toLowerCase().equals("axolotls")) {
++                    axolotls.add(spawner);
++                }
++            }
++
++            output = this.addSpawnerBuild(output, monster, "monster");
++            output = this.addSpawnerBuild(output, creature, "creature");
++            output = this.addSpawnerBuild(output, ambient, "ambient");
++            output = this.addSpawnerBuild(output, water_creature, "water_creature");
++            output = this.addSpawnerBuild(output, underground_water_creature, "underground_water_creature");
++            output = this.addSpawnerBuild(output, water_ambient, "water_ambient");
++            output = this.addSpawnerBuild(output, misc, "misc");
++            output = this.addSpawnerBuild(output, axolotls, "axolotls");
++
++            output = output + "   },\n";
++            // Spawners end
++            // Carvers start
++            output = output + "  \"carvers\": {\n";
++            if(!airCarver.isEmpty()){
++                output = output + "    \"air\": [{air}]"
++                    .replace("[{air}]", arrayToValidString(airCarver));
++            }
++            if(!liquidCarver.isEmpty()){
++                if(!airCarver.isEmpty()){
++                    output = output + ",";
++                }
++                output = output + "    \"liquid\": [{liquid}]"
++                    .replace("[{liquid}]", arrayToValidString(liquidCarver));
++            }
++            output = output + "\n  },\n";
++            // Carvers end
++        output = output + "  \"spawn_costs\": {},";
++        output = output + "  \"creature_spawn_probability\": {u}\n"
++            .replace("{u}", String.valueOf(creatureSpawnProbability).toLowerCase());
++        output = output + "}\n";
++        this.compilerOutput = output;
++        return this;
++    }
++
++    private String arrayToValidString(ArrayList<String> arrayList) {
++        StringBuilder result = new StringBuilder("[");
++        for (int i = 0; i < arrayList.size(); i++) {
++            result.append("\"").append(arrayList.get(i)).append("\"");
++            if (i < arrayList.size() - 1) {
++                result.append(", ");
++            }
++        }
++        result.append("]");
++        return result.toString();
++    }
++
++    private String addSpawnerBuild(String output, ArrayList<BiomeMobSpawner> spawners, String id){
++        output = output + "  \"{id}\": ["
++            .replace("{id}", id);
++        for(BiomeMobSpawner spawner : spawners){
++            boolean comma = false;
++            if(spawners.indexOf(spawner) == spawners.toArray().length){
++                comma = true;
++            }
++            output = output + "\n    {\n" +
++                "        \"type\": \"{t}\",\n"
++                    .replace("{t}", spawner.mobKey.asString()) +
++                "        \"maxCount\": {t},\n"
++                    .replace("{t}", String.valueOf(spawner.maxCount)) +
++                "        \"minCount\": {t},\n"
++                    .replace("{t}", String.valueOf(spawner.minCount)) +
++                "        \"weight\": {t}\n"
++                    .replace("{t}", String.valueOf(spawner.weight)) +
++                "    }";
++            if(comma){
++                output = output + ",\n";
++            }else{
++                output = output + "\n";
++            }
++        }
++        output = output + "  ]";
++        if(id != "axolotls"){
++            output = output + ",";
++        }
++        output = output + "\n";
++        return output;
++    }
++
++    @Override
++    public String getCompiledOutputData() {
++        return compilerOutput;
++    }
++
++    @Override
++    public void presetDefaults() {
++        this.hasPrecip = true;
++        this.temp = 0.5f;
++        this.tempModifier = BiomeTempModifier.NONE;
++        this.downfall = 1f;
++        this.fogColor = 1;
++        this.skyColor = 1;
++        this.waterColor = 1;
++        this.waterFogColor = 1;
++        this.foliageColor = 1;
++        this.grassColor = 1;
++        this.grassColorModifier = BiomeGrassColorModifier.NONE;
++        this.biomeParticle = null;
++        this.creatureSpawnProbability = 1;
++        this.biomeGenerator = new BiomeGenerator();
++    }
++
++    @Override
++    public String getKey() {
++        return this.key;
++    }
++
++    @Override
++    public void setKey(final String key) {
++        this.key = key;
++    }
++
++    @Override
++    public PluginRegistryUser getUser() {
++        return this.provider;
++    }
++
++    @Override
++    public boolean hasPrecipitation() {
++        return hasPrecip;
++    }
++
++    @Override
++    public void setHasPrecipitation(final boolean has) {
++        this.hasPrecip = has;
++    }
++
++    @Override
++    public float getTemperature() {
++        return this.temp;
++    }
++
++    @Override
++    public void setTemperature(final float temp) {
++        this.temp = temp;
++    }
++
++    @Override
++    public BiomeTempModifier getTempModifier() {
++        return this.tempModifier;
++    }
++
++    @Override
++    public void setTempModifier(final BiomeTempModifier modifier) {
++        this.tempModifier = modifier;
++    }
++
++    @Override
++    public float getDownfall() {
++        return this.downfall;
++    }
++
++    @Override
++    public void setDownfall(final float downfall) {
++        this.downfall = downfall;
++    }
++
++    @Override
++    public int getFogColor() {
++        return this.fogColor;
++    }
++
++    @Override
++    public void setFogColor(final int T) {
++        this.fogColor = T;
++    }
++
++    @Override
++    public int getSkyColor() {
++        return this.skyColor;
++    }
++
++    @Override
++    public void setSkyColor(final int T) {
++        this.skyColor = T;
++    }
++
++    @Override
++    public int getWaterColor() {
++        return this.waterColor;
++    }
++
++    @Override
++    public void setWaterColor(final int T) {
++        this.waterColor = T;
++    }
++
++    @Override
++    public int getWaterFogColor() {
++        return this.waterFogColor;
++    }
++
++    @Override
++    public void setWaterFogColor(final int T) {
++        this.waterFogColor = T;
++    }
++
++    @Override
++    public int getFoliageColor() {
++        return this.foliageColor;
++    }
++
++    @Override
++    public void setFoliageColor(final int T) {
++        this.foliageColor = T;
++    }
++
++    @Override
++    public int getGrassColor() {
++        return this.grassColor;
++    }
++
++    @Override
++    public void setGrassColor(final int T) {
++        this.grassColor = T;
++    }
++
++    @Override
++    public BiomeGrassColorModifier getGrassColorModifier() {
++        return this.grassColorModifier;
++    }
++
++    @Override
++    public void setGrassColorModifier(final BiomeGrassColorModifier modifier) {
++        this.grassColorModifier = modifier;
++    }
++
++    @Override
++    public float getCreatureSpawnProb() {
++        return this.creatureSpawnProbability;
++    }
++
++    @Override
++    public void setCreatureSpawnProb(final float T) {
++        this.creatureSpawnProbability = T;
++    }
++
++    @Override
++    public ArrayList<BiomeMobSpawner> getAllSpawners() {
++        return this.spawners;
++    }
++
++    @Override
++    public void addSpawner(final BiomeMobSpawner T) {
++        this.spawners.add(T);
++    }
++
++    @Override
++    public void removeSpawner(final BiomeMobSpawner T) {
++        this.spawners.remove(T);
++    }
++
++    @Override
++    public BiomeGenerator getBiomeGenerator() {
++        return this.biomeGenerator;
++    }
++
++    @Override
++    public void setGenerator(final BiomeGenerator generator) {
++        this.biomeGenerator = generator;
++    }
++
++    @Override
++    public BiomeParticle getParticleOptions() {
++        return biomeParticle;
++    }
++
++    @Override
++    public void setParticleOptions(final BiomeParticle particle) {
++        this.biomeParticle = particle;
++    }
++
++    @Override
++    public ArrayList<String> getAirCarvers(){
++        return this.airCarver;
++    }
++
++    @Override
++    public ArrayList<String> getLiquidCarvers(){
++        return this.liquidCarver;
++    }
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/builder/DamageRegistry.java b/src/main/java/me/dueris/canvas/registry/builder/DamageRegistry.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..d2b7baf4802111f2074c64e068d50f78b22ebcb2
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/builder/DamageRegistry.java
+@@ -0,0 +1,135 @@
++package me.dueris.canvas.registry.builder;
++
++import com.google.common.base.Preconditions;
++
++import me.dueris.canvas.registry.PluginRegistryUser;
++import me.dueris.canvas.registry.RegistryProvider;
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.damage_type.DamageTypeBuilder;
++import me.dueris.canvas.registry.builders.damage_type.DeathMessageType;
++import me.dueris.canvas.registry.builders.damage_type.Effects;
++import me.dueris.canvas.registry.builders.damage_type.Scaling;
++import net.minecraft.core.RegistrySetBuilder;
++
++public class DamageRegistry implements DamageTypeBuilder{
++    private String key;
++    private String outputData;
++    private PluginRegistryUser provider;
++
++    public DamageRegistry(PluginRegistryUser provider, String key){
++        Preconditions.checkArgument(key != null, "Key must not be null for new DamageBuilder");
++        this.key = key;
++        this.provider = provider;
++        presetDefaults();
++    }
++
++    private float exhaustion;
++    private String message_id;
++    private Scaling scaling;
++    private Effects effects;
++    private DeathMessageType death_message_type;
++
++    @Override
++    public RegistrySource build() {
++        String output = "{\n"
++                    + "    \"exhaustion\": {ex},\n"
++                .replace("{ex}", String.valueOf(this.exhaustion))
++                    + "    \"message_id\": \"{m}\",\n"
++                .replace("{m}", this.message_id)
++                    + "    \"scaling\": \"{s}\",\n"
++                .replace("{s}", String.valueOf(this.scaling).toLowerCase())
++                    + "    \"effects\": \"{ef}\",\n"
++                .replace("{ef}", String.valueOf(this.effects).toLowerCase())
++                    + "    \"death_message_type\": \"{dmt}\"\n"
++                .replace("{dmt}", String.valueOf(this.death_message_type).toLowerCase())
++                    + "}\n"
++                ;
++        this.outputData = output;
++        return this;
++    }
++
++    @Override
++    public String getCompiledOutputData() {
++        return outputData;
++    }
++
++    @Override
++    public void presetDefaults() {
++        this.exhaustion = 0;
++        this.message_id = "default";
++        this.scaling = Scaling.NEVER;
++        this.effects = Effects.HURT;
++        this.death_message_type = DeathMessageType.DEFAULT;
++    }
++
++    @Override
++    public String getKey() {
++        return this.key;
++    }
++
++    @Override
++    public void setKey(String key) {
++        this.key = key;
++    }
++
++    @Override
++    public PluginRegistryUser getUser() {
++        return this.provider;
++    }
++
++    @Override
++    public String getMessageID() {
++        return this.message_id;
++    }
++
++    @Override
++    public DamageTypeBuilder setMessageID(String msg) {
++        this.message_id = msg;
++        return this;
++    }
++
++    @Override
++    public float getExhaustion() {
++        return this.exhaustion;
++    }
++
++    @Override
++    public DamageTypeBuilder setExhaustion(float exhaustion) {
++        this.exhaustion = exhaustion;
++        return this;
++    }
++
++    @Override
++    public Scaling getScaling() {
++        return this.scaling;
++    }
++
++    @Override
++    public DamageTypeBuilder setScaling(Scaling scaling) {
++        this.scaling = scaling;
++        return this;
++    }
++
++    @Override
++    public Effects getEffects() {
++        return this.effects;
++    }
++
++    @Override
++    public DamageTypeBuilder setEffects(Effects effect) {
++        this.effects = effect;
++        return this;
++    }
++
++    @Override
++    public DeathMessageType getDeathMessageType() {
++        return this.death_message_type;
++    }
++
++    @Override
++    public DamageTypeBuilder setDeathMessageType(DeathMessageType type) {
++        this.death_message_type = type;
++        return this;
++    }
++    
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/builder/DimensionRegistry.java b/src/main/java/me/dueris/canvas/registry/builder/DimensionRegistry.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..c55dcec95b837205075a3ca7b2d1729429e9896b
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/builder/DimensionRegistry.java
+@@ -0,0 +1,344 @@
++package me.dueris.canvas.registry.builder;
++
++import com.google.common.base.Preconditions;
++
++import me.dueris.canvas.registry.PluginRegistryUser;
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.dimension_type.DimensionEffects;
++import me.dueris.canvas.registry.builders.dimension_type.DimensionTypeBuilder;
++
++public class DimensionRegistry implements DimensionTypeBuilder{
++    private String key;
++    private PluginRegistryUser provider;
++    private boolean ultrawarm;
++    private boolean natural;
++    private double coordScale;
++    private boolean skyLight;
++    private boolean ceiling;
++    private float ambientLight;
++    private boolean useFixedTime;
++    private long fixedTime;
++    private int monsterSpawnLightLevel;
++    private int monsterSpawnBlockLightLimit;
++    private boolean piglinSafe;
++    private boolean bedWorks;
++    private boolean respawnAnchorWorks;
++    private boolean doRaids;
++    private int logicalHeight;
++    private int minY;
++    private int height;
++    private String effects;
++
++    private String output;
++
++    public DimensionRegistry(PluginRegistryUser provider, String key){
++        Preconditions.checkArgument(key != null, "Key must not be null for new DimensionTypeBuilder");
++        this.key = key;
++        this.provider = provider;
++        presetDefaults();
++    }
++
++    @Override
++    public RegistrySource build() {
++        String output = "{\n"
++            + " \"ultrawarm\": {u},\n"
++            .replace("{u}", String.valueOf(ultrawarm))
++            + " \"natural\": {u},\n"
++            .replace("{u}", String.valueOf(natural))
++            + " \"coordinate_scale\": {u},\n"
++            .replace("{u}", String.valueOf(coordScale))
++            + " \"has_skylight\": {u},\n"
++            .replace("{u}", String.valueOf(skyLight))
++            + " \"infiniburn\": \"#minecraft:infiniburn_overworld\",\n"
++            + " \"has_ceiling\": {u},\n"
++            .replace("{u}", String.valueOf(ceiling))
++            + " \"ambient_light\": {u},\n"
++            .replace("{u}", String.valueOf(ambientLight));
++            if(useFixedTime){
++                output = output + " \"fixed_time\": {u},\n"
++                .replace("{u}", String.valueOf(fixedTime));
++            }
++            output = output
++            + " \"monster_spawn_light_level\": {u},\n"
++            .replace("{u}", String.valueOf(monsterSpawnLightLevel))
++            + " \"monster_spawn_block_light_limit\": {u},\n"
++            .replace("{u}", String.valueOf(monsterSpawnBlockLightLimit))
++            + " \"piglin_safe\": {u},\n"
++            .replace("{u}", String.valueOf(piglinSafe))
++            + " \"bed_works\": {u},\n"
++            .replace("{u}", String.valueOf(bedWorks))
++            + " \"respawn_anchor_works\": {u},\n"
++            .replace("{u}", String.valueOf(respawnAnchorWorks))
++            + " \"has_raids\": {u},\n"
++            .replace("{u}", String.valueOf(doRaids))
++            + " \"logical_height\": {u},\n"
++            .replace("{u}", String.valueOf(logicalHeight))
++            + " \"min_y\": {u},\n"
++            .replace("{u}", String.valueOf(minY))
++            + " \"height\": {u},\n"
++            .replace("{u}", String.valueOf(height))
++            + " \"effects\": {u}\n"
++            .replace("{u}", "\"" + String.valueOf(convertToString(getDimensionEffect()) + "\""))
++            + "}\n";
++        ;
++        this.output = output;
++        return this;
++    }
++
++    @Override
++    public String getCompiledOutputData() {
++        return output;
++    }
++
++    @Override
++    public void presetDefaults() {
++        this.ultrawarm = false;
++        this.natural = true;
++        this.coordScale = 1;
++        this.skyLight = true;
++        this.ceiling = false;
++        this.ambientLight = 5;
++        this.useFixedTime = false;
++        this.fixedTime = 1;
++        this.monsterSpawnBlockLightLimit = 7;
++        this.monsterSpawnLightLevel = 3;
++        this.piglinSafe = false;
++        this.bedWorks = true;
++        this.respawnAnchorWorks = false;
++        this.doRaids = true;
++        this.logicalHeight = 1;
++        this.minY = 16;
++        this.height = 160;
++        this.effects = convertToString(DimensionEffects.OVERWORLD);
++    }
++
++    @Override
++    public String getKey() {
++        return this.key;
++    }
++
++    @Override
++    public void setKey(String key) {
++        this.key = key;
++    }
++
++    @Override
++    public PluginRegistryUser getUser() {
++        return this.provider;
++    }
++
++    @Override
++    public boolean getUltrawarm(){
++        return this.ultrawarm;
++    }
++
++    @Override
++    public void setUltrawarn(boolean ultrawarm){
++        this.ultrawarm = ultrawarm;
++    }
++
++    @Override
++    public boolean getNatural(){
++        return this.natural;
++    }
++
++    @Override
++    public void setNatural(boolean nat){
++        this.natural = nat;
++    }
++
++    @Override
++    public double getCoordScale(){
++        return this.coordScale;
++    }
++
++    @Override
++    public void setCoordScale(double scale){
++        this.coordScale = scale;
++    }
++
++    @Override
++    public boolean hasSkylight(){
++        return this.skyLight;
++    }
++
++    @Override
++    public void setHasSkylight(boolean skylight){
++        this.skyLight = skylight;
++    }
++
++    @Override
++    public boolean hasCeiling(){
++        return this.ceiling;
++    }
++
++    @Override
++    public void setHasCeiling(boolean has){
++        this.ceiling = has;
++    }
++
++    @Override
++    public float getAmbientLight(){
++        return this.ambientLight;
++    }
++
++    @Override
++    public void setAmbientLight(float light){
++        this.ambientLight = light;
++    }
++
++    @Override
++    public boolean getUseFixedTime(){
++        return this.useFixedTime;
++    }
++
++    @Override
++    public void setUseFixedTime(boolean fixedTime){
++        this.useFixedTime = fixedTime;
++    }
++
++    @Override
++    public long getFixedTime(){
++        return this.fixedTime;
++    }
++
++    @Override
++    public void setFixedTime(long time){
++        this.fixedTime = time;
++    }
++
++    @Override
++    public int getMonsterSpawnLightLevel(){
++        return this.monsterSpawnLightLevel;
++    }
++
++    @Override
++    public void setMonsterSpawnLightLevel(int lvl){
++        this.monsterSpawnLightLevel = lvl;
++    }
++
++    @Override
++    public int getMonsterSpawnBlockLightLimit(){
++        return this.monsterSpawnBlockLightLimit;
++    }
++
++    @Override
++    public void setMonsterSpawnBlockLightLimit(int limit){
++        this.monsterSpawnBlockLightLimit = limit;
++    }
++
++    @Override
++    public boolean getPiglinSafe(){
++        return this.piglinSafe;
++    }
++
++    @Override
++    public void setPiglinSafe(boolean safe){
++        this.piglinSafe = safe;
++    }
++
++    @Override
++    public boolean getBedWorks(){
++        return this.bedWorks;
++    }
++
++    @Override
++    public void setBedWorks(boolean works){
++        this.bedWorks = works;
++    }
++
++    @Override
++    public boolean getRespawnAnchorWorks(){
++        return this.respawnAnchorWorks;
++    }
++
++    @Override
++    public void setRespawnAnchorWorks(boolean works){
++        this.respawnAnchorWorks = works;
++    }
++
++    @Override
++    public boolean hasRaids(){
++        return this.doRaids;
++    }
++
++    @Override
++    public void setHasRaids(boolean has){
++        this.doRaids = has;
++    }
++
++    @Override
++    public int getLogicalHeight(){
++        return this.logicalHeight;
++    }
++
++    @Override
++    public void setLogicalHeight(int logical_height){
++        this.logicalHeight = logical_height;
++    }
++
++    @Override
++    public int getMinY(){
++        return this.minY;
++    }
++
++    @Override
++    public void setMinY(int y){
++        this.minY = y;
++    }
++
++    @Override
++    public int getHeight(){
++        return this.height;
++    }
++
++    @Override
++    public void setHeight(int height){
++        this.height = height;
++    }
++
++    @Override
++    public DimensionEffects getDimensionEffect(){
++        return convertToDimensionEffects();
++    }
++
++    private DimensionEffects convertToDimensionEffects(){
++        switch (effects) {
++            case "minecraft:overworld" -> {
++                return DimensionEffects.OVERWORLD;
++            }
++            case "minecraft:the_nether" -> {
++                return DimensionEffects.NETHER;
++            }
++            case "minecraft:the_end" -> {
++                return DimensionEffects.THE_END;
++            }
++            default -> {
++                return DimensionEffects.OVERWORLD;
++            }
++        }
++    }
++
++    private String convertToString(DimensionEffects effect){
++        switch (effect) {
++            case OVERWORLD -> {
++                return "minecraft:overworld";
++            }
++            case NETHER -> {
++                return "minecraft:the_nether";
++            }
++            case THE_END -> {
++                return "minecraft:the_end";
++            }
++            default -> {
++                return "minecraft:overworld";
++            }
++        }
++    }
++
++    @Override
++    public void setDimensionEffect(DimensionEffects effect){
++        this.effects = convertToString(effect);
++    }
++    
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/builder/FunctionRegistry.java b/src/main/java/me/dueris/canvas/registry/builder/FunctionRegistry.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..897c46a24fd3f81b8fb934ecb60b02bd89aea720
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/builder/FunctionRegistry.java
+@@ -0,0 +1,65 @@
++package me.dueris.canvas.registry.builder;
++
++import java.util.ArrayList;
++
++import com.google.common.base.Preconditions;
++
++import me.dueris.canvas.registry.PluginRegistryUser;
++import me.dueris.canvas.registry.builders.mcfunction.FunctionTypeBuilder;
++import me.dueris.canvas.registry.builders.RegistrySource;
++
++public class FunctionRegistry implements FunctionTypeBuilder{
++    private String key;
++    private PluginRegistryUser provider;
++    private ArrayList<String> cmds;
++    private String outputData;
++    
++    public FunctionRegistry(PluginRegistryUser provider, String key){
++        Preconditions.checkArgument(key != null, "Key must not be null for new FunctionBuilder");
++        this.key = key;
++        this.provider = provider;
++        presetDefaults();
++    }
++
++    public ArrayList<String> getCommands(){
++        return this.cmds;
++    }
++    
++    public void setCommands(ArrayList<String> cmds){
++        this.cmds = cmds;
++    }
++
++    public void presetDefaults(){
++        cmds = new ArrayList<>();
++    }
++
++    @Override
++    public RegistrySource build() {
++        String output = "";
++        for(String string : this.getCommands()){
++            output = output + string + "\n";
++        }
++        this.outputData = output;
++        return this;
++    }
++
++    @Override
++    public String getCompiledOutputData() {
++        return outputData;
++    }
++
++    @Override
++    public String getKey() {
++        return this.key;
++    }
++
++    @Override
++    public void setKey(String key) {
++        this.key = key;
++    }
++
++    @Override
++    public PluginRegistryUser getUser() {
++        return this.provider;
++    }
++}
+diff --git a/src/main/java/me/dueris/canvas/registry/builder/TagRegistry.java b/src/main/java/me/dueris/canvas/registry/builder/TagRegistry.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..2ba8b77808395a931f9df433756cd7b1ba5ed1d3
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/registry/builder/TagRegistry.java
+@@ -0,0 +1,135 @@
++package me.dueris.canvas.registry.builder;
++
++import java.util.ArrayList;
++
++import org.bukkit.NamespacedKey;
++
++import com.google.common.base.Preconditions;
++
++import me.dueris.canvas.registry.PluginRegistryUser;
++import me.dueris.canvas.registry.builders.RegistrySource;
++import me.dueris.canvas.registry.builders.tag.ResourceLocationType;
++import me.dueris.canvas.registry.builders.tag.TagTypeBuilder;
++
++public class TagRegistry implements TagTypeBuilder{
++    private String output;
++    private ResourceLocationType resourceLocation;
++    private String key;
++    private PluginRegistryUser provider;
++    private boolean replace;
++    private ArrayList<String> values = new ArrayList<>();
++
++    public TagRegistry(PluginRegistryUser provider, String key, ResourceLocationType resourceLocationType){
++        Preconditions.checkArgument(key != null, "Key must not be null for new TagBuilder");
++        this.key = key;
++        this.provider = provider;
++        this.resourceLocation = resourceLocationType;
++        presetDefaults();
++    }
++
++    @Override
++    public RegistrySource build() {
++        Preconditions.checkArgument(!values.isEmpty(), "Cannot build tag registry with no values");
++        StringBuilder valuesString = new StringBuilder();
++        for (int i = 0; i < values.size(); i++) {
++            valuesString.append("        \"").append(values.get(i)).append("\"");
++            if (i < values.size() - 1) {
++                valuesString.append(",");
++            }
++            valuesString.append("\n");
++        }
++        
++        String output = "{\n"
++                    + "    \"replace\": {r},\n"
++                .replace("{r}", String.valueOf(this.replace))
++                    + "    \"values\": [\n"
++                    + valuesString.toString()
++                    + "    ]\n"
++                    + "}\n";
++                ;
++        this.output = output;
++        return this;
++    }
++
++    @Override
++    public String getCompiledOutputData() {
++        return output;
++    }
++
++    @Override
++    public void presetDefaults() {
++        // There are none.
++    }
++
++    @Override
++    public String getKey() {
++        return this.key;
++    }
++
++    @Override
++    public void setKey(String key) {
++        this.key = key;
++    }
++
++    @Override
++    public PluginRegistryUser getUser() {
++        return this.provider;
++    }
++
++    @Override
++    public ResourceLocationType getResourceLocationType() {
++        return this.resourceLocation;
++    }
++
++    @Override
++    public TagTypeBuilder setResourceLocationType(ResourceLocationType type) {
++        this.resourceLocation = type;
++        return this;
++    }
++
++    @Override
++    public boolean getReplace() {
++        return replace;
++    }
++
++    @Override
++    public TagTypeBuilder setReplace(boolean replace) {
++        this.replace = replace;
++        return this;
++    }
++
++    @Override
++    public void addValue(String value) {
++        this.values.add(value);
++    }
++
++    @Override
++    public void addValue(NamespacedKey key) {
++        this.values.add(key.asString());
++    }
++
++    @Override
++    public void removeValue(String value) {
++        if(this.values.contains(value)){
++            this.values.remove(value);
++        }
++    }
++
++    @Override
++    public void removeValue(NamespacedKey key) {
++        if(this.values.contains(key.asString())){
++            this.values.remove(key.asString());
++        }
++    }
++
++    @Override
++    public boolean containsValue(String value) {
++        return this.values.contains(value);
++    }
++
++    @Override
++    public boolean containsValue(NamespacedKey key) {
++        return this.values.contains(key.asString());
++    }
++    
++}
+diff --git a/src/main/java/net/minecraft/server/Bootstrap.java b/src/main/java/net/minecraft/server/Bootstrap.java
+index 5816998cde8504d58732e63eb2179a5d828f35bb..c2d49040c7ef6a919c3e2a44ca8f4cdee55dc5e4 100644
+--- a/src/main/java/net/minecraft/server/Bootstrap.java
++++ b/src/main/java/net/minecraft/server/Bootstrap.java
+@@ -76,6 +76,10 @@ public class Bootstrap {
+                     EntitySelectorOptions.bootStrap();
+                     DispenseItemBehavior.bootStrap();
+                     CauldronInteraction.bootStrap();
++                    // Canvas start
++                    LOGGER.info("Loading Canvas bootstrap provider");
++                    me.dueris.canvas.registry.CanvasRegistryImpl.init();
++                    // Canvas end
+                     // Paper start
+                     BuiltInRegistries.bootStrap(() -> {
+                         io.papermc.paper.world.worldgen.OptionallyFlatBedrockConditionSource.bootstrap(); // Paper - optional flat bedrock
+diff --git a/src/main/java/net/minecraft/server/Main.java b/src/main/java/net/minecraft/server/Main.java
+index 95719c8b052aba8a44dbcf9c9204299491d07659..d0ac80e2413494f49538b5f56841fdb7a1820240 100644
+--- a/src/main/java/net/minecraft/server/Main.java
++++ b/src/main/java/net/minecraft/server/Main.java
+@@ -93,12 +93,14 @@ public class Main {
+     public static List<File> loadedPluginPacks = new ArrayList<>();
+     // Canvas end
+ 
+-    public Main() {}
++    // public Main() {} // Canvas - why does this exist if this does nothing?
++    public static OptionSet optionSet; // Canvas
+ 
+     @DontObfuscate
+     public static void main(final OptionSet optionset) { // CraftBukkit - replaces main(String[] astring)
+         me.jellysquid.mods.hydrogen.common.jvm.ClassConstructors.init(); // JettPack
+         SharedConstants.tryDetectVersion();
++        Main.optionSet = optionset; // Canvas
+         /* CraftBukkit start - Replace everything
+         OptionParser optionparser = new OptionParser();
+         OptionSpec<Void> optionspec = optionparser.accepts("nogui");
+@@ -311,6 +313,7 @@ public class Main {
+                     e.printStackTrace();
+                 }
+             }
++            me.dueris.canvas.registry.CanvasRegistryImpl.freeze();
+             // Canvas end
+             AtomicReference<WorldLoader.DataLoadContext> worldLoader = new AtomicReference<>();
+             // CraftBukkit end
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index cebfb17ded76353c14647fc754248c7160cac774..98469f91744bac0739eaab41d7200f8cd8fa95d9 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1615,9 +1615,16 @@ public final class CraftServer implements Server {
+     public World createWorld(String name, Environment environment, long seed, ChunkGenerator generator) {
+         return WorldCreator.name(name).environment(environment).seed(seed).generator(generator).createWorld();
+     }
++    // Canvas start
++
++    @Override
++    public World createWorld(WorldCreator creator){
++        return this.createWorld(creator, creator.type().name());
++    }
++    // Canvas end
+ 
+     @Override
+-    public World createWorld(WorldCreator creator) {
++    public World createWorld(WorldCreator creator, String dim_type) { // Canvas - expand world creator
+         Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
+@@ -1725,7 +1732,7 @@ public final class CraftServer implements Server {
+             WorldOptions worldoptions = new WorldOptions(creator.seed(), creator.generateStructures(), false);
+             WorldDimensions worlddimensions;
+ 
+-            DedicatedServerProperties.WorldDimensionData properties = new DedicatedServerProperties.WorldDimensionData(GsonHelper.parse((creator.generatorSettings().isEmpty()) ? "{}" : creator.generatorSettings()), creator.type().name().toLowerCase(Locale.ROOT));
++            DedicatedServerProperties.WorldDimensionData properties = new DedicatedServerProperties.WorldDimensionData(GsonHelper.parse((creator.generatorSettings().isEmpty()) ? "{}" : creator.generatorSettings()), dim_type.toLowerCase(Locale.ROOT)); // Canvas
+ 
+             worldsettings = new LevelSettings(name, GameType.byId(this.getDefaultGameMode().getValue()), hardcore, Difficulty.EASY, false, new GameRules(), worldloader_a.dataConfiguration());
+             worlddimensions = properties.create(worldloader_a.datapackWorldgen());
