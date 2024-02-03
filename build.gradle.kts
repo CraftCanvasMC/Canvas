@@ -3,7 +3,9 @@ import io.papermc.paperweight.tasks.CreateBundlerJar
 import io.papermc.paperweight.tasks.RemapJar
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
-import java.nio.file.Files
+import java.nio.file.*
+import java.util.*
+import java.util.zip.*
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
@@ -13,9 +15,9 @@ import org.gradle.api.tasks.TaskAction
 plugins {
     java
     `maven-publish`
-    id("com.github.johnrengelman.shadow") version "8.1.1" apply false
-    id("io.papermc.paperweight.patcher") version "1.5.10"
-    id("ignite.parent-build-logic")
+    id("com.github.johnrengelman.shadow") version "7.1.2" apply false
+    id("io.papermc.paperweight.patcher") version "1.5.11"
+    id("ignite.parent-conventions")
 }
 
 allprojects {
@@ -24,7 +26,7 @@ allprojects {
 
     java {
         toolchain {
-            languageVersion.set(JavaLanguageVersion.of(17))
+            languageVersion = JavaLanguageVersion.of(17)
         }
     }
 }
@@ -34,7 +36,7 @@ val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 subprojects {
     tasks.withType<JavaCompile>().configureEach {
         options.encoding = Charsets.UTF_8.name()
-        options.release.set(17)
+        options.release = 17
     }
     tasks.withType<Javadoc> {
         options.encoding = Charsets.UTF_8.name()
@@ -74,36 +76,41 @@ dependencies {
 }
 
 paperweight {
-    serverProject.set(project(":canvas-server"))
+    serverProject = project(":canvas-server")
 
-    remapRepo.set(paperMavenPublicUrl)
-    decompileRepo.set(paperMavenPublicUrl)
+    remapRepo = paperMavenPublicUrl
+    decompileRepo = paperMavenPublicUrl
 
     useStandardUpstream("purpur") {
-        url.set(github("PurpurMC", "Purpur"))
-        ref.set(providers.gradleProperty("purpurCommit"))
+        url = github("PurpurMC", "Purpur")
+        ref = providers.gradleProperty("purpurCommit")
 
         withStandardPatcher {
             baseName("Purpur")
 
-            apiPatchDir.set(layout.projectDirectory.dir("patches/api"))
-            apiOutputDir.set(layout.projectDirectory.dir("Canvas-API"))
+            apiPatchDir = layout.projectDirectory.dir("patches/api")
+            apiOutputDir = layout.projectDirectory.dir("Canvas-API")
 
-            serverPatchDir.set(layout.projectDirectory.dir("patches/server"))
-            serverOutputDir.set(layout.projectDirectory.dir("Canvas-Server"))
+            serverPatchDir = layout.projectDirectory.dir("patches/server")
+            serverOutputDir = layout.projectDirectory.dir("Canvas-Server")
+        }
+
+        patchTasks.register("generatedApi") {
+            isBareDirectory = true
+            upstreamDirPath = "paper-api-generator/generated"
+            patchDir = layout.projectDirectory.dir("patches/generated-api")
+            outputDir = layout.projectDirectory.dir("paper-api-generator/generated")
         }
     }
 }
 
 tasks.generateDevelopmentBundle {
-    apiCoordinates.set("io.github.dueris:canvas-api")
-    mojangApiCoordinates.set("io.papermc.paper:paper-mojangapi")
-    libraryRepositories.set(
-        listOf(
-            "https://repo.maven.apache.org/maven2/",
-            paperMavenPublicUrl,
-            "https://repo.purpurmc.org/snapshots",
-        )
+    apiCoordinates = "io.github.dueris:canvas-api"
+    mojangApiCoordinates = "io.papermc.paper:paper-mojangapi"
+    libraryRepositories = listOf(
+        "https://repo.maven.apache.org/maven2/",
+        paperMavenPublicUrl,
+        "https://repo.purpurmc.org/snapshots",
     )
 }
 
@@ -114,27 +121,31 @@ tasks.register("printMinecraftVersion") {
 }
 
 tasks.register<DefaultTask>("createCanvasBundler") {
-    dependsOn(tasks.withType<CreateBundlerJar>())
+    dependsOn(":remapPurpurClip")
 
     doLast {
-        val shadowJar: CreateBundlerJar = tasks.getByName<CreateBundlerJar>("createReobfBundlerJar")
+        val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
         val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("Canvas-Launcher/src/main/resources")
 
         Files.createDirectories(targetJarDirectory)
         Files.copy(
-            shadowJar.outputZip.asFile.get().toPath().toAbsolutePath(),
-            targetJarDirectory.resolve("canvas-server.jar"),
+            rmapLoc.resolve("canvas-1.20.4.jar"),
+            targetJarDirectory.resolve("canvas-1.20.4-R0.1-SNAPSHOT.zip"),
             StandardCopyOption.REPLACE_EXISTING
         )
     }
 }
 
-tasks.register<DefaultTask>("createCanvasServer") {
-    // Specify the project path for createCanvasBundler in the dependsOn statement
-    dependsOn(":createCanvasBundler", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
+fun clearCanvasCache() {
+    val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
+        Files.createDirectories(rmapLoc)
+        Files.walk(rmapLoc)
+                .sorted(Comparator.reverseOrder())
+                .forEach { Files.delete(it) }
+}
 
-    doLast {
-        val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
+fun copyToTarget() {
+    val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
         val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
 
         Files.createDirectories(targetJarDirectory)
@@ -143,44 +154,40 @@ tasks.register<DefaultTask>("createCanvasServer") {
             targetJarDirectory.resolve(shadowJar.archiveBaseName.get() + ".jar"),
             StandardCopyOption.REPLACE_EXISTING
         )
+}
+
+tasks.register<DefaultTask>("remapPurpurClip") {
+    dependsOn(":createReobfPaperclipJar")
+    clearCanvasCache()
+
+    doLast{
+        val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
+        Files.createDirectories(rmapLoc)
+        Files.copy(
+            file("build/libs/canvas-paperclip-1.20.4-R0.1-SNAPSHOT-reobf.jar").toPath().toAbsolutePath(),
+            rmapLoc.resolve("canvas-1.20.4.zip"),
+            StandardCopyOption.REPLACE_EXISTING
+        )
+        Files.copy(
+            file("build/libs/canvas-paperclip-1.20.4-R0.1-SNAPSHOT-reobf.jar").toPath().toAbsolutePath(),
+            rmapLoc.resolve("canvas-1.20.4.jar"),
+            StandardCopyOption.REPLACE_EXISTING
+        )
     }
 }
 
-tasks.register<Copy>("renameServer") {
-    from("build/libs/paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip")
-    into("Canvas-Server/build/libs")
-    include("paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip")
+tasks.register<DefaultTask>("createCanvasServer") {
+    dependsOn(":createCanvasBundler", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
 
-    eachFile {
-        val fileName = name
-        name = fileName.replace("paperweight-development-bundle-1.20.2-R0.1-SNAPSHOT.zip", "canvas-server.zip")
+    doLast {
+        copyToTarget()
+        clearCanvasCache()
     }
 }
 
-tasks.register<Copy>("renameApi") {
-    from("Canvas-API/build/libs/canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar")
-    into("Canvas-API/build/libs")
-    include("canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar")
-
-    eachFile {
-        val fileName = name
-        name = fileName.replace("canvas-api-1.20.2-R0.1-SNAPSHOT-sources.jar", "canvas-api.jar")
-    }
-}
-
-tasks.register<Copy>("unzipLauncherData") {
-    from(zipTree(file("work/launcherData.csd")))
-    into(file("./Canvas-Launcher/"))
-}
-
-tasks.register<Zip>("repackLauncherData") {
-    from(file("./Canvas-Launcher/")) {
-        exclude("**/build/**")
-        exclude("**/bin/**")
-        exclude("**/src/main/resources/canvas-server.jar")
-    }
-    archiveFileName.set("launcherData.csd")
-    destinationDirectory.set(file("work"))
+tasks.register<Copy>("viewLauncherContents") {
+    from(zipTree(file("target/canvas-launcher.jar")))
+    into(file("target/view"))
 }
 
 publishing {
@@ -205,6 +212,3 @@ publishing {
         }
     }
 }
-
-tasks.getByName("rebuildPatches").dependsOn("repackLauncherData")
-tasks.getByName("applyPatches").dependsOn("unzipLauncherData")

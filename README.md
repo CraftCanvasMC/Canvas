@@ -6,19 +6,25 @@
 <html>
 <body>
   <h1>Welcome to Canvas</h1>
-  <p><em>A unique Minecraft server platform that empowers creativity and innovation.</em></p>
+  <p><em>A Minecraft ServerType aimed for creativity and performance.</em></p>
 
   <h2>Introduction</h2>
 
-  <p>Introducing Canvas, a unique new Minecraft server type that will completely transform the multiplayer experience!</p>
+  <p>Canvas is a ServerType for Minecraft based on Purpur that tries to give plugin developers unlimted freedom when making plugins,
+   while keeping the server quick and performant.</p>
 
-  <p>Canvas is not your standard server fork; it is an expanding platform based on Paper with a stunning twist of customization and innovation. With Canvas, we're putting the power of Minecraft into your hands, offering an extensive array of APIs, mixin compatibility, and more. Everything is intended to improve your gameplay and give plugin creators an unparalleled experience.</p>
+  <h2>Why use Canvas?</h2>
+  <p>Canvas has an active development team constantly working on fixes and improvements, making new apis, features, and more. Canvas has been
+   put to the test vs Paper and Purpur and definetly beats them in both performance, and api features. Its built to handle whatever you throw at it, so the only limit, is your imagination.</p>
 
-  <h2>Our Mission</h2>
-  <p>Our mission with Canvas is clear: to empower plugin developers like never before. Canvas provides you with the tools you need to paint your most ambitious Minecraft ideas, whether you're an experienced programmer or just getting started. With expanded APIs and mixin compatibility, you have the freedom to craft unique, immersive adventures that have never been seen before in the Minecraft universe.</p>
-
-  <h2>Unleash Your Creativity</h2>
-  <p>Get ready to unleash your creativity and explore a world where the possibilities are truly endless. Welcome to a new era of Minecraft adventure!</p>
+  <h2>Features</h2>
+  <ul>
+    <li>- Multithreaded world ticking</li>
+    <li>- Builtin Mixin</li>
+    <li>- Enhanced APIs</li>
+    <li>- New insane APIs</li>
+    <li>Optimization descriptions can be found in the OPTIMIZATIONS.md file for more info</li>
+  </ul>
 
   <h2>Resources</h2>
   <ul>
@@ -35,14 +41,6 @@
 
   <h2>License</h2>
   <p>Canvas is open-source software licensed under the GNU General Public License version 3 License</a>.</p>
-
-  <h2>Patch contributions</h2>
-  <p>Canvas wouldnt have a large portion of its patches without help from the community. Some patches included are from others who gave me permission to use in Canvas. Those are:</p>
-  <ul>
-    <li>Mirai - Introduced many optimizations to Canvas from C2ME, Lithium, and Gale</li>
-    <li>PlazmaMC - Added more optimizations to Canvas from FerriteCore</li>
-    <li>Graphene - Added krypton implementation and lithium fast_math</li>
-  </ul>
 
 <hr>
   <p align="center">

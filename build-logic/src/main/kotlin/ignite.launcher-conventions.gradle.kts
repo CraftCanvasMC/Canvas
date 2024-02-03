@@ -1,97 +1,66 @@
-import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
-import com.github.jengelman.gradle.plugins.shadow.transformers.Log4j2PluginsCacheFileTransformer
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-
 plugins {
   id("ignite.base-conventions")
-  id("com.github.johnrengelman.shadow")
 }
 
-repositories {
-  maven {
-    url = uri("https://repo.spongepowered.org/maven/")
-  }
-  maven {
-    url = uri("https://files.minecraftforge.net/maven/")
-  }
-  maven {
-    url = uri("https://maven.fabricmc.net/")
+// Expose version catalog
+val libs = extensions.getByType(org.gradle.accessors.dm.LibrariesForLibs::class)
+
+val implementationVersion = project.version.toString()
+val regexPattern = """(\d+\.\d+)""".toRegex()
+val apiVersion = regexPattern.find(implementationVersion)?.value
+
+tasks.getByName<Jar>("jar") {
+  manifest {
+    attributes(
+      "Premain-Class" to "space.vectrix.ignite.agent.IgniteAgent",
+      "Agent-Class" to "space.vectrix.ignite.agent.IgniteAgent",
+      "Launcher-Agent-Class" to "space.vectrix.ignite.agent.IgniteAgent",
+      "Main-Class" to "space.vectrix.ignite.IgniteBootstrap",
+      "Multi-Release" to true,
+
+      "Specification-Title" to "ignite",
+      "Specification-Version" to apiVersion,
+      "Specification-Vendor" to "vectrix.space",
+
+      "Implementation-Title" to project.name,
+      "Implementation-Version" to implementationVersion,
+      "Implementation-Vendor" to "vectrix.space"
+    )
+
+    attributes(
+      "org/objectweb/asm/",
+      "Implementation-Version" to libs.versions.asm
+    )
   }
 }
 
-val launcherJava9 by sourceSets.register("java9") {
-  val main: SourceSet = sourceSets.main.get()
+// tasks.getByName<ShadowJar>("shadowJar") {
+//   mergeServiceFiles()
 
-  this.java.setSrcDirs(setOf("src/java9"))
-  compileClasspath += main.compileClasspath
-  compileClasspath += main.runtimeClasspath
+//   relocate("com.google.gson", "space.vectrix.ignite.libs.gson")
+// }
 
-  tasks.named(compileJavaTaskName, JavaCompile::class) {
-    options.release.set(17)
-    if (JavaVersion.current() < JavaVersion.VERSION_17) {
-      javaCompiler.set(javaToolchains.compilerFor { languageVersion.set(JavaLanguageVersion.of(17)) })
-    }
-  }
+// tasks.register("dist") {
+//   dependsOn("shadowJar")
 
-  dependencies.add(implementationConfigurationName, objects.fileCollection().from(main.output.classesDirs))
-}
+//   doLast {
+//     val sourceDir = project.layout.buildDirectory.asFile.map { it.resolve("libs") }.get()
+//     val targetDir = rootProject.layout.buildDirectory.asFile.map { it.resolve("libs") }.get()
 
-tasks {
-  jar {
-    manifest {
-      attributes(
-        "Premain-Class" to "space.vectrix.ignite.applaunch.agent.Agent",
-        "Agent-Class" to "space.vectrix.ignite.applaunch.agent.Agent",
-        "Launcher-Agent-Class" to "space.vectrix.ignite.applaunch.agent.Agent",
-        "Main-Class" to "space.vectrix.ignite.applaunch.IgniteBootstrap",
-        "Multi-Release" to true
-      )
+//     targetDir.mkdirs()
 
-      attributes("space/vectrix/ignite/applaunch/",
-        "Specification-Title" to "ignite",
-        "Specification-Vendor" to "vectrix.space",
-        "Specification-Version" to 1.0,
-        "Implementation-Title" to project.name,
-        "Implementation-Version" to rootProject.version.toString(),
-        "Implementation-Vendor" to "vectrix.space"
-      )
+//     rootProject.copy {
+//       from(sourceDir) {
+//         include("*-all.jar")
+//       }
 
-      from({
-        zipTree { configurations.runtimeClasspath.get().files.find { entry -> entry.name.contains("modlauncher") } }.matching { include("**/MANIFEST.MF") }.singleFile
-      })
-    }
+//       into(targetDir)
 
-    into("META-INF/versions/9/") {
-      from(launcherJava9.output)
-    }
-  }
+//       rename { "canvas-launcher.jar" } // Canvas
+//     }
+//   }
+// }
 
-  register<DefaultTask>("copyToTarget") {
-    dependsOn(tasks.withType<ShadowJar>())
-
-    doLast {
-      val shadowJar: ShadowJar = getByName<ShadowJar>("shadowJar")
-      val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("../target")
-
-      Files.createDirectories(targetJarDirectory)
-      Files.copy(
-        shadowJar.archiveFile.get().asFile.toPath().toAbsolutePath(),
-        targetJarDirectory.resolve(shadowJar.archiveBaseName.get() + ".jar"),
-        StandardCopyOption.REPLACE_EXISTING
-      )
-    }
-  }
-
-  named<ShadowJar>("shadowJar") {
-    mergeServiceFiles()
-
-    transform(Log4j2PluginsCacheFileTransformer())
-
-    from(jar)
-
-    exclude("META-INF/versions/*/module-info.class")
-    exclude("module-info.class")
-  }
+tasks.getByName("build") {
+  dependsOn("dist")
 }
