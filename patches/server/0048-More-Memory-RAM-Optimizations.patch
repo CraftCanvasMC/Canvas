@@ -1,0 +1,158 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <jedimastertoothless@hotmail.com>
+Date: Sat, 18 Nov 2023 12:10:59 -0800
+Subject: [PATCH] More Memory/RAM Optimizations
+
+
+diff --git a/src/main/java/net/minecraft/world/level/block/state/BlockBehaviour.java b/src/main/java/net/minecraft/world/level/block/state/BlockBehaviour.java
+index 2d4f11b173040a6fc9055890064ccd31e67d0f3a..bc2bf462aef26748a2e2f5532de5efb6a44ae42e 100644
+--- a/src/main/java/net/minecraft/world/level/block/state/BlockBehaviour.java
++++ b/src/main/java/net/minecraft/world/level/block/state/BlockBehaviour.java
+@@ -856,6 +856,12 @@ public abstract class BlockBehaviour implements FeatureElement {
+         protected BlockBehaviour.BlockStateBase.Cache cache;
+         private FluidState fluidState;
+         private boolean isRandomlyTicking;
++        // Canvas - optimize memory usage
++        public static final java.util.Map<net.minecraft.world.phys.shapes.VoxelShape, net.minecraft.world.phys.shapes.VoxelShape> CACHE_COLLIDE = new java.util.HashMap<>();
++        public static final java.util.Map<VoxelShape, org.apache.commons.lang3.tuple.Pair<VoxelShape, VoxelShape[]>> CACHE_PROJECT = new java.util.HashMap<>();
++        public static final java.util.Map<boolean[], boolean[]> CACHE_FACE_STURDY = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenCustomHashMap<>(it.unimi.dsi.fastutil.booleans.BooleanArrays.HASH_STRATEGY);
++        private static final ThreadLocal<BlockBehaviour.BlockStateBase.Cache> LAST_CACHE = new ThreadLocal<>();
++        // Canvas end
+ 
+         protected BlockStateBase(Block block, ImmutableMap<Property<?>, Comparable<?>> propertyMap, MapCodec<BlockState> codec) {
+             super(block, propertyMap, codec);
+@@ -982,6 +988,7 @@ public abstract class BlockBehaviour implements FeatureElement {
+         // Paper end - optimise collisions
+ 
+         public void initCache() {
++            LAST_CACHE.set(asState().cache); // Canvas - optimize memory usage
+             this.fluidState = ((Block) this.owner).getFluidState(this.asState());
+             this.isRandomlyTicking = ((Block) this.owner).isRandomlyTicking(this.asState());
+             if (!this.getBlock().hasDynamicShape()) {
+@@ -1024,7 +1031,61 @@ public abstract class BlockBehaviour implements FeatureElement {
+                 this.constantAABBCollision = null;
+             }
+             // Paper end - optimise collisions
++            // Canvas start
++            if (asState().cache != null) {
++                Cache newCache = asState().cache;
++                final Cache oldCache = LAST_CACHE.get();
++                VoxelShape dedupedCollisionShape;
++                if (oldCache != null && oldCache.collisionShape.equals(newCache.collisionShape)) {
++                    dedupedCollisionShape = oldCache.collisionShape;
++                } else {
++                    dedupedCollisionShape = CACHE_COLLIDE.computeIfAbsent(newCache.collisionShape, Function.identity());
++                }
++                if (dedupedCollisionShape instanceof net.minecraft.world.phys.shapes.ArrayVoxelShape keepArray && newCache.collisionShape instanceof net.minecraft.world.phys.shapes.ArrayVoxelShape replaceArray) {
++                    replaceInternals(keepArray, replaceArray);
++                }
++                newCache.collisionShape = dedupedCollisionShape;
++                final VoxelShape newRenderShape = getRenderShape(newCache.occlusionShapes);
++                if (newRenderShape == null)  return;
++                org.apache.commons.lang3.tuple.Pair<VoxelShape, VoxelShape[]> dedupedRenderShapes = null;
++                if (oldCache != null) {
++                    final VoxelShape oldRenderShape = getRenderShape(oldCache.occlusionShapes);
++                    if (newRenderShape.equals(oldRenderShape)) dedupedRenderShapes = org.apache.commons.lang3.tuple.Pair.of(oldRenderShape, oldCache.occlusionShapes);
++                }
++                if (dedupedRenderShapes == null) {
++                    org.apache.commons.lang3.tuple.Pair<VoxelShape, VoxelShape[]> newPair = org.apache.commons.lang3.tuple.Pair.of(newRenderShape, newCache.occlusionShapes);
++                    dedupedRenderShapes = CACHE_PROJECT.putIfAbsent(newRenderShape, newPair);
++                    if (dedupedRenderShapes == null) dedupedRenderShapes = newPair;
++                }
++                if (dedupedRenderShapes.getLeft() instanceof net.minecraft.world.phys.shapes.ArrayVoxelShape keepArray && newRenderShape instanceof net.minecraft.world.phys.shapes.ArrayVoxelShape replaceArray) {
++                    replaceInternals(keepArray, replaceArray);
++                }
++                newCache.occlusionShapes = dedupedRenderShapes.getRight();
++                boolean equalCheck = oldCache != null && Arrays.equals(oldCache.faceSturdy, newCache.faceSturdy);
++                newCache.faceSturdy = equalCheck ? oldCache.faceSturdy : CACHE_FACE_STURDY.computeIfAbsent(newCache.faceSturdy, Function.identity());
++                LAST_CACHE.set(null);
++            }
++            // Canvas end
++        }
++
++        // Canvas start
++        private void replaceInternals(net.minecraft.world.phys.shapes.ArrayVoxelShape toKeep, net.minecraft.world.phys.shapes.ArrayVoxelShape toReplace) {
++            if (toKeep == toReplace) return;
++            toReplace.xs = toKeep.xs;
++            toReplace.ys = toKeep.ys;
++            toReplace.zs = toKeep.zs;
++            toReplace.faces = toKeep.faces;
++            toReplace.shape = toKeep.shape;
++        }
++
++        @Nullable
++        private static VoxelShape getRenderShape(@Nullable VoxelShape[] projected) {
++            if (projected != null) {
++                for (VoxelShape side : projected) if (side instanceof net.minecraft.world.phys.shapes.SliceShape slice) return slice.getDelegate();
++            }
++            return null;
+         }
++        // Canvas end
+ 
+         public Block getBlock() {
+             return (Block) this.owner;
+@@ -1433,10 +1494,10 @@ public abstract class BlockBehaviour implements FeatureElement {
+             final boolean propagatesSkylightDown;
+             final int lightBlock;
+             @Nullable
+-            final VoxelShape[] occlusionShapes;
+-            protected final VoxelShape collisionShape;
++            public VoxelShape[] occlusionShapes; // Canvas - final -> !final
++            public VoxelShape collisionShape; // Canvas - protected -> public && !final
+             protected final boolean largeCollisionShape;
+-            private final boolean[] faceSturdy;
++            public boolean[] faceSturdy; // Canvas - private -> public && !final
+             protected final boolean isCollisionShapeFullBlock;
+ 
+             Cache(BlockState state) {
+diff --git a/src/main/java/net/minecraft/world/phys/shapes/ArrayVoxelShape.java b/src/main/java/net/minecraft/world/phys/shapes/ArrayVoxelShape.java
+index a232b9396a41c11579a4d691b05717b16473513e..064ef8b5cc5bf1767ad54fe41d007f6db12cc448 100644
+--- a/src/main/java/net/minecraft/world/phys/shapes/ArrayVoxelShape.java
++++ b/src/main/java/net/minecraft/world/phys/shapes/ArrayVoxelShape.java
+@@ -7,9 +7,11 @@ import net.minecraft.Util;
+ import net.minecraft.core.Direction;
+ 
+ public class ArrayVoxelShape extends VoxelShape {
+-    private final DoubleList xs;
+-    private final DoubleList ys;
+-    private final DoubleList zs;
++    // Canvas start - private -> public && !final
++    public DoubleList xs;
++    public DoubleList ys;
++    public DoubleList zs;
++    // Canvas end
+ 
+     protected ArrayVoxelShape(DiscreteVoxelShape shape, double[] xPoints, double[] yPoints, double[] zPoints) {
+         this(shape, (DoubleList)DoubleArrayList.wrap(Arrays.copyOf(xPoints, shape.getXSize() + 1)), (DoubleList)DoubleArrayList.wrap(Arrays.copyOf(yPoints, shape.getYSize() + 1)), (DoubleList)DoubleArrayList.wrap(Arrays.copyOf(zPoints, shape.getZSize() + 1)));
+diff --git a/src/main/java/net/minecraft/world/phys/shapes/SliceShape.java b/src/main/java/net/minecraft/world/phys/shapes/SliceShape.java
+index d9256710e815a5cb55409a80d59df2029b98c0d7..f9ca041661c693f91fdd7b64b820f8182da17d11 100644
+--- a/src/main/java/net/minecraft/world/phys/shapes/SliceShape.java
++++ b/src/main/java/net/minecraft/world/phys/shapes/SliceShape.java
+@@ -5,6 +5,11 @@ import net.minecraft.core.Direction;
+ 
+ public class SliceShape extends VoxelShape {
+     private final VoxelShape delegate;
++    // Canvas start
++    public VoxelShape getDelegate() {
++        return this.delegate;
++    }
++    // Canvas end
+     private final Direction.Axis axis;
+     private static final DoubleList SLICE_COORDS = new CubePointRange(1);
+ 
+diff --git a/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java b/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java
+index 6bd6385ad82481a099f3556ed2dbd3744888fc34..f780e639c1e8b3e8c8ac3a81a0ee308a2fb6db1a 100644
+--- a/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java
++++ b/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java
+@@ -16,9 +16,9 @@ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.Vec3;
+ 
+ public abstract class VoxelShape {
+-    public final DiscreteVoxelShape shape; // Paper - optimise collisions - public
++    public DiscreteVoxelShape shape; // Paper - optimise collisions - public // Canvas - final -> !final
+     @Nullable
+-    private VoxelShape[] faces;
++    public VoxelShape[] faces; // Canvas - private -> public
+ 
+     // Paper start - optimise collisions
+     private double offsetX;

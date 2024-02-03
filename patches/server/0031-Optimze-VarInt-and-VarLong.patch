@@ -1,0 +1,209 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 1229ed65 AH <1229ed65b2ccd3@crankymonkey.info>
+Date: Tue, 30 Jan 2024 03:08:40 +0000
+Subject: [PATCH] Optimze VarInt and VarLong
+
+
+diff --git a/src/main/java/net/minecraft/network/VarInt.java b/src/main/java/net/minecraft/network/VarInt.java
+index 3f362eb42587b333e27b9cf25588a9cfcb8a56e7..8ccfb604354cbcac0bb77ff07ce4d1df56b2eb80 100644
+--- a/src/main/java/net/minecraft/network/VarInt.java
++++ b/src/main/java/net/minecraft/network/VarInt.java
+@@ -51,21 +51,41 @@ public class VarInt {
+     }
+ 
+     public static ByteBuf write(ByteBuf buf, int i) {
+-     // Paper start - Optimize VarInts
+-        // Peel the one and two byte count cases explicitly as they are the most common VarInt sizes
+-        // that the proxy will write, to improve inlining.
+-        if ((i & (0xFFFFFFFF << 7)) == 0) {
++        // Gale start - Velocity - optimized VarInt#write
++        if ((i & 0xFFFFFF80) == 0) {
+             buf.writeByte(i);
+-        } else if ((i & (0xFFFFFFFF << 14)) == 0) {
+-            int w = (i & 0x7F | 0x80) << 8 | (i >>> 7);
++        } else if ((i & 0xFFFFC000) == 0) {
++            int w = (i & 0x7F) << 8
++                | (i >>> 7)
++                | 0x00008000;
+             buf.writeShort(w);
++        } else if ((i & 0xFFE00000) == 0) {
++            int w = (i & 0x7F) << 16
++                | (i & 0x3F80) << 1
++                | (i >>> 14)
++                | 0x00808000;
++            buf.writeMedium(w);
++        } else if ((i & 0xF0000000) == 0) {
++            int w = (i & 0x7F) << 24
++                | ((i & 0x3F80) << 9)
++                | (i & 0x1FC000) >> 6
++                | (i >>> 21)
++                | 0x80808000;
++            buf.writeInt(w);
+         } else {
+-            writeOld(buf, i);
++            int w = (i & 0x7F) << 24
++                | (i & 0x3F80) << 9
++                | (i & 0x1FC000) >> 6
++                | ((i >>> 21) & 0x7F)
++                | 0x80808080;
++            buf.writeInt(w);
++            buf.writeByte(i >>> 28);
+         }
+         return buf;
+     }
+-    public static ByteBuf writeOld(ByteBuf buf, int i) {
+-    // Paper end - Optimize VarInts
++
++    static ByteBuf writeOld(ByteBuf buf, int i) { // public -> package-private
++    // Gale end -/- Paper end - Optimize VarInts
+         while((i & -128) != 0) {
+             buf.writeByte(i & 127 | 128);
+             i >>>= 7;
+diff --git a/src/main/java/net/minecraft/network/VarLong.java b/src/main/java/net/minecraft/network/VarLong.java
+index 3ea9f42b7ad50c0dc4466849e3432ebddcfe2f7b..3f340857983183e323e763c5687b528936d9ddc0 100644
+--- a/src/main/java/net/minecraft/network/VarLong.java
++++ b/src/main/java/net/minecraft/network/VarLong.java
+@@ -39,12 +39,122 @@ public class VarLong {
+     }
+ 
+     public static ByteBuf write(ByteBuf buf, long l) {
+-        while((l & -128L) != 0L) {
+-            buf.writeByte((int)(l & 127L) | 128);
+-            l >>>= 7;
++        // Gale start - Velocity - optimized VarLong#write
++        if ((l & 0xFFFFFFFFFFFFFF80L) == 0) {
++            buf.writeByte((int) l);
++        } else if (l < 0) {
++            // The case of writing arbitrary longs is common
++            // Here, the number is negative, which has probability 1/2 for arbitrary numbers
++            int least7bits = (int) (l & 0xFFFFFFFL);
++            int w = (least7bits & 0x7F) << 24
++                | (least7bits & 0x3F80) << 9
++                | (least7bits & 0x1FC000) >> 6
++                | ((least7bits >>> 21) & 0x7F)
++                | 0x80808080;
++            long nonLeast7Bits = l >>> 28;
++            int secondLeast7bits = (int) (nonLeast7Bits & 0xFFFFFFFL);
++            int w2 = (secondLeast7bits & 0x7F) << 24
++                | ((secondLeast7bits & 0x3F80) << 9)
++                | (secondLeast7bits & 0x1FC000) >> 6
++                | (secondLeast7bits >>> 21)
++                | 0x80808080;
++            int thirdLeast7Bits = (int) (nonLeast7Bits >>> 28);
++            int w3 = (thirdLeast7Bits & 0x7F) << 8
++                | (thirdLeast7Bits >>> 7)
++                 | 0x00008000;
++            buf.writeInt(w);
++            buf.writeInt(w2);
++            buf.writeShort(w3);
++        } else if ((l & 0xFFFFFFFFFFFFC000L) == 0) {
++            int least7bits = (int) l;
++            int w = (least7bits & 0x7F) << 8
++                | (least7bits >>> 7)
++                | 0x00008000;
++            buf.writeShort(w);
++        } else if ((l & 0xFFFFFFFFFFE00000L) == 0) {
++            int least7bits = (int) l;
++            int w = (least7bits & 0x7F) << 16
++                | (least7bits & 0x3F80) << 1
++                | (least7bits >>> 14)
++                | 0x00808000;
++            buf.writeMedium(w);
++        } else if ((l & 0xFFFFFFFFF0000000L) == 0) {
++            int least7bits = (int) l;
++            int w = (least7bits & 0x7F) << 24
++                | ((least7bits & 0x3F80) << 9)
++                | (least7bits & 0x1FC000) >> 6
++                | (least7bits >>> 21)
++                | 0x80808000;
++            buf.writeInt(w);
++        } else if ((l & 0xFFFFFFF800000000L) == 0) {
++            int least7bits = (int) (l & 0xFFFFFFFL);
++            int w = (least7bits & 0x7F) << 24
++                | (least7bits & 0x3F80) << 9
++                | (least7bits & 0x1FC000) >> 6
++                | ((least7bits >>> 21) & 0x7F)
++                | 0x80808080;
++            buf.writeInt(w);
++            buf.writeByte((int) (l >>> 28));
++        } else if ((l & 0xFFFFFC0000000000L) == 0) {
++            int least7bits = (int) (l & 0xFFFFFFFL);
++            int w = (least7bits & 0x7F) << 24
++                | (least7bits & 0x3F80) << 9
++                | (least7bits & 0x1FC000) >> 6
++                | ((least7bits >>> 21) & 0x7F)
++                | 0x80808080;
++            int secondLeast7bits = (int) (l >>> 28);
++            int w2 = (secondLeast7bits & 0x7F) << 8
++                | (secondLeast7bits >>> 7)
++                | 0x00008000;
++            buf.writeInt(w);
++            buf.writeShort(w2);
++        } else if ((l & 0xFFFE000000000000L) == 0) {
++            int least7bits = (int) (l & 0xFFFFFFFL);
++            int w = (least7bits & 0x7F) << 24
++                | (least7bits & 0x3F80) << 9
++                | (least7bits & 0x1FC000) >> 6
++                | ((least7bits >>> 21) & 0x7F)
++                | 0x80808080;
++            int secondLeast7bits = (int) (l >>> 28);
++            int w2 = (secondLeast7bits & 0x7F) << 16
++                | (secondLeast7bits & 0x3F80) << 1
++                | (secondLeast7bits >>> 14)
++                | 0x00808000;
++            buf.writeInt(w);
++            buf.writeMedium(w2);
++        } else if ((l & 0xFF00000000000000L) == 0) {
++            int least7bits = (int) (l & 0xFFFFFFFL);
++            int w = (least7bits & 0x7F) << 24
++                | (least7bits & 0x3F80) << 9
++                | (least7bits & 0x1FC000) >> 6
++                | ((least7bits >>> 21) & 0x7F)
++                | 0x80808080;
++            int secondLeast7bits = (int) (l >>> 28);
++            int w2 = (secondLeast7bits & 0x7F) << 24
++                | ((secondLeast7bits & 0x3F80) << 9)
++                | (secondLeast7bits & 0x1FC000) >> 6
++                | (secondLeast7bits >>> 21)
++                | 0x80808000;
++            buf.writeInt(w);
++            buf.writeInt(w2);
++        } else {
++            int least7bits = (int) (l & 0xFFFFFFFL);
++            int w = (least7bits & 0x7F) << 24
++                | (least7bits & 0x3F80) << 9
++                | (least7bits & 0x1FC000) >> 6
++                | ((least7bits >>> 21) & 0x7F)
++                | 0x80808080;
++            long nonLeast7Bits = l >>> 28;
++            int secondLeast7bits = (int) (nonLeast7Bits & 0xFFFFFFFL);
++            int w2 = (secondLeast7bits & 0x7F) << 24
++                | ((secondLeast7bits & 0x3F80) << 9)
++                | (secondLeast7bits & 0x1FC000) >> 6
++                | (secondLeast7bits >>> 21)
++                | 0x80808080;
++            buf.writeInt(w);
++            buf.writeInt(w2);
++            buf.writeByte((int) (nonLeast7Bits >>> 28));
+         }
+-
+-        buf.writeByte((int)l);
+         return buf;
+     }
+ }
+diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
+index 4bbdce6661f3186145265517ed8a9e19e1978eb6..fd5e5bd9b0cde0a7985421ca2edfce4987b4894c 100644
+--- a/src/main/java/net/minecraft/world/entity/Entity.java
++++ b/src/main/java/net/minecraft/world/entity/Entity.java
+@@ -2051,6 +2051,11 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+         return this.level().hasChunkAt(this.getBlockX(), this.getBlockZ()) ? this.level().getLightLevelDependentMagicValue(BlockPos.containing(this.getX(), this.getEyeY(), this.getZ())) : 0.0F;
+     }
+ 
++    public float getLightLevelDependentMagicValue(BlockPos pos) {
++        return this.level().hasChunkAt(this.getBlockX(), this.getBlockZ()) ? this.level().getLightLevelDependentMagicValue(pos) : 0.0F;
++    }
++
++
+     public void absMoveTo(double x, double y, double z, float yaw, float pitch) {
+         this.absMoveTo(x, y, z);
+         this.setYRot(yaw % 360.0F);

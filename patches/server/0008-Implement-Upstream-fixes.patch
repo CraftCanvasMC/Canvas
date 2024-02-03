@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <jedimastertoothless@hotmail.com>
+Date: Sun, 21 Jan 2024 12:28:54 -0800
+Subject: [PATCH] Implement Upstream fixes
+
+
+diff --git a/build.gradle.kts b/build.gradle.kts
+index bab1194690a0ca9f573e62795374273d329be53e..7d27ee1a20d7c19a55e26fe2e33a1fe353c03795 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -93,7 +93,7 @@ tasks.jar {
+         attributes(
+             "Main-Class" to "org.bukkit.craftbukkit.Main",
+             "Implementation-Title" to "CraftBukkit",
+-            "Implementation-Version" to "git-Purpur-$implementationVersion", // Pufferfish // Purpur
++            "Implementation-Version" to "git-Canvas-$implementationVersion", //Pufferfish // Purpur // Canvas
+             "Implementation-Vendor" to date, // Paper
+             "Specification-Title" to "Bukkit",
+             "Specification-Version" to project.version,
+diff --git a/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java b/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
+index 7cc19060c24ad191b7dca779a18fbfbb65763189..5e8bceaa363ad369a70f332ce9a62e520136b7f9 100644
+--- a/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -1,5 +1,6 @@
+ package net.minecraft.server.dedicated;
+ 
++import me.dueris.canvas.CanvasConfig;
+ import com.google.common.collect.Lists;
+ import com.mojang.authlib.GameProfile;
+ import com.mojang.datafixers.DataFixer;
+@@ -16,6 +17,7 @@ import java.nio.file.Path;
+ import java.util.Collections;
+ import java.util.List;
+ import java.util.Locale;
++import java.util.Objects;
+ import java.util.Optional;
+ import java.util.function.BooleanSupplier;
+ import javax.annotation.Nullable;
+@@ -205,12 +207,19 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         org.spigotmc.SpigotConfig.init((java.io.File) this.options.valueOf("spigot-settings"));
+         org.spigotmc.SpigotConfig.registerCommands();
+         // Spigot end
++        // Canvas start
++        try {
++                CanvasConfig.init((java.io.File) options.valueOf("canvas-settings"));
++            } catch (Exception e) {
++                DedicatedServer.LOGGER.error("Unable to load canvas-server configuration", e);
++                return false;
++            }
++        // Canvas end
++        // Paper start
+         io.papermc.paper.util.ObfHelper.INSTANCE.getClass(); // Paper - load mappings for stacktrace deobf and etc.
+-        // Paper start - initialize global and world-defaults configuration
+-        this.paperConfigurations.initializeGlobalConfiguration(this.registryAccess());
+-        this.paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
+-        // Paper end - initialize global and world-defaults configuration
+-        // Paper start - convert old users earlier after PlayerList creation but before file load/save
++        paperConfigurations.initializeGlobalConfiguration(this.registryAccess());
++        paperConfigurations.initializeWorldDefaultsConfiguration(this.registryAccess());
++        // Paper start - moved up to right after PlayerList creation but before file load/save
+         if (this.convertOldUsers()) {
+             this.getProfileCache().save(false); // Paper
+         }
+@@ -586,11 +595,19 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+ 
+     public void showGui() {
+         if (this.gui == null) {
+-            this.gui = MinecraftServerGui.showFrameFor(this);
++            try {
++                this.gui = MinecraftServerGui.showFrameFor(this, javax.imageio.ImageIO.read(Objects.requireNonNull(MinecraftServerGui.class.getClassLoader().getResourceAsStream("logo.png"))));
++            } catch (IOException e) {
++                throw new RuntimeException(e);
++            }
+         }
+ 
+     }
+ 
++    public MinecraftServerGui getGui(){
++        return this.gui;
++    }
++
+     @Override
+     public boolean hasGui() {
+         return this.gui != null;
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index fd754fc9ff313421d221eea8d21fbde98be24914..bb9b0b39cde3a9367e1c5899c2b5ba23451530f4 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1,5 +1,10 @@
+ package org.bukkit.craftbukkit;
+ 
++import me.dueris.canvas.CanvasConfig;
++import me.dueris.canvas.CraftServerGui;
++import me.dueris.canvas.logger.CanvasLogger;
++import me.dueris.canvas.logger.CraftCanvasLogger;
++import me.dueris.canvas.logger.Obfuscator;
+ import com.google.common.base.Charsets;
+ import com.google.common.base.Function;
+ import com.google.common.base.Preconditions;
+@@ -253,6 +258,7 @@ import org.bukkit.scoreboard.Criteria;
+ import org.bukkit.structure.StructureManager;
+ import org.bukkit.util.StringUtil;
+ import org.bukkit.util.permissions.DefaultPermissions;
++import org.jetbrains.annotations.NotNull;
+ import org.yaml.snakeyaml.LoaderOptions;
+ import org.yaml.snakeyaml.Yaml;
+ import org.yaml.snakeyaml.constructor.SafeConstructor;
+@@ -264,8 +270,12 @@ import javax.annotation.Nullable; // Paper
+ import javax.annotation.Nonnull; // Paper
+ 
+ public final class CraftServer implements Server {
+-    private final String serverName = "Purpur"; // Paper // Pufferfish // Purpur
++    private final String serverName = "Canvas"; // Paper // Pufferfish // Purpur // Canvas
+     private final String serverVersion;
++    // Canvas start
++    public static CraftCanvasLogger.Obfuscator canvas_obfuscator = null;
++    private final CraftCanvasLogger craftCanvasLogger = new CraftCanvasLogger();
++    // Canvas end
+     private final String bukkitVersion = Versioning.getBukkitVersion();
+     private final Logger logger = Logger.getLogger("Minecraft");
+     private final ServicesManager servicesManager = new SimpleServicesManager();
+@@ -659,6 +669,21 @@ public final class CraftServer implements Server {
+         return this.serverName;
+     }
+ 
++    @Override
++    public @NotNull Obfuscator getObfuscator() {
++        return this.canvas_obfuscator;
++    }
++
++    @Override
++    public @NotNull CanvasLogger getCanvasLogger() {
++        return this.craftCanvasLogger;
++    }
++
++    @Override
++    public @NotNull CraftServerGui getServerGui() {
++        return this.console.getGui();
++    }
++
+     @Override
+     public String getVersion() {
+         return this.serverVersion + " (MC: " + this.console.getServerVersion() + ")";
+@@ -1052,6 +1077,7 @@ public final class CraftServer implements Server {
+         org.spigotmc.SpigotConfig.init((File) this.console.options.valueOf("spigot-settings")); // Spigot
+         this.console.paperConfigurations.reloadConfigs(this.console);
+         org.purpurmc.purpur.PurpurConfig.init((File) console.options.valueOf("purpur-settings")); // Purpur
++        CanvasConfig.init((File) console.options.valueOf("canvas-settings")); // Canvas
+         for (ServerLevel world : this.console.getAllLevels()) {
+             // world.serverLevelData.setDifficulty(config.difficulty); // Paper - per level difficulty
+             world.setSpawnSettings(world.serverLevelData.getDifficulty() != Difficulty.PEACEFUL && config.spawnMonsters, config.spawnAnimals); // Paper - per level difficulty (from MinecraftServer#setDifficulty(ServerLevel, Difficulty, boolean))
