@@ -3,6 +3,7 @@
   <a href="https://gyazo.com/d7be938a9e911f14b106d5c8f1bf12b1"><img src="https://i.gyazo.com/d7be938a9e911f14b106d5c8f1bf12b1.png" alt="Image from Gyazo" width="620"/></a>
 </div>
 <!DOCTYPE html>
+
 <html>
 <body>
   <h1>Welcome to Canvas</h1>
