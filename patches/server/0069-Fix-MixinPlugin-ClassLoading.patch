@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <122416109+Dueris@users.noreply.github.com>
+Date: Thu, 1 Feb 2024 03:51:59 +0000
+Subject: [PATCH] Fix MixinPlugin ClassLoading
+
+
+diff --git a/src/main/java/io/papermc/paper/plugin/entrypoint/strategy/modern/ModernPluginLoadingStrategy.java b/src/main/java/io/papermc/paper/plugin/entrypoint/strategy/modern/ModernPluginLoadingStrategy.java
+index 9af388a8e56806ab44f8c3ef4f97086ce38ef3b4..6f3ed5d5685a0897ab83ad20bc680a09960f7d01 100644
+--- a/src/main/java/io/papermc/paper/plugin/entrypoint/strategy/modern/ModernPluginLoadingStrategy.java
++++ b/src/main/java/io/papermc/paper/plugin/entrypoint/strategy/modern/ModernPluginLoadingStrategy.java
+@@ -114,9 +114,18 @@ public class ModernPluginLoadingStrategy<T> implements ProviderLoadingStrategy<T
+ 
+                 if (this.configuration.preloadProvider(retrievedProvider)) {
+                     T instance = retrievedProvider.createInstance();
+-                    if (this.configuration.load(retrievedProvider, instance)) {
+-                        loadedPlugins.add(new ProviderPair<>(retrievedProvider, instance));
++                    if(instance != null){ // Canvas
++                        if (this.configuration.load(retrievedProvider, instance)) {
++                            loadedPlugins.add(new ProviderPair<>(retrievedProvider, instance));
++                        }
++                    // Canvas start
++                    }else{
++                        // MixinPlugin instance. We arent loading it the Paper way
++                        String name = this.getClass().getName();
++                        java.util.logging.Logger.getLogger("CanvasPluginLoader").log(java.util.logging.Level.WARNING, "MixinPlugin was found by Canvas by the name of [%name%].".replace("%name%", retrievedProvider.file().getName()));
++                        java.util.logging.Logger.getLogger("CanvasPluginLoader").log(java.util.logging.Level.WARNING, "Plugin startup for MixinPlugins are different than normal, see the PluginTemplate wiki for more info");
+                     }
++                    // Canvas end
+                 }
+             } catch (Throwable ex) {
+                 LOGGER.error("Could not load plugin '%s' in folder '%s'".formatted(retrievedProvider.getFileName(), retrievedProvider.getParentSource()), ex); // Paper
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+index eeea1e6f7b1ed64567a3f90d8eb2e2cfd53e5912..77a856287949621d46835d98519704507ae8e12f 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+@@ -86,6 +86,7 @@ class PaperPluginInstanceManager {
+     }
+ 
+     public void loadPlugin(Plugin provided) {
++        if(provided.getClass().getClassLoader().getClass().getName().toString().equalsIgnoreCase("space.vectrix.ignite.launch.ember.EmberClassLoader")) return; // Canvas
+         PluginMeta configuration = provided.getPluginMeta();
+ 
+         this.plugins.add(provided);
+@@ -142,6 +143,7 @@ class PaperPluginInstanceManager {
+     // Plugins are disabled in order like this inorder to "rougly" prevent
+     // their dependencies unloading first. But, eh.
+     public void disablePlugins() {
++        me.dueris.canvas.server.MixinPluginHook.pluginDisableHook(org.bukkit.craftbukkit.CraftServer.startupArgs);
+         Plugin[] plugins = this.getPlugins();
+         for (int i = plugins.length - 1; i >= 0; i--) {
+             this.disablePlugin(plugins[i]);
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginParent.java b/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginParent.java
+index f2bc4d0b55d4c9877a442529e0b144656497dae6..1bf5baa5aadef605a9990bfc11ce94fdcfcc18b7 100644
+--- a/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginParent.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginParent.java
+@@ -176,6 +176,11 @@ public class PaperPluginParent {
+                 }
+ 
+                 this.status = ProviderStatus.INITIALIZED;
++                // Canvas start
++                if(plugin.getClass().getClassLoader().getClass().getName().toString().equalsIgnoreCase("space.vectrix.ignite.launch.ember.EmberClassLoader")){
++                    return null;
++                }
++                // Canvas end
+                 return plugin;
+             } catch (Throwable throwable) {
+                 this.status = ProviderStatus.ERRORED;
+diff --git a/src/main/java/me/dueris/canvas/server/MixinPluginHook.java b/src/main/java/me/dueris/canvas/server/MixinPluginHook.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..c3076835e63139efaebb63331694bbf42d7284b5
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/server/MixinPluginHook.java
+@@ -0,0 +1,20 @@
++package me.dueris.canvas.server;
++
++public class MixinPluginHook {
++
++    public static void preLoadHook(String[] args) {
++        // Preload for MixinPlugin instance registry
++    }
++
++    public static void preWorldLoadHook(String[] args) {
++        // PreWorldLoad for MixinPlugin instance registry
++    }
++
++    public static void postWorldLoadHook(String[] args) {
++        // PostWorldLoad for MixinPlugin instance registry
++    }
++
++    public static void pluginDisableHook(String[] args) {
++        // Plugin disable hook for MixinPlugin instance registry
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 98496f5eb0643990484c186a6200ceb8b1660f3a..ffdd9aca59dd80d568bb5cafd8b31fe0e4f65c16 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -661,6 +661,13 @@ public final class CraftServer implements Server {
+                 this.enablePlugin(plugin);
+             }
+         }
++        // Canvas start
++        if(type == PluginLoadOrder.POSTWORLD){
++            me.dueris.canvas.server.MixinPluginHook.postWorldLoadHook(org.bukkit.craftbukkit.CraftServer.startupArgs);
++        }else if(type == PluginLoadOrder.STARTUP){
++            me.dueris.canvas.server.MixinPluginHook.preWorldLoadHook(org.bukkit.craftbukkit.CraftServer.startupArgs);
++        }
++        // Canvas end
+ 
+         if (type == PluginLoadOrder.POSTWORLD) {
+             // Spigot start - Allow vanilla commands to be forced to be the main command
+diff --git a/src/main/java/org/bukkit/craftbukkit/Main.java b/src/main/java/org/bukkit/craftbukkit/Main.java
+index dd8294ca95baa7a1d6f85ce964e0e07827803fe7..c19bd6adb9531bbffe252a5ae1e9176509fe60c4 100644
+--- a/src/main/java/org/bukkit/craftbukkit/Main.java
++++ b/src/main/java/org/bukkit/craftbukkit/Main.java
+@@ -38,6 +38,7 @@ public class Main {
+                 Logger.getLogger("Canvas").info("Unable to locate CodeSource, Canvas may be unable to function in some areas");
+             }
+         }
++        me.dueris.canvas.server.MixinPluginHook.preLoadHook(args); // MixinPlugin injection point
+         // Canvas end -/- Paper start
+         final String warnWhenLegacyFormattingDetected = String.join(".", "net", "kyori", "adventure", "text", "warnWhenLegacyFormattingDetected");
+         if (false && System.getProperty(warnWhenLegacyFormattingDetected) == null) {

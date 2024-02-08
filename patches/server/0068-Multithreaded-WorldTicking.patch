@@ -1,0 +1,860 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <159172167+PurpleWolfMC@users.noreply.github.com>
+Date: Wed, 7 Feb 2024 08:56:11 +0000
+Subject: [PATCH] Multithreaded WorldTicking
+
+
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+index 7ce9ebba8ce304d1f3f21d4f15ee5f3560d7700b..be571b949bf8d3355a25393f96066d6db6b786db 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+@@ -38,7 +38,7 @@ class PaperEventManager {
+     public void callEvent(@NotNull Event event) {
+         if (event.isAsynchronous() && this.server.isPrimaryThread()) {
+             throw new IllegalStateException(event.getEventName() + " may only be triggered asynchronously.");
+-        } else if (!event.isAsynchronous() && !this.server.isPrimaryThread() && !this.server.isStopping()) {
++        } else if (!event.isAsynchronous() && !this.server.isPrimaryThread() && !this.server.isStopping() && !Thread.currentThread().getName().startsWith("WorldTicker")) { // Canvas - multithreaded world ticking
+             throw new IllegalStateException(event.getEventName() + " may only be triggered synchronously.");
+         }
+ 
+diff --git a/src/main/java/me/dueris/canvas/CanvasConfig.java b/src/main/java/me/dueris/canvas/CanvasConfig.java
+index 01c269f1763ad7fbd5d50efe0c88b3c36dd7b61d..e7b5fb72cc4a2105442322a850f1105a5f94873b 100644
+--- a/src/main/java/me/dueris/canvas/CanvasConfig.java
++++ b/src/main/java/me/dueris/canvas/CanvasConfig.java
+@@ -178,6 +178,8 @@ public class CanvasConfig {
+     public static boolean asyncPathfinding;
+     public static int asyncPathfindingMaxThreads;
+     public static int asyncPathfindingKeepalive;
++    public static int maxTickerThreads = 3;
++    public static boolean autoStartSpark = true;
+ 
+     private static void mixin(){
+         disableMixin = getBoolean("mixin.disableMixins", disableMixin);
+@@ -192,6 +194,8 @@ public class CanvasConfig {
+         wantChunky = getBoolean("plugins.use_provided_chunky", wantChunky);
+     }
+     private static void optimizations(){
++        maxTickerThreads = getInt("optimizations.maxTickerThreads", maxTickerThreads);
++        autoStartSpark = getBoolean("optimizations.autoStartSpark", autoStartSpark);
+         asyncPathfinding = getBoolean("optimizations.async-pathfinding.enable", true);
+         asyncPathfindingMaxThreads = getInt("optimizations.async-pathfinding.max-threads", 0);
+         asyncPathfindingKeepalive = getInt("optimizations.async-pathfinding.keepalive", 60);
+diff --git a/src/main/java/me/dueris/canvas/thread/NamedTickThreadFactory.java b/src/main/java/me/dueris/canvas/thread/NamedTickThreadFactory.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..65a1d87f48d8d9bdaea763bd14136591a9938bf9
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/thread/NamedTickThreadFactory.java
+@@ -0,0 +1,63 @@
++package me.dueris.canvas.thread;
++
++import com.mojang.logging.LogUtils;
++import io.papermc.paper.util.TickThread;
++import org.slf4j.Logger;
++import java.util.concurrent.ThreadFactory;
++import java.util.concurrent.atomic.AtomicInteger;
++
++public class NamedTickThreadFactory implements ThreadFactory { // Extends the functionality of the NamedThreadFactory by vanilla
++    private static final Logger LOGGER = LogUtils.getLogger();
++    private final ThreadGroup group;
++    private final AtomicInteger threadNumber = new AtomicInteger(1);
++    private final String namePrefix;
++    private int priority;
++    private boolean daemon;
++
++    public NamedTickThreadFactory(String name) {
++        SecurityManager securityManager = System.getSecurityManager();
++        this.group = securityManager != null ? securityManager.getThreadGroup() : Thread.currentThread().getThreadGroup();
++        this.namePrefix = name + "-";
++        this.priority = 5;
++        this.daemon = false;
++    }
++
++    public NamedTickThreadFactory(String name, int priority){
++        SecurityManager securityManager = System.getSecurityManager();
++        this.group = securityManager != null ? securityManager.getThreadGroup() : Thread.currentThread().getThreadGroup();
++        this.namePrefix = name + "-";
++        this.priority = priority;
++        this.daemon = false;
++    }
++
++    public NamedTickThreadFactory(String name, int priority, String threadName){
++        SecurityManager securityManager = System.getSecurityManager();
++        this.group = securityManager != null ? securityManager.getThreadGroup() : Thread.currentThread().getThreadGroup();
++        this.namePrefix = name + "-";
++        this.priority = priority;
++        this.daemon = false;
++    }
++
++    public NamedTickThreadFactory(String name, int priority, String threadName, boolean daemon){
++        SecurityManager securityManager = System.getSecurityManager();
++        this.group = securityManager != null ? securityManager.getThreadGroup() : Thread.currentThread().getThreadGroup();
++        this.namePrefix = name + "-";
++        this.priority = priority;
++        this.daemon = daemon;
++    }
++
++    @Override
++    public Thread newThread(Runnable runnable) {
++        TickThread thread = new TickThread(runnable, namePrefix + this.threadNumber.getAndIncrement());
++        thread.setDaemon(daemon);
++        thread.setUncaughtExceptionHandler((threadx, throwable) -> {
++            LOGGER.error("Caught exception in thread {} from {}", threadx, runnable);
++            LOGGER.error("", throwable);
++        });
++        if (thread.getPriority() != priority) {
++            thread.setPriority(priority);
++        }
++
++        return thread;
++    }
++}
+diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
+index f3e7da27ed3ad7c2761e3ec494333ecddc2d6618..9f63adbab95b2dcf09c2edf5367224db21eca184 100644
+--- a/src/main/java/net/minecraft/server/MinecraftServer.java
++++ b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -3,9 +3,6 @@ package net.minecraft.server;
+ import com.google.common.base.Preconditions;
+ import com.google.common.base.Splitter;
+ import com.google.common.collect.ImmutableList;
+-import co.aikar.timings.Timings;
+-import com.destroystokyo.paper.event.server.PaperServerListPingEvent;
+-import com.google.common.base.Stopwatch;
+ import com.google.common.collect.Lists;
+ import com.google.common.collect.Maps;
+ import com.google.common.collect.Sets;
+@@ -39,13 +36,16 @@ import java.util.List;
+ import java.util.Locale;
+ import java.util.Map;
+ import java.util.Map.Entry;
++import java.util.NoSuchElementException;
+ import java.util.Objects;
+ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.Executor;
+ import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.atomic.AtomicBoolean;
+ import java.util.concurrent.atomic.AtomicReference;
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Consumer;
+@@ -55,6 +55,7 @@ import java.util.stream.Stream;
+ import javax.annotation.Nullable;
+ import javax.imageio.ImageIO;
+ import me.dueris.canvas.CanvasConfig;
++import me.dueris.canvas.thread.NamedTickThreadFactory;
+ import net.minecraft.CrashReport;
+ import net.minecraft.ReportedException;
+ import net.minecraft.SharedConstants;
+@@ -86,7 +87,6 @@ import net.minecraft.server.level.ServerChunkCache;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.level.ServerPlayerGameMode;
+-import net.minecraft.server.level.TicketType;
+ import net.minecraft.server.level.progress.ChunkProgressListener;
+ import net.minecraft.server.level.progress.ChunkProgressListenerFactory;
+ import net.minecraft.server.network.ServerConnectionListener;
+@@ -110,17 +110,14 @@ import net.minecraft.util.ProgressListener;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.SignatureValidator;
+ import net.minecraft.util.TimeUtil;
+-import net.minecraft.util.Unit;
+ import net.minecraft.util.datafix.DataFixers;
+ import net.minecraft.util.profiling.EmptyProfileResults;
+ import net.minecraft.util.profiling.ProfileResults;
+ import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.util.profiling.ResultField;
+-import net.minecraft.util.profiling.SingleTickProfiler;
+ import net.minecraft.util.profiling.jfr.JvmProfiler;
+ import net.minecraft.util.profiling.jfr.callback.ProfiledDuration;
+ import net.minecraft.util.profiling.metrics.profiling.ActiveMetricsRecorder;
+-import net.minecraft.util.profiling.metrics.profiling.InactiveMetricsRecorder;
+ import net.minecraft.util.profiling.metrics.profiling.MetricsRecorder;
+ import net.minecraft.util.profiling.metrics.profiling.ServerMetricsSamplersProvider;
+ import net.minecraft.util.profiling.metrics.storage.MetricsPersister;
+@@ -187,7 +184,6 @@ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
+ import org.bukkit.Bukkit;
+ import org.bukkit.craftbukkit.CraftServer;
+-import org.bukkit.craftbukkit.Main;
+ import org.bukkit.event.server.ServerLoadEvent;
+ // CraftBukkit end
+ 
+@@ -239,6 +235,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     private int port;
+     private final LayeredRegistryAccess<RegistryLayer> registries;
+     private Map<ResourceKey<Level>, ServerLevel> levels;
++    // Canvas start - multithreaded world ticking
++    public static java.util.concurrent.ExecutorService worldTickerPool;
++    public int tickerThreadMax = setupThreadCount();
++    private ThreadGroup worldThreadGroup = null;
++    // Canvas end
+     private PlayerList playerList;
+     private volatile boolean running;
+     private volatile boolean isRestarting = false; // Paper - flag to signify we're attempting to restart
+@@ -339,6 +340,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         thread.start();
+         return s0;
+     }
++    // Canvas start
++
++    public int setupThreadCount(){
++        int avalibleJVMThreads = Runtime.getRuntime().availableProcessors() * 2;
++        return avalibleJVMThreads < 3 ? avalibleJVMThreads : avalibleJVMThreads >= me.dueris.canvas.CanvasConfig.maxTickerThreads ? me.dueris.canvas.CanvasConfig.maxTickerThreads : avalibleJVMThreads;
++    }
++    // Canvas end
+ 
+     public MinecraftServer(OptionSet options, WorldLoader.DataLoadContext worldLoader, Thread thread, LevelStorageSource.LevelStorageAccess convertable_conversionsession, PackRepository resourcepackrepository, WorldStem worldstem, Proxy proxy, DataFixer datafixer, Services services, ChunkProgressListenerFactory worldloadlistenerfactory) {
+         super("Server");
+@@ -362,6 +370,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.customBossEvents = new CustomBossEvents();
+         this.registries = worldstem.registries();
+         this.worldData = worldstem.worldData();
++        this.worldTickerPool = java.util.concurrent.Executors.newFixedThreadPool(this.tickerThreadMax, new NamedTickThreadFactory("WorldTicker")); // Canvas - multithreaded world ticking
+         if (false && !this.registries.compositeAccess().registryOrThrow(Registries.LEVEL_STEM).containsKey(LevelStem.OVERWORLD)) { // CraftBukkit - initialised later
+             throw new IllegalStateException("Missing Overworld dimension data");
+         } else {
+@@ -1074,6 +1083,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         LOGGER.info("Closing Thread Pool");
+         Util.shutdownExecutors(); // Paper
+         LOGGER.info("Closing Server");
++        MinecraftServer.worldTickerPool.shutdown(); // Canvas - shutdown ticker
+         try {
+             net.minecrell.terminalconsole.TerminalConsoleAppender.close(); // Paper - Use TerminalConsoleAppender
+         } catch (Exception e) {
+@@ -1191,7 +1201,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+             // Spigot start
+             // Paper start - move done tracking
+-            // Canvas start
++            // Canvas start - cmd configuration
+                 for(World world : Bukkit.getWorlds()){
+                     if(CanvasConfig.wantChunky){
+                         Bukkit.dispatchCommand(new CraftServer.SilentCommandSender(), "chunky radius 35");
+@@ -1202,6 +1212,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                         );
+                     }
+                 }
++                if(CanvasConfig.autoStartSpark){
++                    Bukkit.dispatchCommand(new CraftServer.SilentCommandSender(), "spark profiler start --thread *");
++                }
+             // Canvas end
+             LOGGER.info("Running delayed init tasks");
+             this.server.getScheduler().mainThreadHeartbeat(this.tickCount); // run all 1 tick delay tasks during init,
+@@ -1466,7 +1479,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                 executed = true;
+             }
+         }
+-
+         return executed;
+     }
+ 
+@@ -1751,71 +1763,78 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         //MinecraftTimings.timeUpdateTimer.startTiming(); // Spigot // Paper // Purpur
+         // Send time updates to everyone, it will get the right time from the world the player is in.
+         // Paper start - Perf: Optimize time updates
+-        for (final ServerLevel level : this.getAllLevels()) {
+-            final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
+-            final long dayTime = level.getDayTime();
+-            long worldTime = level.getGameTime();
+-            final ClientboundSetTimePacket worldPacket = new ClientboundSetTimePacket(worldTime, dayTime, doDaylight);
+-            for (Player entityhuman : level.players()) {
+-                if (!(entityhuman instanceof ServerPlayer) || (!level.isForceTime() && (tickCount + entityhuman.getId()) % 20 != 0)) { // Purpur
+-                    continue;
+-                }
+-                ServerPlayer entityplayer = (ServerPlayer) entityhuman;
+-                long playerTime = entityplayer.getPlayerTime();
+-                ClientboundSetTimePacket packet = (playerTime == dayTime) ? worldPacket :
+-                    new ClientboundSetTimePacket(worldTime, playerTime, doDaylight);
+-                entityplayer.connection.send(packet); // Add support for per player time
+-            }
+-        }
++        // Canvas - multithreaded world ticking && moved down to iterator of world ticker
++        // for (final ServerLevel level : this.getAllLevels()) {
++        //     final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
++        //     final long dayTime = level.getDayTime();
++        //     long worldTime = level.getGameTime();
++        //     final ClientboundSetTimePacket worldPacket = new ClientboundSetTimePacket(worldTime, dayTime, doDaylight);
++        //     for (Player entityhuman : level.players()) {
++        //         if (!(entityhuman instanceof ServerPlayer) || (!level.isForceTime() && (tickCount + entityhuman.getId()) % 20 != 0)) { // Purpur
++        //             continue;
++        //         }
++        //         ServerPlayer entityplayer = (ServerPlayer) entityhuman;
++        //         long playerTime = entityplayer.getPlayerTime();
++        //         ClientboundSetTimePacket packet = (playerTime == dayTime) ? worldPacket :
++        //             new ClientboundSetTimePacket(worldTime, playerTime, doDaylight);
++        //         entityplayer.connection.send(packet); // Add support for per player time
++        //     }
++        // }
++        // Canvas end
+         // Paper end - Perf: Optimize time updates
+         //MinecraftTimings.timeUpdateTimer.stopTiming(); // Spigot // Paper // Purpur
+ 
+         this.isIteratingOverLevels = true; // Paper - Throw exception on world create while being ticked
+         net.minecraft.network.FriendlyByteBuf.hasItemSerializeEvent = org.purpurmc.purpur.event.packet.NetworkItemSerializeEvent.getHandlerList().getRegisteredListeners().length > 0; // Purpur
+-        Iterator iterator = this.getAllLevels().iterator(); // Paper - Throw exception on world create while being ticked; move down
+-        while (iterator.hasNext()) {
+-            ServerLevel worldserver = (ServerLevel) iterator.next();
+-            worldserver.hasPhysicsEvent = org.bukkit.event.block.BlockPhysicsEvent.getHandlerList().getRegisteredListeners().length > 0; // Paper - BlockPhysicsEvent
+-            worldserver.hasEntityMoveEvent = io.papermc.paper.event.entity.EntityMoveEvent.getHandlerList().getRegisteredListeners().length > 0; // Paper - Add EntityMoveEvent
+-            net.minecraft.world.level.block.entity.HopperBlockEntity.skipHopperEvents = worldserver.paperConfig().hopper.disableMoveEvent || org.bukkit.event.inventory.InventoryMoveItemEvent.getHandlerList().getRegisteredListeners().length == 0; // Paper - Perf: Optimize Hoppers
+-            worldserver.updateLagCompensationTick(); // Paper - lag compensation
+-            worldserver.hasRidableMoveEvent = org.purpurmc.purpur.event.entity.RidableMoveEvent.getHandlerList().getRegisteredListeners().length > 0; // Purpur
+-
+-            /*this.profiler.push(() -> { // Purpur
+-                return worldserver + " " + worldserver.dimension().location();
+-            });*/ // Purpur
+-            /* Drop global time updates
+-            if (this.tickCount % 20 == 0) {
+-                //this.profiler.push("timeSync"); // Purpur
+-                this.synchronizeTime(worldserver);
+-                //this.profiler.pop(); // Purpur
+-            }
+-            // CraftBukkit end */
++        final Iterator iterator = this.getAllLevels().iterator(); // Paper - move down
++        // Canvas start - multithreaded world ticking
++        final AtomicBoolean isDone = new AtomicBoolean(false);
++        List<Runnable> worldTicks = new ArrayList<>();
++        List<Runnable> chunkTicks = new ArrayList<>();
++        while (iterator.hasNext() && !isDone.get()) {
++            try {
++                ServerLevel worldserver = (ServerLevel) iterator.next();
++                if(worldserver == null) {
++                    isDone.set(true);
++                    return;
++                }
+ 
+-            //this.profiler.push("tick"); // Purpur
++                Runnable done = worldserver.tick(shouldKeepTicking, tickCount);
++                    chunkTicks.add(() -> {
++                        worldserver.getChunkSource().tick(shouldKeepTicking, true);
++                        MinecraftServer.getServer().executeMidTickTasks();
++                    });
+ 
+-            try {
+-                //worldserver.timings.doTick.startTiming(); // Spigot // Purpur
+-                worldserver.tick(shouldKeepTicking);
+-                // Paper start
+-                for (final io.papermc.paper.chunk.SingleThreadChunkRegionManager regionManager : worldserver.getChunkSource().chunkMap.regionManagers) {
+-                    regionManager.recalculateRegions();
++                if(done != null){
++                    worldTicks.add(done);
+                 }
+-                // Paper end
+-                //worldserver.timings.doTick.stopTiming(); // Spigot // Purpur
+-            } catch (Throwable throwable) {
+-                CrashReport crashreport = CrashReport.forThrowable(throwable, "Exception ticking world");
+ 
+-                worldserver.fillReportDetails(crashreport);
+-                throw new ReportedException(crashreport);
++                //this.profiler.pop(); // Purpur
++                //this.profiler.pop(); // Purpur
++                worldserver.explosionDensityCache.clear(); // Paper - Optimize explosions
++            } catch (Exception e) {
++                if(e instanceof NoSuchElementException) return;
++                else throw e;
+             }
+-
+-            //this.profiler.pop(); // Purpur
+-            //this.profiler.pop(); // Purpur
+-            worldserver.explosionDensityCache.clear(); // Paper - Optimize explosions
+         }
+         this.isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
+ 
++        List<CompletableFuture<Void>> futures = new ArrayList<>();
++        for(Runnable tick : worldTicks){ // Run world ticks off-main
++            futures.add(CompletableFuture.runAsync(tick, this.worldTickerPool));
++        }
++        CompletableFuture<Void> allOf = CompletableFuture.allOf(
++            futures.toArray(new CompletableFuture[0])
++        );
++        try {
++            allOf.get();
++            for(Runnable runnable : chunkTicks){ // Run chunk ticks
++                runnable.run();
++            }
++        } catch (InterruptedException | ExecutionException e) {
++            e.printStackTrace();
++        }
++        // Canvas end
+         //this.profiler.popPush("connection"); // Purpur
+         // MinecraftTimings.connectionTimer.startTiming(); // Spigot // Paper // Purpur
+         this.getConnection().tick();
+@@ -1837,10 +1856,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         //MinecraftTimings.tickablesTimer.stopTiming(); // Spigot // Paper // Purpur
+ 
+         //this.profiler.popPush("send chunks"); // Purpur
+-        iterator = this.playerList.getPlayers().iterator();
++        Iterator playerIt = this.playerList.getPlayers().iterator(); // Canvas
+ 
+-        while (iterator.hasNext()) {
+-            ServerPlayer entityplayer = (ServerPlayer) iterator.next();
++        while (playerIt.hasNext()) { // Canvas
++            ServerPlayer entityplayer = (ServerPlayer) playerIt.next(); // Canvas
+ 
+             entityplayer.connection.chunkSender.sendNextChunks(entityplayer);
+             entityplayer.connection.resumeFlushing();
+diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
+index 79a1250737750f55195129c6c974f0b04bc0322d..9e6504ee6b31a3744367ab75c264b3d4420027a8 100644
+--- a/src/main/java/net/minecraft/server/level/ServerLevel.java
++++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
+@@ -30,6 +30,7 @@ import java.util.Objects;
+ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
++import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.Executor;
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Function;
+@@ -60,6 +61,7 @@ import net.minecraft.network.protocol.game.ClientboundExplodePacket;
+ import net.minecraft.network.protocol.game.ClientboundLevelEventPacket;
+ import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
+ import net.minecraft.network.protocol.game.ClientboundSetDefaultSpawnPositionPacket;
++import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
+ import net.minecraft.network.protocol.game.ClientboundSoundEntityPacket;
+ import net.minecraft.network.protocol.game.ClientboundSoundPacket;
+ import net.minecraft.network.protocol.game.DebugPackets;
+@@ -227,6 +229,13 @@ public class ServerLevel extends Level implements WorldGenLevel {
+     public boolean hasEntityMoveEvent; // Paper - Add EntityMoveEvent
+     private final alternate.current.wire.WireHandler wireHandler = new alternate.current.wire.WireHandler(this); // Paper - optimize redstone (Alternate Current)
+     public boolean hasRidableMoveEvent = false; // Purpur
++    public Thread currentTickingThread = null; // Canvas
++
++    public static Throwable getAddToWorldStackTrace(Entity entity) {
++        final Throwable thr = new Throwable(entity + " Added to world at " + new java.util.Date());
++        io.papermc.paper.util.StacktraceDeobfuscator.INSTANCE.deobfuscateThrowable(thr);
++        return thr;
++    }
+ 
+     public LevelChunk getChunkIfLoaded(int x, int z) {
+         return this.chunkSource.getChunkAtIfLoadedImmediately(x, z); // Paper - Use getChunkIfLoadedImmediately
+@@ -823,145 +832,184 @@ public class ServerLevel extends Level implements WorldGenLevel {
+         return this.structureManager;
+     }
+ 
+-    public void tick(BooleanSupplier shouldKeepTicking) {
+-        //ProfilerFiller gameprofilerfiller = this.getProfiler(); // Purpur
+-
+-        this.handlingTick = true;
+-        TickRateManager tickratemanager = this.tickRateManager();
+-        boolean flag = tickratemanager.runsNormally();
+-
+-        if (flag) {
+-            // gameprofilerfiller.push("world border"); // Purpur
+-            this.getWorldBorder().tick();
+-            // gameprofilerfiller.popPush("weather"); // Purpur
+-            this.advanceWeatherCycle();
+-        }
+-
+-        int i = this.getGameRules().getInt(GameRules.RULE_PLAYERS_SLEEPING_PERCENTAGE);
+-        long j;
+-
+-        if (this.purpurConfig.playersSkipNight && this.sleepStatus.areEnoughSleeping(i) && this.sleepStatus.areEnoughDeepSleeping(i, this.players)) {
+-            // CraftBukkit start
+-            j = this.levelData.getDayTime() + 24000L;
+-            TimeSkipEvent event = new TimeSkipEvent(this.getWorld(), TimeSkipEvent.SkipReason.NIGHT_SKIP, (j - j % 24000L) - this.getDayTime());
+-            if (this.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT)) {
+-                this.getCraftServer().getPluginManager().callEvent(event);
+-                if (!event.isCancelled()) {
+-                    this.setDayTime(this.getDayTime() + event.getSkipAmount());
++    public Runnable tick(BooleanSupplier shouldKeepTicking, int tickCount) { // Canvas
++        // Canvas start - multithreaded world ticking
++        return () -> {
++            try {
++                this.handlingTick = true;
++                if(this.currentTickingThread != Thread.currentThread()) {this.currentTickingThread = Thread.currentThread();}
++                //ProfilerFiller gameprofilerfiller = this.getProfiler(); // Purpur
++                final boolean doDaylight = this.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
++                final long dayTime = this.getDayTime();
++                long worldTime = this.getGameTime();
++                final ClientboundSetTimePacket worldPacket = new ClientboundSetTimePacket(worldTime, dayTime, doDaylight);
++                for (Player entityhuman : this.players()) {
++                    if (!(entityhuman instanceof ServerPlayer) || (!this.isForceTime() && (tickCount + entityhuman.getId()) % 20 != 0)) { // Purpur
++                        continue;
++                    }
++                    ServerPlayer entityplayer = (ServerPlayer) entityhuman;
++                    long playerTime = entityplayer.getPlayerTime();
++                    ClientboundSetTimePacket packet = (playerTime == dayTime) ? worldPacket :
++                        new ClientboundSetTimePacket(worldTime, playerTime, doDaylight);
++                    entityplayer.connection.send(packet); // Add support for per player time
+                 }
+-            }
+ 
+-            if (!event.isCancelled()) {
+-                this.wakeUpAllPlayers();
+-            }
+-            // CraftBukkit end
+-            if (this.getGameRules().getBoolean(GameRules.RULE_WEATHER_CYCLE) && this.isRaining()) {
+-                this.resetWeatherCycle();
+-            }
+-        }
++                this.updateLagCompensationTick(); // Paper - lag compensation
++                this.hasPhysicsEvent = org.bukkit.event.block.BlockPhysicsEvent.getHandlerList().getRegisteredListeners().length > 0; // Paper
++                net.minecraft.world.level.block.entity.HopperBlockEntity.skipHopperEvents = this.paperConfig().hopper.disableMoveEvent || org.bukkit.event.inventory.InventoryMoveItemEvent.getHandlerList().getRegisteredListeners().length == 0; // Paper - Perf: Optimize Hoppers
++                this.hasEntityMoveEvent = io.papermc.paper.event.entity.EntityMoveEvent.getHandlerList().getRegisteredListeners().length > 0; // Paper
++                this.hasRidableMoveEvent = org.purpurmc.purpur.event.entity.RidableMoveEvent.getHandlerList().getRegisteredListeners().length > 0; // Purpur
++
++                // this.handlingTick = true; // Canvas - move up
++                TickRateManager tickratemanager = this.tickRateManager();
++                boolean flag = tickratemanager.runsNormally();
++
++                if (flag) {
++                    // gameprofilerfiller.push("world border"); // Purpur
++                    this.getWorldBorder().tick();
++                    // gameprofilerfiller.popPush("weather"); // Purpur
++                    this.advanceWeatherCycle();
++                }
+ 
+-        this.updateSkyBrightness();
+-        if (flag) {
+-            this.tickTime();
+-        }
++                int i = this.getGameRules().getInt(GameRules.RULE_PLAYERS_SLEEPING_PERCENTAGE);
++                long j;
++
++                if (this.purpurConfig.playersSkipNight && this.sleepStatus.areEnoughSleeping(i) && this.sleepStatus.areEnoughDeepSleeping(i, this.players)) {
++                    // CraftBukkit start
++                    j = this.levelData.getDayTime() + 24000L;
++                    TimeSkipEvent event = new TimeSkipEvent(this.getWorld(), TimeSkipEvent.SkipReason.NIGHT_SKIP, (j - j % 24000L) - this.getDayTime());
++                    if (this.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT)) {
++                        this.getCraftServer().getPluginManager().callEvent(event);
++                        if (!event.isCancelled()) {
++                            this.setDayTime(this.getDayTime() + event.getSkipAmount());
++                        }
++                    }
+ 
+-        //gameprofilerfiller.popPush("tickPending"); // Purpur
+-        //this.timings.scheduledBlocks.startTiming(); // Paper // Purpur
+-        if (!this.isDebug() && flag) {
+-            j = this.getGameTime();
+-            //gameprofilerfiller.push("blockTicks"); // Purpur
+-            this.blockTicks.tick(j, 65536, this::tickBlock);
+-            //gameprofilerfiller.popPush("fluidTicks"); // Purpur
+-            this.fluidTicks.tick(j, 65536, this::tickFluid);
+-            //gameprofilerfiller.pop(); // Purpur
+-        }
+-        //this.timings.scheduledBlocks.stopTiming(); // Paper // Purpur
++                    if (!event.isCancelled()) {
++                        this.wakeUpAllPlayers();
++                    }
++                    // CraftBukkit end
++                    if (this.getGameRules().getBoolean(GameRules.RULE_WEATHER_CYCLE) && this.isRaining()) {
++                        this.resetWeatherCycle();
++                    }
++                }
+ 
+-        //gameprofilerfiller.popPush("raid"); // Purpur
+-        if (flag) {
+-            // this.timings.raids.startTiming(); // Paper - timings // Purpur
+-            this.raids.tick();
+-            // this.timings.raids.stopTiming(); // Paper - timings // Purpur
+-        }
++                this.updateSkyBrightness();
++                if (flag) {
++                    this.tickTime();
++                }
+ 
+-        //gameprofilerfiller.popPush("chunkSource"); // Purpur
+-        //this.timings.chunkProviderTick.startTiming(); // Paper - timings // Purpur
+-        this.getChunkSource().tick(shouldKeepTicking, true);
+-        //this.timings.chunkProviderTick.stopTiming(); // Paper - timings // Purpur
+-        //gameprofilerfiller.popPush("blockEvents"); // Purpur
+-        if (flag) {
+-            // this.timings.doSounds.startTiming(); // Spigot // Purpur
+-            this.runBlockEvents();
+-            // this.timings.doSounds.stopTiming(); // Spigot // Purpur
+-        }
++                //gameprofilerfiller.popPush("tickPending"); // Purpur
++                //this.timings.scheduledBlocks.startTiming(); // Paper // Purpur
++                if (!this.isDebug() && flag) {
++                    j = this.getGameTime();
++                    //gameprofilerfiller.push("blockTicks"); // Purpur
++                    this.blockTicks.tick(j, 65536, this::tickBlock);
++                    //gameprofilerfiller.popPush("fluidTicks"); // Purpur
++                    this.fluidTicks.tick(j, 65536, this::tickFluid);
++                    //gameprofilerfiller.pop(); // Purpur
++                }
++                //this.timings.scheduledBlocks.stopTiming(); // Paper // Purpur
+ 
+-        this.handlingTick = false;
+-        //gameprofilerfiller.pop(); // Purpur
+-        boolean flag1 = true || !this.players.isEmpty() || !this.getForcedChunks().isEmpty(); // CraftBukkit - this prevents entity cleanup, other issues on servers with no players
++                //gameprofilerfiller.popPush("raid"); // Purpur
++                if (flag) {
++                    // this.timings.raids.startTiming(); // Paper - timings // Purpur
++                    this.raids.tick();
++                    // this.timings.raids.stopTiming(); // Paper - timings // Purpur
++                }
+ 
+-        if (flag1) {
+-            this.resetEmptyTime();
+-        }
++                //gameprofilerfiller.popPush("chunkSource"); // Purpur
++                //this.timings.chunkProviderTick.startTiming(); // Paper - timings // Purpur
++                // this.getChunkSource().tick(shouldKeepTicking, true); // Canvas - move tick chunk source outside multithread
++                //this.timings.chunkProviderTick.stopTiming(); // Paper - timings // Purpur
++                //gameprofilerfiller.popPush("blockEvents"); // Purpur
++                if (flag) {
++                    // this.timings.doSounds.startTiming(); // Spigot // Purpur
++                    this.runBlockEvents();
++                    // this.timings.doSounds.stopTiming(); // Spigot // Purpur
++                }
+ 
+-        if (flag1 || this.emptyTime++ < 300) {
+-            //gameprofilerfiller.push("entities"); // Purpur
+-            //this.timings.tickEntities.startTiming(); // Spigot // Purpur
+-            if (this.dragonFight != null && flag) {
+-                //gameprofilerfiller.push("dragonFight"); // Purpur
+-                this.dragonFight.tick();
++                this.handlingTick = false;
+                 //gameprofilerfiller.pop(); // Purpur
+-            }
++                boolean flag1 = true || !this.players.isEmpty() || !this.getForcedChunks().isEmpty(); // CraftBukkit - this prevents entity cleanup, other issues on servers with no players
++
++                if (flag1) {
++                    this.resetEmptyTime();
++                }
+ 
+-            org.spigotmc.ActivationRange.activateEntities(this); // Spigot
+-            //this.timings.entityTick.startTiming(); // Spigot // Purpur
+-            this.entityTickList.forEach((entity) -> {
+-                entity.activatedPriorityReset = false; // Pufferfish - DAB
+-                if (!entity.isRemoved()) {
+-                    if (false && this.shouldDiscardEntity(entity)) { // CraftBukkit - We prevent spawning in general, so this butchering is not needed
+-                        entity.discard();
+-                    } else if (!tickratemanager.isEntityFrozen(entity)) {
+-                        //gameprofilerfiller.push("checkDespawn"); // Purpur
+-                        entity.checkDespawn();
++                if (flag1 || this.emptyTime++ < 300) {
++                    //gameprofilerfiller.push("entities"); // Purpur
++                    //this.timings.tickEntities.startTiming(); // Spigot // Purpur
++                    if (this.dragonFight != null && flag) {
++                        //gameprofilerfiller.push("dragonFight"); // Purpur
++                        this.dragonFight.tick();
+                         //gameprofilerfiller.pop(); // Purpur
+-                        if (true || this.chunkSource.chunkMap.getDistanceManager().inEntityTickingRange(entity.chunkPosition().toLong())) { // Paper - now always true if in the ticking list
+-                            Entity entity1 = entity.getVehicle();
++                    }
+ 
+-                            if (entity1 != null) {
+-                                if (!entity1.isRemoved() && entity1.hasPassenger(entity)) {
+-                                    return;
++                    org.spigotmc.ActivationRange.activateEntities(this); // Spigot
++                    //this.timings.entityTick.startTiming(); // Spigot // Purpur
++                    this.entityTickList.forEach((entity) -> {
++                        entity.activatedPriorityReset = false; // Pufferfish - DAB
++                        if (!entity.isRemoved()) {
++                            if (false && this.shouldDiscardEntity(entity)) { // CraftBukkit - We prevent spawning in general, so this butchering is not needed
++                                entity.discard();
++                            } else if (!tickratemanager.isEntityFrozen(entity)) {
++                                //gameprofilerfiller.push("checkDespawn"); // Purpur
++                                entity.checkDespawn();
++                                if (entity.isRemoved()) return; // Canvas - if we despawned, dont tick it!
++                                //gameprofilerfiller.pop(); // Purpur
++                                if (true || this.chunkSource.chunkMap.getDistanceManager().inEntityTickingRange(entity.chunkPosition().toLong())) { // Paper - now always true if in the ticking list
++                                    Entity entity1 = entity.getVehicle();
++
++                                    if (entity1 != null) {
++                                        if (!entity1.isRemoved() && entity1.hasPassenger(entity)) {
++                                            return;
++                                        }
++
++                                        entity.stopRiding();
++                                    }
++
++                                    //gameprofilerfiller.push("tick"); // Purpur
++                                    // Pufferfish start - copied from this.guardEntityTick
++                                    try {
++                                        this.tickNonPassenger(entity); // Pufferfish - changed
++                                        // MinecraftServer.getServer().executeMidTickTasks(); // Tuinity - execute chunk tasks mid tick // Canvas - move outside of multithread to prevent server death
++                                    } catch (Throwable throwable) {
++                                        if (throwable instanceof ThreadDeath) throw throwable; // Paper
++                                        // Paper start - Prevent tile entity and entity crashes
++                                        final String msg = String.format("Entity threw exception at %s:%s,%s,%s", entity.level().getWorld().getName(), entity.getX(), entity.getY(), entity.getZ());
++                                        MinecraftServer.LOGGER.error(msg, throwable);
++                                        getCraftServer().getPluginManager().callEvent(new com.destroystokyo.paper.event.server.ServerExceptionEvent(new com.destroystokyo.paper.exception.ServerInternalException(msg, throwable)));
++                                        entity.discard();
++                                        // Paper end
++                                    }
++                                    // Pufferfish end
++                                    //gameprofilerfiller.pop(); // Purpur
+                                 }
+-
+-                                entity.stopRiding();
+                             }
+-
+-                            //gameprofilerfiller.push("tick"); // Purpur
+-                        // Pufferfish start - copied from this.guardEntityTick
+-                        try {
+-                            this.tickNonPassenger(entity); // Pufferfish - changed
+-                            MinecraftServer.getServer().executeMidTickTasks(); // Tuinity - execute chunk tasks mid tick
+-                        } catch (Throwable throwable) {
+-                            if (throwable instanceof ThreadDeath) throw throwable; // Paper
+-                            // Paper start - Prevent tile entity and entity crashes
+-                            final String msg = String.format("Entity threw exception at %s:%s,%s,%s", entity.level().getWorld().getName(), entity.getX(), entity.getY(), entity.getZ());
+-                            MinecraftServer.LOGGER.error(msg, throwable);
+-                            getCraftServer().getPluginManager().callEvent(new com.destroystokyo.paper.event.server.ServerExceptionEvent(new com.destroystokyo.paper.exception.ServerInternalException(msg, throwable)));
+-                            entity.discard();
+-                            // Paper end
+                         }
+-                        // Pufferfish end
+-                            //gameprofilerfiller.pop(); // Purpur
+-                        }
+-                    }
++                    });
++                    //this.timings.entityTick.stopTiming(); // Spigot // Purpur
++                    //this.timings.tickEntities.stopTiming(); // Spigot // Purpur
++                    //gameprofilerfiller.pop(); // Purpur
++                    this.tickBlockEntities();
+                 }
+-            });
+-            //this.timings.entityTick.stopTiming(); // Spigot // Purpur
+-            //this.timings.tickEntities.stopTiming(); // Spigot // Purpur
+-            //gameprofilerfiller.pop(); // Purpur
+-            this.tickBlockEntities();
+-        }
+ 
+-        //gameprofilerfiller.push("entityManagement"); // Purpur
+-        //this.entityManager.tick(); // Paper - rewrite chunk system
++                //gameprofilerfiller.push("entityManagement"); // Purpur
++                //this.entityManager.tick(); // Paper - rewrite chunk system
++                for (final io.papermc.paper.chunk.SingleThreadChunkRegionManager regionManager : this.getChunkSource().chunkMap.regionManagers) {
++                    regionManager.recalculateRegions();
++                }
++            } catch (Throwable throwable) {
++                // ServerLevel failed to tick
++                CrashReport crashreport = CrashReport.forThrowable(throwable, "Exception ticking world");
++
++                this.fillReportDetails(crashreport);
++                throw new net.minecraft.ReportedException(crashreport);
++            }
++        };
++        // Canvas end
++
+     }
+ 
+     @Override
+diff --git a/src/main/java/net/minecraft/util/ThreadingDetector.java b/src/main/java/net/minecraft/util/ThreadingDetector.java
+index b6e98aaebe57453b8eceaa633a989aa24409830f..d97130f8c47b2e9784c4afe73bf40cd85270088f 100644
+--- a/src/main/java/net/minecraft/util/ThreadingDetector.java
++++ b/src/main/java/net/minecraft/util/ThreadingDetector.java
+@@ -33,19 +33,23 @@ public class ThreadingDetector {
+ 
+         try {
+             this.stackTraceLock.lock();
+-            if (!this.lock.tryAcquire()) {
+-                this.threadThatFailedToAcquire = Thread.currentThread();
+-                bl = true;
+-                this.stackTraceLock.unlock();
++            // Canvas start
++            if(!(Thread.currentThread() instanceof io.papermc.paper.util.TickThread)){
++                if (!this.lock.tryAcquire()) {
++                    this.threadThatFailedToAcquire = Thread.currentThread();
++                    bl = true;
++                    this.stackTraceLock.unlock();
+ 
+-                try {
+-                    this.lock.acquire();
+-                } catch (InterruptedException var6) {
+-                    Thread.currentThread().interrupt();
+-                }
++                    try {
++                        this.lock.acquire();
++                    } catch (InterruptedException var6) {
++                        Thread.currentThread().interrupt();
++                    }
+ 
+-                throw this.fullException;
++                    throw this.fullException;
++                }
+             }
++            // Canvas end
+         } finally {
+             if (!bl) {
+                 this.stackTraceLock.unlock();
+diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
+index 760d40f52e322e17330e7236a0acabfd2ac8def0..ce6642081d1b978999d10030ea2f9d0483a78758 100644
+--- a/src/main/java/net/minecraft/world/entity/Entity.java
++++ b/src/main/java/net/minecraft/world/entity/Entity.java
+@@ -3881,7 +3881,7 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+             BlockPos blockposition1;
+ 
+             if (flag1) {
+-                blockposition1 = ServerLevel.END_SPAWN_POINT;
++                blockposition1 = ServerLevel.END_SPAWN_POINT.offset(0, 1, 0); // Canvas - fix spawning 1 block bellow platform
+             } else {
+                 destination.getChunkAt(destination.getSharedSpawnPos()); // Paper - Ensure spawn chunk is always loaded before calculating Y coordinate
+                 blockposition1 = destination.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, destination.getSharedSpawnPos());
+diff --git a/src/main/java/org/spigotmc/WatchdogThread.java b/src/main/java/org/spigotmc/WatchdogThread.java
+index 111522ae2955ce591b1caeab8e9e22d0686a541c..3523880c215805bdd651f5a6ecf640af8a66253d 100644
+--- a/src/main/java/org/spigotmc/WatchdogThread.java
++++ b/src/main/java/org/spigotmc/WatchdogThread.java
+@@ -6,6 +6,8 @@ import java.lang.management.ThreadInfo;
+ import java.util.logging.Level;
+ import java.util.logging.Logger;
+ import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++
+ import org.bukkit.Bukkit;
+ 
+ public final class WatchdogThread extends io.papermc.paper.util.TickThread // Paper - rewrite chunk system
+@@ -47,7 +49,7 @@ public final class WatchdogThread extends io.papermc.paper.util.TickThread // Pa
+         log.log(Level.SEVERE, "Ticking entity: " + entityType + ", entity class: " + entity.getClass().getName());
+         log.log(Level.SEVERE, "Entity status: removed: " + entity.isRemoved() + ", valid: " + entity.valid + ", alive: " + entity.isAlive() + ", is passenger: " + entity.isPassenger());
+         log.log(Level.SEVERE, "Entity UUID: " + entityUUID);
+-        log.log(Level.SEVERE, "Position: world: '" + (world == null ? "unknown world?" : world.getWorld().getName()) + "' at location (" + posX + ", " + posY + ", " + posZ + ")");
++        log.log(Level.SEVERE, "Position: world: '" + (world == null ? "unknown world?" : world.getTypeKey().toString()) + "' at location (" + posX + ", " + posY + ", " + posZ + ")"); // Canvas - show typekey instead of worldname
+         log.log(Level.SEVERE, "Velocity: " + (mot == null ? "unknown velocity" : mot.toString()) + " (in blocks per tick)");
+         log.log(Level.SEVERE, "Entity AABB: " + entity.getBoundingBox());
+         if (moveVec != null) {
+@@ -55,6 +57,31 @@ public final class WatchdogThread extends io.papermc.paper.util.TickThread // Pa
+             log.log(Level.SEVERE, "Start position: (" + moveStartX + ", " + moveStartY + ", " + moveStartZ + ")");
+             log.log(Level.SEVERE, "Move vector: " + moveVec.toString());
+         }
++        // Canvas - show thread report when dumping entities
++        if(((ServerLevel)entity.level()).currentTickingThread != null){ // Most likely actively ticking
++            log.log(Level.SEVERE, "------------------------------");
++            log.log(Level.SEVERE, "TickingThread found, dumping...");
++            log.log(Level.SEVERE, "------------------------------");
++            Thread thread = ((ServerLevel)entity.level()).currentTickingThread;
++            StackTraceElement[] elements = thread.getStackTrace();
++            log.log(Level.SEVERE, "Current Thread: " + thread.getName());
++            ThreadInfo threadInfo = ManagementFactory.getThreadMXBean().getThreadInfo(thread.getId(), Integer.MAX_VALUE);
++            log.log(Level.SEVERE, "\tPID: " + threadInfo.getThreadId()
++                + " | Suspended: " + threadInfo.isSuspended()
++                + " | Native: " + threadInfo.isInNative()
++                + " | State: " + threadInfo.getThreadState());
++            if (threadInfo.getLockedMonitors().length != 0){
++                log.log(Level.SEVERE, "\tThread is waiting on monitor(s):");
++                for (MonitorInfo monitor : threadInfo.getLockedMonitors()){
++                    log.log(Level.SEVERE, "\t\tLocked on:" + monitor.getLockedStackFrame());
++                }
++            }
++            log.log(Level.SEVERE, "\tStack:");
++            for (StackTraceElement stack : io.papermc.paper.util.StacktraceDeobfuscator.INSTANCE.deobfuscateStacktrace(thread.getStackTrace())){
++                log.log( Level.SEVERE, "\t\t" + stack );
++            }
++        }
++        // Canvas end
+     }
+ 
+     private void dumpTickingInfo() {
+@@ -192,7 +219,7 @@ public final class WatchdogThread extends io.papermc.paper.util.TickThread // Pa
+                 log.log( Level.SEVERE, "Server thread dump (Look for plugins here before reporting to Canvas!):" ); // Paper // Purpur // Canvas
+                 io.papermc.paper.chunk.system.scheduling.ChunkTaskScheduler.dumpAllChunkLoadInfo(isLongTimeout); // Paper - rewrite chunk system
+                 this.dumpTickingInfo(); // Paper - log detailed tick information
+-                WatchdogThread.dumpThread( ManagementFactory.getThreadMXBean().getThreadInfo( MinecraftServer.getServer().serverThread.getId(), Integer.MAX_VALUE ), log );
++                // WatchdogThread.dumpThread( ManagementFactory.getThreadMXBean().getThreadInfo( MinecraftServer.getServer().serverThread.getId(), Integer.MAX_VALUE ), log ); // Canvas - rewrite watchdog during entity dumps
+                 log.log( Level.SEVERE, "------------------------------" );
+                 //
+                 // Paper start - Only print full dump on long timeouts
+@@ -263,7 +290,7 @@ public final class WatchdogThread extends io.papermc.paper.util.TickThread // Pa
+             }
+         }
+         log.log( Level.SEVERE, "\tStack:" );
+-        //
++
+         for ( StackTraceElement stack : io.papermc.paper.util.StacktraceDeobfuscator.INSTANCE.deobfuscateStacktrace(thread.getStackTrace()) ) // Paper
+         {
+             log.log( Level.SEVERE, "\t\t" + stack );
