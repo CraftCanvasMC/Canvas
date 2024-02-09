@@ -94,6 +94,13 @@ paperweight {
             serverPatchDir = layout.projectDirectory.dir("patches/server")
             serverOutputDir = layout.projectDirectory.dir("Canvas-Server")
         }
+
+        patchTasks.register("generatedApi") {
+            isBareDirectory = true
+            upstreamDirPath = "paper-api-generator/generated"
+            patchDir = layout.projectDirectory.dir("patches/generated-api")
+            outputDir = layout.projectDirectory.dir("paper-api-generator/generated")
+        }
     }
 }
 
