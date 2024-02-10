@@ -17,7 +17,6 @@ plugins {
     `maven-publish`
     id("com.github.johnrengelman.shadow") version "7.1.2" apply false
     id("io.papermc.paperweight.patcher") version "1.5.11"
-    id("ignite.parent-conventions")
 }
 
 allprojects {
@@ -73,6 +72,10 @@ dependencies {
     remapper("net.fabricmc:tiny-remapper:0.8.10:fat")
     decompiler("net.minecraftforge:forgeflower:2.0.627.2")
     paperclip("io.papermc:paperclip:3.0.3")
+    // implementation(libs.build.nexus)
+    // // implementation(libs.build.shadow)
+    // implementation(libs.build.spotless)
+    compileOnly(files(libs.javaClass.superclass.protectionDomain.codeSource.location))
 }
 
 paperweight {
