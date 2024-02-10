@@ -1,5 +1,4 @@
 pluginManagement {
-  includeBuild("build-logic")
   repositories {
     maven(url = "https://repo.stellardrift.ca/repository/internal/") {
       name = "stellardriftReleases"

@@ -31,7 +31,6 @@ if (!file(".git").exists()) {
     error(errorText)
 }
 
-includeBuild("build-logic")
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 rootProject.name = "canvas"
