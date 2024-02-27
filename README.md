@@ -43,6 +43,10 @@
   <h2>License</h2>
   <p>Canvas is open-source software licensed under the GNU General Public License version 3 License</a>.</p>
 
+  <h2 align="left"><strong font-size="202px">Sponsored by BisectHosting!</strong></h2>
+    <a href="https://bisecthosting.com/DUERIS"><img src="https://i.ibb.co/Rg0qD2V/a03f0848-c1da-4967-9c40-f56cc36ef03c.webp" alt="a03f0848-c1da-4967-9c40-f56cc36ef03c" border="0"></a>
+    </div>
+
 <hr>
   <p align="center">
     <em>Canvas - Empowering the Impossibe</em>
