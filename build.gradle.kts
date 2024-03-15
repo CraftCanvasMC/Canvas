@@ -73,7 +73,7 @@ dependencies {
     decompiler("net.minecraftforge:forgeflower:2.0.627.2")
     paperclip("io.papermc:paperclip:3.0.3")
     // implementation(libs.build.nexus)
-    // // implementation(libs.build.shadow)
+    // implementation(libs.build.shadow)
     // implementation(libs.build.spotless)
     compileOnly(files(libs.javaClass.superclass.protectionDomain.codeSource.location))
 }
