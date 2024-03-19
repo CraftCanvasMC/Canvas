@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <jedimastertoothless@hotmail.com>
+Date: Mon, 18 Mar 2024 17:49:21 -0700
+Subject: [PATCH] Entity Goal Optimizations
+
+
+diff --git a/src/main/java/me/dueris/canvas/CanvasConfig.java b/src/main/java/me/dueris/canvas/CanvasConfig.java
+index e7b5fb72cc4a2105442322a850f1105a5f94873b..dec051ad7b11f2e131993a1f53f24846edc3a52e 100644
+--- a/src/main/java/me/dueris/canvas/CanvasConfig.java
++++ b/src/main/java/me/dueris/canvas/CanvasConfig.java
+@@ -180,6 +180,16 @@ public class CanvasConfig {
+     public static int asyncPathfindingKeepalive;
+     public static int maxTickerThreads = 3;
+     public static boolean autoStartSpark = true;
++    public static boolean playerProximityRateReducer = true;
++    public static int playerProximityRateReducerScanRate = 40;
++    public static int zombieVillageRaidChance = 33;
++    public static boolean optimizeZombieVillageRaids = true;
++    public static int playerProximityRateReducerCutoff = 12;
++    public static int mobEnemyTargetingReducedRatePercentChance = 10;
++    public static boolean optimizeMobWandering = true;
++    public static int mobWanderingPercentChance = 100;
++    public static int mobWanderingReducedRateMultiplier = 6;
++    public static int mobWanderingDelay = 20 * 5;
+ 
+     private static void mixin(){
+         disableMixin = getBoolean("mixin.disableMixins", disableMixin);
+@@ -207,6 +217,16 @@ public class CanvasConfig {
+             asyncPathfindingMaxThreads = 0;
+         else
+             Bukkit.getLogger().log(Level.INFO, "Using " + asyncPathfindingMaxThreads + " threads for Async Pathfinding");
++        zombieVillageRaidChance = getInt("optimizations.zombieVillageRaidChange", zombieVillageRaidChance);
++        optimizeZombieVillageRaids = getBoolean("optimizations.optimizeZombieVillageRaids", optimizeZombieVillageRaids);
++        playerProximityRateReducer = getBoolean("optimizations.entity.usePlayerProximityRateReducer", playerProximityRateReducer);
++        playerProximityRateReducerScanRate = getInt("optimizations.entity.playerProximityRateReducerScanRate", playerProximityRateReducerScanRate);
++        playerProximityRateReducerCutoff = getInt("optimizations.entity.playerProximityRateReducerCutoff", playerProximityRateReducerCutoff);
++        mobEnemyTargetingReducedRatePercentChance = getInt("optimizations.entity.mobEnemyTargetingReducedRatePercentChance", mobEnemyTargetingReducedRatePercentChance);
++        optimizeMobWandering = getBoolean("optimizations.optimizeMobWandering", optimizeMobWandering);
++        mobWanderingDelay = getInt("optimizations.mobWanderingDelay", mobWanderingDelay);
++        mobWanderingPercentChance = getInt("optimizations.mobWanderingPercentChance", mobWanderingPercentChance);
++        mobWanderingReducedRateMultiplier = getInt("optimizations.mobWanderingReducedRateMultiplier", mobWanderingReducedRateMultiplier);
+     }
+     private static void blocks(){
+         useCanvasBedSetDye = getBoolean("blocks.useCanvasBedSetDyeMethod", useCanvasBedSetDye);
+diff --git a/src/main/java/net/minecraft/Util.java b/src/main/java/net/minecraft/Util.java
+index b40864e41e1506884fdefefbf3cf4833a8f706c3..1d88a4939f07c54efe599e9f5f5581d17e72bdc1 100644
+--- a/src/main/java/net/minecraft/Util.java
++++ b/src/main/java/net/minecraft/Util.java
+@@ -532,6 +532,13 @@ public class Util {
+     public static <T> Optional<T> getRandomSafe(List<T> list, RandomSource random) {
+         return list.isEmpty() ? Optional.empty() : Optional.of(getRandom(list, random));
+     }
++    // Canvas start
++
++    public static boolean rollPercentChance(float perc){
++        if(perc == 0) return false;
++        return new java.util.Random().nextFloat() <= (perc/100f);
++    }
++    // Canvas end
+ 
+     private static BooleanSupplier createRenamer(final Path src, final Path dest) {
+         return new BooleanSupplier() {
+diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
+index 8b253cdb91389ee086a1b36b110b34bf98d31a22..ac89348da0251e825170c09f11c376130095b191 100644
+--- a/src/main/java/net/minecraft/world/entity/Entity.java
++++ b/src/main/java/net/minecraft/world/entity/Entity.java
+@@ -428,6 +428,11 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+     public int activatedPriority = gg.pufferfish.pufferfish.PufferfishConfig.maximumActivationPrio; // Pufferfish - DAB (golf score)
+     public final BlockPos.MutableBlockPos cachedBlockPos = new BlockPos.MutableBlockPos(); // Pufferfish - reduce entity allocations
+     public @Nullable Boolean immuneToFire = null; // Purpur - Fire immune API
++    // Canvas start - optimize entity goals
++    private long lastWanderTime;
++    private long lastPlayerScanTime;
++    private boolean playerInRange;
++    // Canvas end
+ 
+     public void setOrigin(@javax.annotation.Nonnull Location location) {
+         this.origin = location.toVector();
+@@ -688,6 +693,32 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+     public void setId(int id) {
+         this.id = id;
+     }
++    // Canvas start - optimize entity goals
++
++    public long getLastWanderTime(){
++        return this.lastWanderTime;
++    }
++
++    public void setLastWanderTime(long wanderTime){
++        this.lastWanderTime = wanderTime;
++    }
++
++    public long getLastPlayerScanTime(){
++        return this.lastPlayerScanTime;
++    }
++
++    public void setLastPlayerScanTime(long scanTime){
++        this.lastPlayerScanTime = scanTime;
++    }
++
++    public boolean isPlayerInRange(){
++        return this.playerInRange;
++    }
++
++    public void setPlayerInRange(boolean inRange){
++        this.playerInRange = inRange;
++    }
++    // Canvas end
+ 
+     public Set<String> getTags() {
+         return this.tags;
+diff --git a/src/main/java/net/minecraft/world/entity/ai/goal/MoveThroughVillageGoal.java b/src/main/java/net/minecraft/world/entity/ai/goal/MoveThroughVillageGoal.java
+index e7b5b08e0d97d8d1ae233a4ac6460cefb5022760..e029530a5b5ab74bb0d52db98a87e9f3b8e85c6f 100644
+--- a/src/main/java/net/minecraft/world/entity/ai/goal/MoveThroughVillageGoal.java
++++ b/src/main/java/net/minecraft/world/entity/ai/goal/MoveThroughVillageGoal.java
+@@ -43,9 +43,23 @@ public class MoveThroughVillageGoal extends Goal {
+             throw new IllegalArgumentException("Unsupported mob for MoveThroughVillageGoal");
+         }
+     }
++    // Canvas start
++
++    public boolean canVillageRaid(){
++        if(me.dueris.canvas.CanvasConfig.optimizeZombieVillageRaids){
++            return net.minecraft.Util.rollPercentChance(me.dueris.canvas.CanvasConfig.zombieVillageRaidChance);
++        }
++        return true;
++    }
++    // Canvas end
+ 
+     @Override
+     public boolean canUse() {
++        // Canvas start
++        if(!this.canVillageRaid()){
++            return false;
++        }
++        // Canvas end
+         if (!GoalUtils.hasGroundPathNavigation(this.mob)) {
+             return false;
+         } else {
+diff --git a/src/main/java/net/minecraft/world/entity/ai/goal/RandomStrollGoal.java b/src/main/java/net/minecraft/world/entity/ai/goal/RandomStrollGoal.java
+index 676e1580849e8942eb41c7a3a80f464138b22764..128d7423b4bca1e121e26f5fc968a4f82462e227 100644
+--- a/src/main/java/net/minecraft/world/entity/ai/goal/RandomStrollGoal.java
++++ b/src/main/java/net/minecraft/world/entity/ai/goal/RandomStrollGoal.java
+@@ -32,9 +32,55 @@ public class RandomStrollGoal extends Goal {
+         this.checkNoActionTime = canDespawn;
+         this.setFlags(EnumSet.of(Goal.Flag.MOVE));
+     }
++    // Canvas start - optimize entity goals
++
++    public boolean canWander(PathfinderMob mob){
++        if(me.dueris.canvas.CanvasConfig.optimizeMobWandering){
++            if(net.minecraft.Util.rollPercentChance(me.dueris.canvas.CanvasConfig.mobWanderingPercentChance)) return false;
++
++            boolean useReducedRates = false;
++            if(me.dueris.canvas.CanvasConfig.playerProximityRateReducer){
++                long lastPlayerScan = this.mob.getLastPlayerScanTime();
++                if(lastPlayerScan + me.dueris.canvas.CanvasConfig.playerProximityRateReducerScanRate > this.mob.level().getGameTime()){
++                    useReducedRates = this.mob.isPlayerInRange();
++                } else {
++                    boolean playerInRangeBool = false;
++                    for(net.minecraft.world.entity.player.Player player : this.mob.level().players()){
++                        if(player.distanceToSqr(this.mob) < me.dueris.canvas.CanvasConfig.playerProximityRateReducerCutoff * me.dueris.canvas.CanvasConfig.playerProximityRateReducerCutoff){
++                            playerInRangeBool = true;
++                            break;
++                        }
++                    }
++
++                    if(playerInRangeBool){
++                        this.mob.setPlayerInRange(playerInRangeBool);
++                        this.mob.setLastPlayerScanTime(this.mob.level().getGameTime());
++                        useReducedRates = !playerInRangeBool;
++                    }
++                }
++            }
++
++            float multiplier = useReducedRates ? me.dueris.canvas.CanvasConfig.mobWanderingReducedRateMultiplier : 1;
++            long lastWander = this.mob.getLastWanderTime();
++
++            if(lastWander + me.dueris.canvas.CanvasConfig.mobWanderingDelay * multiplier > this.mob.level().getGameTime()){
++                return false;
++            }else{
++                this.mob.setLastWanderTime(mob.level().getGameTime());
++            }
++            return true;
++        }
++        return true;
++    }
++    // Canvas end
+ 
+     @Override
+     public boolean canUse() {
++        // Canvas start - optimize entity goals
++        if(!this.canWander(this.mob)){
++            return false;
++        }
++        // Canvas end
+         if (this.mob.hasControllingPassenger()) {
+             return false;
+         } else {
+diff --git a/src/main/java/net/minecraft/world/entity/ai/goal/target/NearestAttackableTargetGoal.java b/src/main/java/net/minecraft/world/entity/ai/goal/target/NearestAttackableTargetGoal.java
+index 175ba1184fc997f562f0834b172e17dc1b5b3027..3e15931315cdaeb3ac4306c3845fab269e70a579 100644
+--- a/src/main/java/net/minecraft/world/entity/ai/goal/target/NearestAttackableTargetGoal.java
++++ b/src/main/java/net/minecraft/world/entity/ai/goal/target/NearestAttackableTargetGoal.java
+@@ -40,9 +40,45 @@ public class NearestAttackableTargetGoal<T extends LivingEntity> extends TargetG
+         this.targetConditions = TargetingConditions.forCombat().range(this.getFollowDistance()).selector(targetPredicate);
+         if (mob.level().paperConfig().entities.entitiesTargetWithFollowRange) this.targetConditions.useFollowRange(); // Paper - Fix MC-145656
+     }
++    // Canvas start
++
++    public boolean canTarget(Mob mob){
++        boolean useReducedRates = false;
++        if(me.dueris.canvas.CanvasConfig.playerProximityRateReducer){
++            long lastPlayerScan = this.mob.getLastPlayerScanTime();
++            if(lastPlayerScan + me.dueris.canvas.CanvasConfig.playerProximityRateReducerScanRate > this.mob.level().getGameTime()){
++                useReducedRates = this.mob.isPlayerInRange();
++            } else {
++                boolean playerInRangeBool = false;
++                for(net.minecraft.world.entity.player.Player player : this.mob.level().players()){
++                    if(player.distanceToSqr(this.mob) < me.dueris.canvas.CanvasConfig.playerProximityRateReducerCutoff * me.dueris.canvas.CanvasConfig.playerProximityRateReducerCutoff){
++                        playerInRangeBool = true;
++                        break;
++                    }
++                }
++
++                if(playerInRangeBool){
++                    this.mob.setPlayerInRange(playerInRangeBool);
++                    this.mob.setLastPlayerScanTime(this.mob.level().getGameTime());
++                    useReducedRates = !playerInRangeBool;
++                }
++            }
++        }
++
++        if(useReducedRates){
++            return net.minecraft.Util.rollPercentChance(me.dueris.canvas.CanvasConfig.mobEnemyTargetingReducedRatePercentChance);
++        }
++        return true;
++    }
++    // Canvas end
+ 
+     @Override
+     public boolean canUse() {
++        // Canvas start - optimize entity goals
++        if(!this.canTarget(this.mob)){
++            return false;
++        }
++        // Canvas end
+         if (this.randomInterval > 0 && this.mob.getRandom().nextInt(this.randomInterval) != 0) {
+             return false;
+         } else {
