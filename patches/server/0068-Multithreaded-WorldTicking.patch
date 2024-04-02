@@ -109,7 +109,7 @@ index 0000000000000000000000000000000000000000..65a1d87f48d8d9bdaea763bd14136591
 +    }
 +}
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f90263187e 100644
+index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78a3082ca7 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -39,13 +39,17 @@ import java.util.List;
@@ -190,7 +190,7 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f9
              final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
              final long dayTime = level.getDayTime();
              long worldTime = level.getGameTime();
-@@ -1776,56 +1796,71 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1776,56 +1796,77 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                      new ClientboundSetTimePacket(worldTime, playerTime, doDaylight);
                  entityplayer.connection.send(packet); // Add support for per player time
              }
@@ -224,8 +224,8 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f9
 +        // Canvas start - Multithreaded WorldTicking -- rewrite world ticker
 +        final Iterator iterator = this.getAllLevels().iterator();
 +        final AtomicBoolean finishedTicking = new AtomicBoolean(false);
-+        List<Runnable> worldTicks = new ArrayList();
-+        List<Runnable> chunkTicks = new ArrayList();
++        List<com.mojang.datafixers.util.Pair<Runnable, ServerLevel>> worldTicks = new ArrayList();
++        List<Runnable> midTickTasks = new ArrayList();
 +        while (iterator.hasNext() && !finishedTicking.get()){
              //this.profiler.push("tick"); // Purpur
 -
@@ -236,9 +236,8 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f9
 +                    break;
 +                }
 +
-+                Runnable tick = worldServer.tick(shouldKeepTicking, tickCount);
-+                chunkTicks.add(() -> {
-+                    worldServer.getChunkSource().tick(shouldKeepTicking, true);
++                com.mojang.datafixers.util.Pair<Runnable, ServerLevel> tick = worldServer.tick(shouldKeepTicking, tickCount);
++                midTickTasks.add(() -> {
 +                    executeMidTickTasks();
 +                });
                  //worldserver.timings.doTick.startTiming(); // Spigot // Purpur
@@ -253,13 +252,13 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f9
                  // Paper end
                  //worldserver.timings.doTick.stopTiming(); // Spigot // Purpur
 -            } catch (Throwable throwable) {
+-                CrashReport crashreport = CrashReport.forThrowable(throwable, "Exception ticking world");
 +                if(tick != null){
 +                    worldTicks.add(tick);
 +                }
-+                worldServer.explosionDensityCache.clear();
 +            } catch (Exception throwable) {
 +                if(throwable instanceof NoSuchElementException) return;
-                 CrashReport crashreport = CrashReport.forThrowable(throwable, "Exception ticking world");
++                CrashReport crashreport = CrashReport.forThrowable(throwable, "Exception preparing WorldTick!");
  
 -                worldserver.fillReportDetails(crashreport);
 +                worldServer.fillReportDetails(crashreport);
@@ -269,19 +268,27 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f9
              //this.profiler.pop(); // Purpur
              //this.profiler.pop(); // Purpur
 -            worldserver.explosionDensityCache.clear(); // Paper - Optimize explosions
-+            worldServer.explosionDensityCache.clear(); // Paper - Optimize explosions
++            // worldServer.explosionDensityCache.clear(); // Paper - Optimize explosions // Canvas - move to ServerLevel for MTWT
          }
          this.isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
  
 +        List<CompletableFuture<Void>> futureTicks = new ArrayList();
-+        for(Runnable tick : worldTicks){
-+            futureTicks.add(CompletableFuture.runAsync(tick, this.worldTickerPool));
++        for(com.mojang.datafixers.util.Pair<Runnable, ServerLevel> tick : worldTicks){
++            futureTicks.add(CompletableFuture.runAsync(() -> {
++                try {
++                    tick.getFirst().run();
++                } catch (Exception throwable) {
++                    CrashReport report = CrashReport.forThrowable(throwable, "Exception ticking world!");
++                    tick.getSecond().fillReportDetails(report);
++                    throw new ReportedException(report);
++                }
++            }, this.worldTickerPool));
 +        }
 +        CompletableFuture<Void> allTicks = CompletableFuture.allOf(futureTicks.toArray(new CompletableFuture[0]));
 +        try {
 +            allTicks.get();
-+            for(Runnable chunkTick : chunkTicks){
-+                chunkTick.run();
++            for(Runnable midTick : midTickTasks){
++                midTick.run();
 +            }
 +        } catch (InterruptedException | ExecutionException e) {
 +            e.printStackTrace();
@@ -290,7 +297,7 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f9
          //this.profiler.popPush("connection"); // Purpur
          // MinecraftTimings.connectionTimer.startTiming(); // Spigot // Paper // Purpur
          this.getConnection().tick();
-@@ -1847,10 +1882,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1847,10 +1888,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          //MinecraftTimings.tickablesTimer.stopTiming(); // Spigot // Paper // Purpur
  
          //this.profiler.popPush("send chunks"); // Purpur
@@ -305,7 +312,7 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..6ea628bb5bd84b52360856fb590319f9
              entityplayer.connection.chunkSender.sendNextChunks(entityplayer);
              entityplayer.connection.resumeFlushing();
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 8c1fa761e30f723683f7509053fa8d4c4a7f49c0..92dec470bc0bf79158688ba276f8dec553722317 100644
+index 8c1fa761e30f723683f7509053fa8d4c4a7f49c0..eea94fe0fd43b9485cf8b06d9a9d88ce4ba02261 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -30,6 +30,7 @@ import java.util.Objects;
@@ -348,9 +355,9 @@ index 8c1fa761e30f723683f7509053fa8d4c4a7f49c0..92dec470bc0bf79158688ba276f8dec5
 -        //ProfilerFiller gameprofilerfiller = this.getProfiler(); // Purpur
 -
 -        this.handlingTick = true;
-+    public Runnable tick(BooleanSupplier shouldKeepTicking, int tickCount) { // Canvas - Multithreaded WorldTicking
++    public Pair<Runnable, ServerLevel> tick(BooleanSupplier shouldKeepTicking, int tickCount) { // Canvas - Multithreaded WorldTicking
 +        // Canvas start - Multithreaded WorldTicking
-+        return () -> {
++        return new Pair<Runnable, ServerLevel>(() -> {
 +            this.handlingTick = true;
 +            if(this.currentTickingThread != Thread.currentThread()) {this.currentTickingThread = Thread.currentThread();}
 +            //ProfilerFiller gameprofilerfiller = this.getProfiler(); // Purpur
@@ -410,7 +417,7 @@ index 8c1fa761e30f723683f7509053fa8d4c4a7f49c0..92dec470bc0bf79158688ba276f8dec5
                          } catch (Throwable throwable) {
                              if (throwable instanceof ThreadDeath) throw throwable; // Paper
                              // Paper start - Prevent tile entity and entity crashes
-@@ -962,6 +999,12 @@ public class ServerLevel extends Level implements WorldGenLevel {
+@@ -962,6 +999,14 @@ public class ServerLevel extends Level implements WorldGenLevel {
  
          //gameprofilerfiller.push("entityManagement"); // Purpur
          //this.entityManager.tick(); // Paper - rewrite chunk system
@@ -418,12 +425,14 @@ index 8c1fa761e30f723683f7509053fa8d4c4a7f49c0..92dec470bc0bf79158688ba276f8dec5
 +        for (final io.papermc.paper.chunk.SingleThreadChunkRegionManager regionManager : this.getChunkSource().chunkMap.regionManagers) {
 +            regionManager.recalculateRegions();
 +        }
++        this.getChunkSource().tick(shouldKeepTicking, true);
++        this.explosionDensityCache.clear();
 +        // Canvas end
-+    }; // Canvas - Multithreaded WorldTicking
++    }, this); // Canvas - Multithreaded WorldTicking
      }
  
      @Override
-@@ -1442,7 +1485,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
+@@ -1442,7 +1487,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
          if (fluid1.is(fluid)) {
              fluid1.tick(this, pos);
          }
@@ -432,7 +441,7 @@ index 8c1fa761e30f723683f7509053fa8d4c4a7f49c0..92dec470bc0bf79158688ba276f8dec5
  
      }
  
-@@ -1452,7 +1495,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
+@@ -1452,7 +1497,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
          if (iblockdata.is(block)) {
              iblockdata.tick(this, pos, this.random);
          }
@@ -480,7 +489,7 @@ index b6e98aaebe57453b8eceaa633a989aa24409830f..d97130f8c47b2e9784c4afe73bf40cd8
              if (!bl) {
                  this.stackTraceLock.unlock();
 diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
-index 0ce4d45fbc91505f703d10b5234bd921c1489dab..8b253cdb91389ee086a1b36b110b34bf98d31a22 100644
+index 135c2e3fc51f6b953868801c5fa721dd0473fad9..9ad66751c0802a5e43d318dece1a04bb40e4a8b5 100644
 --- a/src/main/java/net/minecraft/world/entity/Entity.java
 +++ b/src/main/java/net/minecraft/world/entity/Entity.java
 @@ -3900,7 +3900,7 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
