@@ -135,11 +135,11 @@ public final class EmberClassLoader extends ClassLoader {
       Class<?> target = this.findLoadedClass(canonicalName);
       if(target == null) {
         if(canonicalName.startsWith("java.")) {
-          Logger.trace("Loading parent class: {}", canonicalName);
+          // Logger.trace("Loading parent class: {}", canonicalName);
           target = this.parent.loadClass(canonicalName);
-          Logger.trace("Loaded parent class: {}", canonicalName);
+          // Logger.trace("Loaded parent class: {}", canonicalName);
         } else {
-          Logger.trace("Attempting to load class: {}", canonicalName);
+          // Logger.trace("Attempting to load class: {}", canonicalName);
           target = this.findClass(canonicalName, TransformPhase.INITIALIZE);
           if(target == null) {
             Logger.trace("Unable to locate class: {}", canonicalName);
@@ -147,15 +147,15 @@ public final class EmberClassLoader extends ClassLoader {
             final URL url = this.parent.getResource(internalName);
 
             if(url != null) {
-              Logger.trace("Attempting to load parent class: {}", canonicalName);
+              // Logger.trace("Attempting to load parent class: {}", canonicalName);
               target = this.parent.loadClass(canonicalName);
-              Logger.trace("Loaded parent class: {}", canonicalName);
+              // Logger.trace("Loaded parent class: {}", canonicalName);
             } else {
               Logger.trace("Unable to locate parent resource: {}", canonicalName);
               throw new ClassNotFoundException("Unable to locate parent resource: " + canonicalName);
             }
           } else {
-            Logger.trace("Loaded transformed class: {}", canonicalName);
+            // Logger.trace("Loaded transformed class: {}", canonicalName);
           }
         }
       }
