@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <jedimastertoothless@hotmail.com>
+Date: Sat, 6 Apr 2024 17:26:48 -0700
+Subject: [PATCH] Threaded ConnectionHandlers
+
+
+diff --git a/src/main/java/me/dueris/canvas/CanvasConfig.java b/src/main/java/me/dueris/canvas/CanvasConfig.java
+index d058318adb9f7e219ae7d52b325fc587872de3a9..d39c17d027030425df58b48e884074309280d50d 100644
+--- a/src/main/java/me/dueris/canvas/CanvasConfig.java
++++ b/src/main/java/me/dueris/canvas/CanvasConfig.java
+@@ -198,6 +198,7 @@ public class CanvasConfig {
+     public static boolean lavaCatchesBlocksOnFire = true;
+     public static boolean disableFootsteps = false;
+     public static boolean disableRaidsFromSpawnerRaiders = false;
++    public static int maxConnectionThreads = 5;
+ 
+     private static void logger(){
+         obfuscateIps = getBoolean("logger.obfuscateIps", obfuscateIps);
+@@ -233,7 +234,8 @@ public class CanvasConfig {
+         mobWanderingDelay = getInt("optimizations.mobWanderingDelay", mobWanderingDelay);
+         mobWanderingPercentChance = getInt("optimizations.mobWanderingPercentChance", mobWanderingPercentChance);
+         mobWanderingReducedRateMultiplier = getInt("optimizations.mobWanderingReducedRateMultiplier", mobWanderingReducedRateMultiplier);
+-        threadripper = getBoolean("optimizations.threadripper", threadripper);
++        threadripper = getBoolean("optimizations.threadripper.enable", threadripper);
++        maxConnectionThreads = getInt("optimizations.threadripper.maxConnectionThreads", maxConnectionThreads);
+         tntLoadChunks = getBoolean("optimizations.tntLoadChunks", tntLoadChunks);
+         enderpearlsLoadChunks = getBoolean("optimizations.enderpearlsLoadChunks", enderpearlsLoadChunks);
+         fallingBlocksLoadChunks = getBoolean("optimizations.fallingBlocksLoadChunks", fallingBlocksLoadChunks);
+diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
+index 63b8421d6e4fc1cadb24019e2b60c2f03d34b021..5a9161c0ac4808762f83d160e705f75070b6bb25 100644
+--- a/src/main/java/net/minecraft/server/level/ServerLevel.java
++++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
+@@ -635,6 +635,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
+             double nearestDist = Double.MAX_VALUE;
+ 
+             for (ServerPlayer player : this.players()) {
++                if(player == null || player.connection.isDisconnected()) continue;
+                 double dist = player.distanceToSqr(x, y, z);
+                 if (dist >= nearestDist) {
+                     continue;
+diff --git a/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+index a55c8e460a2b93b209a511afbdaa8ae54f75284a..daa752c2eec6fbd146596de6f4266e68d466a6d3 100644
+--- a/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -308,6 +308,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+ 
+     public void send(Packet<?> packet, @Nullable PacketSendListener callbacks) {
+         // CraftBukkit start
++        ServerConnectionListener.connectionExecutor.submit(() -> { // Canvas - Threaded ConnectionHandler
+         if (packet == null || this.processedDisconnect) { // Spigot
+             return;
+         } else if (packet instanceof ClientboundSetDefaultSpawnPositionPacket) {
+@@ -328,6 +329,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+             });
+             throw new ReportedException(crashreport);
+         }
++        }); // Canvas
+     }
+ 
+     // CraftBukkit start
+diff --git a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java b/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
+index 586521a2cbb1d4dcfb912029f65e4363ec7674a7..b5f168c01daafeefb2c752f9eb7e46eeba121165 100644
+--- a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
++++ b/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
+@@ -64,6 +64,7 @@ public class ServerConnectionListener {
+     // Paper start - prevent blocking on adding a new connection while the server is ticking
+     private final java.util.Queue<Connection> pending = new java.util.concurrent.ConcurrentLinkedQueue<>();
+     private static final boolean disableFlushConsolidation = Boolean.getBoolean("Paper.disableFlushConsolidate"); // Paper - Optimize network
++    public static java.util.concurrent.ExecutorService connectionExecutor = java.util.concurrent.Executors.newFixedThreadPool(me.dueris.canvas.CanvasConfig.maxConnectionThreads, new me.dueris.canvas.thread.NamedTickThreadFactory("ServerConnectionListener", 5)); // Canvas - Threaded ConnectionHandler
+     private final void addPending() {
+         Connection connection;
+         while ((connection = pending.poll()) != null) {
+@@ -224,8 +225,15 @@ public class ServerConnectionListener {
+             }
+             // Spigot End
+             Iterator iterator = this.connections.iterator();
++            List<java.util.concurrent.CompletableFuture> futures = new java.util.ArrayList<>(); // Canvas - Threaded ConnectionHandler
++            java.util.concurrent.atomic.AtomicBoolean stopLoop = new java.util.concurrent.atomic.AtomicBoolean(false);
+ 
+             while (iterator.hasNext()) {
++                // Canvas start - Threaded ConnectionHandler
++                if(stopLoop.get()) break;
++                java.util.concurrent.CompletableFuture packetFuture = java.util.concurrent.CompletableFuture.runAsync(() -> {
++                try {
++                // Canvas end
+                 Connection networkmanager = (Connection) iterator.next();
+ 
+                 if (!networkmanager.isConnecting()) {
+@@ -248,13 +256,31 @@ public class ServerConnectionListener {
+                     } else {
+                         // Spigot Start
+                         // Fix a race condition where a NetworkManager could be unregistered just before connection.
+-                        if (networkmanager.preparing) continue;
++                        if (networkmanager.preparing) return; // Canvas
+                         // Spigot End
+                         iterator.remove();
+                         networkmanager.handleDisconnection();
+                     }
+                 }
++            // Canvas start
++                } catch (Throwable throwable) {
++                    if(!(throwable instanceof java.util.NoSuchElementException)) {
++                        throw new ReportedException(CrashReport.forThrowable(throwable, "Ticking connection"));
++                    }
++                    stopLoop.set(true);
++                }
++            }, connectionExecutor);
++                futures.add(packetFuture);
++            }
++
++            java.util.concurrent.CompletableFuture finalPacketFuture = java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[futures.size()]));
++            try {
++                finalPacketFuture.get();
++            } catch (Exception e) {
++                MinecraftServer.LOGGER.error("Error while ticking connections", e);
++                e.printStackTrace();
+             }
++            // Canvas end
+ 
+         }
+     }
+diff --git a/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java b/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java
+index daa03360dd7044f10b20f36023b305dc7e0bb7df..a6d9b5092f4ba53d9f17c4e4a0d6ee68382546e6 100644
+--- a/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java
++++ b/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java
+@@ -42,7 +42,8 @@ public class LegacyRandomSource implements BitRandomSource {
+         long l = this.seed.get();
+         long m = l * 25214903917L + 11L & 281474976710655L;
+         if (!this.seed.compareAndSet(l, m)) {
+-            throw ThreadingDetector.makeThreadingException("LegacyRandomSource", (Thread)null);
++            if(!(Thread.currentThread() instanceof io.papermc.paper.util.TickThread)) throw ThreadingDetector.makeThreadingException("LegacyRandomSource", (Thread)null);// Canvas
++            else return (int)(m >> 48 - bits);
+         } else {
+             return (int)(m >> 48 - bits);
+         }
