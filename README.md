@@ -20,11 +20,24 @@
 
   <h2>Features</h2>
   <ul>
-    <li>- Multithreaded world ticking</li>
-    <li>- Builtin Mixin</li>
-    <li>- Enhanced APIs</li>
-    <li>- New insane APIs</li>
-    <li>Optimization descriptions can be found in the OPTIMIZATIONS.md file for more info</li>
+    <li>Multithreaded world ticking</li>
+    <ul>
+        <li>In VanillaMC, it uses a "Ping-Pong" method for ticking worlds, aka ticking 1 world at a time. This can cause a ton of performance issues for servers with multiple worlds, or busy ones. Canvas now makes it so that it ticks in "batches" on different threads to tick them all at once to save on tick times, submitting them like "worlds 1-3 tick, then worlds 4-6, etc". Theres even a config for how many threads Canvas will use, which also changes how many worlds are allowed to tick at once(default 3).</li>
+    </ul>
+    <li>Builtin Mixin</li>
+    <li>New and Enhanced APIs</li>
+    <li>Entity Goal/AI Optimizations</li>
+    <li>Threaded ConnectionHandlers(Multithreaded PacketHandlers)</li>
+    <li>Experience Orb Optimizations</li>
+    <ul>
+        <li>Properly integrates XP Orb merging to save on the amount of entities being ticked</li>
+        <li>Configurable to make players instantly absorb XP orbs</li>
+    </ul>
+    <li>Optimize Entity Pathfinding</li>
+    <ul>
+        <li>Reduces the amount of times the Pathfinder gets ticked for an entity when bunched up with multiple entities in the same space. This should improve performance a ton with giant mob-farms or XP farms, or general senerios where lots of mobs are bunched together</li>
+    </ul>
+
   </ul>
 
   <h2>Resources</h2>
