@@ -109,7 +109,7 @@ index 0000000000000000000000000000000000000000..65a1d87f48d8d9bdaea763bd14136591
 +    }
 +}
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78a3082ca7 100644
+index ddaf5a74f262fd781fe50548144c748fe0179677..53d9bd21e2c2fe3e12c1262ee60b36ad78f67465 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -39,13 +39,17 @@ import java.util.List;
@@ -181,7 +181,15 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78
          try {
              net.minecrell.terminalconsole.TerminalConsoleAppender.close(); // Paper - Use TerminalConsoleAppender
          } catch (Exception e) {
-@@ -1761,7 +1781,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1481,6 +1501,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public final void executeMidTickTasks() {
++        if (true) return; // Canvas - disable mid tick tasks
+         org.spigotmc.AsyncCatcher.catchOp("mid tick chunk task execution");
+         long startTime = System.nanoTime();
+         if ((startTime - lastMidTickExecute) <= CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME || (startTime - lastMidTickExecuteFailure) <= TASK_EXECUTION_FAILURE_BACKOFF) {
+@@ -1761,7 +1782,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          //MinecraftTimings.timeUpdateTimer.startTiming(); // Spigot // Paper // Purpur
          // Send time updates to everyone, it will get the right time from the world the player is in.
          // Paper start - Perf: Optimize time updates
@@ -190,7 +198,7 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78
              final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
              final long dayTime = level.getDayTime();
              long worldTime = level.getGameTime();
-@@ -1776,56 +1796,77 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1776,56 +1797,71 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                      new ClientboundSetTimePacket(worldTime, playerTime, doDaylight);
                  entityplayer.connection.send(packet); // Add support for per player time
              }
@@ -225,7 +233,6 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78
 +        final Iterator iterator = this.getAllLevels().iterator();
 +        final AtomicBoolean finishedTicking = new AtomicBoolean(false);
 +        List<com.mojang.datafixers.util.Pair<Runnable, ServerLevel>> worldTicks = new ArrayList();
-+        List<Runnable> midTickTasks = new ArrayList();
 +        while (iterator.hasNext() && !finishedTicking.get()){
              //this.profiler.push("tick"); // Purpur
 -
@@ -237,9 +244,6 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78
 +                }
 +
 +                com.mojang.datafixers.util.Pair<Runnable, ServerLevel> tick = worldServer.tick(shouldKeepTicking, tickCount);
-+                midTickTasks.add(() -> {
-+                    executeMidTickTasks();
-+                });
                  //worldserver.timings.doTick.startTiming(); // Spigot // Purpur
 -                worldserver.tick(shouldKeepTicking);
 +                //worldserver.tick(shouldKeepTicking); // Canvas
@@ -284,12 +288,10 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78
 +                }
 +            }, this.worldTickerPool));
 +        }
++
 +        CompletableFuture<Void> allTicks = CompletableFuture.allOf(futureTicks.toArray(new CompletableFuture[0]));
 +        try {
 +            allTicks.get();
-+            for(Runnable midTick : midTickTasks){
-+                midTick.run();
-+            }
 +        } catch (InterruptedException | ExecutionException e) {
 +            e.printStackTrace();
 +        }
@@ -297,7 +299,7 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78
          //this.profiler.popPush("connection"); // Purpur
          // MinecraftTimings.connectionTimer.startTiming(); // Spigot // Paper // Purpur
          this.getConnection().tick();
-@@ -1847,10 +1888,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1847,10 +1883,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          //MinecraftTimings.tickablesTimer.stopTiming(); // Spigot // Paper // Purpur
  
          //this.profiler.popPush("send chunks"); // Purpur
@@ -311,8 +313,21 @@ index ddaf5a74f262fd781fe50548144c748fe0179677..b64588486af00a8fe0216286a781ee78
  
              entityplayer.connection.chunkSender.sendNextChunks(entityplayer);
              entityplayer.connection.resumeFlushing();
+diff --git a/src/main/java/net/minecraft/server/level/ChunkMap.java b/src/main/java/net/minecraft/server/level/ChunkMap.java
+index bb412ca874b85d777c0e3565fcefcee15b23182b..87e3bc069ebae922b4b41338b72043ccffe03cc6 100644
+--- a/src/main/java/net/minecraft/server/level/ChunkMap.java
++++ b/src/main/java/net/minecraft/server/level/ChunkMap.java
+@@ -1140,7 +1140,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+     }
+ 
+     // Paper start - optimised tracker
+-    private final void processTrackQueue() {
++    private synchronized final void processTrackQueue() {
+         //this.level.timings.tracker1.startTiming(); // Purpur
+         try {
+             for (TrackedEntity tracker : this.entityMap.values()) {
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 8c1fa761e30f723683f7509053fa8d4c4a7f49c0..eea94fe0fd43b9485cf8b06d9a9d88ce4ba02261 100644
+index 88f471f28bfea473fdbc39ad29ba3365612ac08e..4f78e4dc7856c5a0bae547b5ce0f36e5be02e6e5 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -30,6 +30,7 @@ import java.util.Objects;
@@ -502,7 +517,7 @@ index 135c2e3fc51f6b953868801c5fa721dd0473fad9..9ad66751c0802a5e43d318dece1a04bb
                  destination.getChunkAt(destination.getSharedSpawnPos()); // Paper - Ensure spawn chunk is always loaded before calculating Y coordinate
                  blockposition1 = destination.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, destination.getSharedSpawnPos());
 diff --git a/src/main/java/net/minecraft/world/level/Level.java b/src/main/java/net/minecraft/world/level/Level.java
-index e033e7884366c20bc3a1935ff92e2f3dea87bae5..ee956b83e08ec3afe92a5455de3c6c99f2573f4e 100644
+index 43bc45fd6e75c23ae4c720fbd73b338bce64058d..68b75e1291c5877852a72074e982dd8dd56746f6 100644
 --- a/src/main/java/net/minecraft/world/level/Level.java
 +++ b/src/main/java/net/minecraft/world/level/Level.java
 @@ -1347,7 +1347,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
