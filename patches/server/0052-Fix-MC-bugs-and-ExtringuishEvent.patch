@@ -1,0 +1,209 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris MC <purplewolf.mc1@gmail.com>
+Date: Tue, 21 Nov 2023 02:27:58 +0000
+Subject: [PATCH] Fix MC bugs and ExtringuishEvent
+
+
+diff --git a/src/main/java/net/minecraft/server/level/ServerPlayer.java b/src/main/java/net/minecraft/server/level/ServerPlayer.java
+index e460f60035e572e6c6ed253d9e0a376677dfe599..b946c09e1c26a93d916278dc4680b00d5e8c9f09 100644
+--- a/src/main/java/net/minecraft/server/level/ServerPlayer.java
++++ b/src/main/java/net/minecraft/server/level/ServerPlayer.java
+@@ -1073,6 +1073,11 @@ public class ServerPlayer extends Player {
+         this.awardStat(Stats.DEATHS);
+         this.resetStat(Stats.CUSTOM.get(Stats.TIME_SINCE_DEATH));
+         this.resetStat(Stats.CUSTOM.get(Stats.TIME_SINCE_REST));
++         // Canvas start
++        if (this.getRemainingFireTicks() > 0) {
++            new me.dueris.canvas.event.entity.EntityExtinguishEvent(this.getBukkitEntity(), me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.DEATH).callEvent();
++        }
++        // Canvas end
+         this.clearFire();
+         this.setTicksFrozen(0);
+         this.setSharedFlagOnFire(false);
+diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
+index 6303f9a741b41316045f7b00c63a0465dfb9b2dd..33e3ead28e6ff79f848ccc262d2c5689f9d171ec 100644
+--- a/src/main/java/net/minecraft/world/entity/Entity.java
++++ b/src/main/java/net/minecraft/world/entity/Entity.java
+@@ -899,7 +899,13 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+                     this.hurt(this.damageSources().onFire(), 1.0F);
+                 }
+ 
+-                this.setRemainingFireTicks(this.remainingFireTicks - 1);
++                // Canvas start
++                if (getRemainingFireTicks() - 1 == 0 && !new me.dueris.canvas.event.entity.EntityExtinguishEvent(this.getBukkitEntity(), me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.TIME).callEvent()) {
++                    setRemainingFireTicks(20);
++                } else {
++                    this.setRemainingFireTicks(this.remainingFireTicks - 1);
++                }
++                // Canvas end
+             }
+ 
+             if (this.getTicksFrozen() > 0 && !freezeLocked) { // Paper - Freeze Tick Lock API
+@@ -1328,7 +1334,11 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+                 }
+ 
+                 if (this.isOnFire() && (this.isInPowderSnow || this.isInWaterRainOrBubble())) {
+-                    this.setRemainingFireTicks(-this.getFireImmuneTicks());
++                    // Canvas start
++                    if (this.callExtinguishEvent(iblockdata)){
++                        this.setRemainingFireTicks(-this.getFireImmuneTicks());
++                    }
++                    // Canvas end
+                 }
+ 
+                 //this.level().getProfiler().pop(); // Purpur
+@@ -1385,7 +1395,7 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+         }
+     }
+ 
+-    protected void playEntityOnFireExtinguishedSound() {
++    public void playEntityOnFireExtinguishedSound() { // Canvas - protected -> public
+         this.playSound(SoundEvents.GENERIC_EXTINGUISH_FIRE, 0.7F, 1.6F + (this.random.nextFloat() - this.random.nextFloat()) * 0.4F);
+     }
+ 
+@@ -1921,12 +1931,41 @@ public abstract class Entity implements Nameable, EntityAccess, CommandSource, S
+ 
+             this.resetFallDistance();
+             this.wasTouchingWater = true;
+-            this.clearFire();
++            // Canvas start
++            if (this.getRemainingFireTicks() <= 0 || new me.dueris.canvas.event.entity.EntityExtinguishEvent(this.getBukkitEntity(), me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.WATER).callEvent()) {
++                if (this.getRemainingFireTicks() > 0 && this instanceof net.minecraft.world.entity.projectile.AbstractArrow){
++                    this.playEntityOnFireExtinguishedSound();
++                }
++                this.clearFire();
++            }
++            // Canvas end
+         } else {
+             this.wasTouchingWater = false;
+         }
+ 
+     }
++    // Canvas start
++
++    public boolean callExtinguishEvent(@Nullable BlockState state) {
++        final me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause cause;
++        final boolean onFire = getRemainingFireTicks() > 0;
++        if (!onFire) {
++            cause = null;
++        } else if (this.isInPowderSnow || (state != null && state.is(Blocks.POWDER_SNOW))) {
++            cause = me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.POWDER_SNOW;
++        } else if (this.isInWater()) {
++            cause = me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.WATER;
++        } else if (this.isInRain()) {
++            cause = me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.RAIN;
++       } else if (this.isInBubbleColumn()) {
++            cause = me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.BUBBLE_COLUMN;
++        } else {
++            cause = null;
++        }
++
++        return cause == null || new me.dueris.canvas.event.entity.EntityExtinguishEvent(this.getBukkitEntity(), cause).callEvent();
++    }
++    // Canvas end
+ 
+     private void updateFluidOnEyes() {
+         this.wasEyeInWater = this.isEyeInFluid(FluidTags.WATER);
+diff --git a/src/main/java/net/minecraft/world/entity/LivingEntity.java b/src/main/java/net/minecraft/world/entity/LivingEntity.java
+index fb547c2d5743194fe51c823974fb0132bc449442..1e4f81bec32224d66ae3853b6a082b6d45ae86dc 100644
+--- a/src/main/java/net/minecraft/world/entity/LivingEntity.java
++++ b/src/main/java/net/minecraft/world/entity/LivingEntity.java
+@@ -474,7 +474,11 @@ public abstract class LivingEntity extends Entity implements Attackable {
+         }
+ 
+         if (this.isAlive() && (this.isInWaterRainOrBubble() || this.isInPowderSnow)) {
+-            this.extinguishFire();
++            // Canvas start
++            if (callExtinguishEvent(null)){
++                this.extinguishFire();
++            }
++            // Canvas end
+         }
+ 
+         if (this.hurtTime > 0) {
+@@ -1825,6 +1829,11 @@ public abstract class LivingEntity extends Entity implements Attackable {
+                         entity.killedEntity((ServerLevel) this.level(), this);
+                     }
+                     this.gameEvent(GameEvent.ENTITY_DIE);
++                    // Canvas start
++                    if (this.getRemainingFireTicks() > 0){
++                        new me.dueris.canvas.event.entity.EntityExtinguishEvent(this.getBukkitEntity(), me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.DEATH).callEvent();
++                    }
++                    // Canvas end
+                 } else {
+                     this.dead = false;
+                     this.setHealth((float) deathEvent.getReviveHealth());
+diff --git a/src/main/java/net/minecraft/world/entity/projectile/AbstractArrow.java b/src/main/java/net/minecraft/world/entity/projectile/AbstractArrow.java
+index 2aea97fba2b37a58a67cc5e41eba9796fcda888d..1cb747b479fd5a30da7f4ecb4c9a8b6f4076c3c8 100644
+--- a/src/main/java/net/minecraft/world/entity/projectile/AbstractArrow.java
++++ b/src/main/java/net/minecraft/world/entity/projectile/AbstractArrow.java
+@@ -197,7 +197,11 @@ public abstract class AbstractArrow extends Projectile {
+         }
+ 
+         if (this.isInWaterOrRain() || iblockdata.is(Blocks.POWDER_SNOW)) {
+-            this.clearFire();
++            // Canvas start
++            if (this.callExtinguishEvent(iblockdata)){
++                this.clearFire();
++            }
++            // Canvas end
+         }
+ 
+         if (this.inGround && !flag) {
+diff --git a/src/main/java/net/minecraft/world/entity/projectile/ThrownPotion.java b/src/main/java/net/minecraft/world/entity/projectile/ThrownPotion.java
+index a07634cf0dfc976d3dbe044c203e3016147d0666..439eacc9d56ba3c4e3c8ffbe12a03e944bab9828 100644
+--- a/src/main/java/net/minecraft/world/entity/projectile/ThrownPotion.java
++++ b/src/main/java/net/minecraft/world/entity/projectile/ThrownPotion.java
+@@ -168,7 +168,11 @@ public class ThrownPotion extends ThrowableItemProjectile implements ItemSupplie
+                 ((CraftLivingEntity) affectedEntity).getHandle().hurt(this.damageSources().indirectMagic(this, this.getOwner()), 1.0F);
+             }
+             for (LivingEntity toExtinguish : event.getToExtinguish()) {
+-                ((CraftLivingEntity) toExtinguish).getHandle().extinguishFire();
++                // Canvas start
++                if (new me.dueris.canvas.event.entity.EntityExtinguishEvent(toExtinguish, me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.WATER_BOTTLE).callEvent()){
++                    ((CraftLivingEntity) toExtinguish).getHandle().extinguishFire();
++                }
++                // Canvas end
+             }
+             for (LivingEntity toRehydrate : event.getToRehydrate()) {
+                 if (((CraftLivingEntity) toRehydrate).getHandle() instanceof Axolotl axolotl) {
+diff --git a/src/main/java/net/minecraft/world/level/block/LayeredCauldronBlock.java b/src/main/java/net/minecraft/world/level/block/LayeredCauldronBlock.java
+index a4857675772d4fe849ba85fc21a369decca42fc0..3a4b155041f61f16c9dcdf2fb69d318c502fc74d 100644
+--- a/src/main/java/net/minecraft/world/level/block/LayeredCauldronBlock.java
++++ b/src/main/java/net/minecraft/world/level/block/LayeredCauldronBlock.java
+@@ -73,8 +73,11 @@ public class LayeredCauldronBlock extends AbstractCauldronBlock {
+                     return;
+                 }
+             }
+-            entity.clearFire();
+-            // CraftBukkit end
++            // Canvas start
++            if (new me.dueris.canvas.event.entity.EntityExtinguishEvent(entity.getBukkitEntity(), me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.CAULDRON).callEvent()){
++                entity.clearFire();
++            }
++            // CraftBukkit end -/- Canvas end
+         }
+ 
+     }
+diff --git a/src/main/java/net/minecraft/world/level/block/PowderSnowBlock.java b/src/main/java/net/minecraft/world/level/block/PowderSnowBlock.java
+index 2dbf71e421156093c8bc387941eae991f5e6c957..81fbbf119edebd39c30842b98a77a78710b26013 100644
+--- a/src/main/java/net/minecraft/world/level/block/PowderSnowBlock.java
++++ b/src/main/java/net/minecraft/world/level/block/PowderSnowBlock.java
+@@ -83,7 +83,16 @@ public class PowderSnowBlock extends Block implements BucketPickup {
+                 if (!org.bukkit.craftbukkit.event.CraftEventFactory.callEntityChangeBlockEvent(entity, pos, Blocks.AIR.defaultBlockState(), !((world.purpurConfig.powderSnowBypassMobGriefing || world.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) || entity instanceof Player))) {
+                     return;
+                 }
+-                // CraftBukkit end
++                // CraftBukkit end -/- Canvas start
++                if (entity instanceof net.minecraft.world.entity.projectile.AbstractArrow) {
++                    if (!new me.dueris.canvas.event.entity.EntityExtinguishEvent(entity.getBukkitEntity(), me.dueris.canvas.event.entity.EntityExtinguishEvent.Cause.POWDER_SNOW).callEvent()) {
++                        return;
++                    }
++
++                    entity.playEntityOnFireExtinguishedSound();
++                    entity.clearFire();
++                }
++                // Canvas end
+                 world.destroyBlock(pos, false);
+             }
+ 

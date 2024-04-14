@@ -16,7 +16,7 @@ plugins {
     java
     `maven-publish`
     id("com.github.johnrengelman.shadow") version "7.1.2" apply false
-    id("io.papermc.paperweight.patcher") version "1.5.12"
+    id("io.papermc.paperweight.patcher") version "1.5.15"
 }
 
 allprojects {
@@ -70,7 +70,7 @@ repositories {
 
 dependencies {
     remapper("net.fabricmc:tiny-remapper:0.8.10:fat")
-    decompiler("net.minecraftforge:forgeflower:2.0.627.2")
+    decompiler("org.vineflower:vineflower:1.11.0-20240412.144930-14")
     paperclip("io.papermc:paperclip:3.0.3")
     // implementation(libs.build.nexus)
     // implementation(libs.build.shadow)
@@ -82,7 +82,7 @@ paperweight {
     serverProject = project(":canvas-server")
 
     remapRepo = paperMavenPublicUrl
-    decompileRepo = paperMavenPublicUrl
+    decompileRepo = "https://s01.oss.sonatype.org/content/repositories/snapshots"
 
     useStandardUpstream("purpur") {
         url = github("PurpurMC", "Purpur")
