@@ -70,7 +70,7 @@ repositories {
 
 dependencies {
     remapper("net.fabricmc:tiny-remapper:0.8.10:fat")
-    decompiler("org.vineflower:vineflower:1.11.0-20240412.144930-14")
+    decompiler("org.vineflower:vineflower:1.10.1")
     paperclip("io.papermc:paperclip:3.0.3")
     // implementation(libs.build.nexus)
     // implementation(libs.build.shadow)
