@@ -1,0 +1,220 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <159172167+PurpleWolfMC@users.noreply.github.com>
+Date: Wed, 24 Apr 2024 07:53:55 +0000
+Subject: [PATCH] Better TickTask Scheduler
+
+
+diff --git a/src/main/java/me/dueris/canvas/thread/ScheduledTask.java b/src/main/java/me/dueris/canvas/thread/ScheduledTask.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..2cc5415c50c9c6aaf143a8a29c6e4ae0ea58bff3
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/thread/ScheduledTask.java
+@@ -0,0 +1,25 @@
++package me.dueris.canvas.thread;
++
++public class ScheduledTask {
++    Runnable runnable;
++    boolean onMain;
++    TickTaskHolder.Timing timing;
++    
++    public ScheduledTask(Runnable runnable, boolean onMain, TickTaskHolder.Timing timing) {
++        this.runnable = runnable;
++        this.onMain = onMain;
++        this.timing = timing;
++    }
++
++    public boolean canRun(TickTaskHolder.Timing timing) {
++        return this.timing == timing;
++    }
++
++    public boolean serverLevel() {
++        return !this.onMain;
++    }
++
++    public void run() {
++        this.runnable.run();
++    }
++}
+diff --git a/src/main/java/me/dueris/canvas/thread/TickTaskHolder.java b/src/main/java/me/dueris/canvas/thread/TickTaskHolder.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ea37ab9d3df91bb7e3fca28f13134b9e9137083
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/thread/TickTaskHolder.java
+@@ -0,0 +1,15 @@
++package me.dueris.canvas.thread;
++
++import me.dueris.canvas.thread.TickTaskHolder.*;
++
++public interface TickTaskHolder {
++    public void scheduleTask(Runnable runnable, Timing timing, State state);
++
++    public static enum Timing {
++        END_TICK, PRE_TICK, PRE_ENTITY, POST_ENTITY;
++    }
++
++    public static enum State {
++        SERVER_LEVEL, MAIN;
++    }
++}
+diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
+index 2e79b15e55c795e326082b958dfb70600f47a143..8091368e8cd888203eaed6ce78d9546a572428b4 100644
+--- a/src/main/java/net/minecraft/server/MinecraftServer.java
++++ b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -1840,6 +1840,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         } catch (InterruptedException | ExecutionException e) {
+             e.printStackTrace();
+         }
++        // Run scheduled main thread tasks now
++        getAllLevels().forEach(Level::runMainThreadTasks);
+         // Canvas end
+         //this.profiler.popPush("connection"); // Purpur
+         // MinecraftTimings.connectionTimer.startTiming(); // Spigot // Paper // Purpur
+diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
+index ed79facc7b822e1b1bc3f249ac8dce1e66095414..8c77597214d882c61660e1daceb428b553b91e63 100644
+--- a/src/main/java/net/minecraft/server/level/ServerLevel.java
++++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
+@@ -835,16 +835,13 @@ public class ServerLevel extends Level implements WorldGenLevel {
+     public StructureManager structureManager() {
+         return this.structureManager;
+     }
+-    // Canvas start - end tick tasks
+-
+-    public ConcurrentLinkedQueue<Runnable> endTickTasks = new ConcurrentLinkedQueue<>();
+-    // Canvas end
+ 
+     public Pair<Runnable, ServerLevel> tick(BooleanSupplier shouldKeepTicking, int tickCount) { // Canvas - Multithreaded WorldTicking
+         // Canvas start - Multithreaded WorldTicking
+         return new Pair<Runnable, ServerLevel>(() -> {
+             this.handlingTick = true;
+             if(this.currentTickingThread != Thread.currentThread()) {this.currentTickingThread = Thread.currentThread();}
++            this.runAllWithTiming(me.dueris.canvas.thread.TickTaskHolder.Timing.PRE_TICK); // Canvas
+             //ProfilerFiller gameprofilerfiller = this.getProfiler(); // Purpur
+             // Moved from MinecraftSever
+             final boolean doDaylight = this.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
+@@ -956,6 +953,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
+ 
+             org.spigotmc.ActivationRange.activateEntities(this); // Spigot
+             //this.timings.entityTick.startTiming(); // Spigot // Purpur
++            this.runAllWithTiming(me.dueris.canvas.thread.TickTaskHolder.Timing.PRE_ENTITY); // Canvas
+             this.entityTickList.forEach((entity) -> {
+                 entity.activatedPriorityReset = false; // Pufferfish - DAB
+                 if (!entity.isRemoved()) {
+@@ -997,6 +995,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
+                     }
+                 }
+             });
++            this.runAllWithTiming(me.dueris.canvas.thread.TickTaskHolder.Timing.POST_ENTITY); // Canvas
+             //this.timings.entityTick.stopTiming(); // Spigot // Purpur
+             //this.timings.tickEntities.stopTiming(); // Spigot // Purpur
+             //gameprofilerfiller.pop(); // Purpur
+@@ -1011,10 +1010,11 @@ public class ServerLevel extends Level implements WorldGenLevel {
+         }
+         this.getChunkSource().tick(shouldKeepTicking, true);
+         this.explosionDensityCache.clear();
+-        new ArrayList<>(this.endTickTasks).forEach((r) -> {
++        /* new ArrayList<>(this.endTickTasks).forEach((r) -> { // Canvas - Use new tick timing system
+             r.run();
+             endTickTasks.remove(r);
+-        });
++        }); */ // Canvas - Use new tick timing system
++        this.runAllWithTiming(me.dueris.canvas.thread.TickTaskHolder.Timing.END_TICK); // Canvas
+         // Canvas end
+     }, this); // Canvas - Multithreaded WorldTicking
+     }
+diff --git a/src/main/java/net/minecraft/world/level/Explosion.java b/src/main/java/net/minecraft/world/level/Explosion.java
+index aac51d7c31402b681532bc8b4b025f29823365c9..8b217391da1bfdfcb4c5682b8018fa3b6879c3c9 100644
+--- a/src/main/java/net/minecraft/world/level/Explosion.java
++++ b/src/main/java/net/minecraft/world/level/Explosion.java
+@@ -575,7 +575,8 @@ public class Explosion {
+ 
+         // Canvas start
+         ExplosionBlockCache[] cacheSave = blockCache.clone();
+-        ((net.minecraft.server.level.ServerLevel) this.level).endTickTasks.add(() -> {
++        this.level.scheduleTask(() -> {
++        // ((net.minecraft.server.level.ServerLevel) this.level).endTickTasks.add(() -> { // Canvas - Use new tick timing system
+         // Canvas end
+         while (iterator.hasNext()) {
+             Entity entity = (Entity) iterator.next();
+@@ -677,7 +678,7 @@ public class Explosion {
+         this.chunkCache = null;
+         // Canvas end
+ 
+-        }); // Canvas
++        }, me.dueris.canvas.thread.TickTaskHolder.Timing.POST_ENTITY, me.dueris.canvas.thread.TickTaskHolder.State.SERVER_LEVEL); // Canvas
+         /* this.blockCache = null; // Paper - optimise explosions // Canvas
+         this.chunkPosCache = null; // Paper - optimise explosions
+         this.chunkCache = null; // Paper - optimise explosions */ // Canvas
+diff --git a/src/main/java/net/minecraft/world/level/Level.java b/src/main/java/net/minecraft/world/level/Level.java
+index 4bc8375e819bc396e32d749e2a23a081545e3b57..7317434c44e7d168f59db84caf7dc7474f91d02f 100644
+--- a/src/main/java/net/minecraft/world/level/Level.java
++++ b/src/main/java/net/minecraft/world/level/Level.java
+@@ -29,6 +29,7 @@ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.resources.ResourceLocation;
+ import io.papermc.paper.util.MCUtil;
++import me.dueris.canvas.thread.ScheduledTask;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.FullChunkStatus;
+ import net.minecraft.server.level.ServerChunkCache;
+@@ -105,7 +106,7 @@ import org.bukkit.event.block.BlockPhysicsEvent;
+ import org.bukkit.event.world.GenericGameEvent;
+ // CraftBukkit end
+ 
+-public abstract class Level implements LevelAccessor, AutoCloseable {
++public abstract class Level implements LevelAccessor, AutoCloseable, me.dueris.canvas.thread.TickTaskHolder { // Canvas
+ 
+     public static final Codec<ResourceKey<Level>> RESOURCE_KEY_CODEC = ResourceKey.codec(Registries.DIMENSION);
+     public static final ResourceKey<Level> OVERWORLD = ResourceKey.create(Registries.DIMENSION, new ResourceLocation("overworld"));
+@@ -146,6 +147,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+     private final RegistryAccess registryAccess;
+     private final DamageSources damageSources;
+     private long subTickCount;
++    public java.util.concurrent.LinkedBlockingQueue<me.dueris.canvas.thread.ScheduledTask> scheduledTasks = new java.util.concurrent.LinkedBlockingQueue<>();
+ 
+     // CraftBukkit start Added the following
+     private final CraftWorld world;
+@@ -244,6 +246,44 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+     public CraftServer getCraftServer() {
+         return (CraftServer) Bukkit.getServer();
+     }
++    // Canvas start - scheduler tasks
++
++    @Override
++    public void scheduleTask(Runnable runnable, Timing timing, State state) {
++        this.scheduledTasks.add(new ScheduledTask(runnable, state.equals(State.MAIN), timing));
++    }
++
++    public void runAllScheduledTasks() {
++        new java.util.ArrayList<ScheduledTask>(this.scheduledTasks).stream().filter(ScheduledTask::serverLevel).forEach((task) -> {
++            // We ignore timings because we are executing all remaining tasks that should be executed on the ServerLevel thread
++            task.run();
++            // Remove it from the tasks that need to be executed
++            this.scheduledTasks.remove(task);
++        });
++    }
++
++    public void runAllWithTiming(Timing timing) {
++        new java.util.ArrayList<ScheduledTask>(this.scheduledTasks).stream().filter(s -> s.canRun(timing)).forEach((task) -> {
++            // Run the task on the ServerLevel thread
++            task.run();
++            // Remove it from the tasks that need to be executed
++            this.scheduledTasks.remove(task);
++        });
++    }
++
++    public void runMainThreadTasks() {
++        new java.util.ArrayList<ScheduledTask>(this.scheduledTasks).stream().filter(s -> !s.serverLevel()).forEach((task) -> {
++            // Run the task on the ServerLevel thread
++            task.run();
++            // Remove it from the tasks that need to be executed
++            this.scheduledTasks.remove(task);
++        });
++    }
++
++    public ScheduledTask[] getMainThreadTasks() {
++        return (ScheduledTask[]) this.scheduledTasks.stream().filter(s -> !s.serverLevel()).toArray().clone();
++    }
++    // Canvas end
+ 
+     // Paper start - Use getChunkIfLoadedImmediately
+     @Override

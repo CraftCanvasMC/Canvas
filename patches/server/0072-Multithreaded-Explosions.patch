@@ -1,0 +1,394 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolfMC <jedimastertoothless@hotmail.com>
+Date: Sun, 21 Apr 2024 18:26:24 -0700
+Subject: [PATCH] Multithreaded Explosions
+
+
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+index be571b949bf8d3355a25393f96066d6db6b786db..354dd4329a38fae22531d17028e954f7c8dd6d37 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+@@ -38,7 +38,7 @@ class PaperEventManager {
+     public void callEvent(@NotNull Event event) {
+         if (event.isAsynchronous() && this.server.isPrimaryThread()) {
+             throw new IllegalStateException(event.getEventName() + " may only be triggered asynchronously.");
+-        } else if (!event.isAsynchronous() && !this.server.isPrimaryThread() && !this.server.isStopping() && !Thread.currentThread().getName().startsWith("WorldTicker")) { // Canvas - multithreaded world ticking
++        } else if (!event.isAsynchronous() && !this.server.isPrimaryThread() && !this.server.isStopping() && !Thread.currentThread().getName().startsWith("WorldTicker") && !Thread.currentThread().getName().startsWith("ExplosionWorker")) { // Canvas - multithreaded world ticking // Multithreaded Explosions
+             throw new IllegalStateException(event.getEventName() + " may only be triggered synchronously.");
+         }
+ 
+diff --git a/src/main/java/me/dueris/canvas/CanvasConfig.java b/src/main/java/me/dueris/canvas/CanvasConfig.java
+index c0f2799dec7fdeaad71502555dbcbaba13638b81..234d4eab036e37a6d843bc095f8529f06eb107cb 100644
+--- a/src/main/java/me/dueris/canvas/CanvasConfig.java
++++ b/src/main/java/me/dueris/canvas/CanvasConfig.java
+@@ -210,6 +210,7 @@ public class CanvasConfig {
+     public static boolean useCanvasOrbOptimizations = false;
+     public static double orbMergeSearchInfaltionRadius = 0.8;
+     public static int maxEntitiesToReducePathfindingRates = 2;
++    public static int maxTntWorkerThreads = 3;
+ 
+     private static void general(){
+         disableFootsteps = getBoolean("disableFootsteps", disableFootsteps);
+@@ -253,6 +254,7 @@ public class CanvasConfig {
+         fallingBlocksLoadChunks = getBoolean("optimizations.fallingBlocksLoadChunks", fallingBlocksLoadChunks);
+         tickItemFrames = getBoolean("optimizations.tickItemFrames", tickItemFrames);
+         disableRaidsFromSpawnerRaiders = getBoolean("optimizations.disableRaidsFromSpawnerRaiders", disableRaidsFromSpawnerRaiders);
++        maxTntWorkerThreads = getInt("optimizations.threadripper.maxTntWorkerThreads", maxTntWorkerThreads);
+     }
+     
+     private static void blocks(){
+diff --git a/src/main/java/me/dueris/canvas/thread/level/ExplosionWorker.java b/src/main/java/me/dueris/canvas/thread/level/ExplosionWorker.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..6fef32201afb7250e6eeb3415ba32d7f28fdb4cc
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/thread/level/ExplosionWorker.java
+@@ -0,0 +1,21 @@
++package me.dueris.canvas.thread.level;
++
++import me.dueris.canvas.CanvasConfig;
++import me.dueris.canvas.thread.NamedTickThreadFactory;
++import net.minecraft.world.level.Explosion;
++import java.util.concurrent.Callable;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.Future;
++
++public class ExplosionWorker {
++    private static final ExecutorService service = Executors.newFixedThreadPool(CanvasConfig.maxTntWorkerThreads, new NamedTickThreadFactory("ExplosionWorker"));
++
++    public static Future<Explosion> submitTask(Callable<Explosion> runnable) {
++        return service.submit(runnable);
++    }
++
++    public static void stopWorker() {
++        service.shutdown();
++    }
++}
+diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
+index 954111f806ee860bfb3d371eaf0a95f0d97ad57f..2e79b15e55c795e326082b958dfb70600f47a143 100644
+--- a/src/main/java/net/minecraft/server/MinecraftServer.java
++++ b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -1082,8 +1082,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         // Paper start - move final shutdown items here
+         LOGGER.info("Closing Thread Pool");
+         Util.shutdownExecutors(); // Paper
+-        LOGGER.info("Closing Server");
++        me.dueris.canvas.thread.level.ExplosionWorker.stopWorker(); // Canvas
+         MinecraftServer.worldTickerPool.shutdown(); // Canvas - Multithreaded WorldTicking -- shutdown executor
++        LOGGER.info("Closing Server");
+         try {
+             net.minecrell.terminalconsole.TerminalConsoleAppender.close(); // Paper - Use TerminalConsoleAppender
+         } catch (Exception e) {
+diff --git a/src/main/java/net/minecraft/server/level/ServerChunkCache.java b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
+index 7b3ba500f465b999ce11964b0e4e30f36005536e..460ae3902d72041c184a1473e5534e0318658d61 100644
+--- a/src/main/java/net/minecraft/server/level/ServerChunkCache.java
++++ b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
+@@ -248,12 +248,19 @@ public class ServerChunkCache extends ChunkSource {
+         this.lastChunkStatus[0] = status;
+         this.lastChunk[0] = chunk;
+     }
++    // Canvas start - im doing rly dumb things now
+ 
+-    @Nullable
+     @Override
+     public ChunkAccess getChunk(int x, int z, ChunkStatus leastStatus, boolean create) {
++        return this.getChunk(x, z, leastStatus, create, true);
++    }
++    // Canvas end
++
++    @Nullable
++    // @Override // Canvas
++    public ChunkAccess getChunk(int x, int z, ChunkStatus leastStatus, boolean create, boolean async) { // Canvas
+         final int x1 = x; final int z1 = z; // Paper - conflict on variable change
+-        if (!io.papermc.paper.util.TickThread.isTickThread()) { // Paper - rewrite chunk system
++        if (!io.papermc.paper.util.TickThread.isTickThread() && async) { // Paper - rewrite chunk system
+             return (ChunkAccess) CompletableFuture.supplyAsync(() -> {
+                 return this.getChunk(x, z, leastStatus, create);
+             }, this.mainThreadProcessor).join();
+diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
+index b0daa622702661d8fc3bc12213b5d19bb10e93a0..ed79facc7b822e1b1bc3f249ac8dce1e66095414 100644
+--- a/src/main/java/net/minecraft/server/level/ServerLevel.java
++++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
+@@ -31,6 +31,7 @@ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ConcurrentLinkedQueue;
+ import java.util.concurrent.Executor;
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Function;
+@@ -834,6 +835,10 @@ public class ServerLevel extends Level implements WorldGenLevel {
+     public StructureManager structureManager() {
+         return this.structureManager;
+     }
++    // Canvas start - end tick tasks
++
++    public ConcurrentLinkedQueue<Runnable> endTickTasks = new ConcurrentLinkedQueue<>();
++    // Canvas end
+ 
+     public Pair<Runnable, ServerLevel> tick(BooleanSupplier shouldKeepTicking, int tickCount) { // Canvas - Multithreaded WorldTicking
+         // Canvas start - Multithreaded WorldTicking
+@@ -1006,6 +1011,10 @@ public class ServerLevel extends Level implements WorldGenLevel {
+         }
+         this.getChunkSource().tick(shouldKeepTicking, true);
+         this.explosionDensityCache.clear();
++        new ArrayList<>(this.endTickTasks).forEach((r) -> {
++            r.run();
++            endTickTasks.remove(r);
++        });
+         // Canvas end
+     }, this); // Canvas - Multithreaded WorldTicking
+     }
+diff --git a/src/main/java/net/minecraft/world/level/Explosion.java b/src/main/java/net/minecraft/world/level/Explosion.java
+index 0be03430d8257d918b7cf646af518473ae027399..aac51d7c31402b681532bc8b4b025f29823365c9 100644
+--- a/src/main/java/net/minecraft/world/level/Explosion.java
++++ b/src/main/java/net/minecraft/world/level/Explosion.java
+@@ -11,6 +11,7 @@ import java.util.List;
+ import java.util.Map;
+ import java.util.Optional;
+ import java.util.Set;
++import java.util.function.Consumer;
+ import javax.annotation.Nullable;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+@@ -196,7 +197,7 @@ public class Explosion {
+                 chunk = this.chunkCache[chunkCacheKey];
+             } else {
+                 this.chunkPosCache[chunkCacheKey] = chunkKey;
+-                this.chunkCache[chunkCacheKey] = chunk = this.level.getChunk(x >> 4, z >> 4);
++                this.chunkCache[chunkCacheKey] = chunk = this.level.getChunk(x >> 4, z >> 4, false);
+             }
+ 
+             BlockState blockState = chunk.getBlockStateFinal(x, y, z);
+@@ -423,10 +424,10 @@ public class Explosion {
+         return new Vec3(this.x, this.y, this.z);
+     }
+ 
+-    public void explode() {
++    public Explosion explode() { // Canvas
+         // CraftBukkit start
+         if ((this.level == null || this.level.purpurConfig.explosionClampRadius) && this.radius < 0.1F) { // Purpur
+-            return;
++            return this; // Canvas
+         }
+         // CraftBukkit end
+ 
+@@ -435,13 +436,13 @@ public class Explosion {
+             Location location = new Location(this.level.getWorld(), this.x, this.y, this.z);
+             if(!new org.purpurmc.purpur.event.entity.PreEntityExplodeEvent(this.source.getBukkitEntity(), location, this.blockInteraction == Explosion.BlockInteraction.DESTROY_WITH_DECAY ? 1.0F / this.radius : 1.0F).callEvent()) {
+                 this.wasCanceled = true;
+-                return;
++                return this; // Canvas
+             }
+         }else {
+             Location location = new Location(this.level.getWorld(), this.x, this.y, this.z);
+             if(!new org.purpurmc.purpur.event.PreBlockExplodeEvent(location.getBlock(), this.blockInteraction == Explosion.BlockInteraction.DESTROY_WITH_DECAY ? 1.0F / this.radius : 1.0F, this.damageSource.explodedBlockState).callEvent()) {
+                 this.wasCanceled = true;
+-                return;
++                return this; // Canvas
+             }
+         }
+         //Purpur end
+@@ -527,7 +528,7 @@ public class Explosion {
+ 
+                             f -= cachedBlock.resistance; // Paper - optimise explosions
+ 
+-                            if (f > 0.0F && cachedBlock.shouldExplode == null) { // Paper - optimise explosions
++                            if (f > 0.0F || cachedBlock.shouldExplode == null) { // Paper - optimise explosions
+                                 // Paper start - optimise explosions
+                                 // note: we expect shouldBlockExplode to be pure with respect to power, as Vanilla currently is.
+                                 // basically, it is unused, which allows us to cache the result
+@@ -572,6 +573,10 @@ public class Explosion {
+ 
+         final BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos(); // Paper - optimise explosions
+ 
++        // Canvas start
++        ExplosionBlockCache[] cacheSave = blockCache.clone();
++        ((net.minecraft.server.level.ServerLevel) this.level).endTickTasks.add(() -> {
++        // Canvas end
+         while (iterator.hasNext()) {
+             Entity entity = (Entity) iterator.next();
+ 
+@@ -611,7 +616,7 @@ public class Explosion {
+                                     }
+                                 }
+                             } else {
+-                                entity.hurt(this.damageSource, this.damageCalculator.getEntityDamageAmount(this, entity, getSeenFraction(vec3d, entity, blockCache, blockPos))); // Paper - actually optimise explosions
++                                entity.hurt(this.damageSource, this.damageCalculator.getEntityDamageAmount(this, entity, getSeenFraction(vec3d, entity, cacheSave, blockPos))); // Paper - actually optimise explosions
+                             }
+ 
+                             if (entity.lastDamageCancelled) { // SPIGOT-5339, SPIGOT-6252, SPIGOT-6777: Skip entity if damage event was cancelled
+@@ -666,13 +671,20 @@ public class Explosion {
+                 }
+             }
+         }
+-
+-        this.blockCache = null; // Paper - optimise explosions
++        // Canvas start
++        this.blockCache = null;
++        this.chunkPosCache = null;
++        this.chunkCache = null;
++        // Canvas end
++
++        }); // Canvas
++        /* this.blockCache = null; // Paper - optimise explosions // Canvas
+         this.chunkPosCache = null; // Paper - optimise explosions
+-        this.chunkCache = null; // Paper - optimise explosions
++        this.chunkCache = null; // Paper - optimise explosions */ // Canvas
++        return this; // Canvas
+     }
+ 
+-    public void finalizeExplosion(boolean particles) {
++    public Explosion finalizeExplosion(boolean particles) { // Canvas
+         if (this.level.isClientSide) {
+             this.level.playLocalSound(this.x, this.y, this.z, this.explosionSound, SoundSource.BLOCKS, 4.0F, (1.0F + (this.level.random.nextFloat() - this.level.random.nextFloat()) * 0.2F) * 0.7F, false);
+         }
+@@ -735,7 +747,7 @@ public class Explosion {
+             }
+ 
+             if (this.wasCanceled) {
+-                return;
++                return this; // Canvas
+             }
+             // CraftBukkit end
+             objectlistiterator = this.toBlow.iterator();
+@@ -787,6 +799,7 @@ public class Explosion {
+             }
+         }
+ 
++        return this; // Canvas
+     }
+ 
+     private static void addOrAppendStack(List<Pair<ItemStack, BlockPos>> stacks, ItemStack stack, BlockPos pos) {
+diff --git a/src/main/java/net/minecraft/world/level/Level.java b/src/main/java/net/minecraft/world/level/Level.java
+index 79761a0958ea5932adf9fd5f134a2246bea4b98c..4bc8375e819bc396e32d749e2a23a081545e3b57 100644
+--- a/src/main/java/net/minecraft/world/level/Level.java
++++ b/src/main/java/net/minecraft/world/level/Level.java
+@@ -6,6 +6,8 @@ import java.io.IOException;
+ import java.util.Iterator;
+ import java.util.List;
+ import java.util.Objects;
++import java.util.Optional;
++import java.util.concurrent.ExecutionException;
+ import java.util.function.Consumer;
+ import java.util.function.Predicate;
+ import java.util.function.Supplier;
+@@ -29,6 +31,7 @@ import net.minecraft.resources.ResourceLocation;
+ import io.papermc.paper.util.MCUtil;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.FullChunkStatus;
++import net.minecraft.server.level.ServerChunkCache;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+@@ -871,8 +874,15 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+         return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+     }
+ 
++    // Canvas start
+     @Override
+-    public final LevelChunk getChunk(int chunkX, int chunkZ) { // Paper - final to help inline
++    public final LevelChunk getChunk(int chunkX, int chunkZ) {
++        return getChunk(chunkX, chunkZ, true);
++    }
++
++    // Canvas end
++    // @Override // Canvas
++    public final LevelChunk getChunk(int chunkX, int chunkZ, boolean async) { // Paper - final to help inline // Canvas
+         // Paper start - Perf: make sure loaded chunks get the inlined variant of this function
+         net.minecraft.server.level.ServerChunkCache cps = ((ServerLevel)this).getChunkSource();
+         if (cps.mainThread == Thread.currentThread()) {
+@@ -882,7 +892,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+             }
+         }
+         // Paper end - Perf: make sure loaded chunks get the inlined variant of this function
+-        return (LevelChunk) this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, true); // Paper - avoid a method jump
++        return (LevelChunk) this.getChunk(chunkX, chunkZ, ChunkStatus.FULL, true, async); // Paper - avoid a method jump // Canvas
+     }
+ 
+     // Paper start - if loaded
+@@ -939,11 +949,26 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+     public final @Nullable BlockState getBlockStateIfLoadedAndInBounds(BlockPos blockposition) {
+         return getWorldBorder().isWithinBounds(blockposition) ? getBlockStateIfLoaded(blockposition) : null;
+     }
++    // Canvas start
+ 
+     @Override
+-    public final ChunkAccess getChunk(int chunkX, int chunkZ, ChunkStatus leastStatus, boolean create) { // Paper - final for inline
++    public final ChunkAccess getChunk(int chunkX, int chunkZ, ChunkStatus leastStatus, boolean create) {
++        return getChunk(chunkX, chunkZ, leastStatus, create, true);
++    }
++    // Canvas end
++
++    // @Override // Canvas
++    public final ChunkAccess getChunk(int chunkX, int chunkZ, ChunkStatus leastStatus, boolean create, boolean async) { // Paper - final for inline // Canvas
+         // Paper end
+-        ChunkAccess ichunkaccess = this.getChunkSource().getChunk(chunkX, chunkZ, leastStatus, create);
++        // Canvas start
++        ChunkAccess ichunkaccess;
++        if (this.getChunkSource() instanceof ServerChunkCache sCC) {
++            ichunkaccess = sCC.getChunk(chunkX, chunkZ, leastStatus, create, async);
++        } else {
++            ichunkaccess = this.getChunkSource().getChunk(chunkX, chunkZ, leastStatus, create);
++        }
++        // ChunkAccess ichunkaccess = this.getChunkSource().getChunk(chunkX, chunkZ, leastStatus, create);
++        // Canvas end
+ 
+         if (ichunkaccess == null && create) {
+             throw new IllegalStateException("Should always be able to create a chunk!");
+@@ -1450,11 +1475,25 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+         }
+ 
+         Explosion.BlockInteraction explosion_effect1 = explosion_effect;
++        // Canvas start
++        java.util.Optional<Explosion> opExpl;
+         Explosion explosion = new Explosion(this, entity, damageSource, behavior, x, y, z, power, createFire, explosion_effect1, particle, emitterParticle, soundEvent);
++        if (me.dueris.canvas.CanvasConfig.threadripper) {
++            try {
++                opExpl = Optional.of(me.dueris.canvas.thread.level.ExplosionWorker.submitTask(explosion::explode).get());
++            } catch (InterruptedException | ExecutionException e) {
++                throw new RuntimeException("An error occurred when creating an explosion!", e);
++            }
++        } else {
++        // Explosion explosion = new Explosion(this, entity, damageSource, behavior, x, y, z, power, createFire, explosion_effect1, particle, emitterParticle, soundEvent); // Move up
++        // Canvas end
+ 
+-        explosion.explode();
+-        explosion.finalizeExplosion(particles);
+-        return explosion;
++        opExpl = java.util.Optional.of(explosion.explode()); // Canvas
++        // explosion.finalizeExplosion(particles); // Canvas
++        // Canvas start
++        }
++        return opExpl.orElse(null).finalizeExplosion(particles);
++        // Canvas end
+     }
+ 
+     private Explosion.BlockInteraction getDestroyType(GameRules.Key<GameRules.BooleanValue> gameRuleKey) {
+diff --git a/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java b/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
+index b82a6143526bd1d4ecd4591c1253cdb0b913fe09..8f2b685c286cf93b06b5fd26d93687897736b5ff 100644
+--- a/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
++++ b/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java
+@@ -2086,14 +2086,20 @@ public class CraftEventFactory {
+         return event;
+     }
+ 
++    // Canvas start
++
+     public static EntityKnockbackEvent callEntityKnockbackEvent(CraftLivingEntity entity, Entity attacker, EntityKnockbackEvent.KnockbackCause cause, double force, Vec3 raw, double x, double y, double z) {
++        return callEntityKnockbackEvent(entity, attacker, cause, force, raw, x, y, z, false);
++    }
++    // Canvas end
++    public static EntityKnockbackEvent callEntityKnockbackEvent(CraftLivingEntity entity, Entity attacker, EntityKnockbackEvent.KnockbackCause cause, double force, Vec3 raw, double x, double y, double z, boolean async) { // Canvas
+         Vector bukkitRaw = new Vector(-raw.x, raw.y, -raw.z); // Due to how the knockback calculation works, we need to invert x and z.
+ 
+         EntityKnockbackEvent event;
+         if (attacker != null) {
+-            event = new EntityKnockbackByEntityEvent(entity, attacker.getBukkitEntity(), cause, force, new Vector(-raw.x, raw.y, -raw.z), new Vector(x, y, z));
++            event = new EntityKnockbackByEntityEvent(entity, attacker.getBukkitEntity(), cause, force, new Vector(-raw.x, raw.y, -raw.z), new Vector(x, y, z), async); // Canvas
+         } else {
+-            event = new EntityKnockbackEvent(entity, cause, force, new Vector(-raw.x, raw.y, -raw.z), new Vector(x, y, z));
++            event = new EntityKnockbackEvent(entity, cause, force, new Vector(-raw.x, raw.y, -raw.z), new Vector(x, y, z), async); // Canvas
+         }
+ 
+         Bukkit.getPluginManager().callEvent(event);
