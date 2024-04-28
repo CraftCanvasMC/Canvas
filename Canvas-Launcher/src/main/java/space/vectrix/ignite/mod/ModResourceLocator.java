@@ -49,6 +49,9 @@ public final class ModResourceLocator {
         if(!Files.isRegularFile(childDirectory) || !childDirectory.getFileName().toString().endsWith(".jar")) {
           continue;
         }
+        // Canvas start
+          if (childDirectory.toFile().isDirectory()) continue;
+          if (!childDirectory.getParent().toFile().getName().equalsIgnoreCase("plugins")) continue;
 
         try(final JarFile jarFile = new JarFile(childDirectory.toFile())) {
           final JarEntry jarEntry = jarFile.getJarEntry(IgniteConstants.MOD_CONFIG);
