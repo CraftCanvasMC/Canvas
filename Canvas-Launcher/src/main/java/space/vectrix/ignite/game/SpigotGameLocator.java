@@ -32,7 +32,7 @@ public final class SpigotGameLocator implements GameLocatorService {
   private static final BlackboardMap.@NotNull Key<Path> SPIGOT_BUNDLER = Blackboard.key("ignite.spigot.bundler", Path.class, Paths.get("./bundler"));
   private static final BlackboardMap.@NotNull Key<Path> SPIGOT_JAR = Blackboard.key("ignite.spigot.jar", Path.class, Paths.get("./spigot.jar"));
   private static final BlackboardMap.@NotNull Key<String> SPIGOT_TARGET = Blackboard.key("ignite.spigot.target", String.class, "org.bukkit.craftbukkit.bootstrap.Main");
-  private static final BlackboardMap.@NotNull Key<String> SPIGOT_VERSION = Blackboard.key("ignite.spigot.version", String.class, "1.20.5-R0.1-SNAPSHOT");
+  private static final BlackboardMap.@NotNull Key<String> SPIGOT_VERSION = Blackboard.key("ignite.spigot.version", String.class, "1.20.6-R0.1-SNAPSHOT");
 
   private static final String SPIGOT_VERSION_PATTERN = "META-INF/versions/[^/].[^/]+\\.jar";
 

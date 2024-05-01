@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris MC <purplewolf.mc1@gmail.com>
+Date: Thu, 9 Nov 2023 18:53:30 +0000
+Subject: [PATCH] Implement Mirai patches
+
+
+diff --git a/src/main/java/org/bukkit/event/Event.java b/src/main/java/org/bukkit/event/Event.java
+index 8ec56cd6b8e0f5c5dd8c7c88b4671e18dcf109d0..a3bacd6e2cda243df7e712e33254a2ad0dbf3799 100644
+--- a/src/main/java/org/bukkit/event/Event.java
++++ b/src/main/java/org/bukkit/event/Event.java
+@@ -14,7 +14,9 @@ import org.jetbrains.annotations.NotNull;
+  */
+ public abstract class Event {
+     private String name;
+-    private final boolean async;
++    // Canvas start - impliment Mirai patches
++    // private final boolean async;
++    private final net.kyori.adventure.util.TriState async;
+ 
+     /**
+      * The default constructor is defined for cleaner code. This constructor
+@@ -32,7 +34,31 @@ public abstract class Event {
+      *     by default from default constructor
+      */
+     public Event(boolean isAsync) {
+-        this.async = isAsync;
++        this(net.kyori.adventure.util.TriState.byBoolean(isAsync));
++    }
++
++    /**
++     * This constructor is used to explicitly declare an event as synchronous
++     * or asynchronous or potentially unset.
++     *
++     * @param isAsync true indicates the event will fire asynchronously, false
++     *                by default from default constructor, unset indicates that the event may be called on either the server thread or off the server
++     *                thread.
++     */
++    public Event(@NotNull final net.kyori.adventure.util.TriState isAsync) {
++         this.async = isAsync;
++     }
++ 
++    /**
++     * Returns a tristate that, when resolving to true or false, has the exact indications defined by {@link #isAsynchronous()}.
++     * <p>
++     * If the tristate resolves to NOT_SET, the event may or may not have been fired off the main thread, meaning a plugin would have
++     * to validate what thread the spigot event bus was called on.
++     *
++     * @return the tristate enum.
++     */
++    public final @NotNull net.kyori.adventure.util.TriState asynchronous() {
++        return this.async;
+     }
+ 
+     // Paper start
+@@ -92,8 +118,9 @@ public abstract class Event {
+      * @return false by default, true if the event fires asynchronously
+      */
+     public final boolean isAsynchronous() {
+-        return async;
++        return this.async == net.kyori.adventure.util.TriState.TRUE;
+     }
++    // Canvas end
+ 
+     public enum Result {
+ 
+diff --git a/src/main/java/org/bukkit/plugin/RegisteredListener.java b/src/main/java/org/bukkit/plugin/RegisteredListener.java
+index 3b3d9642a8d63798dc28f2f8df77f0466451cbff..99ce31fe9d0c5f60ad04a0286340c556d6d68904 100644
+--- a/src/main/java/org/bukkit/plugin/RegisteredListener.java
++++ b/src/main/java/org/bukkit/plugin/RegisteredListener.java
+@@ -62,8 +62,8 @@ public class RegisteredListener {
+      * @throws EventException If an event handler throws an exception.
+      */
+     public void callEvent(@NotNull final Event event) throws EventException {
+-        if (event instanceof Cancellable) {
+-            if (((Cancellable) event).isCancelled() && isIgnoringCancelled()) {
++        if (isIgnoringCancelled()) {
++            if (event instanceof Cancellable cancellable && cancellable.isCancelled()) {
+                 return;
+             }
+         }
+diff --git a/src/main/java/org/bukkit/plugin/SimplePluginManager.java b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+index 07a9c9e254188c251165ca84c8e961fccda01175..cc3b10988962b576edf62396ee8e7ab376cf082c 100644
+--- a/src/main/java/org/bukkit/plugin/SimplePluginManager.java
++++ b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
+@@ -645,6 +645,19 @@ public final class SimplePluginManager implements PluginManager {
+         HandlerList handlers = event.getHandlers();
+         RegisteredListener[] listeners = handlers.getRegisteredListeners();
+ 
++        // Gale start - JettPack - skip events without listeners
++        if (listeners.length == 0) {
++            return;
++        }
++        // Gale end - JettPack - skip events without listeners
++
++        // Paper - replace callEvent by merging to below method
++        if (event.isAsynchronous() && server.isPrimaryThread()) {
++            throw new IllegalStateException(event.getEventName() + " may only be triggered asynchronously.");
++        } else if (!event.isAsynchronous() && !server.isPrimaryThread() && !server.isStopping() ) {
++            throw new IllegalStateException(event.getEventName() + " may only be triggered synchronously.");
++        }
++
+         for (RegisteredListener registration : listeners) {
+             if (!registration.getPlugin().isEnabled()) {
+                 continue;
+diff --git a/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java b/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
+index 7e4f7cb2afbc145e532285c793573ad107bc3033..7a5da2a1a6ca31adf541f59a1b50d0aaf13d700f 100644
+--- a/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
++++ b/src/main/java/org/bukkit/plugin/java/PluginClassLoader.java
+@@ -107,6 +107,11 @@ public final class PluginClassLoader extends URLClassLoader implements io.paperm
+         }
+     }
+ 
++    @Override
++    public void addURL(final URL url) {
++        super.addURL(url);
++    }
++
+     @Override
+     public URL getResource(String name) {
+         // Paper start

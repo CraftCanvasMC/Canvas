@@ -1,22 +1,17 @@
 import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
-import io.papermc.paperweight.tasks.CreateBundlerJar
-import io.papermc.paperweight.tasks.RemapJar
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import java.nio.file.*
 import java.util.*
-import java.util.zip.*
 import java.nio.file.Path
-import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import org.gradle.api.DefaultTask
-import org.gradle.api.tasks.TaskAction
 
 plugins {
     java
     `maven-publish`
     id("io.github.goooler.shadow") version "8.1.7" apply false
-    id("io.papermc.paperweight.patcher") version "1.6.2"
+    id("io.papermc.paperweight.patcher") version "1.6.3"
 }
 
 allprojects {
@@ -133,8 +128,8 @@ tasks.register<DefaultTask>("createCanvasBundler") {
 
         Files.createDirectories(targetJarDirectory)
         Files.copy(
-            rmapLoc.resolve("canvas-1.20.5.jar"),
-            targetJarDirectory.resolve("canvas-1.20.5-R0.1-SNAPSHOT.zip"),
+            rmapLoc.resolve("canvas-1.20.6.jar"),
+            targetJarDirectory.resolve("canvas-1.20.6-R0.1-SNAPSHOT.zip"),
             StandardCopyOption.REPLACE_EXISTING
         )
     }
@@ -168,13 +163,13 @@ tasks.register<DefaultTask>("remapPurpurClip") {
         val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
         Files.createDirectories(rmapLoc)
         Files.copy(
-            file("build/libs/canvas-paperclip-1.20.5-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
-            rmapLoc.resolve("canvas-1.20.5.zip"),
+            file("build/libs/canvas-paperclip-1.20.6-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
+            rmapLoc.resolve("canvas-1.20.6.zip"),
             StandardCopyOption.REPLACE_EXISTING
         )
         Files.copy(
-            file("build/libs/canvas-paperclip-1.20.5-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
-            rmapLoc.resolve("canvas-1.20.5.jar"),
+            file("build/libs/canvas-paperclip-1.20.6-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
+            rmapLoc.resolve("canvas-1.20.6.jar"),
             StandardCopyOption.REPLACE_EXISTING
         )
     }

@@ -1,0 +1,208 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: PurpleWolf1909 <160778222+PurpleWolf1909@users.noreply.github.com>
+Date: Tue, 30 Apr 2024 16:12:51 +0000
+Subject: [PATCH] Enhance Chunk API
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+index 82b4bd669c57b18fb0b443bcd94495023cd5a528..fa2a9401a5be61d925b6e633240847340b4d6d12 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftChunk.java
+@@ -5,10 +5,16 @@ import com.google.common.base.Predicates;
+ import com.mojang.serialization.Codec;
+ import java.util.Arrays;
+ import java.util.Collection;
++import java.util.HashMap;
++import java.util.List;
+ import java.util.Objects;
++import java.util.Random;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ThreadPoolExecutor;
+ import java.util.concurrent.locks.LockSupport;
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Predicate;
++import io.papermc.paper.math.Position;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.Registry;
+@@ -17,6 +23,8 @@ import net.minecraft.core.registries.Registries;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.nbt.NbtOps;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.Mth;
++import net.minecraft.util.RandomSource;
+ import net.minecraft.util.thread.ProcessorMailbox;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.LightLayer;
+@@ -25,6 +33,7 @@ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.chunk.DataLayer;
+ import net.minecraft.world.level.chunk.ImposterProtoChunk;
++import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.level.chunk.LevelChunkSection;
+ import net.minecraft.world.level.chunk.PalettedContainer;
+ import net.minecraft.world.level.chunk.PalettedContainerRO;
+@@ -35,8 +44,11 @@ import net.minecraft.world.level.entity.PersistentEntitySectionManager;
+ import net.minecraft.world.level.levelgen.Heightmap;
+ import net.minecraft.world.level.levelgen.WorldgenRandom;
+ import net.minecraft.world.level.lighting.LevelLightEngine;
++import org.bukkit.Bukkit;
+ import org.bukkit.Chunk;
+ import org.bukkit.ChunkSnapshot;
++import org.bukkit.Location;
++import org.bukkit.Material;
+ import org.bukkit.World;
+ import org.bukkit.block.Biome;
+ import org.bukkit.block.Block;
+@@ -45,11 +57,20 @@ import org.bukkit.block.data.BlockData;
+ import org.bukkit.craftbukkit.block.CraftBiome;
+ import org.bukkit.craftbukkit.block.CraftBlock;
+ import org.bukkit.craftbukkit.block.data.CraftBlockData;
++import org.bukkit.craftbukkit.entity.CraftEntity;
++import org.bukkit.craftbukkit.entity.CraftPlayer;
++import org.bukkit.craftbukkit.generator.CraftChunkData;
++import org.bukkit.craftbukkit.generator.CustomChunkGenerator;
++import org.bukkit.craftbukkit.util.RandomSourceWrapper;
+ import org.bukkit.entity.Entity;
+ import org.bukkit.generator.structure.GeneratedStructure;
+ import org.bukkit.generator.structure.Structure;
++import org.bukkit.entity.Player;
++import org.bukkit.generator.ChunkGenerator;
++import org.bukkit.generator.WorldInfo;
+ import org.bukkit.persistence.PersistentDataContainer;
+ import org.bukkit.plugin.Plugin;
++import org.jetbrains.annotations.Nullable;
+ 
+ public class CraftChunk implements Chunk {
+     private final ServerLevel worldServer;
+@@ -372,6 +393,72 @@ public class CraftChunk implements Chunk {
+         return this.getCraftWorld().getStructures(this.getX(), this.getZ(), structure);
+     }
+ 
++    // Canvas start
++    @Override
++    public void clearAllEntities() {
++        for(Entity entity : this.getEntities()){
++            CraftEntity craftEntity = (CraftEntity) entity;
++            craftEntity.getHandle().remove(net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);
++        }
++    }
++
++    @Override
++    public List<Entity> getEntitiesInChunk() {
++        return Arrays.stream(getEntities()).toList();
++    }
++
++    @Override
++    public void replaceBlocksInChunk(final Material oldMat, final Material newMat) {
++        for (Block block : this.getBlocksInChunk()) {
++            if (block.getType() == oldMat) {
++                block.setType(newMat);
++            }
++        }
++    }
++
++    @Override
++    public void reloadChunk() {
++        this.unload(true);
++        this.load();
++    }
++
++    @Override
++    public void addEntityToChunk(final Entity entity) {
++        entity.spawnAt(this.getCenter());
++    }
++
++    @Override
++    public void addEntityToChunk(final Entity entity, final Location location) {
++        entity.spawnAt(location);
++    }
++
++    @Override
++    public Location getCenter() {
++        return this.getBlock(0, 0, 0).getLocation();
++    }
++
++    @Override
++    public Block[] getBlocksInChunk() {
++        World world = this.getWorld();
++        int chunkX = this.getX();
++        int chunkZ = this.getZ();
++
++        Block[] blocks = new Block[16 * 256 * 16];
++        int index = 0;
++
++        for (int x = 0; x < 16; x++) {
++            for (int y = 0; y < 256; y++) {
++                for (int z = 0; z < 16; z++) {
++                    Location blockLocation = new Location(world, chunkX * 16 + x, y, chunkZ * 16 + z);
++                    Block block = blockLocation.getBlock();
++                    blocks[index++] = block;
++                }
++            }
++        }
++        return blocks;
++    }
++    // Canvas end
++
+     @Override
+     public boolean equals(Object o) {
+         if (this == o) return true;
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 90338017ebcb2a690dff7dad57aa6fbb95e0ff93..d65bba610acb6cb55a7b95d2134f3c0e07c2e4c2 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -110,6 +110,7 @@ import net.minecraft.world.phys.Vec3;
+ import org.bukkit.BanEntry;
+ import org.bukkit.BanList;
+ import org.bukkit.Bukkit;
++import org.bukkit.Chunk;
+ import org.bukkit.DyeColor;
+ import org.bukkit.Effect;
+ import org.bukkit.GameMode;
+@@ -3088,6 +3089,32 @@ public class CraftPlayer extends CraftHumanEntity implements Player {
+         this.getHandle().adventure$displayName = displayName != null ? displayName : net.kyori.adventure.text.Component.text(this.getName());
+         this.getHandle().displayName = null;
+     }
++    // Canvas start
++    
++    @Override
++    public Chunk[] getChunksInRenderDistance() {
++        int viewDistance = this.getClientViewDistance();
++        int playerChunkX = this.getLocation().getChunk().getX();
++        int playerChunkZ = this.getLocation().getChunk().getZ();
++
++        int startChunkX = playerChunkX - viewDistance;
++        int endChunkX = playerChunkX + viewDistance;
++        int startChunkZ = playerChunkZ - viewDistance;
++        int endChunkZ = playerChunkZ + viewDistance;
++
++        Chunk[] chunksInPlayerView = new Chunk[(endChunkX - startChunkX + 1) * (endChunkZ - startChunkZ + 1)];
++        int index = 0;
++
++        for (int x = startChunkX; x <= endChunkX; x++) {
++            for (int z = startChunkZ; z <= endChunkZ; z++) {
++                chunksInPlayerView[index] = this.getWorld().getChunkAt(x, z);
++                index++;
++            }
++        }
++
++        return chunksInPlayerView;
++    }
++    // Canvas end
+ 
+     @Override
+     public void deleteMessage(net.kyori.adventure.chat.SignedMessage.Signature signature) {
+diff --git a/src/main/java/org/bukkit/craftbukkit/generator/CustomChunkGenerator.java b/src/main/java/org/bukkit/craftbukkit/generator/CustomChunkGenerator.java
+index c77f722131e0e40e9de29bf8d42f9bc5d8fa2f7d..13e82c36da87d6e28e88529d3cdd429c3d84fde3 100644
+--- a/src/main/java/org/bukkit/craftbukkit/generator/CustomChunkGenerator.java
++++ b/src/main/java/org/bukkit/craftbukkit/generator/CustomChunkGenerator.java
+@@ -96,7 +96,7 @@ public class CustomChunkGenerator extends InternalChunkGenerator {
+         return this.delegate;
+     }
+ 
+-    private static WorldgenRandom getSeededRandom() {
++    public static WorldgenRandom getSeededRandom() { // Canvas - private -> public
+         return new WorldgenRandom(new LegacyRandomSource(0));
+     }
+ 
