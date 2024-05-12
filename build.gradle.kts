@@ -11,7 +11,7 @@ plugins {
     java
     `maven-publish`
     id("io.github.goooler.shadow") version "8.1.7" apply false
-    id("io.papermc.paperweight.patcher") version "1.6.3"
+    id("io.papermc.paperweight.patcher") version "1.7.1"
 }
 
 allprojects {
@@ -105,7 +105,6 @@ paperweight {
 
 tasks.generateDevelopmentBundle {
     apiCoordinates = "io.github.dueris:canvas-api"
-    mojangApiCoordinates = "io.papermc.paper:paper-mojangapi"
     libraryRepositories = listOf(
         "https://repo.maven.apache.org/maven2/",
         paperMavenPublicUrl,
