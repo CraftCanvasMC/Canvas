@@ -1,7 +1,3 @@
-<br>
-<div align="center">
-  <a href="https://gyazo.com/d7be938a9e911f14b106d5c8f1bf12b1"><img src="https://i.gyazo.com/d7be938a9e911f14b106d5c8f1bf12b1.png" alt="Image from Gyazo" width="620"/></a>
-</div>
 <!DOCTYPE html>
 
 <html>
@@ -42,9 +38,6 @@
 
   <h2>License</h2>
   <p>Canvas is open-source software licensed under the GNU General Public License version 3 License</a>.</p>
-
-  <h2 align="left"><strong font-size="202px">Sponsored by BisectHosting!</strong></h2>
-    <a href="https://bisecthosting.com/DUERIS"><img src="https://i.ibb.co/Rg0qD2V/a03f0848-c1da-4967-9c40-f56cc36ef03c.webp" alt="a03f0848-c1da-4967-9c40-f56cc36ef03c" border="0"></a>
     </div>
 
 <hr>
