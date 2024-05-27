@@ -1231,6 +1231,335 @@ index 0000000000000000000000000000000000000000..0dbd245466f965a80c1736a49d574c68
 +        super.start();
 +    }
 +}
+diff --git a/src/main/java/me/dueris/canvas/thread/region/RegionThread.java b/src/main/java/me/dueris/canvas/thread/region/RegionThread.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..6b9bdb38d9f9b82984386f355228ada9e6b52f18
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/thread/region/RegionThread.java
+@@ -0,0 +1,21 @@
++package me.dueris.canvas.thread.region;
++
++import io.papermc.paper.util.TickThread;
++import me.dueris.canvas.thread.TickTaskHolder;
++
++public abstract class RegionThread extends TickThread  implements TickTaskHolder {
++    public RegionThread(final String name) {
++        super(name);
++    }
++
++    abstract void tickRegion();
++
++    abstract void spin();
++
++    abstract void stopSpinning();
++
++    @Override
++    public void run() {
++        this.spin();
++    }
++}
+diff --git a/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java b/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..bdc455d1505e20f5900ccfcd7e585664cf28ce67
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java
+@@ -0,0 +1,296 @@
++package me.dueris.canvas.thread.region;
++
++import java.util.Iterator;
++import java.util.List;
++import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.concurrent.CountDownLatch;
++import me.dueris.canvas.thread.ScheduledTask;
++import me.dueris.canvas.thread.TickTaskHolder;
++import me.dueris.canvas.world.TickManagerHolder;
++import net.minecraft.Util;
++import net.minecraft.commands.CommandSourceStack;
++import net.minecraft.resources.ResourceKey;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.ServerTickRateManager;
++import net.minecraft.server.TickTask;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.players.PlayerList;
++import net.minecraft.util.TimeUtil;
++import net.minecraft.util.debugchart.DebugSampleSubscriptionTracker;
++import net.minecraft.util.debugchart.RemoteDebugSampleType;
++import net.minecraft.util.debugchart.RemoteSampleLogger;
++import net.minecraft.util.debugchart.TpsDebugDimensions;
++import net.minecraft.world.level.Level;
++import org.apache.logging.log4j.LogManager;
++import org.apache.logging.log4j.Logger;
++import org.bukkit.command.defaults.ReloadCommand;
++
++public class ThreadedRegion extends RegionThread implements TickManagerHolder {
++    private static final Logger LOGGER = LogManager.getLogger("ThreadedRegion");
++    private static final java.math.BigDecimal TPS_BASE = new java.math.BigDecimal("1E9").multiply(new java.math.BigDecimal(MinecraftServer.SAMPLE_INTERVAL));
++    public final CountDownLatch latch = new CountDownLatch(1);
++    public final Double[] recentTps = new Double[4];
++    public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
++    public final MinecraftServer.RollingAverage tps1 = new MinecraftServer.RollingAverage(60);
++    public final MinecraftServer.RollingAverage tps5 = new MinecraftServer.RollingAverage(60 * 5);
++    public final MinecraftServer.RollingAverage tps15 = new MinecraftServer.RollingAverage(60 * 15);
++    private final ConcurrentLinkedQueue<ScheduledTask> scheduledTasks = new ConcurrentLinkedQueue<>();
++    private final ServerLevel level;
++    private final MinecraftServer server;
++    private final ResourceKey<Level> dimension;
++    private final ServerTickRateManager tickRateManager;
++    public volatile boolean running = false;
++    public int tickCount = 0;
++    public int currentTick;
++    public long currentTickLong;
++    public boolean lagging = false;
++    public Long lastNanoTickTime = 0L;
++    public long currentTime;
++    private long nextTickTimeNanos;
++    private long lastOverloadWarningNanos;
++    private long taskExecutionStartNanos;
++    private long idleTimeNanos;
++    private long delayedTasksMaxNextTickTimeNanos;
++    private boolean mayHaveDelayedTasks;
++    private ThreadedRegion.EventLoop eventLoop;
++    private net.minecraft.util.debugchart.SampleLogger tickTimeLogger;
++
++    public ThreadedRegion(ServerLevel level) {
++        super("ThreadedRegion");
++        this.level = level;
++        this.setUncaughtExceptionHandler((thread1, throwable) -> {
++            ServerLevel.LOGGER.error("Uncaught exception in ThreadedRegion", throwable);
++        });
++        this.setPriority(Thread.NORM_PRIORITY + 2);
++        if (Runtime.getRuntime().availableProcessors() > 4) {
++            this.setPriority(8);
++        }
++        this.server = level.server;
++        this.dimension = level.dimension();
++        this.tickRateManager = new ServerTickRateManager(this);
++    }
++
++    @Override
++    protected void tickRegion() {
++        tickCount++;
++    }
++
++    @Override
++    public PlayerList getPlayerList() {
++        return this.server.getPlayerList();
++    }
++
++    @Override
++    public CommandSourceStack createCommandSourceStack() {
++        return this.server.createCommandSourceStack();
++    }
++
++    @Override
++    public void onTickRateChanged() {
++        server.onTickRateChanged();
++    }
++
++    @Override
++    public ServerTickRateManager getManager() {
++        return tickRateManager;
++    }
++
++    @Override
++    public Float getTps() {
++        return Double.valueOf(tps5s.getAverage()).floatValue();
++    }
++
++    @Override
++    public Long getNanoSecondsFromLastTick() {
++        return this.lastNanoTickTime;
++    }
++
++    @Override
++    public String getHolderName() {
++        return this.dimension.location().toString();
++    }
++
++    private void startMeasuringTaskExecutionTime() {
++        if (server.isTickTimeLoggingEnabled()) {
++            this.taskExecutionStartNanos = Util.getNanos();
++            this.idleTimeNanos = 0L;
++        }
++
++    }
++
++    private void finishMeasuringTaskExecutionTime() {
++        if (server.isTickTimeLoggingEnabled()) {
++            net.minecraft.util.debugchart.SampleLogger samplelogger = this.tickTimeLogger;
++
++            samplelogger.logPartialSample(Util.getNanos() - this.taskExecutionStartNanos - this.idleTimeNanos, net.minecraft.util.debugchart.TpsDebugDimensions.SCHEDULED_TASKS.ordinal());
++            samplelogger.logPartialSample(this.idleTimeNanos, net.minecraft.util.debugchart.TpsDebugDimensions.IDLE.ordinal());
++        }
++
++    }
++
++    @Override
++    protected void stopSpinning() {
++        this.running = false;
++        try {
++            latch.await();
++        } catch (InterruptedException e) {
++            throw new RuntimeException(e);
++        }
++    }
++
++    @Override
++    public void spin() {
++        long tickSection = Util.getNanos();
++        this.running = true;
++        this.eventLoop = new ThreadedRegion.EventLoop(this);
++        DebugSampleSubscriptionTracker debugSampleSubscriptionTracker = new DebugSampleSubscriptionTracker(this.getPlayerList());
++        this.tickTimeLogger = new RemoteSampleLogger(TpsDebugDimensions.values().length, debugSampleSubscriptionTracker, RemoteDebugSampleType.TICK_TIME);
++        while (this.running) {
++            try {
++                long tickDuration;
++                currentTime = Util.getNanos();
++                if (ReloadCommand.isReloading) continue; // Dont tick worlds during reload
++                if (!server.isPaused() && this.tickRateManager.isSprinting() && this.tickRateManager.checkShouldSprintThisTick()) {
++                    tickDuration = 0L;
++                    this.nextTickTimeNanos = Util.getNanos();
++                    this.lastOverloadWarningNanos = this.nextTickTimeNanos;
++                } else {
++                    tickDuration = this.tickRateManager().nanosecondsPerTick();
++                    long elapsedTime = Util.getNanos() - this.nextTickTimeNanos;
++
++                    if (elapsedTime > 20 + 20L * tickDuration && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * tickDuration) {
++                        long ticksBehind = elapsedTime / tickDuration;
++
++                        if (server.server.getWarnOnOverload() && tickCount > 300)
++                            LOGGER.warn("Can't keep up! Is the region overloaded? Running {}ms or {} ticks behind.", elapsedTime / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind);
++                        this.nextTickTimeNanos += ticksBehind * tickDuration;
++                        this.lastOverloadWarningNanos = this.nextTickTimeNanos;
++                    }
++                }
++                ++this.currentTickLong;
++                currentTime = Util.getNanos();
++                if (++this.currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
++                    final long diff = currentTime - tickSection;
++                    final java.math.BigDecimal currentTps = TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
++                    tps5s.add(currentTps, diff);
++                    tps1.add(currentTps, diff);
++                    tps5.add(currentTps, diff);
++                    tps15.add(currentTps, diff);
++
++                    this.recentTps[0] = tps5s.getAverage();
++                    this.recentTps[1] = tps1.getAverage();
++                    this.recentTps[2] = tps5.getAverage();
++                    this.recentTps[3] = tps15.getAverage();
++                    lagging = recentTps[0] < org.purpurmc.purpur.PurpurConfig.laggingThreshold;
++                    tickSection = currentTime;
++                }
++                this.nextTickTimeNanos += tickDuration;
++
++                long i = Util.getNanos();
++                this.tickRegion();
++                this.lastNanoTickTime = Util.getNanos() - i;
++                this.mayHaveDelayedTasks = true;
++                this.delayedTasksMaxNextTickTimeNanos = Math.max(Util.getNanos() + tickDuration, this.nextTickTimeNanos);
++                if (!org.purpurmc.purpur.PurpurConfig.tpsCatchup) {
++                    this.nextTickTimeNanos = currentTime + nextTickTimeNanos;
++                    this.delayedTasksMaxNextTickTimeNanos = nextTickTimeNanos;
++                }
++                this.startMeasuringTaskExecutionTime();
++                this.waitUntilNextTick();
++                this.finishMeasuringTaskExecutionTime();
++            } catch (Throwable throwable) {
++                throwable.printStackTrace();
++            }
++        }
++        latch.countDown();
++        stopSpinning();
++    }
++
++    public void waitUntilNextTick() {
++        eventLoop.managedBlock(() -> !(server.forceTicks || eventLoop.getRunningTask() || Util.getNanos() < this.nextTickTimeNanos));
++    }
++
++    public boolean haveTime() {
++        if (server.forceTicks) {
++            return true;
++        }
++        if (server.isOversleep)
++            return this.mayHaveDelayedTasks && Util.getNanos() < this.delayedTasksMaxNextTickTimeNanos;
++        return server.forceTicks || eventLoop.getRunningTask() || Util.getNanos() < (this.mayHaveDelayedTasks ? this.delayedTasksMaxNextTickTimeNanos : this.nextTickTimeNanos);
++    }
++
++    @Override
++    public void scheduleTickTask(Runnable runnable, Timing timing, TickTaskHolder.State state) {
++        this.scheduledTasks.add(new ScheduledTask(runnable, state.equals(TickTaskHolder.State.MAIN), timing));
++    }
++
++    public void runAllScheduledTasks() {
++        List<ScheduledTask> tasksToRun = new java.util.ArrayList<>(this.scheduledTasks);
++        this.scheduledTasks.clear();
++
++        for (ScheduledTask task : tasksToRun) {
++            task.run();
++        }
++    }
++
++    public void runAllWithTiming(Timing timing) {
++        Iterator<ScheduledTask> iterator = this.scheduledTasks.iterator();
++        while (iterator.hasNext()) {
++            ScheduledTask task = iterator.next();
++            if (task == null) break;
++            if (task.canRun(timing) && task.serverLevel()) {
++                iterator.remove();
++                task.run();
++            }
++        }
++    }
++
++    public ServerLevel level() {
++        return level;
++    }
++
++    public ResourceKey<Level> dimension() {
++        return dimension;
++    }
++
++    public ServerTickRateManager tickRateManager() {
++        return tickRateManager;
++    }
++
++    public int tickCount() {
++        return tickCount;
++    }
++
++    private static class EventLoop extends net.minecraft.util.thread.ReentrantBlockableEventLoop<net.minecraft.server.TickTask> {
++        private final ServerLevel level;
++
++        public EventLoop(ThreadedRegion region) {
++            super("ThreadedRegion_" + region.hashCode());
++            this.level = region.level;
++        }
++
++        @Override
++        protected TickTask wrapRunnable(Runnable runnable) {
++            if (level.server.hasStopped && Thread.currentThread().equals(level.server.shutdownThread)) {
++                runnable.run();
++                runnable = () -> {};
++            }
++            return new TickTask(level.tickCount, runnable);
++        }
++
++        @Override
++        protected boolean shouldRun(TickTask ticktask) {
++            return ticktask.getTick() + 3 < level.tickCount || level.server.haveTime();
++        }
++
++        @Override
++        protected Thread getRunningThread() {
++            return Thread.currentThread();
++        }
++
++        public boolean getRunningTask() {
++            return this.runningTask();
++        }
++    }
++
++}
 diff --git a/src/main/java/me/dueris/canvas/world/TickManagerHolder.java b/src/main/java/me/dueris/canvas/world/TickManagerHolder.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..812ca23a793e3adeea4f3fbf5d60c0b954a9c03a
@@ -2317,7 +2646,7 @@ index dd6278fe99e2ee4daa95249c71ea935dd08b0025..003f9575de45aa25ed43e693885e5db3
              if (!set.isEmpty()) {
                  // CraftBukkit start - Send scaled max health
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index d8d63405e7eb388d8690d8a4c645bbb3955108b7..0884a0996c3e6b6cc02c7603471801cb98cc149c 100644
+index d8d63405e7eb388d8690d8a4c645bbb3955108b7..dca2338c1ece79c20f00c90a1321e61770bc3616 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -6,11 +6,13 @@ import com.google.common.collect.Lists;
@@ -2396,7 +2725,7 @@ index d8d63405e7eb388d8690d8a4c645bbb3955108b7..0884a0996c3e6b6cc02c7603471801cb
  import org.slf4j.Logger;
  import org.bukkit.Bukkit;
  import org.bukkit.WeatherType;
-@@ -182,14 +196,14 @@ import org.bukkit.event.weather.LightningStrikeEvent;
+@@ -182,19 +196,19 @@ import org.bukkit.event.weather.LightningStrikeEvent;
  import org.bukkit.event.world.TimeSkipEvent;
  // CraftBukkit end
  
@@ -2413,6 +2742,12 @@ index d8d63405e7eb388d8690d8a4c645bbb3955108b7..0884a0996c3e6b6cc02c7603471801cb
      private static final int EMPTY_TIME_NO_TICK = 300;
      private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
      final List<ServerPlayer> players;
+     public final ServerChunkCache chunkSource;
+-    private final MinecraftServer server;
++    public final MinecraftServer server; // Canvas - private -> public
+     public final PrimaryLevelData serverLevelData; // CraftBukkit - type
+     private int lastSpawnChunkRadius;
+     final EntityTickList entityTickList;
 @@ -210,7 +224,7 @@ public class ServerLevel extends Level implements WorldGenLevel {
      final Set<Mob> navigatingMobs;
      volatile boolean isUpdatingNavigations;
@@ -2867,7 +3202,7 @@ index c51b429822d56761f69c49ecd4addfab7b90bad8..b126cb21b2b679def6c92734daa758aa
      }
  
 diff --git a/src/main/java/net/minecraft/world/level/Level.java b/src/main/java/net/minecraft/world/level/Level.java
-index 487bb3e75afc5871a79506a54f0f4af806460b14..1d0b73df34c271ccb2db83156ad07bc5c81ce4af 100644
+index 487bb3e75afc5871a79506a54f0f4af806460b14..abf6287a5fce30bb3aa5248df9a41f02a875e349 100644
 --- a/src/main/java/net/minecraft/world/level/Level.java
 +++ b/src/main/java/net/minecraft/world/level/Level.java
 @@ -10,9 +10,10 @@ import java.util.function.Consumer;
@@ -2929,7 +3264,7 @@ index 487bb3e75afc5871a79506a54f0f4af806460b14..1d0b73df34c271ccb2db83156ad07bc5
  
      // CraftBukkit start Added the following
      private final CraftWorld world;
-@@ -229,6 +228,50 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+@@ -229,6 +228,46 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
      public CraftServer getCraftServer() {
          return (CraftServer) Bukkit.getServer();
      }
@@ -2972,15 +3307,11 @@ index 487bb3e75afc5871a79506a54f0f4af806460b14..1d0b73df34c271ccb2db83156ad07bc5
 +            }
 +        }
 +    }
-+
-+    public ScheduledTask[] getMainThreadTasks() {
-+        return (ScheduledTask[]) this.scheduledTasks.stream().filter(s -> !s.serverLevel()).toArray().clone();
-+    }
 +    // Canvas end
  
      // Paper start - Use getChunkIfLoadedImmediately
      @Override
-@@ -249,6 +292,16 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+@@ -249,6 +288,16 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
      public abstract ResourceKey<LevelStem> getTypeKey();
  
      protected Level(WritableLevelData worlddatamutable, ResourceKey<Level> resourcekey, RegistryAccess iregistrycustom, Holder<DimensionType> holder, Supplier<ProfilerFiller> supplier, boolean flag, boolean flag1, long i, int j, org.bukkit.generator.ChunkGenerator gen, org.bukkit.generator.BiomeProvider biomeProvider, org.bukkit.World.Environment env, java.util.function.Function<org.spigotmc.SpigotWorldConfig, io.papermc.paper.configuration.WorldConfiguration> paperWorldConfigCreator, java.util.concurrent.Executor executor) { // Paper - create paper world config; Async-Anti-Xray: Pass executor
@@ -2997,7 +3328,7 @@ index 487bb3e75afc5871a79506a54f0f4af806460b14..1d0b73df34c271ccb2db83156ad07bc5
          this.spigotConfig = new org.spigotmc.SpigotWorldConfig(((net.minecraft.world.level.storage.PrimaryLevelData) worlddatamutable).getLevelName()); // Spigot
          this.paperConfig = paperWorldConfigCreator.apply(this.spigotConfig); // Paper - create paper world config
          this.purpurConfig = new org.purpurmc.purpur.PurpurWorldConfig(((net.minecraft.world.level.storage.PrimaryLevelData) worlddatamutable).getLevelName(), env); // Purpur
-@@ -1292,6 +1345,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+@@ -1292,6 +1341,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
      public void addBlockEntityTicker(TickingBlockEntity ticker) {
          (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
      }
@@ -3005,7 +3336,7 @@ index 487bb3e75afc5871a79506a54f0f4af806460b14..1d0b73df34c271ccb2db83156ad07bc5
  
      protected void tickBlockEntities() {
          //ProfilerFiller gameprofilerfiller = this.getProfiler(); // Purpur
-@@ -1311,7 +1365,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+@@ -1311,7 +1361,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
          boolean flag = this.tickRateManager().runsNormally();
  
          int tilesThisCycle = 0;
@@ -3014,7 +3345,7 @@ index 487bb3e75afc5871a79506a54f0f4af806460b14..1d0b73df34c271ccb2db83156ad07bc5
          toRemove.add(null); // Paper - Fix MC-117075
          for (tileTickPosition = 0; tileTickPosition < this.blockEntityTickers.size(); tileTickPosition++) { // Paper - Disable tick limiters
              this.tileTickPosition = (this.tileTickPosition < this.blockEntityTickers.size()) ? this.tileTickPosition : 0;
-@@ -1327,12 +1381,13 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+@@ -1327,12 +1377,13 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
                  tickingblockentity.tick();
                  // Paper start - execute chunk tasks during tick
                  if ((this.tileTickPosition & 7) == 0) {
@@ -3029,7 +3360,7 @@ index 487bb3e75afc5871a79506a54f0f4af806460b14..1d0b73df34c271ccb2db83156ad07bc5
  
          //this.timings.tileEntityTick.stopTiming(); // Spigot // Purpur
          this.tickingBlockEntities = false;
-@@ -1344,7 +1399,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
+@@ -1344,7 +1395,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable {
      public <T extends Entity> void guardEntityTick(Consumer<T> tickConsumer, T entity) {
          try {
              tickConsumer.accept(entity);
