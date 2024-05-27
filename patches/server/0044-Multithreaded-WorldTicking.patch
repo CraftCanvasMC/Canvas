@@ -844,10 +844,10 @@ index b69f6b2c1bdd129aef96a07f49971e6ee250dfdd..a7804cccf8a8c46b7818be6df48a5d80
          asyncPathfindingKeepalive = getInt("optimizations.async-pathfinding.keepalive", 60);
 diff --git a/src/main/java/me/dueris/canvas/command/CanvasCommand.java b/src/main/java/me/dueris/canvas/command/CanvasCommand.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..7e263d51f3919c9556ebddaf4d8b9219af05d516
+index 0000000000000000000000000000000000000000..25d0a8ef795b6cf0c65fdbf7e2c96c70a0b62c25
 --- /dev/null
 +++ b/src/main/java/me/dueris/canvas/command/CanvasCommand.java
-@@ -0,0 +1,232 @@
+@@ -0,0 +1,241 @@
 +package me.dueris.canvas.command;
 +
 +import java.io.File;
@@ -906,6 +906,10 @@ index 0000000000000000000000000000000000000000..7e263d51f3919c9556ebddaf4d8b9219
 +        if (!testPermission(sender)) return true;
 +        CraftServer server = (CraftServer) sender.getServer();
 +        List<Pair<ServerTickRateManager, Float>> tpsValues = server.getServer().getAllTickRateManagers().stream().map(ServerTickRateManager::toTpsPair).toList();
++        int runningRegions = 0;
++        for (final ServerLevel allLevel : server.getServer().getAllLevels()) {
++            runningRegions += allLevel.regionManager().regionChunksMap.keySet().size();
++        }
 +
 +        Pair<ServerTickRateManager, Float> minMSPT = tpsValues.stream()
 +            .min(Comparator.comparing(Pair::getSecond))
@@ -936,6 +940,11 @@ index 0000000000000000000000000000000000000000..7e263d51f3919c9556ebddaf4d8b9219
 +                .color(TextColor.color(0x2F8FE9))
 +                .append(base.append(
 +                    Component.text(String.valueOf(server.getOnlinePlayers().size())).color(TextColor.color(10407396)))));
++            sender.sendMessage(base.append(
++                    Component.text(" - Running Regions: "))
++                .color(TextColor.color(0x2F8FE9))
++                .append(base.append(
++                    Component.text(String.valueOf(runningRegions)).color(TextColor.color(10407396)))));
 +            sender.sendMessage(base.append(
 +                Component.text(" - Running TickHolders: "))
 +                .color(TextColor.color(0x2F8FE9))
@@ -1233,10 +1242,10 @@ index 0000000000000000000000000000000000000000..0dbd245466f965a80c1736a49d574c68
 +}
 diff --git a/src/main/java/me/dueris/canvas/thread/region/RegionManager.java b/src/main/java/me/dueris/canvas/thread/region/RegionManager.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..4ffc64e887d56386f2b48ccd45070facd24fbc08
+index 0000000000000000000000000000000000000000..7c776bfc4f6e9ecaf53d918c70466c90fe0a563f
 --- /dev/null
 +++ b/src/main/java/me/dueris/canvas/thread/region/RegionManager.java
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,167 @@
 +package me.dueris.canvas.thread.region;
 +
 +import java.util.*;
@@ -1252,8 +1261,8 @@ index 0000000000000000000000000000000000000000..4ffc64e887d56386f2b48ccd45070fac
 +    private static final int MAX_CHUNKS = 20000;
 +    private static final int OVERFLOW_LIMIT = 2000;
 +
-+    protected final ConcurrentHashMap<ThreadedRegion, CopyOnWriteArraySet<ChunkPos>> regionChunksMap = new ConcurrentHashMap<>();
-+    private final ConcurrentHashMap<ChunkPos, ThreadedRegion> chunkToRegionMap = new ConcurrentHashMap<>();
++    public final ConcurrentHashMap<ThreadedRegion, CopyOnWriteArraySet<ChunkPos>> regionChunksMap = new ConcurrentHashMap<>();
++    public final ConcurrentHashMap<ChunkPos, ThreadedRegion> chunkToRegionMap = new ConcurrentHashMap<>();
 +    private final ServerLevel level;
 +    private final Lock lock = new ReentrantLock();
 +
@@ -1265,6 +1274,57 @@ index 0000000000000000000000000000000000000000..4ffc64e887d56386f2b48ccd45070fac
 +        this.regionChunksMap.keySet().forEach(region -> {
 +            region.stopSpinning();
 +        });
++    }
++
++    public ChunkPos[][] chunkMap() {
++        Set<ChunkPos> positions = new HashSet<>();
++        for (final ThreadedRegion value : this.chunkToRegionMap.values()) {
++            positions.addAll(value.chunkSet());
++        }
++        return createChunkPosArray(positions);
++    }
++
++    public ChunkPos[][] chunkMap(ThreadedRegion region) {
++        return createChunkPosArray(region.chunkSet());
++    }
++
++    public static ChunkPos[][] createChunkPosArray(Set<ChunkPos> chunkPosSet) {
++        if (chunkPosSet.isEmpty()) {
++            return new ChunkPos[0][0];
++        }
++
++        int minX = Integer.MAX_VALUE;
++        int maxX = Integer.MIN_VALUE;
++        int minZ = Integer.MAX_VALUE;
++        int maxZ = Integer.MIN_VALUE;
++
++        for (ChunkPos chunkPos : chunkPosSet) {
++            if (chunkPos.x < minX) {
++                minX = chunkPos.x;
++            }
++            if (chunkPos.x > maxX) {
++                maxX = chunkPos.x;
++            }
++            if (chunkPos.z < minZ) {
++                minZ = chunkPos.z;
++            }
++            if (chunkPos.z > maxZ) {
++                maxZ = chunkPos.z;
++            }
++        }
++
++        int width = maxX - minX + 1;
++        int height = maxZ - minZ + 1;
++
++        ChunkPos[][] chunkPosArray = new ChunkPos[width][height];
++
++        for (ChunkPos chunkPos : chunkPosSet) {
++            int xIndex = chunkPos.x - minX;
++            int zIndex = chunkPos.z - minZ;
++            chunkPosArray[xIndex][zIndex] = chunkPos;
++        }
++
++        return chunkPosArray;
 +    }
 +
 +    public void tick(Set<ChunkPos> newChunkPosSet) {
@@ -1298,6 +1358,15 @@ index 0000000000000000000000000000000000000000..4ffc64e887d56386f2b48ccd45070fac
 +        }
 +    }
 +
++    public Optional<ThreadedRegion> getChunkPosRegion(ChunkPos pos) {
++        for (ThreadedRegion region : this.chunkToRegionMap.values()) {
++            if (region.chunkSet().contains(pos)) {
++                return Optional.of(region);
++            }
++        }
++        return Optional.empty();
++    }
++
 +    private ThreadedRegion findOrCreateRegion(ChunkPos chunkPos) {
 +        for (ThreadedRegion region : regionChunksMap.keySet()) {
 +            if (regionChunksMap.get(region).size() < MAX_CHUNKS) {
@@ -1305,6 +1374,7 @@ index 0000000000000000000000000000000000000000..4ffc64e887d56386f2b48ccd45070fac
 +            }
 +        }
 +
++        System.out.println("New region creating..");
 +        ThreadedRegion newRegion = new ThreadedRegion(this.level);
 +        regionChunksMap.put(newRegion, new CopyOnWriteArraySet<>());
 +        return newRegion;
@@ -1372,15 +1442,17 @@ index 0000000000000000000000000000000000000000..6b9bdb38d9f9b82984386f355228ada9
 +}
 diff --git a/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java b/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..40007a2bf939162a4f8df539dd699165fbaaba69
+index 0000000000000000000000000000000000000000..397a1a9a09d00eb9b02422a2d928939148a3b540
 --- /dev/null
 +++ b/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java
-@@ -0,0 +1,384 @@
+@@ -0,0 +1,390 @@
 +package me.dueris.canvas.thread.region;
 +
++import java.awt.*;
 +import java.util.Collections;
 +import java.util.Iterator;
 +import java.util.List;
++import java.util.Random;
 +import java.util.Set;
 +import java.util.concurrent.ConcurrentLinkedQueue;
 +import java.util.concurrent.CopyOnWriteArraySet;
@@ -1683,7 +1755,11 @@ index 0000000000000000000000000000000000000000..40007a2bf939162a4f8df539dd699165
 +        }
 +    }
 +
-+    public Set<ChunkPos> getChunks() {
++    public ChunkPos[][] chunks() {
++        return this.manager.createChunkPosArray(this.chunkSet());
++    }
++
++    public Set<ChunkPos> chunkSet() {
 +        lock.lock();
 +        try {
 +            return Collections.unmodifiableSet(chunks);
