@@ -4010,3 +4010,468 @@ index 6b0a3b49b4fc85d916faab26a5432d88ff56eae7..1e25d89f38af24c0eb20413d5b43762f
          for ( StackTraceElement stack : io.papermc.paper.util.StacktraceDeobfuscator.INSTANCE.deobfuscateStacktrace(thread.getStackTrace()) ) // Paper
          {
              log.log( Level.SEVERE, "\t\t" + stack );
+diff --git a/src/main/java/me/dueris/canvas/command/CanvasCommand.java b/src/main/java/me/dueris/canvas/command/CanvasCommand.java
+index 25d0a8ef795b6cf0c65fdbf7e2c96c70a0b62c25..60d515c496cc186c26b69b09b5f52dbda0d40976 100644
+--- a/src/main/java/me/dueris/canvas/command/CanvasCommand.java
++++ b/src/main/java/me/dueris/canvas/command/CanvasCommand.java
+@@ -58,7 +58,7 @@ public class CanvasCommand extends Command {
+         List<Pair<ServerTickRateManager, Float>> tpsValues = server.getServer().getAllTickRateManagers().stream().map(ServerTickRateManager::toTpsPair).toList();
+         int runningRegions = 0;
+         for (final ServerLevel allLevel : server.getServer().getAllLevels()) {
+-            runningRegions += allLevel.regionManager().regionChunksMap.keySet().size();
++            runningRegions += allLevel.regionManager().regions().size();
+         }
+ 
+         Pair<ServerTickRateManager, Float> minMSPT = tpsValues.stream()
+diff --git a/src/main/java/me/dueris/canvas/thread/region/RegionManager.java b/src/main/java/me/dueris/canvas/thread/region/RegionManager.java
+index 7c776bfc4f6e9ecaf53d918c70466c90fe0a563f..a55d3efa7ea746efc9921211bfae3e4a9bb2de51 100644
+--- a/src/main/java/me/dueris/canvas/thread/region/RegionManager.java
++++ b/src/main/java/me/dueris/canvas/thread/region/RegionManager.java
+@@ -1,82 +1,44 @@
+ package me.dueris.canvas.thread.region;
+ 
+-import java.util.*;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Set;
++import java.util.Stack;
+ import java.util.concurrent.ConcurrentHashMap;
+ import java.util.concurrent.CopyOnWriteArraySet;
+ import java.util.concurrent.locks.Lock;
+ import java.util.concurrent.locks.ReentrantLock;
+-
++import me.dueris.canvas.thread.region.visual.ChunkMapVM;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.level.ChunkPos;
+ 
+ public class RegionManager {
+-    private static final int MAX_CHUNKS = 20000;
++    private static final int MAX_CHUNKS = 10000;
+     private static final int OVERFLOW_LIMIT = 2000;
+ 
+-    public final ConcurrentHashMap<ThreadedRegion, CopyOnWriteArraySet<ChunkPos>> regionChunksMap = new ConcurrentHashMap<>();
+-    public final ConcurrentHashMap<ChunkPos, ThreadedRegion> chunkToRegionMap = new ConcurrentHashMap<>();
+-    private final ServerLevel level;
++    protected final ConcurrentHashMap<ThreadedRegion, CopyOnWriteArraySet<ChunkPos>> regionChunksMap = new ConcurrentHashMap<>();
++    private final ConcurrentHashMap<ChunkPos, ThreadedRegion> chunkToRegionMap = new ConcurrentHashMap<>();
+     private final Lock lock = new ReentrantLock();
++    private final ServerLevel level;
++    private ChunkMapVM vm;
+ 
+     public RegionManager(ServerLevel level) {
+         this.level = level;
++        if (level.dimension().location().toString().equalsIgnoreCase("minecraft:overworld")) {
++            this.vm = new ChunkMapVM();
++        }
+     }
+ 
+     public void stopRegions() {
+-        this.regionChunksMap.keySet().forEach(region -> {
+-            region.stopSpinning();
+-        });
+-    }
+-
+-    public ChunkPos[][] chunkMap() {
+-        Set<ChunkPos> positions = new HashSet<>();
+-        for (final ThreadedRegion value : this.chunkToRegionMap.values()) {
+-            positions.addAll(value.chunkSet());
++        for (final ThreadedRegion threadedRegion : this.regionChunksMap.keySet()) {
++            threadedRegion.stopSpinning();
+         }
+-        return createChunkPosArray(positions);
+     }
+ 
+-    public ChunkPos[][] chunkMap(ThreadedRegion region) {
+-        return createChunkPosArray(region.chunkSet());
+-    }
+-
+-    public static ChunkPos[][] createChunkPosArray(Set<ChunkPos> chunkPosSet) {
+-        if (chunkPosSet.isEmpty()) {
+-            return new ChunkPos[0][0];
+-        }
+-
+-        int minX = Integer.MAX_VALUE;
+-        int maxX = Integer.MIN_VALUE;
+-        int minZ = Integer.MAX_VALUE;
+-        int maxZ = Integer.MIN_VALUE;
+-
+-        for (ChunkPos chunkPos : chunkPosSet) {
+-            if (chunkPos.x < minX) {
+-                minX = chunkPos.x;
+-            }
+-            if (chunkPos.x > maxX) {
+-                maxX = chunkPos.x;
+-            }
+-            if (chunkPos.z < minZ) {
+-                minZ = chunkPos.z;
+-            }
+-            if (chunkPos.z > maxZ) {
+-                maxZ = chunkPos.z;
+-            }
+-        }
+-
+-        int width = maxX - minX + 1;
+-        int height = maxZ - minZ + 1;
+-
+-        ChunkPos[][] chunkPosArray = new ChunkPos[width][height];
+-
+-        for (ChunkPos chunkPos : chunkPosSet) {
+-            int xIndex = chunkPos.x - minX;
+-            int zIndex = chunkPos.z - minZ;
+-            chunkPosArray[xIndex][zIndex] = chunkPos;
+-        }
+-
+-        return chunkPosArray;
++    public Set<ThreadedRegion> regions() {
++        return new HashSet<>(regionChunksMap.keySet().stream().toList());
+     }
+ 
+     public void tick(Set<ChunkPos> newChunkPosSet) {
+@@ -92,31 +54,47 @@ public class RegionManager {
+                 ThreadedRegion region = findOrCreateRegion(chunkPos);
+                 regionChunksMap.computeIfAbsent(region, r -> new CopyOnWriteArraySet<>()).add(chunkPos);
+                 chunkToRegionMap.put(chunkPos, region);
++                if (vm != null) {
++                    vm.tilePanel.setTileColor(chunkPos.x, chunkPos.z, region.color);
++                }
+             }
+ 
+             for (ChunkPos chunkPos : removedChunks) {
+                 ThreadedRegion region = chunkToRegionMap.remove(chunkPos);
+                 if (region != null) {
+                     regionChunksMap.get(region).remove(chunkPos);
+-                    if (regionChunksMap.get(region).size() <= MAX_CHUNKS * 0.2) {
+-                        mergeRegion(region);
+-                    }
++                }
++                if (vm != null) {
++                    vm.tilePanel.setTileColor(chunkPos.x, chunkPos.z, ChunkMapVM.DEFAULT_COLOR);
+                 }
+             }
+ 
+-            mergeNeighboringRegions();
+-        } finally {
+-            lock.unlock();
+-        }
+-    }
++            // Merge neighbored regions
++            for (ThreadedRegion region : new ArrayList<>(regionChunksMap.keySet())) {
++                for (ThreadedRegion other : new ArrayList<>(regionChunksMap.keySet())) {
++                    if (region == other) {
++                        continue;
++                    }
+ 
+-    public Optional<ThreadedRegion> getChunkPosRegion(ChunkPos pos) {
+-        for (ThreadedRegion region : this.chunkToRegionMap.values()) {
+-            if (region.chunkSet().contains(pos)) {
+-                return Optional.of(region);
++                    synchronized (region) {
++                        synchronized (other) {
++                            if (region.isNeighbor(other) && other.size() + region.size() <= MAX_CHUNKS) {
++                                Set<ChunkPos> positions = new HashSet<>(other.getChunks());
++                                other.stopSpinning();
++                                region.merge(positions);
++
++                                regionChunksMap.remove(other);
++                                for (ChunkPos chunkPos : positions) {
++                                    chunkToRegionMap.put(chunkPos, region);
++                                }
++                            }
++                        }
++                    }
++                }
+             }
++        } finally {
++            lock.unlock();
+         }
+-        return Optional.empty();
+     }
+ 
+     private ThreadedRegion findOrCreateRegion(ChunkPos chunkPos) {
+@@ -147,21 +125,75 @@ public class RegionManager {
+         }
+     }
+ 
+-    private void mergeNeighboringRegions() {
+-        List<ThreadedRegion> regionList = new ArrayList<>(regionChunksMap.keySet());
+-        for (int i = 0; i < regionList.size(); i++) {
+-            for (int j = i + 1; j < regionList.size(); j++) {
+-                ThreadedRegion region1 = regionList.get(i);
+-                ThreadedRegion region2 = regionList.get(j);
+-                if (region1.isNeighbor(region2) && regionChunksMap.get(region1).size() + regionChunksMap.get(region2).size() <= MAX_CHUNKS) {
+-                    region1.merge(regionChunksMap.get(region2));
+-                    regionChunksMap.remove(region2);
+-                    for (ChunkPos chunkPos : regionChunksMap.get(region2)) {
+-                        chunkToRegionMap.put(chunkPos, region1);
++    private void splitRegionIfNecessary(ThreadedRegion region) {
++        Set<ChunkPos> chunks = regionChunksMap.get(region);
++        List<Set<ChunkPos>> components = findConnectedComponents(chunks);
++
++        if (components.size() > 1) {
++            regionChunksMap.remove(region);
++            for (Set<ChunkPos> component : components) {
++                ThreadedRegion newRegion = new ThreadedRegion(this.level);
++                System.out.println("new region made");
++                regionChunksMap.put(newRegion, new CopyOnWriteArraySet<>(component));
++                for (ChunkPos chunkPos : component) {
++                    chunkToRegionMap.put(chunkPos, newRegion);
++                }
++            }
++        }
++    }
++
++    private List<Set<ChunkPos>> findConnectedComponents(Set<ChunkPos> chunks) {
++        List<Set<ChunkPos>> components = new ArrayList<>();
++        Set<ChunkPos> visited = new HashSet<>();
++
++        for (ChunkPos chunk : chunks) {
++            if (!visited.contains(chunk)) {
++                Set<ChunkPos> component = new HashSet<>();
++                dfs(chunk, chunks, component, visited);
++                components.add(component);
++            }
++        }
++
++        return components;
++    }
++
++    private void dfs(ChunkPos chunk, Set<ChunkPos> chunks, Set<ChunkPos> component, Set<ChunkPos> visited) {
++        Stack<ChunkPos> stack = new Stack<>();
++        stack.push(chunk);
++
++        while (!stack.isEmpty()) {
++            ChunkPos current = stack.pop();
++            if (!visited.contains(current)) {
++                visited.add(current);
++                component.add(current);
++
++                for (ChunkPos neighbor : getNeighbors(current)) {
++                    if (chunks.contains(neighbor) && !visited.contains(neighbor)) {
++                        stack.push(neighbor);
+                     }
+                 }
+             }
+         }
+     }
+ 
++    private List<ChunkPos> getNeighbors(ChunkPos chunk) {
++        return Arrays.asList(
++            new ChunkPos(chunk.x + 1, chunk.z),
++            new ChunkPos(chunk.x - 1, chunk.z),
++            new ChunkPos(chunk.x, chunk.z + 1),
++            new ChunkPos(chunk.x, chunk.z - 1)
++        );
++    }
++
++    public void tickRegion(ThreadedRegion region) {
++        Set<ChunkPos> chunkPosSet = regionChunksMap.get(region);
++        if (chunkPosSet != null) {
++            region.updateChunks(chunkPosSet);
++        }
++    }
++
++    public ThreadedRegion getRegion(ChunkPos chunkPos) {
++        return chunkToRegionMap.get(chunkPos);
++    }
++
+ }
+diff --git a/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java b/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java
+index 397a1a9a09d00eb9b02422a2d928939148a3b540..5f697158155f501c455758b8bdf6be0c5c355d0f 100644
+--- a/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java
++++ b/src/main/java/me/dueris/canvas/thread/region/ThreadedRegion.java
+@@ -11,7 +11,6 @@ import java.util.concurrent.CopyOnWriteArraySet;
+ import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.locks.Lock;
+ import java.util.concurrent.locks.ReentrantLock;
+-
+ import me.dueris.canvas.thread.ScheduledTask;
+ import me.dueris.canvas.thread.TickTaskHolder;
+ import me.dueris.canvas.world.TickManagerHolder;
+@@ -43,11 +42,14 @@ public class ThreadedRegion extends RegionThread implements TickManagerHolder {
+     public final MinecraftServer.RollingAverage tps1 = new MinecraftServer.RollingAverage(60);
+     public final MinecraftServer.RollingAverage tps5 = new MinecraftServer.RollingAverage(60 * 5);
+     public final MinecraftServer.RollingAverage tps15 = new MinecraftServer.RollingAverage(60 * 15);
++    public final Color color = new Color(new Random().nextInt(255), new Random().nextInt(255), new Random().nextInt(255));
+     private final ConcurrentLinkedQueue<ScheduledTask> scheduledTasks = new ConcurrentLinkedQueue<>();
+     private final ServerLevel level;
+     private final MinecraftServer server;
+     private final ResourceKey<Level> dimension;
+     private final ServerTickRateManager tickRateManager;
++    private final Lock lock = new ReentrantLock();
++    private final RegionManager manager;
+     public volatile boolean running = false;
+     public int tickCount = 0;
+     public int currentTick;
+@@ -64,8 +66,6 @@ public class ThreadedRegion extends RegionThread implements TickManagerHolder {
+     private ThreadedRegion.EventLoop eventLoop;
+     private net.minecraft.util.debugchart.SampleLogger tickTimeLogger;
+     private final Set<ChunkPos> chunks = new CopyOnWriteArraySet<>();
+-    private final Lock lock = new ReentrantLock();
+-    private final RegionManager manager;
+ 
+     public ThreadedRegion(ServerLevel level) {
+         super("ThreadedRegion");
+@@ -88,7 +88,7 @@ public class ThreadedRegion extends RegionThread implements TickManagerHolder {
+     protected void tickRegion() {
+         tickCount++;
+         Set<ChunkPos> chunkPosSet = manager.regionChunksMap.get(this);
+-        if (chunkPosSet != null) {
++        if (chunkPosSet != null && !chunkPosSet.isEmpty()) {
+             this.updateChunks(chunkPosSet);
+         }
+     }
+@@ -149,6 +149,7 @@ public class ThreadedRegion extends RegionThread implements TickManagerHolder {
+     @Override
+     protected void stopSpinning() {
+         this.running = false;
++        this.chunks.clear();
+         try {
+             latch.await();
+         } catch (InterruptedException e) {
+@@ -307,11 +308,7 @@ public class ThreadedRegion extends RegionThread implements TickManagerHolder {
+         }
+     }
+ 
+-    public ChunkPos[][] chunks() {
+-        return this.manager.createChunkPosArray(this.chunkSet());
+-    }
+-
+-    public Set<ChunkPos> chunkSet() {
++    public Set<ChunkPos> getChunks() {
+         lock.lock();
+         try {
+             return Collections.unmodifiableSet(chunks);
+diff --git a/src/main/java/me/dueris/canvas/thread/region/visual/ChunkMapVM.java b/src/main/java/me/dueris/canvas/thread/region/visual/ChunkMapVM.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..4a992180a3128af45a0e91d14b819eccdf1a9129
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/thread/region/visual/ChunkMapVM.java
+@@ -0,0 +1,81 @@
++package me.dueris.canvas.thread.region.visual;
++
++import java.awt.*;
++import java.awt.event.ActionEvent;
++import java.awt.event.ActionListener;
++import java.util.HashMap;
++import java.util.Map;
++import javax.swing.*;
++
++public class ChunkMapVM extends JFrame {
++    public static final Color DEFAULT_COLOR = Color.WHITE;
++    private static final int TILE_SIZE = 10;
++    private static final int GRID_SIZE = 2000;
++    private static final int TILES_PER_SIDE = GRID_SIZE / TILE_SIZE;
++    public final TilePanel tilePanel;
++
++    public ChunkMapVM() {
++        setTitle("ChunkMap VM");
++        setSize(GRID_SIZE, GRID_SIZE);
++        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
++        setLocationRelativeTo(null);
++
++        tilePanel = new TilePanel(TILES_PER_SIDE);
++        add(tilePanel);
++
++        // example
++        // tilePanel.setTileColor(0, 0, Color.RED);
++        // tilePanel.setTileColor(-5, -5, Color.BLUE);
++        // tilePanel.setTileColor(5, 5, Color.GREEN);
++
++        JButton clearButton = new JButton("Clear Board");
++        clearButton.addActionListener(new ActionListener() {
++            @Override
++            public void actionPerformed(ActionEvent e) {
++                tilePanel.clearBoard();
++            }
++        });
++        add(clearButton, BorderLayout.SOUTH);
++
++        setVisible(true);
++    }
++
++    public static void main(String[] args) {
++        SwingUtilities.invokeLater(() -> new ChunkMapVM());
++    }
++
++    public class TilePanel extends JPanel {
++        private final Map<Point, Color> tileColors;
++        private final int centerX;
++        private final int centerY;
++
++        public TilePanel(int tilesPerSide) {
++            this.tileColors = new HashMap<>();
++            this.centerX = tilesPerSide / 2;
++            this.centerY = tilesPerSide / 2;
++            setPreferredSize(new Dimension(GRID_SIZE, GRID_SIZE));
++        }
++
++        public void setTileColor(int x, int y, Color color) {
++            tileColors.put(new Point(centerX + x, centerY + y), color);
++            repaint();
++        }
++
++        public void clearBoard() {
++            tileColors.clear();
++            repaint();
++        }
++
++        @Override
++        protected void paintComponent(Graphics g) {
++            super.paintComponent(g);
++            for (int i = 0; i < TILES_PER_SIDE; i++) {
++                for (int j = 0; j < TILES_PER_SIDE; j++) {
++                    Color color = tileColors.getOrDefault(new Point(i, j), DEFAULT_COLOR);
++                    g.setColor(color);
++                    g.fillRect(i * TILE_SIZE, j * TILE_SIZE, TILE_SIZE, TILE_SIZE);
++                }
++            }
++        }
++    }
++}
+diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
+index 5fa9fed75872f4fde20c0bb90fd00e58a655d935..e7ee699eb2e768abbe9bbe9fd1e8319ab50f03e1 100644
+--- a/src/main/java/net/minecraft/server/level/ServerLevel.java
++++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
+@@ -934,6 +934,7 @@ public class ServerLevel extends Level implements WorldGenLevel, TickManagerHold
+     }
+ 
+     public void tickRegions() {
++        if (this.manager == null) return;
+         this.manager.tick(
+             new java.util.HashSet<ChunkPos>(io.papermc.paper.chunk.system.ChunkSystem.getVisibleChunkHolders(this).stream().map(ChunkHolder::getPos).toList())
+         );
+diff --git a/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java b/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
+index 8ba2d45a9c81e8b86dbe594174fd60a2b408f53e..4d3b9c8efaa9b3cd58bae1c13d9960bedfa777ac 100644
+--- a/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
++++ b/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
+@@ -5,6 +5,7 @@ import java.util.ArrayDeque;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.concurrent.ConcurrentLinkedDeque;
++import java.util.concurrent.ConcurrentLinkedQueue;
+ import javax.annotation.Nullable;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+@@ -47,8 +48,9 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+     public void updateNeighborsAtExceptFromFacing(BlockPos pos, Block sourceBlock, @Nullable Direction except) {
+         this.addAndRun(pos, new CollectingNeighborUpdater.MultiNeighborUpdate(pos.immutable(), sourceBlock, except));
+     }
++    private final ConcurrentLinkedQueue<Runnable> orderedUpdates = new ConcurrentLinkedQueue<>(); // Canvas
+ 
+-    private void addAndRun(BlockPos pos, CollectingNeighborUpdater.NeighborUpdates entry) {
++    private synchronized void addAndRun(BlockPos pos, CollectingNeighborUpdater.NeighborUpdates entry) { // Canvas
+         boolean bl = this.count > 0;
+         boolean bl2 = this.maxChainedNeighborUpdates >= 0 && this.count >= this.maxChainedNeighborUpdates;
+         this.count++;
+@@ -64,7 +66,8 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+         }
+ 
+         if (!bl) {
+-            this.runUpdates();
++            orderedUpdates.add(this::runUpdates);
++            orderedUpdates.poll().run();
+         }
+     }
+ 
