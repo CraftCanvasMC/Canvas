@@ -26,6 +26,7 @@ allprojects {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
+val mcVersion = "1.21"
 
 subprojects {
     tasks.withType<JavaCompile>().configureEach {
@@ -127,8 +128,8 @@ tasks.register<DefaultTask>("createCanvasBundler") {
 
         Files.createDirectories(targetJarDirectory)
         Files.copy(
-            rmapLoc.resolve("canvas-1.20.6.jar"),
-            targetJarDirectory.resolve("canvas-1.20.6-R0.1-SNAPSHOT.zip"),
+            rmapLoc.resolve("canvas-${mcVersion}.jar"),
+            targetJarDirectory.resolve("canvas-${mcVersion}-R0.1-SNAPSHOT.zip"),
             StandardCopyOption.REPLACE_EXISTING
         )
     }
@@ -162,13 +163,13 @@ tasks.register<DefaultTask>("remapPurpurClip") {
         val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
         Files.createDirectories(rmapLoc)
         Files.copy(
-            file("build/libs/canvas-paperclip-1.20.6-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
-            rmapLoc.resolve("canvas-1.20.6.zip"),
+            file("build/libs/canvas-paperclip-${mcVersion}-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
+            rmapLoc.resolve("canvas-${mcVersion}.zip"),
             StandardCopyOption.REPLACE_EXISTING
         )
         Files.copy(
-            file("build/libs/canvas-paperclip-1.20.6-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
-            rmapLoc.resolve("canvas-1.20.6.jar"),
+            file("build/libs/canvas-paperclip-${mcVersion}-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
+            rmapLoc.resolve("canvas-${mcVersion}.jar"),
             StandardCopyOption.REPLACE_EXISTING
         )
     }
