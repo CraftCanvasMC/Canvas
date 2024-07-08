@@ -5,7 +5,7 @@
   <h1>Welcome to Canvas</h1>
   <p><em>A Minecraft ServerType aimed for creativity and performance.</em></p>
 
-  <p>Canvas 1.21+ currently is highly unstable and could cause crashes at any point. The goal of Canvas is to be performant, plugin compatible, and stable, however due to the intensity and scale of a patch in canvas that multithreads the tickloop, its gotten highly unstable(yet the results in speed and tps stability are often 3x faster than Paper on a lower-end computer, and even faster on higher-end computers)/p>
+  <p>Canvas 1.21+ currently is highly unstable and could cause crashes at any point. The goal of Canvas is to be performant, plugin compatible, and stable, however due to the intensity and scale of a patch in canvas that multithreads the tickloop, its gotten highly unstable(yet the results in speed and tps stability are often 3x faster than Paper on a lower-end computer, and even faster on higher-end computers)</p>
 
   <p>Note from the dev: I'm currently on vacation in Europe for the next 2 1/2 weeks, returning July 7th. Because of this, no contributions will be made by me and I will not have time to fix issues or review PRs. When I return I plan on fixing lots of bugs and attempting to make Canvas more stable</p>
 
