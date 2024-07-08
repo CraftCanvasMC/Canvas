@@ -40,7 +40,7 @@ index 3e8401b1b1f833c4f01bc87059a2f48d761d989f..251951bcd0014c26f9411f5adabfeda5
                  while ((task = queue.pollFirst()) != null) {
                      if (task.trySetCompleting(i)) {
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
-index 3a8c192d1aed186ff506d69e3960e3b2792ddbd1..22f13d8aaca65ac58038a29f11ef6968297a3fd5 100644
+index 3a8c192d1aed186ff506d69e3960e3b2792ddbd1..e8efe4f6192787095e94c35fccb69f4b1ec2509f 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
 @@ -8,6 +8,7 @@ import ca.spottedleaf.moonrise.common.util.WorldUtil;
@@ -117,6 +117,15 @@ index 3a8c192d1aed186ff506d69e3960e3b2792ddbd1..22f13d8aaca65ac58038a29f11ef6968
              }
              if (!slices.removeEntity(entity, sectionY)) {
                  LOGGER.warn("Failed to remove entity " + entity + " from entity slices (" + sectionX + "," + sectionZ + ")");
+@@ -480,7 +501,7 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
+         }
+     }
+ 
+-    protected ChunkEntitySlices moveEntity(final Entity entity) {
++    protected synchronized ChunkEntitySlices moveEntity(final Entity entity) { // Canvas
+         // ensure we own the entity
+         this.checkThread(entity, "Cannot move entity off-main");
+ 
 @@ -1041,4 +1062,4 @@ public abstract class EntityLookup implements LevelEntityGetter<Entity> {
          @Override
          public void onRemove(final Entity.RemovalReason reason) {}
@@ -1313,10 +1322,10 @@ index 0000000000000000000000000000000000000000..e8e325231fad0b43957c7b65a4aaee5c
 \ No newline at end of file
 diff --git a/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockSet.java b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockSet.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..6bd1b25b87555dba0f076fc2ca3e49465c8cf8f2
+index 0000000000000000000000000000000000000000..c41e318265f11ad051225a354d83844598234031
 --- /dev/null
 +++ b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockSet.java
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,101 @@
 +package me.dueris.canvas.util;
 +
 +import java.util.Iterator;
@@ -1349,16 +1358,18 @@ index 0000000000000000000000000000000000000000..6bd1b25b87555dba0f076fc2ca3e4946
 +
 +    public synchronized WrappedConcurrentLockSet<T> removeAll() {
 +        set.clear();
++        count = 0;
 +        return this;
 +    }
 +
 +    public synchronized WrappedConcurrentLockSet<T> addAll(Set<T> set) {
 +        this.set.addAll(set);
++        count = this.set.size();
 +        return this;
 +    }
 +
 +    public boolean isEmpty() {
-+        return count == 0;
++        return set.isEmpty();
 +    }
 +
 +    public Iterator<T> iterator() {
@@ -1379,6 +1390,7 @@ index 0000000000000000000000000000000000000000..6bd1b25b87555dba0f076fc2ca3e4946
 +    public void markIterating() {
 +        if (this.toUpdate != null) {
 +            this.set = toUpdate;
++            count = this.set.size();
 +            this.toUpdate = null;
 +        }
 +        iterating = true;
@@ -1388,6 +1400,7 @@ index 0000000000000000000000000000000000000000..6bd1b25b87555dba0f076fc2ca3e4946
 +        iterating = false;
 +        if (this.toUpdate != null) {
 +            this.set = toUpdate;
++            count = this.set.size();
 +            this.toUpdate = null;
 +        }
 +    }
@@ -1475,7 +1488,7 @@ index a64e5997b94cc8173f0512d1e282355f14f098ec..d1c657c69ae1d6254ea4b8f689302570
          queue.add(Pair.of(pos, 0));
          int i = 0;
 diff --git a/src/main/java/net/minecraft/network/Connection.java b/src/main/java/net/minecraft/network/Connection.java
-index a7462b5c2d13985d81b5f762c14782070d2a12e3..9da238bcb01182b954aa018ce837db7fb4707cb8 100644
+index a7462b5c2d13985d81b5f762c14782070d2a12e3..2a7797453c840b0beea6d91837606efce55440c1 100644
 --- a/src/main/java/net/minecraft/network/Connection.java
 +++ b/src/main/java/net/minecraft/network/Connection.java
 @@ -114,6 +114,8 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
@@ -1495,7 +1508,31 @@ index a7462b5c2d13985d81b5f762c14782070d2a12e3..9da238bcb01182b954aa018ce837db7f
      public final net.minecraft.server.level.ServerPlayer getPlayer() {
          if (this.packetListener instanceof net.minecraft.server.network.ServerGamePacketListenerImpl impl) {
              return impl.player;
-@@ -955,6 +958,12 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -175,6 +178,23 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+         }
+ 
+     }
++    // Canvas start
++
++    @Override
++    public String toString() {
++        if (this.getPlayer() != null) {
++            return "Connection{" +
++                "tickCount=" + tickCount +
++                ", virtualHost=" + virtualHost +
++                ", player=" + getPlayer().getName().getString() +
++                '}';
++        }
++        return "Connection{" +
++            "tickCount=" + tickCount +
++            ", virtualHost=" + virtualHost +
++            '}';
++    }
++    // Canvas end
+ 
+     public void channelInactive(ChannelHandlerContext channelhandlercontext) {
+         this.disconnect((Component) Component.translatable("disconnect.endOfStream"));
+@@ -955,6 +975,12 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
          }
          this.pendingActions.clear();
      }
@@ -2692,7 +2729,7 @@ index fe2d82a173f27039d8f96fec1ad1f6a5650b0661..593e6eccd63aebbc2dc2a3861ae31486
  import java.util.stream.Stream;
  import javax.annotation.Nullable;
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 8931206a4c15f71b3bb52dddb588aecbfa3ae5b6..422cb37df29c964f655a9ef7d942c86f2a937da2 100644
+index 8931206a4c15f71b3bb52dddb588aecbfa3ae5b6..50368f961e079ccb00924aa154e29302e9451b92 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -6,16 +6,18 @@ import com.google.common.collect.Lists;
@@ -2880,7 +2917,7 @@ index 8931206a4c15f71b3bb52dddb588aecbfa3ae5b6..422cb37df29c964f655a9ef7d942c86f
      }
  
      // Paper start
-@@ -642,133 +686,412 @@ public class ServerLevel extends Level implements WorldGenLevel, ca.spottedleaf.
+@@ -642,133 +686,413 @@ public class ServerLevel extends Level implements WorldGenLevel, ca.spottedleaf.
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -3180,9 +3217,9 @@ index 8931206a4c15f71b3bb52dddb588aecbfa3ae5b6..422cb37df29c964f655a9ef7d942c86f
 +    public Runnable tick(BooleanSupplier shouldKeepTicking, int tickCount) { // Canvas - Multithreaded WorldTicking
 +        // Canvas start - Multithreaded WorldTicking
 +        return () -> {
++            checkFill();
++            connections.markIterating();
 +            if (!this.connections.isEmpty()) {
-+                checkFill();
-+                connections.markIterating();
 +                Iterator<Connection> iterator = connections.iterator();
  
 -                            if (entity1 != null) {
@@ -3214,6 +3251,7 @@ index 8931206a4c15f71b3bb52dddb588aecbfa3ae5b6..422cb37df29c964f655a9ef7d942c86f
 +                            }
 +                        } else {
 +                            if (playerConnection.preparing) continue;
++                            LOGGER.info("Removing disconnected PlayerConnection:{{}} from Threaded-Handler:{}", playerConnection.toString(), this.dimension.location().toString());
 +                            this.connections.remove(playerConnection);
 +                            playerConnection.handleDisconnection();
                          }
@@ -3223,8 +3261,8 @@ index 8931206a4c15f71b3bb52dddb588aecbfa3ae5b6..422cb37df29c964f655a9ef7d942c86f
 -            });
 -            //this.timings.entityTick.stopTiming(); // Spigot // Purpur
 -            //this.timings.tickEntities.stopTiming(); // Spigot // Purpur
-+                connections.markFinished();
 +            }
++            connections.markFinished();
 +            milliSinceLastConnectionTick = Util.getMillis();
 +            // Ensure it still ticks time
 +            final boolean doDaylight = this.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
@@ -3389,7 +3427,7 @@ index 8931206a4c15f71b3bb52dddb588aecbfa3ae5b6..422cb37df29c964f655a9ef7d942c86f
      }
  
      @Override
-@@ -1936,7 +2259,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ca.spottedleaf.
+@@ -1936,7 +2260,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ca.spottedleaf.
  
      @Override
      public TickRateManager tickRateManager() {
@@ -4108,7 +4146,7 @@ index afdbc74a3012fa717f59ecef613567338d285b7b..94b7fc27eb01260cb8565913dabb7575
  
          return null;
 diff --git a/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java b/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
-index 7ed694cbdd3a0c8d5643524eba3f56bc533ef3a7..b718ea305dc6e72677008751a403c25c2ee8d319 100644
+index 7ed694cbdd3a0c8d5643524eba3f56bc533ef3a7..a2b8368ecc8990bac9f57bb5143c0e10c16471b4 100644
 --- a/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
 +++ b/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
 @@ -1,9 +1,15 @@
@@ -4215,7 +4253,7 @@ index 7ed694cbdd3a0c8d5643524eba3f56bc533ef3a7..b718ea305dc6e72677008751a403c25c
                  }
 +                // Canvas start
 +                } catch (Throwable throwable) {
-+                    if (throwable instanceof NoSuchElementException | throwable instanceof ArrayIndexOutOfBoundsException e) {
++                    if (throwable instanceof NoSuchElementException || throwable instanceof ArrayIndexOutOfBoundsException e) {
 +                        break;
 +                    }
 +                    throw new RuntimeException(throwable);
@@ -4225,7 +4263,7 @@ index 7ed694cbdd3a0c8d5643524eba3f56bc533ef3a7..b718ea305dc6e72677008751a403c25c
  
              this.hasWork = !this.priorityQueue.isEmpty();
 diff --git a/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java b/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
-index 106af2b2c7ff72c7549975aef75cdcff8d9a7d97..041878f7536d03564c2430bc7dd1640428888a94 100644
+index 106af2b2c7ff72c7549975aef75cdcff8d9a7d97..41456ff2fe952c0b2165e99ffc85628819a411be 100644
 --- a/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
 +++ b/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
 @@ -4,6 +4,8 @@ import com.mojang.logging.LogUtils;
@@ -4291,21 +4329,23 @@ index 106af2b2c7ff72c7549975aef75cdcff8d9a7d97..041878f7536d03564c2430bc7dd16404
                          break;
                      }
                  }
-@@ -88,6 +104,13 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+@@ -88,6 +104,15 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
              this.addedThisLayer.clear();
              this.count = 0;
          }
 +        // Canvas start
 +        });
-+        updateTasks.removeIf((run) -> {
-+            run.run();
-+            return true;
-+        });
++        synchronized (updateTasks) {
++            updateTasks.removeIf((run) -> {
++                run.run();
++                return true;
++            });
++        }
 +        // Canvas end
      }
  
      static record FullNeighborUpdate(BlockState state, BlockPos pos, Block block, BlockPos neighborPos, boolean movedByPiston)
-@@ -116,7 +139,7 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+@@ -116,7 +141,7 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
          }
  
          @Override
