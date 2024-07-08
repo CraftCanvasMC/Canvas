@@ -4036,34 +4036,118 @@ index d8b4196adf955f8d414688dc451caac2d9c609d9..931467c580afc6b7e323f0cc4ef54010
          // Paper end - rewrite chunk system
      }
 diff --git a/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java b/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
-index 68be0d51aa64b5d917fb53dbbbdf8966d4f4abd8..a4787332acb2962648e5553a267be0c830f4e4a9 100644
+index 68be0d51aa64b5d917fb53dbbbdf8966d4f4abd8..b556b4daceb8e5f7047f693e202f9869c49af4e1 100644
 --- a/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
 +++ b/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
-@@ -51,6 +51,7 @@ import org.apache.commons.lang3.mutable.MutableObject;
+@@ -13,6 +13,8 @@ import java.util.Objects;
+ import java.util.OptionalInt;
+ import java.util.Set;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
+ import java.util.function.Predicate;
+ import java.util.function.Supplier;
+ import javax.annotation.Nullable;
+@@ -51,6 +53,8 @@ import org.apache.commons.lang3.mutable.MutableObject;
  
  public final class NoiseBasedChunkGenerator extends ChunkGenerator {
  
 +    public static boolean NOISIUM = true; // Canvas - Implement noisium
++    private static ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
      public static final MapCodec<NoiseBasedChunkGenerator> CODEC = RecordCodecBuilder.mapCodec((instance) -> {
          return instance.group(BiomeSource.CODEC.fieldOf("biome_source").forGetter((chunkgeneratorabstract) -> {
              return chunkgeneratorabstract.biomeSource;
-@@ -377,6 +378,20 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+@@ -264,54 +268,27 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+ 
+     @Override
+     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState noiseConfig, StructureManager structureAccessor, ChunkAccess chunk) {
+-        NoiseSettings noisesettings = ((NoiseGeneratorSettings) this.settings.value()).noiseSettings().clampToHeightAccessor(chunk.getHeightAccessorForGeneration());
+-        int i = noisesettings.minY();
+-        int j = Mth.floorDiv(i, noisesettings.getCellHeight());
+-        int k = Mth.floorDiv(noisesettings.height(), noisesettings.getCellHeight());
+-
+-        return k <= 0 ? CompletableFuture.completedFuture(chunk) : CompletableFuture.supplyAsync(Util.wrapThreadWithTaskName("wgen_fill_noise", () -> {
+-            int l = chunk.getSectionIndex(k * noisesettings.getCellHeight() - 1 + i);
+-            int i1 = chunk.getSectionIndex(i);
+-            Set<LevelChunkSection> set = Sets.newHashSet();
+-
+-            for (int j1 = l; j1 >= i1; --j1) {
+-                LevelChunkSection chunksection = chunk.getSection(j1);
+-
+-                chunksection.acquire();
+-                set.add(chunksection);
+-            }
+-
+-            boolean flag = false;
+-
+-            ChunkAccess ichunkaccess1;
+-
+-            try {
+-                flag = true;
+-                ichunkaccess1 = this.doFill(blender, structureAccessor, noiseConfig, chunk, j, k);
+-                flag = false;
+-            } finally {
+-                if (flag) {
+-                    Iterator iterator = set.iterator();
+-
+-                    while (iterator.hasNext()) {
+-                        LevelChunkSection chunksection1 = (LevelChunkSection) iterator.next();
+-
+-                        chunksection1.release();
+-                    }
+-
+-                }
+-            }
+-
+-            Iterator iterator1 = set.iterator();
+-
+-            while (iterator1.hasNext()) {
+-                LevelChunkSection chunksection2 = (LevelChunkSection) iterator1.next();
+-
+-                chunksection2.release();
+-            }
+-
+-            return ichunkaccess1;
+-        }), Runnable::run); // Paper - rewrite chunk system
++        // Canvas start
++        NoiseSettings settings = this.settings.value().noiseSettings().clampToHeightAccessor(chunk.getHeightAccessorForGeneration());
++        int miny = settings.minY();
++        int minyDiv = Mth.floorDiv(miny, settings.getCellHeight());
++        int cellHeightDiv = Mth.floorDiv(settings.height(), settings.cellHeight());
++
++        if (cellHeightDiv <= 0) return CompletableFuture.completedFuture(chunk);
++
++        int startIndex = chunk.getSectionIndex(cellHeightDiv * settings.getCellHeight() - 1 + miny);
++        int minYIndex = chunk.getSectionIndex(miny);
++
++        LevelChunkSection[] sections = chunk.getSections();
++        for (int i = startIndex; i >= minYIndex; --i) sections[i].acquire();
++
++        return CompletableFuture.supplyAsync(Util.wrapThreadWithTaskName(
++            "wgen_fill_noise",
++            () -> this.doFill(blender, structureAccessor, noiseConfig, chunk, minyDiv, cellHeightDiv)
++        ), Util.backgroundExecutor()).whenCompleteAsync((result, ignored) -> {
++            for (int i = startIndex; i >= minYIndex; --i) sections[i].release();
++            }, executorService);
++        // Canvas end
+     }
+ 
+     private ChunkAccess doFill(Blender blender, StructureManager structureAccessor, RandomState noiseConfig, ChunkAccess chunk, int minimumCellY, int cellHeight) {
+@@ -377,6 +354,18 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
  
                                  iblockdata = this.debugPreliminarySurfaceLevel(noisechunk, j4, j3, i5, iblockdata);
                                  if (iblockdata != NoiseBasedChunkGenerator.AIR && !SharedConstants.debugVoidTerrain(chunk.getPos())) {
-+                                    if (NOISIUM) {
-+                                        // Canvas start - Implement noisium
-+                                        chunksection.nonEmptyBlockCount++;
++                                    // Canvas start - Implement noisium
++                                    chunksection.nonEmptyBlockCount++;
 +
-+                                        if (!iblockdata.getFluidState().isEmpty()) chunksection.nonEmptyBlockCount++;
-+                                        if (iblockdata.isRandomlyTicking()) chunksection.tickingBlockCount++;
++                                    if (!iblockdata.getFluidState().isEmpty()) chunksection.nonEmptyBlockCount++;
++                                    if (iblockdata.isRandomlyTicking()) chunksection.tickingBlockCount++;
 +
-+                                        chunksection.states.data.storage().set(
-+                                                chunksection.states.strategy.getIndex(k4, k3, j5),
-+                                                chunksection.states.data.palette().idFor(iblockdata)
-+                                        );
-+                                        // Canvas end - Implement noisium
-+                                    }
++                                    chunksection.states.data.storage().set(
++                                        chunksection.states.strategy.getIndex(k4, k3, j5),
++                                        chunksection.states.data.palette().idFor(iblockdata)
++                                    );
++                                    // Canvas end - Implement noisium
 +
                                      chunksection.setBlockState(k4, k3, j5, iblockdata, false);
                                      heightmap.update(k4, j3, j5, iblockdata);
