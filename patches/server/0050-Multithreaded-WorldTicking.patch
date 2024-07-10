@@ -3669,7 +3669,7 @@ index 43487a9ee202c5b0e5a416519939111f77b3059c..0d73c7b2308c53a1828815cc42c04171
          }
      }
 diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
-index 3d9845be5e474880fc5c0f260ef136f00e8cec57..73ba5d3203f5a3306b803b685755950c39369c55 100644
+index 3d9845be5e474880fc5c0f260ef136f00e8cec57..4990c39a2337e5732b16403e68ee05239c836a12 100644
 --- a/src/main/java/net/minecraft/world/entity/Entity.java
 +++ b/src/main/java/net/minecraft/world/entity/Entity.java
 @@ -4660,6 +4660,18 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
@@ -3691,6 +3691,15 @@ index 3d9845be5e474880fc5c0f260ef136f00e8cec57..73ba5d3203f5a3306b803b685755950c
          // Paper start - rewrite chunk system
          if (this.updatingSectionStatus) {
              LOGGER.error(
+@@ -4802,7 +4814,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+     public final void setRemoved(Entity.RemovalReason entity_removalreason, EntityRemoveEvent.Cause cause) {
+         // Paper start - rewrite chunk system
+         if (!((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this.level).moonrise$getEntityLookup().canRemoveEntity((Entity)(Object)this)) {
+-            LOGGER.warn("Entity " + this + " is currently prevented from being removed from the world since it is processing section status updates", new Throwable());
++            // LOGGER.warn("Entity " + this + " is currently prevented from being removed from the world since it is processing section status updates", new Throwable()); // Canvas - its fine, we try again on the next tick and it works out
+             return;
+         }
+         // Paper end - rewrite chunk system
 @@ -4865,6 +4877,9 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
      }
  
@@ -4229,123 +4238,77 @@ index afdbc74a3012fa717f59ecef613567338d285b7b..94b7fc27eb01260cb8565913dabb7575
          }
  
          return null;
-diff --git a/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java b/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
-index 7ed694cbdd3a0c8d5643524eba3f56bc533ef3a7..a2b8368ecc8990bac9f57bb5143c0e10c16471b4 100644
---- a/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
-+++ b/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
-@@ -1,9 +1,15 @@
+diff --git a/src/main/java/net/minecraft/world/level/lighting/LeveledPriorityQueue.java b/src/main/java/net/minecraft/world/level/lighting/LeveledPriorityQueue.java
+index f6fbebe9f28b66db27ec9c20e9d672b2eebc99e0..e3239b479a5ffddb1113042e6a8c6d7620293814 100644
+--- a/src/main/java/net/minecraft/world/level/lighting/LeveledPriorityQueue.java
++++ b/src/main/java/net/minecraft/world/level/lighting/LeveledPriorityQueue.java
+@@ -1,33 +1,50 @@
  package net.minecraft.world.level.lighting;
  
--import it.unimi.dsi.fastutil.longs.Long2ByteMap;
--import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
--import it.unimi.dsi.fastutil.longs.LongArrayList;
--import it.unimi.dsi.fastutil.longs.LongList;
-+// Canvas start
-+// import it.unimi.dsi.fastutil.longs.Long2ByteMap;
-+// import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
-+// import it.unimi.dsi.fastutil.longs.LongArrayList;
-+// import it.unimi.dsi.fastutil.longs.LongList;
-+import java.util.ArrayList;
-+import java.util.List;
-+import java.util.NoSuchElementException;
-+import java.util.concurrent.ConcurrentHashMap;
-+// Canvas end
- import java.util.function.LongPredicate;
- import net.minecraft.util.Mth;
++import io.netty.util.internal.ConcurrentSet;
+ import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
++import javax.annotation.Nullable;
++import java.util.Iterator;
++import java.util.concurrent.ConcurrentSkipListSet;
  
-@@ -12,7 +18,7 @@ public abstract class DynamicGraphMinFixedPoint {
-     private static final int NO_COMPUTED_LEVEL = 255;
-     protected final int levelCount;
-     private final LeveledPriorityQueue priorityQueue;
--    private final Long2ByteMap computedLevels;
-+    private final ConcurrentHashMap<Long, Byte> computedLevels; // Canvas
-     private volatile boolean hasWork;
+ public class LeveledPriorityQueue {
+     private final int levelCount;
+-    private final LongLinkedOpenHashSet[] queues;
++    private final ConcurrentSkipListSet<Long>[] queues;
+     private int firstQueuedLevel;
  
-     protected DynamicGraphMinFixedPoint(int levelCount, int expectedLevelSize, int expectedTotalSize) {
-@@ -21,14 +27,18 @@ public abstract class DynamicGraphMinFixedPoint {
-         } else {
-             this.levelCount = levelCount;
-             this.priorityQueue = new LeveledPriorityQueue(levelCount, expectedLevelSize);
--            this.computedLevels = new Long2ByteOpenHashMap(expectedTotalSize, 0.5F) {
--                protected void rehash(int i) {
-+            // Canvas start
-+            this.computedLevels = new ConcurrentHashMap<Long, Byte>(expectedTotalSize, 0.5F); // {
-+            /*    protected void rehash(int i) {
-+            // Canvas end
-                     if (i > expectedTotalSize) {
+     public LeveledPriorityQueue(int levelCount, int expectedLevelSize) {
+         this.levelCount = levelCount;
+-        this.queues = new LongLinkedOpenHashSet[levelCount];
++        this.queues = new ConcurrentSkipListSet[levelCount];
+ 
+         for (int i = 0; i < levelCount; i++) {
+-            this.queues[i] = new LongLinkedOpenHashSet(expectedLevelSize, 0.5F) {
++            this.queues[i] = new ConcurrentSkipListSet<Long>();/*(expectedLevelSize, 0.5F) { // Canvas
+                 protected void rehash(int i) {
+                     if (i > expectedLevelSize) {
                          super.rehash(i);
                      }
                  }
 -            };
--            this.computedLevels.defaultReturnValue((byte)-1);
-+            // Canvas start
-+            }; */
-+            // this.computedLevels.defaultReturnValue((byte)-1);
-+            // Canvas end
++            };*/ // Canvas
          }
+ 
+         this.firstQueuedLevel = levelCount;
+     }
++    // Canvas start
++
++    @Nullable
++    private static <E> E removeFirstEntry(ConcurrentSkipListSet<E> set) {
++        Iterator<E> iterator = set.iterator();
++        if (iterator.hasNext()) {
++            E firstElement = iterator.next();
++            set.remove(firstElement);
++            return firstElement;
++        }
++        return null;
++    }
++    // Canvas end
+ 
+     public long removeFirstLong() {
+-        LongLinkedOpenHashSet longLinkedOpenHashSet = this.queues[this.firstQueuedLevel];
+-        long l = longLinkedOpenHashSet.removeFirstLong();
+-        if (longLinkedOpenHashSet.isEmpty()) {
++        ConcurrentSkipListSet<Long> longLinkedOpenHashSet = this.queues[this.firstQueuedLevel];
++        Long l = removeFirstEntry(longLinkedOpenHashSet);
++        if (longLinkedOpenHashSet.isEmpty() || l == null) {
+             this.checkFirstQueuedLevel(this.levelCount);
+         }
+ 
+@@ -39,7 +56,7 @@ public class LeveledPriorityQueue {
      }
  
-@@ -43,7 +53,7 @@ public abstract class DynamicGraphMinFixedPoint {
-     }
- 
-     public void removeIf(LongPredicate predicate) {
--        LongList longList = new LongArrayList();
-+        List<Long> longList = new ArrayList<Long>(); // Canvas
-         this.computedLevels.keySet().forEach(l -> {
-             if (predicate.test(l)) {
-                 longList.add(l);
-@@ -61,7 +71,7 @@ public abstract class DynamicGraphMinFixedPoint {
-     }
- 
-     protected void checkEdge(long sourceId, long id, int level, boolean decrease) {
--        this.checkEdge(sourceId, id, level, this.getLevel(id), this.computedLevels.get(id) & 255, decrease);
-+        this.checkEdge(sourceId, id, level, this.getLevel(id), this.computedLevels.getOrDefault(id, (byte)-1) & 255, decrease); // Canvas
-         this.hasWork = !this.priorityQueue.isEmpty();
-     }
- 
-@@ -98,7 +108,7 @@ public abstract class DynamicGraphMinFixedPoint {
-     }
- 
-     protected final void checkNeighbor(long sourceId, long targetId, int level, boolean decrease) {
--        int i = this.computedLevels.get(targetId) & 255;
-+        int i = this.computedLevels.getOrDefault(targetId, (byte)-1) & 255; // Canvas
-         int j = Mth.clamp(this.computeLevelFromNeighbor(sourceId, targetId, level), 0, this.levelCount - 1);
-         if (decrease) {
-             this.checkEdge(sourceId, targetId, j, this.getLevel(targetId), i, decrease);
-@@ -126,10 +136,17 @@ public abstract class DynamicGraphMinFixedPoint {
-             return maxSteps;
-         } else {
-             while (!this.priorityQueue.isEmpty() && maxSteps > 0) {
-+                try { // Canvas
-                 maxSteps--;
-                 long l = this.priorityQueue.removeFirstLong();
-                 int i = Mth.clamp(this.getLevel(l), 0, this.levelCount - 1);
--                int j = this.computedLevels.remove(l) & 255;
-+                // Canvas start
-+                Byte b = this.computedLevels.remove(l);
-+                if (b == null) {
-+                    b = (byte) -1;
-+                }
-+                int j = b & 255;
-+                // Canvas end
-                 if (j < i) {
-                     this.setLevel(l, j);
-                     this.checkNeighborsAfterUpdate(l, j, true);
-@@ -142,6 +159,14 @@ public abstract class DynamicGraphMinFixedPoint {
- 
-                     this.checkNeighborsAfterUpdate(l, i, false);
-                 }
-+                // Canvas start
-+                } catch (Throwable throwable) {
-+                    if (throwable instanceof NoSuchElementException || throwable instanceof ArrayIndexOutOfBoundsException e) {
-+                        break;
-+                    }
-+                    throw new RuntimeException(throwable);
-+                }
-+                // Canvas end
-             }
- 
-             this.hasWork = !this.priorityQueue.isEmpty();
+     public void dequeue(long id, int level, int levelCount) {
+-        LongLinkedOpenHashSet longLinkedOpenHashSet = this.queues[level];
++        ConcurrentSkipListSet<Long> longLinkedOpenHashSet = this.queues[level];
+         longLinkedOpenHashSet.remove(id);
+         if (longLinkedOpenHashSet.isEmpty() && this.firstQueuedLevel == level) {
+             this.checkFirstQueuedLevel(levelCount);
 diff --git a/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java b/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
 index 106af2b2c7ff72c7549975aef75cdcff8d9a7d97..41456ff2fe952c0b2165e99ffc85628819a411be 100644
 --- a/src/main/java/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
