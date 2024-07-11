@@ -223,7 +223,7 @@ index f6a3eb3d1bb070bcc74133818682571d520d9894..4af3c51c4370d2484c2a9019763bc33b
 \ No newline at end of file
 +}
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
-index 91c4219b2abf1b5be3dc35f7b8403884e1d36f8d..99d01ad831431e1f5a17cc8b43cfe280261768ea 100644
+index 91c4219b2abf1b5be3dc35f7b8403884e1d36f8d..cf475b7fce4762b986c7ea675551a2240852e4ad 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
 @@ -19,6 +19,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
@@ -244,7 +244,21 @@ index 91c4219b2abf1b5be3dc35f7b8403884e1d36f8d..99d01ad831431e1f5a17cc8b43cfe280
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicLong;
  import java.util.function.Function;
-@@ -336,7 +340,7 @@ public final class RegionizedPlayerChunkLoader {
+@@ -305,8 +309,11 @@ public final class RegionizedPlayerChunkLoader {
+                 // not our problem anymore
+                 continue;
+             }
+-            loader.update(); // can't invoke plugin logic
+-            loader.updateQueues(currTime);
++
++            synchronized (this) {
++                loader.update(); // can't invoke plugin logic
++                loader.updateQueues(currTime);
++            }
+         }
+     }
+ 
+@@ -336,7 +343,7 @@ public final class RegionizedPlayerChunkLoader {
  
          private boolean canGenerateChunks = true;
  
@@ -253,7 +267,7 @@ index 91c4219b2abf1b5be3dc35f7b8403884e1d36f8d..99d01ad831431e1f5a17cc8b43cfe280
          private final LongOpenHashSet sentChunks = new LongOpenHashSet();
  
          private static final byte CHUNK_TICKET_STAGE_NONE           = 0;
-@@ -410,7 +414,9 @@ public final class RegionizedPlayerChunkLoader {
+@@ -410,7 +417,9 @@ public final class RegionizedPlayerChunkLoader {
              if (this.sentChunks.add(CoordinateUtils.getChunkKey(chunkX, chunkZ))) {
                  ((ChunkSystemChunkHolder)((ChunkSystemServerLevel)this.world).moonrise$getChunkTaskScheduler().chunkHolderManager
                          .getChunkHolder(chunkX, chunkZ).vanillaChunkHolder).moonrise$addReceivedChunk(this.player);
@@ -264,8 +278,17 @@ index 91c4219b2abf1b5be3dc35f7b8403884e1d36f8d..99d01ad831431e1f5a17cc8b43cfe280
                  return;
              }
              throw new IllegalStateException();
+@@ -624,7 +633,7 @@ public final class RegionizedPlayerChunkLoader {
+             return true;
+         }
+ 
+-        void updateQueues(final long time) {
++        void updateQueues(final long time) { // Canvas
+             io.papermc.paper.util.TickThread.ensureTickThread(this.player, "Cannot tick player chunk loader async");
+             if (this.removed) {
+                 throw new IllegalStateException("Ticking removed player chunk loader");
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
-index 3d902f382977a194e09986419391c3ca1568885c..83ff97c42987e63d1e985b376b46b472e3bc9fbe 100644
+index 3d902f382977a194e09986419391c3ca1568885c..20f9249b78b6a974011bdc8dcd15892d74fff868 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
 @@ -49,6 +49,7 @@ import java.util.Iterator;
@@ -276,16 +299,46 @@ index 3d902f382977a194e09986419391c3ca1568885c..83ff97c42987e63d1e985b376b46b472
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicBoolean;
  import java.util.concurrent.atomic.AtomicReference;
-@@ -79,7 +80,7 @@ public final class ChunkHolderManager {
+@@ -79,27 +80,8 @@ public final class ChunkHolderManager {
      private final ChunkTaskScheduler taskScheduler;
      private long currentTick;
  
 -    private final ArrayDeque<NewChunkHolder> pendingFullLoadUpdate = new ArrayDeque<>();
+-    private final ObjectRBTreeSet<NewChunkHolder> autoSaveQueue = new ObjectRBTreeSet<>((final NewChunkHolder c1, final NewChunkHolder c2) -> {
+-        if (c1 == c2) {
+-            return 0;
+-        }
+-
+-        final int saveTickCompare = Long.compare(c1.lastAutoSave, c2.lastAutoSave);
+-
+-        if (saveTickCompare != 0) {
+-            return saveTickCompare;
+-        }
+-
+-        final long coord1 = CoordinateUtils.getChunkKey(c1.chunkX, c1.chunkZ);
+-        final long coord2 = CoordinateUtils.getChunkKey(c2.chunkX, c2.chunkZ);
+-
+-        if (coord1 == coord2) {
+-            throw new IllegalStateException("Duplicate chunkholder in auto save queue");
+-        }
+-
+-        return Long.compare(coord1, coord2);
+-    });
 +    private final ConcurrentLinkedDeque<NewChunkHolder> pendingFullLoadUpdate = new ConcurrentLinkedDeque<>(); // Canvas
-     private final ObjectRBTreeSet<NewChunkHolder> autoSaveQueue = new ObjectRBTreeSet<>((final NewChunkHolder c1, final NewChunkHolder c2) -> {
-         if (c1 == c2) {
-             return 0;
-@@ -1009,7 +1010,7 @@ public final class ChunkHolderManager {
++    private final ConcurrentLinkedDeque<NewChunkHolder> autoSaveQueue = new ConcurrentLinkedDeque<>();
+ 
+     public ChunkHolderManager(final ServerLevel world, final ChunkTaskScheduler taskScheduler) {
+         this.world = world;
+@@ -232,7 +214,7 @@ public final class ChunkHolderManager {
+         final long maxSaveTime = currentTick - Math.max(1L, this.world.paperConfig().chunks.autoSaveInterval.value());
+         final int maxToSave = this.world.paperConfig().chunks.maxAutoSaveChunksPerTick;
+         for (int autoSaved = 0; autoSaved < maxToSave && !this.autoSaveQueue.isEmpty();) {
+-            final NewChunkHolder holder = this.autoSaveQueue.first();
++            final NewChunkHolder holder = this.autoSaveQueue.getFirst(); // Canvas
+ 
+             if (holder.lastAutoSave > maxSaveTime) {
+                 break;
+@@ -1009,7 +991,7 @@ public final class ChunkHolderManager {
          }
          if (!io.papermc.paper.util.TickThread.isTickThread()) {
              this.taskScheduler.scheduleChunkTask(() -> {
@@ -294,7 +347,7 @@ index 3d902f382977a194e09986419391c3ca1568885c..83ff97c42987e63d1e985b376b46b472
                  for (int i = 0, len = changedFullStatus.size(); i < len; ++i) {
                      pendingFullLoadUpdate.add(changedFullStatus.get(i));
                  }
-@@ -1017,7 +1018,7 @@ public final class ChunkHolderManager {
+@@ -1017,7 +999,7 @@ public final class ChunkHolderManager {
                  ChunkHolderManager.this.processPendingFullUpdate();
              }, PrioritisedExecutor.Priority.HIGHEST);
          } else {
@@ -303,7 +356,7 @@ index 3d902f382977a194e09986419391c3ca1568885c..83ff97c42987e63d1e985b376b46b472
              for (int i = 0, len = changedFullStatus.size(); i < len; ++i) {
                  pendingFullLoadUpdate.add(changedFullStatus.get(i));
              }
-@@ -1350,7 +1351,7 @@ public final class ChunkHolderManager {
+@@ -1350,7 +1332,7 @@ public final class ChunkHolderManager {
  
      // only call on tick thread
      private boolean processPendingFullUpdate() {
@@ -439,10 +492,17 @@ index 3aa3b0be2285def7a068f1f440ee5b7736f1d96c..05b68873a216766b4185c226860ffc96
          }
  
 diff --git a/src/main/java/io/papermc/paper/threadedregions/EntityScheduler.java b/src/main/java/io/papermc/paper/threadedregions/EntityScheduler.java
-index 62484ebf4550b05182f693a3180bbac5d5fd906d..566609789ab52b891f00de31d5645865e540819e 100644
+index 62484ebf4550b05182f693a3180bbac5d5fd906d..2d77ca550cfa1947cdead01e773adcfbe4f6a2db 100644
 --- a/src/main/java/io/papermc/paper/threadedregions/EntityScheduler.java
 +++ b/src/main/java/io/papermc/paper/threadedregions/EntityScheduler.java
-@@ -9,6 +9,7 @@ import org.bukkit.craftbukkit.entity.CraftEntity;
+@@ -3,12 +3,14 @@ package io.papermc.paper.threadedregions;
+ import ca.spottedleaf.concurrentutil.util.Validate;
+ import io.papermc.paper.util.TickThread;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
++import me.dueris.canvas.util.WrappedConcurrentLockDeque;
+ import net.minecraft.world.entity.Entity;
+ import org.bukkit.craftbukkit.entity.CraftEntity;
+ 
  import java.util.ArrayDeque;
  import java.util.ArrayList;
  import java.util.List;
@@ -450,12 +510,12 @@ index 62484ebf4550b05182f693a3180bbac5d5fd906d..566609789ab52b891f00de31d5645865
  import java.util.function.Consumer;
  
  /**
-@@ -44,7 +45,7 @@ public final class EntityScheduler {
+@@ -44,7 +46,7 @@ public final class EntityScheduler {
      private final Object stateLock = new Object();
      private final Long2ObjectOpenHashMap<List<ScheduledTask>> oneTimeDelayed = new Long2ObjectOpenHashMap<>();
  
 -    private final ArrayDeque<ScheduledTask> currentlyExecuting = new ArrayDeque<>();
-+    private final ConcurrentLinkedDeque<ScheduledTask> currentlyExecuting = new ConcurrentLinkedDeque<>(); // Canvas
++    private final WrappedConcurrentLockDeque<ScheduledTask> currentlyExecuting = new WrappedConcurrentLockDeque<>(); // Canvas
  
      public EntityScheduler(final CraftEntity entity) {
          this.entity = Validate.notNull(entity);
@@ -1359,6 +1419,139 @@ index 0000000000000000000000000000000000000000..e8e325231fad0b43957c7b65a4aaee5c
 +    }
 +}
 \ No newline at end of file
+diff --git a/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockDeque.java b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockDeque.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b2d29702cbd57af4cd9ce9ae2fae892d7550dc7
+--- /dev/null
++++ b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockDeque.java
+@@ -0,0 +1,127 @@
++package me.dueris.canvas.util;
++
++import java.util.Iterator;
++import java.util.concurrent.ConcurrentLinkedDeque;
++import java.util.function.Consumer;
++
++public class WrappedConcurrentLockDeque<T> {
++    private ConcurrentLinkedDeque<T> set;
++    private ConcurrentLinkedDeque<T> toUpdate;
++    private boolean iterating = false;
++    private int count;
++
++    public WrappedConcurrentLockDeque() {
++        this.set = new ConcurrentLinkedDeque<>();
++        this.count = 0;
++    }
++
++    public synchronized WrappedConcurrentLockDeque<T> add(T item) {
++        set.add(item);
++        count++;
++        return this;
++    }
++
++    public synchronized WrappedConcurrentLockDeque<T> remove(T item) {
++        set.remove(item);
++        count--;
++        return this;
++    }
++
++    public synchronized WrappedConcurrentLockDeque<T> removeAll() {
++        set.clear();
++        count = 0;
++        return this;
++    }
++
++    public synchronized WrappedConcurrentLockDeque<T> addAll(ConcurrentLinkedDeque<T> set) {
++        this.set.addAll(set);
++        count = this.set.size();
++        return this;
++    }
++
++    public boolean isEmpty() {
++        return set.isEmpty();
++    }
++
++    public Iterator<T> iterator() {
++        return this.set.iterator();
++    }
++
++    public void scheduleUpdate(ConcurrentLinkedDeque<T> set) {
++        synchronized (this) {
++            if (isIterating()) {
++                toUpdate = set;
++                return;
++            }
++            this.set = set;
++            this.toUpdate = null;
++        }
++    }
++
++    public void markIterating() {
++        if (this.toUpdate != null) {
++            this.set = toUpdate;
++            count = this.set.size();
++            this.toUpdate = null;
++        }
++        iterating = true;
++    }
++
++    public void markFinished() {
++        iterating = false;
++        if (this.toUpdate != null) {
++            this.set = toUpdate;
++            count = this.set.size();
++            this.toUpdate = null;
++        }
++    }
++
++    public boolean isIterating() {
++        return iterating;
++    }
++
++    public ConcurrentLinkedDeque<T> getRaw() {
++        return (ConcurrentLinkedDeque<T>) set;
++    }
++
++    public int getCount() {
++        return count;
++    }
++
++    public int size() {
++        return count;
++    }
++
++    public void forEach(Consumer<T> consumer) {
++        for (final T t : this.set) {
++            consumer.accept(t);
++        }
++    }
++
++    public WrappedConcurrentLockDeque<T> clone() {
++        return new WrappedConcurrentLockDeque<T>().addAll(set);
++    }
++
++    public synchronized T pollFirst() {
++        T item = set.pollFirst();
++        if (item != null) {
++            count--;
++        }
++        return item;
++    }
++
++    public synchronized T pollLast() {
++        T item = set.pollLast();
++        if (item != null) {
++            count--;
++        }
++        return item;
++    }
++
++    public synchronized WrappedConcurrentLockDeque<T> addLast(T item) {
++        set.addLast(item);
++        count++;
++        return this;
++    }
++
++}
 diff --git a/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockSet.java b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockSet.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..c41e318265f11ad051225a354d83844598234031
@@ -2440,10 +2633,18 @@ index 9bc59697fc71d4e3c226aa7fe958f57193fc4bd4..7b5576377405b8b5582f5892edb78547
  
                                  this.broadcast(list, new ClientboundBlockUpdatePacket(blockposition, iblockdata));
 diff --git a/src/main/java/net/minecraft/server/level/ChunkMap.java b/src/main/java/net/minecraft/server/level/ChunkMap.java
-index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8f2d46b96 100644
+index ecd02b10c4120a7d7342b12ec95be0ee56318333..fbf61042b58c769aba6c27c3605b7e54401fbcf9 100644
 --- a/src/main/java/net/minecraft/server/level/ChunkMap.java
 +++ b/src/main/java/net/minecraft/server/level/ChunkMap.java
-@@ -28,6 +28,7 @@ import java.io.Writer;
+@@ -10,6 +10,7 @@ import com.google.common.collect.Queues;
+ import com.google.common.collect.Sets;
+ import com.mojang.datafixers.DataFixer;
+ import com.mojang.logging.LogUtils;
++import io.netty.util.internal.ConcurrentSet;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.Long2ByteMap;
+@@ -28,6 +29,7 @@ import java.io.Writer;
  import java.nio.file.Path;
  import java.util.ArrayList;
  import java.util.HashMap;
@@ -2451,7 +2652,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
  import java.util.Iterator;
  import java.util.List;
  import java.util.Locale;
-@@ -39,6 +40,9 @@ import java.util.Set;
+@@ -39,6 +41,9 @@ import java.util.Set;
  import java.util.concurrent.CancellationException;
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.CompletionException;
@@ -2461,7 +2662,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
  import java.util.concurrent.Executor;
  import java.util.concurrent.atomic.AtomicInteger;
  import java.util.function.BooleanSupplier;
-@@ -62,6 +66,7 @@ import net.minecraft.network.protocol.game.ClientboundChunksBiomesPacket;
+@@ -62,6 +67,7 @@ import net.minecraft.network.protocol.game.ClientboundChunksBiomesPacket;
  import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
  import net.minecraft.server.level.progress.ChunkProgressListener;
  import net.minecraft.server.network.ServerPlayerConnection;
@@ -2469,7 +2670,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
  import net.minecraft.util.CsvOutput;
  import net.minecraft.util.Mth;
  import net.minecraft.util.StaticCache2D;
-@@ -139,9 +144,9 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -139,9 +145,9 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
      public final AtomicInteger tickingGenerated; // Paper - public
      private final String storageName;
      private final PlayerMap playerMap;
@@ -2482,7 +2683,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
      // Paper - rewrite chunk system
      public int serverViewDistance;
      public final WorldGenContext worldGenContext; // Paper - public
-@@ -204,9 +209,9 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -204,9 +210,9 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
          this.toDrop = new LongOpenHashSet();
          this.tickingGenerated = new AtomicInteger();
          this.playerMap = new PlayerMap();
@@ -2495,7 +2696,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
          // Paper - rewrite chunk system
          Path path = session.getDimensionPath(world.dimension());
  
-@@ -821,7 +826,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -821,7 +827,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
      }
  
      public void move(ServerPlayer player) {
@@ -2504,7 +2705,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
  
          while (objectiterator.hasNext()) {
              ChunkMap.TrackedEntity playerchunkmap_entitytracker = (ChunkMap.TrackedEntity) objectiterator.next();
-@@ -914,7 +919,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -914,7 +920,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
                          ServerPlayer entityplayer = (ServerPlayer) entity;
  
                          this.updatePlayerStatus(entityplayer, true);
@@ -2513,7 +2714,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
  
                          while (objectiterator.hasNext()) {
                              ChunkMap.TrackedEntity playerchunkmap_entitytracker1 = (ChunkMap.TrackedEntity) objectiterator.next();
-@@ -934,7 +939,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -934,7 +940,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
          org.spigotmc.AsyncCatcher.catchOp("entity untrack"); // Spigot
          if (entity instanceof ServerPlayer entityplayer) {
              this.updatePlayerStatus(entityplayer, false);
@@ -2522,7 +2723,7 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
  
              while (objectiterator.hasNext()) {
                  ChunkMap.TrackedEntity playerchunkmap_entitytracker = (ChunkMap.TrackedEntity) objectiterator.next();
-@@ -956,7 +961,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -956,7 +962,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
  
          List<ServerPlayer> list = Lists.newArrayList();
          List<ServerPlayer> list1 = this.level.players();
@@ -2531,6 +2732,15 @@ index ecd02b10c4120a7d7342b12ec95be0ee56318333..be72b3e7a164e35ce6c7afbba6f9daf8
          //this.level.timings.tracker1.startTiming(); // Paper // Purpur
  
          ChunkMap.TrackedEntity playerchunkmap_entitytracker;
+@@ -1099,7 +1105,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+         final Entity entity;
+         private final int range;
+         SectionPos lastSectionPos;
+-        public final Set<ServerPlayerConnection> seenBy = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(); // Paper - Perf: optimise map impl
++        public final Set<ServerPlayerConnection> seenBy = new ConcurrentSet<>(); // Paper - Perf: optimise map impl // Canvas - no.
+ 
+         public TrackedEntity(final Entity entity, final int i, final int j, final boolean flag) {
+             this.serverEntity = new ServerEntity(ChunkMap.this.level, entity, j, flag, this::broadcast, this.seenBy); // CraftBukkit
 diff --git a/src/main/java/net/minecraft/server/level/DistanceManager.java b/src/main/java/net/minecraft/server/level/DistanceManager.java
 index 71abe25cfb73af3857cbc85980aa32d0201aab62..f71c96904b792c6d1976b8c50ef99378c2002dfd 100644
 --- a/src/main/java/net/minecraft/server/level/DistanceManager.java
