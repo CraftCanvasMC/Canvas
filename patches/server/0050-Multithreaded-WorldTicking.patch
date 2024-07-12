@@ -1421,15 +1421,17 @@ index 0000000000000000000000000000000000000000..e8e325231fad0b43957c7b65a4aaee5c
 \ No newline at end of file
 diff --git a/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockDeque.java b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockDeque.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..2b2d29702cbd57af4cd9ce9ae2fae892d7550dc7
+index 0000000000000000000000000000000000000000..b0976bc5da4e34dd9fdb9c2a2f7044cea15f11c5
 --- /dev/null
 +++ b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockDeque.java
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,153 @@
 +package me.dueris.canvas.util;
 +
 +import java.util.Iterator;
 +import java.util.concurrent.ConcurrentLinkedDeque;
 +import java.util.function.Consumer;
++import java.util.function.Predicate;
++import java.util.stream.Stream;
 +
 +public class WrappedConcurrentLockDeque<T> {
 +    private ConcurrentLinkedDeque<T> set;
@@ -1444,6 +1446,12 @@ index 0000000000000000000000000000000000000000..2b2d29702cbd57af4cd9ce9ae2fae892
 +
 +    public synchronized WrappedConcurrentLockDeque<T> add(T item) {
 +        set.add(item);
++        count++;
++        return this;
++    }
++
++    public synchronized WrappedConcurrentLockDeque<T> addLast(T item) {
++        set.addLast(item);
 +        count++;
 +        return this;
 +    }
@@ -1508,7 +1516,7 @@ index 0000000000000000000000000000000000000000..2b2d29702cbd57af4cd9ce9ae2fae892
 +    }
 +
 +    public ConcurrentLinkedDeque<T> getRaw() {
-+        return (ConcurrentLinkedDeque<T>) set;
++        return set;
 +    }
 +
 +    public int getCount() {
@@ -1545,12 +1553,30 @@ index 0000000000000000000000000000000000000000..2b2d29702cbd57af4cd9ce9ae2fae892
 +        return item;
 +    }
 +
-+    public synchronized WrappedConcurrentLockDeque<T> addLast(T item) {
-+        set.addLast(item);
-+        count++;
-+        return this;
++    public synchronized void clear() {
++        set.clear();
++        count = 0;
 +    }
 +
++    public synchronized T poll() {
++        T item = set.poll();
++        if (item != null) {
++            count--;
++        }
++        return item;
++    }
++
++    public synchronized boolean removeIf(Predicate<? super T> filter) {
++        boolean removed = set.removeIf(filter);
++        if (removed) {
++            count = set.size();
++        }
++        return removed;
++    }
++
++    public Stream<T> stream() {
++        return set.stream();
++    }
 +}
 diff --git a/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockSet.java b/src/main/java/me/dueris/canvas/util/WrappedConcurrentLockSet.java
 new file mode 100644
@@ -4717,10 +4743,10 @@ index c42c0d1e4da30aa15f32d4ca524aeabd26fc50cf..9d1af7d11de934692976d6c4f82c90c8
      private List<SavedTick<T>> pendingTicks;
      private final Set<ScheduledTick<?>> ticksPerPosition = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
 diff --git a/src/main/java/net/minecraft/world/ticks/LevelTicks.java b/src/main/java/net/minecraft/world/ticks/LevelTicks.java
-index a6d62abd3102770652f914b9d697c6d3c2533cfc..59a419eae9fc3cfe1060de2ce636cf186545d42d 100644
+index a6d62abd3102770652f914b9d697c6d3c2533cfc..6f0fc73b5aba7810f55d788e70d0367ec6298c35 100644
 --- a/src/main/java/net/minecraft/world/ticks/LevelTicks.java
 +++ b/src/main/java/net/minecraft/world/ticks/LevelTicks.java
-@@ -11,11 +11,15 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenCustomHashSet;
+@@ -11,15 +11,20 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenCustomHashSet;
  import java.util.ArrayDeque;
  import java.util.ArrayList;
  import java.util.Comparator;
@@ -4736,7 +4762,12 @@ index a6d62abd3102770652f914b9d697c6d3c2533cfc..59a419eae9fc3cfe1060de2ce636cf18
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -32,10 +36,10 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+ import java.util.function.Supplier;
++import me.dueris.canvas.util.WrappedConcurrentLockDeque;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.SectionPos;
+@@ -32,10 +37,10 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
      private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (a, b) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER.compare(a.peek(), b.peek());
      private final LongPredicate tickCheck;
      private final Supplier<ProfilerFiller> profiler;
@@ -4746,11 +4777,11 @@ index a6d62abd3102770652f914b9d697c6d3c2533cfc..59a419eae9fc3cfe1060de2ce636cf18
 +    private final ConcurrentHashMap<Long, Long> nextTickForContainer = new ConcurrentHashMap<>();
      private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
 -    private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
-+    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedDeque<>(); // Canvas
++    private final WrappedConcurrentLockDeque<ScheduledTick<T>> toRunThisTick = new WrappedConcurrentLockDeque<>(); // Canvas
      private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
      private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (chunkTickScheduler, tick) -> {
-@@ -100,12 +104,12 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+@@ -100,12 +105,12 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
      }
  
      private void sortContainersToTick(long time) {
@@ -4767,6 +4798,15 @@ index a6d62abd3102770652f914b9d697c6d3c2533cfc..59a419eae9fc3cfe1060de2ce636cf18
              if (m <= time) {
                  LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(l);
                  if (levelChunkTicks == null) {
+@@ -214,7 +219,7 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+ 
+     private void calculateTickSetIfNeeded() {
+         if (this.toRunThisTickSet.isEmpty() && !this.toRunThisTick.isEmpty()) {
+-            this.toRunThisTickSet.addAll(this.toRunThisTick);
++            this.toRunThisTickSet.addAll(this.toRunThisTick.getRaw());
+         }
+     }
+ 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 index 997ec241139dca9d26c85caf776fe5d4189bcd03..9db1e80508264ae3d79e327a4c8811cc6e2f3a8a 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
