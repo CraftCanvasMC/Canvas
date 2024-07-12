@@ -40,24 +40,36 @@ index 3e8401b1b1f833c4f01bc87059a2f48d761d989f..251951bcd0014c26f9411f5adabfeda5
                  while ((task = queue.pollFirst()) != null) {
                      if (task.trySetCompleting(i)) {
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
-index ba68998f6ef57b24c72fd833bd7de440de9501cc..494f84306fcc8ab23999b270b4cedce5dd55ee49 100644
+index ba68998f6ef57b24c72fd833bd7de440de9501cc..1d65de65cafd1d7e217c5d03a91156682720fda7 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
-@@ -5,6 +5,7 @@ import net.minecraft.world.entity.Entity;
+@@ -5,6 +5,8 @@ import net.minecraft.world.entity.Entity;
  import java.util.Arrays;
  import java.util.Iterator;
  import java.util.NoSuchElementException;
 +import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.concurrent.locks.ReentrantReadWriteLock;
  
  // list with O(1) remove & contains
  
-@@ -21,17 +22,19 @@ public final class EntityList implements Iterable<Entity> {
+@@ -13,6 +15,8 @@ import java.util.NoSuchElementException;
+  */
+ public final class EntityList implements Iterable<Entity> {
+ 
++    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
++
+     protected final Int2IntOpenHashMap entityToIndex = new Int2IntOpenHashMap(2, 0.8f);
+     {
+         this.entityToIndex.defaultReturnValue(Integer.MIN_VALUE);
+@@ -20,110 +24,113 @@ public final class EntityList implements Iterable<Entity> {
+ 
      protected static final Entity[] EMPTY_LIST = new Entity[0];
  
-     protected Entity[] entities = EMPTY_LIST;
+-    protected Entity[] entities = EMPTY_LIST;
 -    protected int count;
-+    private int count; // Canvas - weaken visibility
-+    protected ConcurrentLinkedQueue<Entity> concurrentEntities = new ConcurrentLinkedQueue<>(); // Canvas
++    protected volatile Entity[] entities = EMPTY_LIST;
++    private volatile int count;
++    protected final ConcurrentLinkedQueue<Entity> concurrentEntities = new ConcurrentLinkedQueue<>();
  
      public int size() {
          return this.count;
@@ -69,65 +81,170 @@ index ba68998f6ef57b24c72fd833bd7de440de9501cc..494f84306fcc8ab23999b270b4cedce5
      }
  
      public boolean remove(final Entity entity) {
-+        /* // Canvas
-         final int index = this.entityToIndex.remove(entity.getId());
-         if (index == Integer.MIN_VALUE) {
+-        final int index = this.entityToIndex.remove(entity.getId());
+-        if (index == Integer.MIN_VALUE) {
++        lock.writeLock().lock();
++        try {
++            if (this.concurrentEntities.remove(entity)) {
++                final int index = this.entityToIndex.remove(entity.getId());
++                if (index != Integer.MIN_VALUE) {
++                    final int endIndex = --this.count;
++                    final Entity end = this.entities[endIndex];
++                    if (index != endIndex) {
++                        this.entityToIndex.put(end.getId(), index); // update index
++                    }
++                    this.entities[index] = end;
++                    this.entities[endIndex] = null;
++                }
++                return true;
++            }
              return false;
-@@ -48,9 +51,18 @@ public final class EntityList implements Iterable<Entity> {
-         this.entities[endIndex] = null;
- 
-         return true;
-+        // Canvas start
-+         */
-+        if (this.concurrentEntities.remove(entity)) {
-+            count--;
-+            return true;
-+        }
-+        return false;
-+        // Canvas end
++        } finally {
++            lock.writeLock().unlock();
+         }
+-
+-        // move the entity at the end to this index
+-        final int endIndex = --this.count;
+-        final Entity end = this.entities[endIndex];
+-        if (index != endIndex) {
+-            // not empty after this call
+-            this.entityToIndex.put(end.getId(), index); // update index
+-        }
+-        this.entities[index] = end;
+-        this.entities[endIndex] = null;
+-
+-        return true;
      }
  
      public boolean add(final Entity entity) {
-+        /* // Canvas
-         final int count = this.count;
-         final int currIndex = this.entityToIndex.putIfAbsent(entity.getId(), count);
+-        final int count = this.count;
+-        final int currIndex = this.entityToIndex.putIfAbsent(entity.getId(), count);
+-
+-        if (currIndex != Integer.MIN_VALUE) {
+-            return false; // already in this list
+-        }
++        lock.writeLock().lock();
++        try {
++            if (this.concurrentEntities.add(entity)) {
++                final int count = this.count;
++                final int currIndex = this.entityToIndex.putIfAbsent(entity.getId(), count);
++
++                if (currIndex != Integer.MIN_VALUE) {
++                    return false; // already in this list
++                }
  
-@@ -69,6 +81,14 @@ public final class EntityList implements Iterable<Entity> {
-         this.count = count + 1;
+-        Entity[] list = this.entities;
++                Entity[] list = this.entities;
  
-         return true;
-+        // Canvas start
-+         */
-+        if (this.concurrentEntities.add(entity)) {
-+            count++;
-+            return true;
+-        if (list.length == count) {
+-            // resize required
+-            list = this.entities = Arrays.copyOf(list, (int)Math.max(4L, count * 2L)); // overflow results in negative
+-        }
++                if (list.length == count) {
++                    // resize required
++                    list = this.entities = Arrays.copyOf(list, (int) Math.max(4L, count * 2L)); // overflow results in negative
++                }
+ 
+-        list[count] = entity;
+-        this.count = count + 1;
++                list[count] = entity;
++                this.count = count + 1;
+ 
+-        return true;
++                return true;
++            }
++            return false;
++        } finally {
++            lock.writeLock().unlock();
 +        }
-+        return false;
-+        // Canvas end
      }
  
      public Entity getChecked(final int index) {
-@@ -83,17 +103,17 @@ public final class EntityList implements Iterable<Entity> {
+-        if (index < 0 || index >= this.count) {
+-            throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
++        lock.readLock().lock();
++        try {
++            if (index < 0 || index >= this.count) {
++                throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
++            }
++            return this.entities[index];
++        } finally {
++            lock.readLock().unlock();
+         }
+-        return this.entities[index];
+     }
+ 
+     public Entity getUnchecked(final int index) {
+-        return this.entities[index];
++        lock.readLock().lock();
++        try {
++            return this.entities[index];
++        } finally {
++            lock.readLock().unlock();
++        }
      }
  
      public Entity[] getRawData() {
 -        return this.entities;
-+        return this.concurrentEntities.toArray(EMPTY_LIST);
++        lock.readLock().lock();
++        try {
++            return Arrays.copyOf(this.entities, this.count);
++        } finally {
++            lock.readLock().unlock();
++        }
      }
  
      public void clear() {
 -        this.entityToIndex.clear();
 -        Arrays.fill(this.entities, 0, this.count, null);
-+        this.concurrentEntities.clear(); // Canvas
-         this.count = 0;
+-        this.count = 0;
++        lock.writeLock().lock();
++        try {
++            this.concurrentEntities.clear();
++            this.count = 0;
++            this.entities = EMPTY_LIST;
++            this.entityToIndex.clear();
++        } finally {
++            lock.writeLock().unlock();
++        }
      }
  
      @Override
      public Iterator<Entity> iterator() {
-+        if (true) return concurrentEntities.iterator(); // Canvas
-         return new Iterator<Entity>() {
- 
-             Entity lastRet;
+-        return new Iterator<Entity>() {
+-
+-            Entity lastRet;
+-            int current;
+-
+-            @Override
+-            public boolean hasNext() {
+-                return this.current < EntityList.this.count;
+-            }
+-
+-            @Override
+-            public Entity next() {
+-                if (this.current >= EntityList.this.count) {
+-                    throw new NoSuchElementException();
+-                }
+-                return this.lastRet = EntityList.this.entities[this.current++];
+-            }
+-
+-            @Override
+-            public void remove() {
+-                final Entity lastRet = this.lastRet;
+-
+-                if (lastRet == null) {
+-                    throw new IllegalStateException();
+-                }
+-                this.lastRet = null;
+-
+-                EntityList.this.remove(lastRet);
+-                --this.current;
+-            }
+-        };
++        return concurrentEntities.iterator();
+     }
+ }
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
 index f6a3eb3d1bb070bcc74133818682571d520d9894..4af3c51c4370d2484c2a9019763bc33b99071390 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
@@ -993,10 +1110,10 @@ index 6efae16d152200660787716094061ffd760410fd..24f00e8ec31a7cf4ef554c778cebbe34
  
 diff --git a/src/main/java/me/dueris/canvas/command/CanvasCommand.java b/src/main/java/me/dueris/canvas/command/CanvasCommand.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..a99396fd9c6259f3a782dac2a05f7759ec0b07ea
+index 0000000000000000000000000000000000000000..4469d9fcbac069bdf35c20579628a473af553c41
 --- /dev/null
 +++ b/src/main/java/me/dueris/canvas/command/CanvasCommand.java
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,247 @@
 +package me.dueris.canvas.command;
 +
 +import java.io.File;
@@ -1071,7 +1188,7 @@ index 0000000000000000000000000000000000000000..a99396fd9c6259f3a782dac2a05f7759
 +        Float min = minMSPT.getSecond();
 +        Float max = maxMSPT.getSecond();
 +
-+        if (args.length != 1) {
++        if (args.length < 1) {
 +            sender.sendMessage(ChatColor.RED + "Usage: " + usageMessage);
 +            return false;
 +        }
@@ -1110,14 +1227,21 @@ index 0000000000000000000000000000000000000000..a99396fd9c6259f3a782dac2a05f7759
 +                    Component.text(" ").append(createColoredComponent(simplifyNumber(max.doubleValue()).toString(), simplifyNumber(max.doubleValue()).floatValue())))));
 +
 +            sender.sendMessage(base.append(Component.text("==================================")));
-+            List<Pair<ServerTickRateManager, Long>> top3Pairs = server.getServer().getAllTickRateManagers().stream().map(ServerTickRateManager::toNanoPair)
++            List<Pair<ServerTickRateManager, Long>> top3Pairs = server.getServer().getAllTickRateManagers().stream()
++                .map(ServerTickRateManager::toNanoPair)
 +                .sorted(Comparator.comparing(Pair<ServerTickRateManager, Long>::getSecond))
 +                .limit(3)
 +                .collect(Collectors.toList());
++            List<Pair<ServerTickRateManager, Long>> lowest3Pairs = server.getServer().getAllTickRateManagers().stream()
++                .map(ServerTickRateManager::toNanoPair)
++                .sorted(Comparator.comparing(Pair<ServerTickRateManager, Long>::getSecond, Comparator.reverseOrder()))
++                .limit(3)
++                .collect(Collectors.toList());
++            boolean reverse = args.length >= 2 ? args[1].equalsIgnoreCase("true") : false;
 +            sender.sendMessage(base.append(
-+                Component.text("Detailed Status Report ").append(Component.text("(Highest 3)").color(TextColor.color(6860008))))
++                Component.text("Detailed Status Report ").append(Component.text(reverse ? "(Lowest 3)" : "(Highest 3)").color(TextColor.color(6860008))))
 +                .color(TextColor.color(0x2F8FE9)));
-+            for (Pair<ServerTickRateManager, Long> pair : top3Pairs) {
++            for (Pair<ServerTickRateManager, Long> pair : reverse ? lowest3Pairs : top3Pairs) {
 +                TickManagerHolder ticker = pair.getFirst().getHolder();
 +                Integer chunkCount = ticker instanceof ServerLevel level ? level.getChunkSource().getLoadedChunksCount() : 0;
 +                Integer playerCount = ticker instanceof ServerLevel level ? level.players().size() : 0;
@@ -1803,6 +1927,48 @@ index a7462b5c2d13985d81b5f762c14782070d2a12e3..2a7797453c840b0beea6d91837606efc
  
      private static class InnerUtil { // Attempt to hide these methods from ProtocolLib, so it doesn't accidently pick them up.
  
+diff --git a/src/main/java/net/minecraft/network/protocol/PacketUtils.java b/src/main/java/net/minecraft/network/protocol/PacketUtils.java
+index 0c8fe5b2500480c3a9e9ab3285ad22e0e599d953..9dfdc47c96a6e8e562e08dd4af8795dca8c304c5 100644
+--- a/src/main/java/net/minecraft/network/protocol/PacketUtils.java
++++ b/src/main/java/net/minecraft/network/protocol/PacketUtils.java
+@@ -2,10 +2,13 @@ package net.minecraft.network.protocol;
+ 
+ import com.mojang.logging.LogUtils;
+ import javax.annotation.Nullable;
++import me.dueris.canvas.thread.TickTaskHolder;
+ import net.minecraft.CrashReport;
+ import net.minecraft.CrashReportCategory;
+ import net.minecraft.ReportedException;
+ import net.minecraft.network.PacketListener;
++import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.server.network.ServerGamePacketListenerImpl;
+ import org.slf4j.Logger;
+ 
+ // CraftBukkit start
+@@ -33,7 +36,22 @@ public class PacketUtils {
+                 if (listener.shouldHandleMessage(packet)) {
+                     co.aikar.timings.Timing timing = co.aikar.timings.MinecraftTimings.getPacketTiming(packet); // Paper - timings
+                     try { // Paper - timings // Purpur
+-                        packet.handle(listener);
++                        // Canvas start
++                        ServerPlayer pl = null;
++                        if (listener instanceof ServerGamePacketListenerImpl i) {
++                            pl = i.player;
++                        } else if (listener instanceof ServerCommonPacketListenerImpl i) {
++                            pl = i.connection.getPlayer();
++                        }
++
++                        if (pl != null) {
++                            ((ServerLevel)pl.level()).scheduleTickTask(() -> {
++                                packet.handle(listener);
++                            }, TickTaskHolder.Timing.END_TICK, TickTaskHolder.State.SERVER_LEVEL);
++                        } else {
++                            packet.handle(listener);
++                        }
++                        // Canvas end
+                     } catch (Exception exception) {
+                         if (exception instanceof ReportedException) {
+                             ReportedException reportedexception = (ReportedException) exception;
 diff --git a/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java b/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java
 index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..2ede26ce0ce71282ef259360ec7128641f41b82f 100644
 --- a/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java
@@ -1874,7 +2040,7 @@ index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..2ede26ce0ce71282ef259360ec712864
      }
      // Paper end - Multi Block Change API
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index b6554e377546317c9341186550fc74fcb4f1f518..4259f50c3ee899c348ef3937b7334fd9b63941bf 100644
+index b6554e377546317c9341186550fc74fcb4f1f518..964ee27b126494401870488db28dfa46b758814b 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -3,9 +3,6 @@ package net.minecraft.server;
@@ -2068,7 +2234,7 @@ index b6554e377546317c9341186550fc74fcb4f1f518..4259f50c3ee899c348ef3937b7334fd9
 +            }
 +        });
 +    }
-+
+ 
 +    @Override
 +    public Float getTps() {
 +        return Double.valueOf(tps5s.getAverage()).floatValue();
@@ -2078,7 +2244,7 @@ index b6554e377546317c9341186550fc74fcb4f1f518..4259f50c3ee899c348ef3937b7334fd9
 +    public Long getNanoSecondsFromLastTick() {
 +        return this.lastNanoTickTime;
 +    }
- 
++
 +    @Override
 +    public String getHolderName() {
 +        return "MinecraftServer";
@@ -2284,9 +2450,9 @@ index b6554e377546317c9341186550fc74fcb4f1f518..4259f50c3ee899c348ef3937b7334fd9
          this.isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
 +        // Canvas start - Multithreaded WorldTicking
 +        */ // Run scheduled main thread tasks now
-+        // for (ServerLevel level : allLevels) {
-+        //     level.mainThreadTick(shouldKeepTicking);
-+        // }
++        for (ServerLevel level : allLevels) {
++            ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)level).moonrise$getPlayerChunkLoader().tick();
++        }
 +        // Canvas end
  
          //this.profiler.popPush("connection"); // Purpur
@@ -2918,7 +3084,7 @@ index 71abe25cfb73af3857cbc85980aa32d0201aab62..f71c96904b792c6d1976b8c50ef99378
                      while (objectiterator.hasNext()) {
                          it.unimi.dsi.fastutil.longs.Long2ByteMap.Entry it_unimi_dsi_fastutil_longs_long2bytemap_entry = (it.unimi.dsi.fastutil.longs.Long2ByteMap.Entry) objectiterator.next();
 diff --git a/src/main/java/net/minecraft/server/level/ServerChunkCache.java b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
-index 63b03939a15150eeafc0498a6c810153bcc0e271..b7cdaebca41ebb9e4c6081ec4a021a2dca9e2f5b 100644
+index 63b03939a15150eeafc0498a6c810153bcc0e271..4b88ce06305b3014d431006062daa19542daea1e 100644
 --- a/src/main/java/net/minecraft/server/level/ServerChunkCache.java
 +++ b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
 @@ -3,13 +3,19 @@ package net.minecraft.server.level;
@@ -2952,6 +3118,15 @@ index 63b03939a15150eeafc0498a6c810153bcc0e271..b7cdaebca41ebb9e4c6081ec4a021a2d
      private final ca.spottedleaf.concurrentutil.map.ConcurrentLong2ReferenceChainedHashTable<net.minecraft.world.level.chunk.LevelChunk> fullChunks = new ca.spottedleaf.concurrentutil.map.ConcurrentLong2ReferenceChainedHashTable<>();
      long chunkFutureAwaitCounter;
      // Paper end
+@@ -396,7 +402,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         //this.level.getProfiler().popPush("chunks"); // Purpur
+         if (tickChunks) {
+             //this.level.timings.chunks.startTiming(); // Paper - timings // Purpur
+-            ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().tick(); // Paper - rewrite chunk system
++            // ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().tick(); // Paper - rewrite chunk system
+             this.tickChunks();
+             //this.level.timings.chunks.stopTiming(); // Paper - timings // Purpur
+             this.chunkMap.tick();
 diff --git a/src/main/java/net/minecraft/server/level/ServerEntity.java b/src/main/java/net/minecraft/server/level/ServerEntity.java
 index fe2d82a173f27039d8f96fec1ad1f6a5650b0661..593e6eccd63aebbc2dc2a3861ae31486e2f232ae 100644
 --- a/src/main/java/net/minecraft/server/level/ServerEntity.java
