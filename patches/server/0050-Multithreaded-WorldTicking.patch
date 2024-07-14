@@ -2236,48 +2236,6 @@ index f4e69e22a02f49cfc97f799bd257596394d026d8..28788275df32176e60eb6f41af1f8907
  
      private static class InnerUtil { // Attempt to hide these methods from ProtocolLib, so it doesn't accidently pick them up.
  
-diff --git a/src/main/java/net/minecraft/network/protocol/PacketUtils.java b/src/main/java/net/minecraft/network/protocol/PacketUtils.java
-index 01efbc507b3d58f13f78ee286f93df40cdc3f0cb..9ea7a91e08d7d8817a6f763542b983f4214c8856 100644
---- a/src/main/java/net/minecraft/network/protocol/PacketUtils.java
-+++ b/src/main/java/net/minecraft/network/protocol/PacketUtils.java
-@@ -2,10 +2,13 @@ package net.minecraft.network.protocol;
- 
- import com.mojang.logging.LogUtils;
- import javax.annotation.Nullable;
-+import me.dueris.canvas.thread.TickTaskHolder;
- import net.minecraft.CrashReport;
- import net.minecraft.CrashReportCategory;
- import net.minecraft.ReportedException;
- import net.minecraft.network.PacketListener;
-+import net.minecraft.server.level.ServerPlayer;
-+import net.minecraft.server.network.ServerGamePacketListenerImpl;
- import org.slf4j.Logger;
- 
- // CraftBukkit start
-@@ -53,7 +56,22 @@ public class PacketUtils {
-                 if (listener.shouldHandleMessage(packet)) {
-                     co.aikar.timings.Timing timing = co.aikar.timings.MinecraftTimings.getPacketTiming(packet); // Paper - timings
-                     try { // Paper - timings // Purpur
--                        packet.handle(listener);
-+                        // Canvas start
-+                        ServerPlayer pl = null;
-+                        if (listener instanceof ServerGamePacketListenerImpl i) {
-+                            pl = i.player;
-+                        } else if (listener instanceof ServerCommonPacketListenerImpl i) {
-+                            pl = i.connection.getPlayer();
-+                        }
-+
-+                        /* if (pl != null) {
-+                            ((ServerLevel)pl.level()).scheduleTickTask(() -> {
-+                                packet.handle(listener);
-+                            }, TickTaskHolder.Timing.END_TICK, TickTaskHolder.State.SERVER_LEVEL);
-+                        } else { */
-+                            packet.handle(listener);
-+                        // }
-+                        // Canvas end
-                     } catch (Exception exception) {
-                         if (exception instanceof ReportedException) {
-                             ReportedException reportedexception = (ReportedException) exception;
 diff --git a/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java b/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java
 index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..2ede26ce0ce71282ef259360ec7128641f41b82f 100644
 --- a/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java
@@ -3508,7 +3466,7 @@ index e81f89dc2357843de9b1cf8a54a1edaeb1a9a33a..b90a6c9159db9cf191ac25aa788d7fce
  import java.util.stream.Stream;
  import javax.annotation.Nullable;
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 47de81f6de9df7faf1d8813bb12045ef00e6ff7f..a4d28dfadcf3b8eebd791c03210be5664c76ea74 100644
+index 47de81f6de9df7faf1d8813bb12045ef00e6ff7f..2b1928813998cd742e0c51eb73d7544ba3510709 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -6,16 +6,18 @@ import com.google.common.collect.Lists;
@@ -4208,6 +4166,15 @@ index 47de81f6de9df7faf1d8813bb12045ef00e6ff7f..a4d28dfadcf3b8eebd791c03210be566
      }
  
      @Override
+@@ -1743,7 +2067,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ca.spottedleaf.
+         if (this.isUpdatingNavigations) {
+             String s = "recursive call to sendBlockUpdated";
+ 
+-            Util.logAndPauseIfInIde("recursive call to sendBlockUpdated", new IllegalStateException("recursive call to sendBlockUpdated"));
++            return; // Util.logAndPauseIfInIde("recursive call to sendBlockUpdated", new IllegalStateException("recursive call to sendBlockUpdated")); // Canvas
+         }
+ 
+         this.getChunkSource().blockChanged(pos);
 @@ -2005,7 +2329,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ca.spottedleaf.
  
      @Override
@@ -4246,6 +4213,19 @@ index f1b5fc89e5f1fc7df299ac6ed88254104235863d..d00137c26d60f9e8564859c0df4c52ec
  
      private int getCoprime(int horizontalSpawnArea) {
          return horizontalSpawnArea <= 16 ? horizontalSpawnArea - 1 : 17;
+diff --git a/src/main/java/net/minecraft/server/level/ServerPlayerGameMode.java b/src/main/java/net/minecraft/server/level/ServerPlayerGameMode.java
+index 7c06b284a6cc74c0b31f8921706c7796dcc4e402..9b619daa38d1ffb321cd1bfd07482fdab6e68df8 100644
+--- a/src/main/java/net/minecraft/server/level/ServerPlayerGameMode.java
++++ b/src/main/java/net/minecraft/server/level/ServerPlayerGameMode.java
+@@ -300,7 +300,7 @@ public class ServerPlayerGameMode {
+                     if (!iblockdata.isAir()) {
+                         float f1 = iblockdata.getDestroyProgress(this.player, this.player.level(), pos) * (float) (l + 1);
+ 
+-                        if (f1 >= 0.7F) {
++                        if (f1 >= 0.04F) {
+                             this.isDestroyingBlock = false;
+                             this.level.destroyBlockProgress(this.player.getId(), pos, -1);
+                             this.destroyAndAck(pos, sequence, "destroyed");
 diff --git a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java b/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
 index 8aff5129f85ab5729b3da2e465871be62d15bdf2..c1b2a46f3731abc14bc184e1b98c9d3160a40462 100644
 --- a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
