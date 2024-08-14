@@ -11,7 +11,7 @@ plugins {
     java
     `maven-publish`
     id("io.github.goooler.shadow") version "8.1.7" apply false
-    id("io.papermc.paperweight.patcher") version "1.7.1"
+    id("io.papermc.paperweight.patcher") version "1.7.2"
 }
 
 allprojects {
@@ -26,7 +26,7 @@ allprojects {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
-val mcVersion = "1.21"
+val mcVersion = "1.21.1"
 
 subprojects {
     tasks.withType<JavaCompile>().configureEach {

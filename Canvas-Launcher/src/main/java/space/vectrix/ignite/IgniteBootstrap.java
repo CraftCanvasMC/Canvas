@@ -80,14 +80,14 @@ public final class IgniteBootstrap {
               Enumeration<JarEntry> entries = jar.entries();
               while (entries.hasMoreElements()) {
                   JarEntry entry = entries.nextElement();
-                  if (entry.getName().endsWith("canvas-1.21-R0.1-SNAPSHOT.zip")) {
+                  if (entry.getName().endsWith("canvas-1.21.1-R0.1-SNAPSHOT.zip")) {
                       Path pluginsDirectory = Paths.get(mainfile.getParent() + "/.launcher/");
 
                       if (!Files.exists(pluginsDirectory)) {
                           Files.createDirectories(pluginsDirectory);
                       }
 
-                      Path destinationPath = pluginsDirectory.resolve("canvas-1.21-R0.1-SNAPSHOT.jar");
+                      Path destinationPath = pluginsDirectory.resolve("canvas-1.21.1-R0.1-SNAPSHOT.jar");
                       Files.copy(jar.getInputStream(entry), destinationPath, StandardCopyOption.REPLACE_EXISTING);
                       break;
                   }

@@ -21,7 +21,7 @@ public final class Blackboard {
   // formatting:off
   public static final BlackboardMap.@NotNull Key<Boolean> DEBUG = key("ignite.debug", Boolean.class, true);
   public static final BlackboardMap.@NotNull Key<String> GAME_LOCATOR = key("ignite.locator", String.class, "paper");
-  public static final BlackboardMap.@NotNull Key<Path> GAME_JAR = key("ignite.jar", Path.class, Paths.get("./.launcher/canvas-1.21-R0.1-SNAPSHOT.jar"));
+  public static final BlackboardMap.@NotNull Key<Path> GAME_JAR = key("ignite.jar", Path.class, Paths.get("./.launcher/canvas-1.21.1-R0.1-SNAPSHOT.jar"));
   public static final BlackboardMap.@NotNull Key<String> GAME_TARGET = key("ignite.target", String.class, "org.bukkit.craftbukkit.Main");
   public static final BlackboardMap.@NotNull Key<Path> GAME_LIBRARIES = key("ignite.libraries", Path.class, Paths.get("./libraries"));
   public static final BlackboardMap.@NotNull Key<Path> MODS_DIRECTORY = key("ignite.mods", Path.class, Paths.get("./plugins"));
