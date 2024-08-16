@@ -3014,7 +3014,7 @@ index 4db96543e2072e47040bb25a9d97ea6a69c4a43d..c68f769e57f573a75276720a67929216
  
                                  this.broadcast(list, new ClientboundBlockUpdatePacket(blockposition, iblockdata));
 diff --git a/src/main/java/net/minecraft/server/level/ChunkMap.java b/src/main/java/net/minecraft/server/level/ChunkMap.java
-index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a311225869cb8652 100644
+index 66ee6ca56897c9646605f5907ce895e54bc30d96..deb48f4b9091c00d339bad3f3d22d464d3634e9c 100644
 --- a/src/main/java/net/minecraft/server/level/ChunkMap.java
 +++ b/src/main/java/net/minecraft/server/level/ChunkMap.java
 @@ -10,6 +10,8 @@ import com.google.common.collect.Queues;
@@ -3052,33 +3052,47 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
  import net.minecraft.util.CsvOutput;
  import net.minecraft.util.Mth;
  import net.minecraft.util.StaticCache2D;
-@@ -139,9 +146,9 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -139,9 +146,23 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
      public final AtomicInteger tickingGenerated; // Paper - public
      private final String storageName;
      private final PlayerMap playerMap;
 -    public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap;
 -    private final Long2ByteMap chunkTypeCache;
 -    private final Long2LongMap chunkSaveCooldowns;
-+    public final Int2ObjectMap<TrackedEntity> entityMap; // Canvas
-+    private final ConcurrentHashMap<Long, Byte> chunkTypeCache; // Canvas
++    // Canvas start
++    public final ConcurrentHashMap<Integer, TrackedEntity> entityMap;
++    private final ConcurrentHashMap<Long, Byte> chunkTypeCache;
++
++    public void addToEntityMap(int key, TrackedEntity value) {
++        entityMap.put(key, value);
++    }
++
++    public void removeFromEntityMap(int key, TrackedEntity value) {
++        entityMap.remove(key, value);
++    }
++
++    public void removeFromEntityMap(int key) {
++        entityMap.remove(key);
++    }
++    // Canvas end
 +    private final ConcurrentHashMap<Long, Byte> chunkSaveCooldowns;
      // Paper - rewrite chunk system
      public int serverViewDistance;
      public final WorldGenContext worldGenContext; // Paper - public
-@@ -183,9 +190,9 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -183,9 +204,9 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
          this.toDrop = new LongOpenHashSet();
          this.tickingGenerated = new AtomicInteger();
          this.playerMap = new PlayerMap();
 -        this.entityMap = new Int2ObjectOpenHashMap();
 -        this.chunkTypeCache = new Long2ByteOpenHashMap();
 -        this.chunkSaveCooldowns = new Long2LongOpenHashMap();
-+        this.entityMap = new Int2ObjectOpenHashMap<>(); // Canvas
++        this.entityMap = new ConcurrentHashMap<>(); // Canvas
 +        this.chunkTypeCache = new ConcurrentHashMap<>(); // Canvas
 +        this.chunkSaveCooldowns = new ConcurrentHashMap<>(); // Canvas
          // Paper - rewrite chunk system
          Path path = session.getDimensionPath(world.dimension());
  
-@@ -395,7 +402,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -395,7 +416,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
          );
      }
  
@@ -3087,7 +3101,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
          //ProfilerFiller gameprofilerfiller = this.level.getProfiler(); // Purpur
  
          //gameprofilerfiller.push("poi"); // Purpur
-@@ -744,7 +751,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -744,7 +765,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
      }
  
      private boolean playerIsCloseEnoughForSpawning(ServerPlayer entityplayer, ChunkPos chunkcoordintpair, double range) { // Spigot
@@ -3096,12 +3110,17 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
              return false;
          } else {
              double d0 = ChunkMap.euclideanDistanceSquared(chunkcoordintpair, entityplayer);
-@@ -845,16 +852,20 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -844,17 +865,27 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+         }
          // Paper end - rewrite chunk system
      }
++    // Canvas start
++    public synchronized boolean addEntity(Entity entity) {
++        return addEntity(entity, false);
++    }
  
 -    public void addEntity(Entity entity) {
-+    public synchronized boolean addEntity(Entity entity) { // Canvas - sync
++    public synchronized boolean addEntity(Entity entity, boolean retrial) { // Canvas - sync
          org.spigotmc.AsyncCatcher.catchOp("entity track"); // Spigot
          // Paper start - ignore and warn about illegal addEntity calls instead of crashing server
          if (!entity.valid || entity.level() != this.level || this.entityMap.containsKey(entity.getId())) {
@@ -3109,10 +3128,12 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
 -                + ": " + entity  + (this.entityMap.containsKey(entity.getId()) ? " ALREADY CONTAINED (This would have crashed your server)" : ""), new Throwable());
 -            return;
 +            // Canvas start - run this on main if failed
-+            // LOGGER.error("Illegal ChunkMap::addEntity for world " + this.level.getWorld().getName()
-+            //     + ": " + entity  + (this.entityMap.containsKey(entity.getId()) ? " ALREADY CONTAINED (This would have crashed your server)" : ""), new Throwable());
-+            LOGGER.warn("Illegal ChunkMap::adEntity for world " + this.level.getWorld().getName() + " was caught by canvas. Redirecting to main for 2nd attempt.");
-+            this.level.scheduleTickTask(() -> addEntity(entity), TickTaskHolder.Timing.PRE_TICK, TickTaskHolder.State.MAIN);
++            if (retrial) {
++                LOGGER.error("Illegal ChunkMap::addEntity for world {}: {}{}", this.level.getWorld().getName(),
++                    entity, this.entityMap.containsKey(entity.getId()) ? " ALREADY CONTAINED (This would have crashed your server)" : "", new Throwable());
++            } else
++                LOGGER.warn("Illegal ChunkMap::addEntity for world {} was caught by canvas. Redirecting to main for 2nd attempt.", this.level.getWorld().getName());
++            this.level.getServer().scheduleOnMain(() -> addEntity(entity, true));
 +            return false;
 +            // Canvas end
          }
@@ -3122,7 +3143,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
          if (!(entity instanceof EnderDragonPart)) {
              EntityType<?> entitytypes = entity.getType();
              int i = entitytypes.clientTrackingRange() * 16;
-@@ -880,11 +891,11 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -880,11 +911,11 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
                          ServerPlayer entityplayer = (ServerPlayer) entity;
  
                          this.updatePlayerStatus(entityplayer, true);
@@ -3138,7 +3159,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
                              if (playerchunkmap_entitytracker1.entity != entityplayer) {
                                  playerchunkmap_entitytracker1.updatePlayer(entityplayer);
                              }
-@@ -894,13 +905,14 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -894,13 +925,14 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
                  }
              }
          }
@@ -3155,7 +3176,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
  
              while (objectiterator.hasNext()) {
                  ChunkMap.TrackedEntity playerchunkmap_entitytracker = (ChunkMap.TrackedEntity) objectiterator.next();
-@@ -920,6 +932,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -920,6 +952,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
  
      // Paper start - optimise entity tracker
      private void newTrackerTick() {
@@ -3163,7 +3184,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
          final ca.spottedleaf.moonrise.common.misc.NearbyPlayers nearbyPlayers = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getNearbyPlayers();
          final ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup entityLookup = (ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup)((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getEntityLookup();;
  
-@@ -927,6 +940,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -927,6 +960,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
          final Entity[] trackerEntitiesRaw = trackerEntities.getRawDataUnchecked();
          for (int i = 0, len = trackerEntities.size(); i < len; ++i) {
              final Entity entity = trackerEntitiesRaw[i];
@@ -3171,7 +3192,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
              final ChunkMap.TrackedEntity tracker = ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$getTrackedEntity();
              if (tracker == null) {
                  continue;
-@@ -947,10 +961,11 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -947,10 +981,11 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
              }
              ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$clearPlayers();
          }
@@ -3184,7 +3205,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
          // Paper start - optimise entity tracker
          if (true) {
              this.newTrackerTick();
-@@ -961,7 +976,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -961,7 +996,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
  
          List<ServerPlayer> list = Lists.newArrayList();
          List<ServerPlayer> list1 = this.level.players();
@@ -3193,7 +3214,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
          //this.level.timings.tracker1.startTiming(); // Paper // Purpur
  
          ChunkMap.TrackedEntity playerchunkmap_entitytracker;
-@@ -1104,7 +1119,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -1104,7 +1139,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
          final Entity entity;
          private final int range;
          SectionPos lastSectionPos;
@@ -3202,7 +3223,7 @@ index 66ee6ca56897c9646605f5907ce895e54bc30d96..01515112d5f5b4b42337e6c5a3112258
  
          // Paper start - optimise entity tracker
          private long lastChunkUpdate = -1L;
-@@ -1239,7 +1254,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+@@ -1239,7 +1274,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
  
          public void updatePlayer(ServerPlayer player) {
              org.spigotmc.AsyncCatcher.catchOp("player tracker update"); // Spigot
