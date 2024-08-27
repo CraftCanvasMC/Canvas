@@ -145,7 +145,7 @@ fun clearCanvasCache() {
 
 fun copyToTarget() {
     val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
-        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
+        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("build").resolve("libs")
 
         Files.createDirectories(targetJarDirectory)
         Files.copy(
