@@ -44,7 +44,7 @@ public final class IgniteConstants {
    *
    * @since 1.0.0
    */
-  public static final String MOD_CONFIG = "ignite.mod.json";
+  public static final String MOD_CONFIG = "mixin-plugin.json";
 
   /**
    * The gson instance.
