@@ -22,6 +22,11 @@ allprojects {
             languageVersion = JavaLanguageVersion.of(21)
         }
     }
+
+    tasks.compileJava {
+        options.compilerArgs.add("-Xlint:-deprecation")
+        options.isWarnings = false
+    }
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
