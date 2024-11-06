@@ -1,4 +1,4 @@
-import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+import io.papermc.paperweight.tasks.CreatePaperclipJar
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import java.nio.file.*
@@ -10,8 +10,7 @@ import org.gradle.api.DefaultTask
 plugins {
     java
     `maven-publish`
-    id("io.github.goooler.shadow") version "8.1.7" apply false
-    id("io.papermc.paperweight.patcher") version "1.7.2"
+    id("io.papermc.paperweight.patcher") version "1.7.4"
 }
 
 allprojects {
@@ -26,7 +25,7 @@ allprojects {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
-val mcVersion = "1.21.1"
+val mcVersion = "1.21.3"
 
 subprojects {
     tasks.withType<JavaCompile>().configureEach {
@@ -119,68 +118,23 @@ tasks.register("printMinecraftVersion") {
     }
 }
 
-tasks.register<DefaultTask>("createCanvasBundler") {
-    dependsOn(":remapPurpurClip")
-
-    doLast {
-        val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
-        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("Canvas-Launcher/src/main/resources")
-
-        Files.createDirectories(targetJarDirectory)
-        Files.copy(
-            rmapLoc.resolve("canvas-${mcVersion}.jar"),
-            targetJarDirectory.resolve("canvas-${mcVersion}-R0.1-SNAPSHOT.zip"),
-            StandardCopyOption.REPLACE_EXISTING
-        )
-    }
-}
-
-fun clearCanvasCache() {
-    val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
-        Files.createDirectories(rmapLoc)
-        Files.walk(rmapLoc)
-                .sorted(Comparator.reverseOrder())
-                .forEach { Files.delete(it) }
-}
-
 fun copyToTarget() {
-    val shadowJar: ShadowJar = projects.canvasLauncher.dependencyProject.tasks.getByName<ShadowJar>("shadowJar")
+    val shadowJar: CreatePaperclipJar = tasks.getByName<CreatePaperclipJar>("createMojmapPaperclipJar")
         val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
 
         Files.createDirectories(targetJarDirectory)
         Files.copy(
-            shadowJar.archiveFile.get().asFile.toPath().toAbsolutePath(),
-            targetJarDirectory.resolve(shadowJar.archiveBaseName.get() + ".jar"),
+            shadowJar.outputZip.get().asFile.toPath().toAbsolutePath(),
+            targetJarDirectory.resolve("canvas-launcher.jar"),
             StandardCopyOption.REPLACE_EXISTING
         )
-}
-
-tasks.register<DefaultTask>("remapPurpurClip") {
-    dependsOn(":createMojmapPaperclipJar")
-    clearCanvasCache()
-
-    doLast{
-        val rmapLoc: Path = projectDir.toPath().toAbsolutePath().resolve(".gradle/caches/canvas/building")
-        Files.createDirectories(rmapLoc)
-        Files.copy(
-            file("build/libs/canvas-paperclip-${mcVersion}-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
-            rmapLoc.resolve("canvas-${mcVersion}.zip"),
-            StandardCopyOption.REPLACE_EXISTING
-        )
-        Files.copy(
-            file("build/libs/canvas-paperclip-${mcVersion}-R0.1-SNAPSHOT-mojmap.jar").toPath().toAbsolutePath(),
-            rmapLoc.resolve("canvas-${mcVersion}.jar"),
-            StandardCopyOption.REPLACE_EXISTING
-        )
-    }
 }
 
 tasks.register<DefaultTask>("createCanvasServer") {
-    dependsOn(":createCanvasBundler", projects.canvasLauncher.dependencyProject.tasks.withType<ShadowJar>())
+    dependsOn(":createMojmapPaperclipJar")
 
     doLast {
         copyToTarget()
-        clearCanvasCache()
     }
 }
 
