@@ -457,7 +457,7 @@ index 93335de8cf514dc8417e4b9b2d495663deda2904..d987b780fe84a8fcf0a2299c8057d038
          this.checkThread(entity, "Cannot move entity off-main");
  
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
-index 5a6defc4c4d30c06d4bba856847feb176950ca1e..77c680e33963853936aa5096766bb8584546d652 100644
+index 5a6defc4c4d30c06d4bba856847feb176950ca1e..6811c9a46684740e4735ae5e1fbe19647db92611 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/player/RegionizedPlayerChunkLoader.java
 @@ -20,6 +20,8 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
@@ -481,12 +481,21 @@ index 5a6defc4c4d30c06d4bba856847feb176950ca1e..77c680e33963853936aa5096766bb858
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicLong;
  import java.util.function.Function;
-@@ -308,8 +315,13 @@ public final class RegionizedPlayerChunkLoader {
+@@ -300,6 +307,7 @@ public final class RegionizedPlayerChunkLoader {
+     }
+ 
+     public void tick() {
++        synchronized (this) { // Canvas
+         TickThread.ensureTickThread("Cannot tick player chunk loader async");
+         long currTime = System.nanoTime();
+         for (final ServerPlayer player : new java.util.ArrayList<>(this.world.players())) {
+@@ -308,9 +316,14 @@ public final class RegionizedPlayerChunkLoader {
                  // not our problem anymore
                  continue;
              }
 -            loader.update(); // can't invoke plugin logic
 -            loader.updateQueues(currTime);
+-        }
 +
 +            try {
 +                synchronized (this) {
@@ -494,10 +503,11 @@ index 5a6defc4c4d30c06d4bba856847feb176950ca1e..77c680e33963853936aa5096766bb858
 +                    loader.updateQueues(currTime);
 +                }
 +            } catch (AlreadySentChunkException ignored) {}
-         }
++        }} // Canvas
      }
  
-@@ -339,7 +351,7 @@ public final class RegionizedPlayerChunkLoader {
+     public static final class PlayerChunkLoaderData {
+@@ -339,7 +352,7 @@ public final class RegionizedPlayerChunkLoader {
  
          private boolean canGenerateChunks = true;
  
@@ -506,7 +516,22 @@ index 5a6defc4c4d30c06d4bba856847feb176950ca1e..77c680e33963853936aa5096766bb858
          private final LongOpenHashSet sentChunks = new LongOpenHashSet();
  
          private static final byte CHUNK_TICKET_STAGE_NONE           = 0;
-@@ -420,7 +432,7 @@ public final class RegionizedPlayerChunkLoader {
+@@ -411,8 +424,14 @@ public final class RegionizedPlayerChunkLoader {
+ 
+         private void sendChunk(final int chunkX, final int chunkZ) {
+             if (this.sentChunks.add(CoordinateUtils.getChunkKey(chunkX, chunkZ))) {
++                try { // Canvas
+                 ((ChunkSystemChunkHolder)((ChunkSystemServerLevel)this.world).moonrise$getChunkTaskScheduler().chunkHolderManager
+                         .getChunkHolder(chunkX, chunkZ).vanillaChunkHolder).moonrise$addReceivedChunk(this.player);
++                // Canvas start
++                } catch (AlreadySentChunkException ignored) {
++                    return;
++                }
++                // Canvas end
+ 
+                 final LevelChunk chunk = ((ChunkSystemLevel)this.world).moonrise$getFullChunkIfLoaded(chunkX, chunkZ);
+ 
+@@ -420,7 +439,7 @@ public final class RegionizedPlayerChunkLoader {
                  PlayerChunkSender.sendChunk(this.player.connection, this.world, chunk);
                  return;
              }
@@ -515,7 +540,49 @@ index 5a6defc4c4d30c06d4bba856847feb176950ca1e..77c680e33963853936aa5096766bb858
          }
  
          private void sendUnloadChunk(final int chunkX, final int chunkZ) {
-@@ -819,7 +831,12 @@ public final class RegionizedPlayerChunkLoader {
+@@ -434,8 +453,14 @@ public final class RegionizedPlayerChunkLoader {
+             PlatformHooks.get().onChunkUnWatch(this.world, new ChunkPos(chunkX, chunkZ), this.player);
+             // Note: Check PlayerChunkSender#dropChunk for other logic
+             // Note: drop isAlive() check so that chunks properly unload client-side when the player dies
++            try { // Canvas
+             ((ChunkSystemChunkHolder)((ChunkSystemServerLevel)this.world).moonrise$getChunkTaskScheduler().chunkHolderManager
+                 .getChunkHolder(chunkX, chunkZ).vanillaChunkHolder).moonrise$removeReceivedChunk(this.player);
++                // Canvas start
++            } catch (AlreadySentChunkException ignored) {
++                return;
++            }
++            // Canvas end
+             this.player.connection.send(new ClientboundForgetLevelChunkPacket(new ChunkPos(chunkX, chunkZ)));
+             // Paper start - PlayerChunkUnloadEvent
+             if (io.papermc.paper.event.packet.PlayerChunkUnloadEvent.getHandlerList().getRegisteredListeners().length > 0) {
+@@ -484,7 +509,7 @@ public final class RegionizedPlayerChunkLoader {
+             }
+ 
+             @Override
+-            protected void removeCallback(final PlayerChunkLoaderData parameter, final int chunkX, final int chunkZ) {
++            protected synchronized void removeCallback(final PlayerChunkLoaderData parameter, final int chunkX, final int chunkZ) { // Canvas
+                 final long chunk = CoordinateUtils.getChunkKey(chunkX, chunkZ);
+                 // note: by the time this is called, the tick cleanup should have ran - so, if the chunk is at
+                 // the tick stage it was deemed in range for loading. Thus, we need to move it to generated
+@@ -618,7 +643,7 @@ public final class RegionizedPlayerChunkLoader {
+             return Math.max(Math.abs(dx), Math.abs(dz)) <= this.lastTickDistance;
+         }
+ 
+-        private boolean areNeighboursGenerated(final int chunkX, final int chunkZ, final int radius) {
++        private synchronized boolean areNeighboursGenerated(final int chunkX, final int chunkZ, final int radius) { // Canvas
+             for (int dz = -radius; dz <= radius; ++dz) {
+                 for (int dx = -radius; dx <= radius; ++dx) {
+                     if ((dx | dz) == 0) {
+@@ -637,7 +662,7 @@ public final class RegionizedPlayerChunkLoader {
+             return true;
+         }
+ 
+-        void updateQueues(final long time) {
++        synchronized void updateQueues(final long time) { // Canvas
+             TickThread.ensureTickThread(this.player, "Cannot tick player chunk loader async");
+             if (this.removed) {
+                 throw new IllegalStateException("Ticking removed player chunk loader");
+@@ -819,7 +844,12 @@ public final class RegionizedPlayerChunkLoader {
              final int maxSendsThisTick = Math.min((int)this.chunkSendLimiter.takeAllocation(time, sendRate, maxSends), this.sendQueue.size());
              // we do not return sends that we took from the allocation back because we want to limit the max send rate, not target it
              for (int i = 0; i < maxSendsThisTick; ++i) {
@@ -529,6 +596,15 @@ index 5a6defc4c4d30c06d4bba856847feb176950ca1e..77c680e33963853936aa5096766bb858
                  final int pendingSendX = CoordinateUtils.getChunkX(pendingSend);
                  final int pendingSendZ = CoordinateUtils.getChunkZ(pendingSend);
                  final LevelChunk chunk = ((ChunkSystemLevel)this.world).moonrise$getFullChunkIfLoaded(pendingSendX, pendingSendZ);
+@@ -904,7 +934,7 @@ public final class RegionizedPlayerChunkLoader {
+             );
+         }
+ 
+-        void update() {
++        synchronized void update() { // Canvas
+             TickThread.ensureTickThread(this.player, "Cannot update player asynchronously");
+             if (this.removed) {
+                 throw new IllegalStateException("Updating removed player chunk loader");
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
 index a0e5fc2eff605e17704f0726d20e79cbb3d88d6d..27e3195f0fdbdf99e7f91dda94c1ed7cb5a8696e 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
@@ -1939,6 +2015,49 @@ index c03608fec96b51e1867f43d8f42e5aefb1520e46..650323c0af11affc91aaeba33b1c1516
              }
              ++this.tickCount;
              if (this.oneTimeDelayed.isEmpty()) {
+diff --git a/src/main/java/net/minecraft/Util.java b/src/main/java/net/minecraft/Util.java
+index dfe49edd915979f895fda0e372804f1d5f732699..df528edb822d9524c8bd5d2b5497be04caa5b104 100644
+--- a/src/main/java/net/minecraft/Util.java
++++ b/src/main/java/net/minecraft/Util.java
+@@ -1065,6 +1065,38 @@ public class Util {
+     public static <K, V> Map<K, V> copyAndPut(Map<K, V> map, K keyToAppend, V valueToAppend) {
+         return ImmutableMap.<K, V>builderWithExpectedSize(map.size() + 1).putAll(map).put(keyToAppend, valueToAppend).buildKeepingLast();
+     }
++    // Canvas start
++    public static Runnable wrapThreadWithTaskName(String activeThreadName, Runnable task) {
++        return SharedConstants.IS_RUNNING_IN_IDE ? () -> {
++            Thread thread = Thread.currentThread();
++            String string2 = thread.getName();
++            thread.setName(activeThreadName);
++
++            try {
++                task.run();
++            } finally {
++                thread.setName(string2);
++            }
++        } : task;
++    }
++
++    public static <V> Supplier<V> wrapThreadWithTaskName(String activeThreadName, Supplier<V> supplier) {
++        return SharedConstants.IS_RUNNING_IN_IDE ? () -> {
++            Thread thread = Thread.currentThread();
++            String string2 = thread.getName();
++            thread.setName(activeThreadName);
++
++            Object var4;
++            try {
++                var4 = supplier.get();
++            } finally {
++                thread.setName(string2);
++            }
++
++            return (V)var4;
++        } : supplier;
++    }
++    // Canvas end
+ 
+     public static enum OS {
+         LINUX("linux"),
 diff --git a/src/main/java/net/minecraft/advancements/critereon/SimpleCriterionTrigger.java b/src/main/java/net/minecraft/advancements/critereon/SimpleCriterionTrigger.java
 index 35772110e9318df46a2729dbc0b5879b290011b7..5fc2a1b2e042a999e85cc520cd37e5d6fdabcd4e 100644
 --- a/src/main/java/net/minecraft/advancements/critereon/SimpleCriterionTrigger.java
@@ -2138,7 +2257,7 @@ index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..60b79dd1216a4bf7cc3ccb513a15c93f
      }
      // Paper end - Multi Block Change API
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index da625072ce4b3378bf25d8a33fb7f73fbacea68d..488385923f27d00825284cf4445379a80730ed27 100644
+index da625072ce4b3378bf25d8a33fb7f73fbacea68d..15ee2a3ff60e16fb24e5ada8df526ec11fe2ba68 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -3,9 +3,6 @@ package net.minecraft.server;
@@ -2422,10 +2541,12 @@ index da625072ce4b3378bf25d8a33fb7f73fbacea68d..488385923f27d00825284cf4445379a8
              this.managedBlock(() -> {
                  return !this.haveTime();
              });
-@@ -1689,6 +1771,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1688,7 +1770,14 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                 }
                  for (final ServerLevel level : this.levels.values()) {
                      // process unloads
-                     level.getChunkSource().tick(() -> true, false);
+-                    level.getChunkSource().tick(() -> true, false);
++                    // level.getChunkSource().tick(() -> true, false); // Canvas - no!
 +                    if (level.milliSinceLastConnectionTick + 20000 < Util.getMillis()) {
 +                        // Assuming WorldThread died, schedule on ServerConnectionListener
 +                        level.connections.forEach((connection) -> {
@@ -3299,7 +3420,7 @@ index 7a9e7fc688e48d18a6a884f02f768ae652326aae..11ae2e1a0454d2327c6a88ead204e88a
                      while (objectiterator.hasNext()) {
                          it.unimi.dsi.fastutil.longs.Long2ByteMap.Entry it_unimi_dsi_fastutil_longs_long2bytemap_entry = (it.unimi.dsi.fastutil.longs.Long2ByteMap.Entry) objectiterator.next();
 diff --git a/src/main/java/net/minecraft/server/level/ServerChunkCache.java b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
-index 3c711e1df57ac5b0f8795ebb12299d275792b1d4..50fd28e3a1400065ee4d56e528b968951a0bb5ef 100644
+index 3c711e1df57ac5b0f8795ebb12299d275792b1d4..67bcb6b451757a6e529c9109df25686f4f0075ed 100644
 --- a/src/main/java/net/minecraft/server/level/ServerChunkCache.java
 +++ b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
 @@ -2,17 +2,21 @@ package net.minecraft.server.level;
@@ -3324,6 +3445,18 @@ index 3c711e1df57ac5b0f8795ebb12299d275792b1d4..50fd28e3a1400065ee4d56e528b96895
  import java.util.concurrent.Executor;
  import java.util.function.BooleanSupplier;
  import java.util.function.Consumer;
+@@ -538,6 +542,11 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+ 
+         for (int i = 0; i < size; ++i) {
+             final ServerChunkCache.ChunkAndHolder chunkAndHolder = raw[i];
++            // Canvas start - NPE
++            if (chunkAndHolder == null) {
++                continue;
++            }
++            // Canvas end
+             final LevelChunk levelChunk = chunkAndHolder.chunk();
+ 
+             if (!this.isChunkNearPlayer(chunkMap, levelChunk.getPos(), levelChunk)) {
 diff --git a/src/main/java/net/minecraft/server/level/ServerEntity.java b/src/main/java/net/minecraft/server/level/ServerEntity.java
 index e3e9a06047519eb4159cfa28b5cdb1ee707e4d16..ce3d6d9b3d6213a012b702cc9328b2fbc1dd0f8e 100644
 --- a/src/main/java/net/minecraft/server/level/ServerEntity.java
@@ -3925,10 +4058,50 @@ index 9b706276dc5b5f55b966c5472c6c4e864342b916..2f81c4fca51425bd73089bbaf50834e4
          }
      }
 diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
-index 8bde4662f520870cd642fb174b29aec7cf4e0ce5..2ee88aa3380af0af8e30f539ebeea893e056a59c 100644
+index 8bde4662f520870cd642fb174b29aec7cf4e0ce5..56f09143a0f3f4d16059207d66f3745eeb4ea64f 100644
 --- a/src/main/java/net/minecraft/world/entity/Entity.java
 +++ b/src/main/java/net/minecraft/world/entity/Entity.java
-@@ -1548,8 +1548,14 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -7,6 +7,7 @@ import com.google.common.collect.Lists;
+ import com.google.common.collect.Sets;
+ import com.google.common.collect.UnmodifiableIterator;
+ import com.mojang.logging.LogUtils;
++import io.netty.util.internal.ConcurrentSet;
+ import it.unimi.dsi.fastutil.doubles.DoubleList;
+ import it.unimi.dsi.fastutil.doubles.DoubleListIterator;
+ import it.unimi.dsi.fastutil.floats.FloatArraySet;
+@@ -26,6 +27,7 @@ import java.util.Objects;
+ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
++import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.function.BiConsumer;
+ import java.util.function.Predicate;
+@@ -397,7 +399,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+     private BlockState inBlockState;
+     private final List<Entity.Movement> movementThisTick;
+     private final Set<BlockState> blocksInside;
+-    private final LongSet visitedBlocks;
++    private final Set<Long> visitedBlocks; // Canvas
+     // CraftBukkit start
+     public boolean forceDrops;
+     public boolean persist = true;
+@@ -660,9 +662,11 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+         this.mainSupportingBlockPos = Optional.empty();
+         this.onGroundNoBlocks = false;
+         this.inBlockState = null;
+-        this.movementThisTick = new ArrayList();
+-        this.blocksInside = new ReferenceArraySet();
+-        this.visitedBlocks = new LongOpenHashSet();
++        // Canvas start
++        this.movementThisTick = new CopyOnWriteArrayList<>();
++        this.blocksInside = new ConcurrentSet<>();
++        this.visitedBlocks = new ConcurrentSet<>();
++        // Canvas end
+         this.type = type;
+         this.level = world;
+         this.dimensions = type.getDimensions();
+@@ -1548,8 +1552,14 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
      }
  
      protected BlockPos getOnPos(float offset) {
@@ -3944,7 +4117,7 @@ index 8bde4662f520870cd642fb174b29aec7cf4e0ce5..2ee88aa3380af0af8e30f539ebeea893
  
              if (offset <= 1.0E-5F) {
                  return blockposition;
-@@ -1559,11 +1565,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -1559,11 +1569,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
                  return ((double) offset > 0.5D || !iblockdata.is(BlockTags.FENCES)) && !iblockdata.is(BlockTags.WALLS) && !(iblockdata.getBlock() instanceof FenceGateBlock) ? blockposition.atY(Mth.floor(this.position.y - (double) offset)) : blockposition;
              }
          } else {
@@ -3957,7 +4130,16 @@ index 8bde4662f520870cd642fb174b29aec7cf4e0ce5..2ee88aa3380af0af8e30f539ebeea893
          }
      }
  
-@@ -5051,6 +5053,12 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -1824,7 +1830,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+     private void checkInsideBlocks(List<Entity.Movement> queuedCollisionChecks, Set<BlockState> collidedBlocks) {
+         if (this.isAffectedByBlocks()) {
+             AABB axisalignedbb = this.getBoundingBox().deflate(9.999999747378752E-6D);
+-            LongSet longset = this.visitedBlocks;
++            Set<Long> longset = this.visitedBlocks;
+             Iterator iterator = queuedCollisionChecks.iterator();
+ 
+             while (iterator.hasNext()) {
+@@ -5051,6 +5057,12 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
          if (this.inBlockState == null) {
              this.inBlockState = this.level().getBlockState(this.blockPosition());
          }
@@ -3970,7 +4152,7 @@ index 8bde4662f520870cd642fb174b29aec7cf4e0ce5..2ee88aa3380af0af8e30f539ebeea893
  
          return this.inBlockState;
      }
-@@ -5148,6 +5156,18 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -5148,6 +5160,18 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
          this.setPosRaw(x, y, z, false);
      }
      public final void setPosRaw(double x, double y, double z, boolean forceBoundingBoxUpdate) {
@@ -3989,7 +4171,7 @@ index 8bde4662f520870cd642fb174b29aec7cf4e0ce5..2ee88aa3380af0af8e30f539ebeea893
          // Paper start - rewrite chunk system
          if (this.updatingSectionStatus) {
              LOGGER.error(
-@@ -5290,7 +5310,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -5290,7 +5314,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
      public final void setRemoved(Entity.RemovalReason entity_removalreason, EntityRemoveEvent.Cause cause) {
          // Paper start - rewrite chunk system
          if (!((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this.level).moonrise$getEntityLookup().canRemoveEntity((Entity)(Object)this)) {
@@ -3998,7 +4180,7 @@ index 8bde4662f520870cd642fb174b29aec7cf4e0ce5..2ee88aa3380af0af8e30f539ebeea893
              return;
          }
          // Paper end - rewrite chunk system
-@@ -5354,6 +5374,9 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -5354,6 +5378,9 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
      }
  
      public void setLevel(Level world) {
@@ -4255,6 +4437,28 @@ index e9e919fdcd61cb59e8b02a0ac5b33c8a1c7ca240..1910ef50fa7025f303e3f84ac6a9c89d
  import net.minecraft.world.level.levelgen.Heightmap;
  import net.minecraft.world.level.levelgen.structure.BuiltinStructures;
  import net.minecraft.world.level.levelgen.structure.Structure;
+diff --git a/src/main/java/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java b/src/main/java/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
+index 14526e6019a54edc7dcdbd9ad31162297e7a33ba..66981b0016d7b54539c5867de3e17b6877af09b7 100644
+--- a/src/main/java/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
++++ b/src/main/java/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
+@@ -315,7 +315,7 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+         }
+ 
+         this.fuel = nbt.getByte("Fuel");
+-        this.ingredient = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(nbt.getString("Mirai.ingredient"))).get().value(); // Mirai - fix brewing stands resetting their brewTime when being unloaded
++        this.ingredient = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(ResourceLocation.tryParse(nbt.getString("Canvas.ingredient"))).orElse(Items.AIR.builtInRegistryHolder()).value(); // Mirai - fix brewing stands resetting their brewTime when being unloaded
+     }
+ 
+     @Override
+@@ -324,7 +324,7 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+         nbt.putShort("BrewTime", (short) this.brewTime);
+         ContainerHelper.saveAllItems(nbt, this.items, registries);
+         nbt.putByte("Fuel", (byte) this.fuel);
+-        nbt.putString("Mirai.ingredient", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(this.ingredient).toString()); // Mirai - fix brewing stands resetting their brewTime when being unloaded
++        nbt.putString("Canvas.ingredient", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(this.ingredient).toString()); // Mirai - fix brewing stands resetting their brewTime when being unloaded
+     }
+ 
+     @Override
 diff --git a/src/main/java/net/minecraft/world/level/block/state/BlockBehaviour.java b/src/main/java/net/minecraft/world/level/block/state/BlockBehaviour.java
 index 852bfe68ab722a5cbdd90dbd70501b751fe81a78..d3891f0966182a5815d0dd62e4090ea34397de89 100644
 --- a/src/main/java/net/minecraft/world/level/block/state/BlockBehaviour.java
@@ -4298,7 +4502,7 @@ index 4640baec5bed6c2d53cc0f8ca1d273cc115abe9b..e6d8dd922224857deee76d01e03dccb2
  
      @Nullable
 diff --git a/src/main/java/net/minecraft/world/level/chunk/LevelChunkSection.java b/src/main/java/net/minecraft/world/level/chunk/LevelChunkSection.java
-index e4ae25c83ab9dd1aaa530a5456275ef63cdb8511..99b4e5884f4b4bf5dfa5ff7eaa5ab2c7ce904a7f 100644
+index e4ae25c83ab9dd1aaa530a5456275ef63cdb8511..1d998e91f81b1a5f3807ae9c0d54a67bc9347592 100644
 --- a/src/main/java/net/minecraft/world/level/chunk/LevelChunkSection.java
 +++ b/src/main/java/net/minecraft/world/level/chunk/LevelChunkSection.java
 @@ -19,8 +19,8 @@ public class LevelChunkSection implements ca.spottedleaf.moonrise.patches.block_
@@ -4307,33 +4511,36 @@ index e4ae25c83ab9dd1aaa530a5456275ef63cdb8511..99b4e5884f4b4bf5dfa5ff7eaa5ab2c7
      public static final int BIOME_CONTAINER_BITS = 2;
 -    short nonEmptyBlockCount; // Paper - package private
 -    private short tickingBlockCount;
-+    public short nonEmptyBlockCount; // Paper - package private // Canvas - Implement noisium; why?
++    public short nonEmptyBlockCount; // Paper - package private
 +    public short tickingBlockCount; // Canvas - AT
      private short tickingFluidCount;
      public final PalettedContainer<BlockState> states;
      private PalettedContainer<Holder<Biome>> biomes; // CraftBukkit - read/write
-@@ -309,18 +309,14 @@ public class LevelChunkSection implements ca.spottedleaf.moonrise.patches.block_
+@@ -308,19 +308,19 @@ public class LevelChunkSection implements ca.spottedleaf.moonrise.patches.block_
+     }
      // CraftBukkit end
  
++    private static final int sliceSize = 4;
      public void fillBiomesFromNoise(BiomeResolver biomeSupplier, Climate.Sampler sampler, int x, int y, int z) {
 -        PalettedContainer<Holder<Biome>> datapaletteblock = this.biomes.recreate();
 -        boolean flag = true;
-+        // Canvas start - Implement noisium; micro optimization
-+        PalettedContainer<Holder<Biome>> palette = this.biomes.recreate();
++        // Canvas start - noise generation optimizations
++        PalettedContainer<Holder<Biome>> palettedContainer = this.biomes.recreate();
  
 -        for (int l = 0; l < 4; ++l) {
 -            for (int i1 = 0; i1 < 4; ++i1) {
 -                for (int j1 = 0; j1 < 4; ++j1) {
 -                    datapaletteblock.getAndSetUnchecked(l, i1, j1, biomeSupplier.getNoiseBiome(x + l, y + i1, z + j1, sampler));
--                }
--            }
--        }
-+        for (int y1 = 0; y1 < 4; ++y1) for (int z1 = 0; z1 < 4; ++z1) for (int x1 = 0; x1 < 4; ++x1)
-+            palette.getAndSetUnchecked(x1, y1, z1, biomeSupplier.getNoiseBiome(x + x1, y + y1, z + z1, sampler));
- 
++        for (int pY = 0; pY < sliceSize; ++pY) {
++            for (int pZ = 0; pZ < sliceSize; ++pZ) {
++                for (int pX = 0; pX < sliceSize; ++pX) {
++                    palettedContainer.getAndSetUnchecked(pX, pY, pZ, biomeSupplier.getNoiseBiome(x + pX, y + pY, z + pZ, sampler));
+                 }
+             }
+         }
+-
 -        this.biomes = datapaletteblock;
-+        this.biomes = palette;
-+        // Canvas end - Implement noisium; micro optimization
++        // Canvas end
      }
  
      public LevelChunkSection copy() {
@@ -4407,7 +4614,7 @@ index d8b4196adf955f8d414688dc451caac2d9c609d9..042858d683745e4c0fd5a9cfc7d6965f
          // Paper end - rewrite chunk system
      }
 diff --git a/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java b/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
-index 3f39d6c786d9dfdd9ad591e08ff05fcbb41a1df6..126016ac384fcba56563c98d137c4591ef7cedb4 100644
+index 3f39d6c786d9dfdd9ad591e08ff05fcbb41a1df6..237221e49c7d26d596f8152b4e8796f21f81c971 100644
 --- a/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
 +++ b/src/main/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
 @@ -13,6 +13,8 @@ import java.util.Objects;
@@ -4419,16 +4626,91 @@ index 3f39d6c786d9dfdd9ad591e08ff05fcbb41a1df6..126016ac384fcba56563c98d137c4591
  import java.util.function.Predicate;
  import java.util.function.Supplier;
  import javax.annotation.Nullable;
-@@ -51,6 +53,8 @@ import org.apache.commons.lang3.mutable.MutableObject;
+@@ -51,6 +53,7 @@ import org.apache.commons.lang3.mutable.MutableObject;
  
  public final class NoiseBasedChunkGenerator extends ChunkGenerator {
  
-+    public static boolean NOISIUM = true; // Canvas - Implement noisium
-+    private static ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
++    private static ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor(); // Canvas
      public static final MapCodec<NoiseBasedChunkGenerator> CODEC = RecordCodecBuilder.mapCodec((instance) -> {
          return instance.group(BiomeSource.CODEC.fieldOf("biome_source").forGetter((chunkgeneratorabstract) -> {
              return chunkgeneratorabstract.biomeSource;
-@@ -377,6 +381,18 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+@@ -264,54 +267,27 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+ 
+     @Override
+     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState noiseConfig, StructureManager structureAccessor, ChunkAccess chunk) {
+-        NoiseSettings noisesettings = ((NoiseGeneratorSettings) this.settings.value()).noiseSettings().clampToHeightAccessor(chunk.getHeightAccessorForGeneration());
+-        int i = noisesettings.minY();
+-        int j = Mth.floorDiv(i, noisesettings.getCellHeight());
+-        int k = Mth.floorDiv(noisesettings.height(), noisesettings.getCellHeight());
+-
+-        return k <= 0 ? CompletableFuture.completedFuture(chunk) : CompletableFuture.supplyAsync(() -> {
+-            int l = chunk.getSectionIndex(k * noisesettings.getCellHeight() - 1 + i);
+-            int i1 = chunk.getSectionIndex(i);
+-            Set<LevelChunkSection> set = Sets.newHashSet();
+-
+-            for (int j1 = l; j1 >= i1; --j1) {
+-                LevelChunkSection chunksection = chunk.getSection(j1);
+-
+-                chunksection.acquire();
+-                set.add(chunksection);
+-            }
+-
+-            boolean flag = false;
+-
+-            ChunkAccess ichunkaccess1;
+-
+-            try {
+-                flag = true;
+-                ichunkaccess1 = this.doFill(blender, structureAccessor, noiseConfig, chunk, j, k);
+-                flag = false;
+-            } finally {
+-                if (flag) {
+-                    Iterator iterator = set.iterator();
+-
+-                    while (iterator.hasNext()) {
+-                        LevelChunkSection chunksection1 = (LevelChunkSection) iterator.next();
+-
+-                        chunksection1.release();
+-                    }
+-
+-                }
+-            }
+-
+-            Iterator iterator1 = set.iterator();
+-
+-            while (iterator1.hasNext()) {
+-                LevelChunkSection chunksection2 = (LevelChunkSection) iterator1.next();
+-
+-                chunksection2.release();
+-            }
+-
+-            return ichunkaccess1;
+-        }, Runnable::run); // Paper - rewrite chunk system
++        // Canvas start - noise gen optimizations
++        NoiseSettings settings = this.settings.value().noiseSettings().clampToHeightAccessor(chunk.getHeightAccessorForGeneration());
++        int miny = settings.minY();
++        int minyDiv = Mth.floorDiv(miny, settings.cellHeight());
++        int cellHeightDiv = Mth.floorDiv(settings.height(), settings.cellHeight());
++
++        if (cellHeightDiv <= 0) return CompletableFuture.completedFuture(chunk);
++
++        int startIndex = chunk.getSectionIndex(cellHeightDiv * settings.getCellHeight() - 1 + miny);
++        int minYIndex = chunk.getSectionIndex(miny);
++
++        LevelChunkSection[] sections = chunk.getSections();
++        for (int i = startIndex; i >= minYIndex; --i) sections[i].acquire();
++
++        return CompletableFuture.supplyAsync(Util.wrapThreadWithTaskName(
++            "wgen_fill_noise",
++            () -> this.doFill(blender, structureAccessor, noiseConfig, chunk, minyDiv, cellHeightDiv)
++        ), executorService).whenCompleteAsync((result, ignored) -> {
++            for (int i = startIndex; i >= minYIndex; --i) sections[i].release();
++        }, executorService);
++        // Canvas end
+     }
+ 
+     private ChunkAccess doFill(Blender blender, StructureManager structureAccessor, RandomState noiseConfig, ChunkAccess chunk, int minimumCellY, int cellHeight) {
+@@ -377,6 +353,18 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
  
                                  iblockdata = this.debugPreliminarySurfaceLevel(noisechunk, j4, j3, i5, iblockdata);
                                  if (iblockdata != NoiseBasedChunkGenerator.AIR && !SharedConstants.debugVoidTerrain(chunk.getPos())) {
@@ -4492,20 +4774,30 @@ index 25591124b6fadd3b976dfab79b06ae30278f8e6b..e720501b4cdffd18639546f415d4a773
      }
  
 diff --git a/src/main/java/net/minecraft/world/level/levelgen/material/MaterialRuleList.java b/src/main/java/net/minecraft/world/level/levelgen/material/MaterialRuleList.java
-index 0e6dfe2635ea5f5e410049b05f94f5083b2f18a4..85b851bd8e835d965f37caa16253b3bdeb80ad18 100644
+index 0e6dfe2635ea5f5e410049b05f94f5083b2f18a4..fe500204a8ef2ab7dc60d2ec3443bc15bec650f5 100644
 --- a/src/main/java/net/minecraft/world/level/levelgen/material/MaterialRuleList.java
 +++ b/src/main/java/net/minecraft/world/level/levelgen/material/MaterialRuleList.java
-@@ -11,9 +11,7 @@ public record MaterialRuleList(NoiseChunk.BlockStateFiller[] materialRuleList) i
+@@ -9,13 +9,15 @@ public record MaterialRuleList(NoiseChunk.BlockStateFiller[] materialRuleList) i
+     @Nullable
+     @Override
      public BlockState calculate(DensityFunction.FunctionContext pos) {
-         for (NoiseChunk.BlockStateFiller blockStateFiller : this.materialRuleList) {
-             BlockState blockState = blockStateFiller.calculate(pos);
+-        for (NoiseChunk.BlockStateFiller blockStateFiller : this.materialRuleList) {
+-            BlockState blockState = blockStateFiller.calculate(pos);
 -            if (blockState != null) {
 -                return blockState;
--            }
-+            if (blockState == null) continue; return blockState; // Canvas - Implement noisium
++        // Canvas start - noise generation optimizations
++        for (int i = 0; i < this.materialRuleList.length; i++) {
++            BlockState state = this.materialRuleList[i].calculate(pos);
++            if (state == null) {
++                continue;
+             }
++            return state;
          }
- 
+-
          return null;
++        // Canvas end
+     }
+ }
 diff --git a/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java b/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
 index 7ed694cbdd3a0c8d5643524eba3f56bc533ef3a7..90801365c2e972600ecff950bf0b651af6967487 100644
 --- a/src/main/java/net/minecraft/world/level/lighting/DynamicGraphMinFixedPoint.java
