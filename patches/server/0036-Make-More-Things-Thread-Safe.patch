@@ -1,0 +1,174 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Tue, 5 Nov 2024 19:26:39 -0800
+Subject: [PATCH] Make More Things Thread-Safe
+
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
+index 7fed43a1e7bcf35c4d7fd3224837a47fedd59860..db1112a284a8f1dd7d4072e467ae92748d2869b4 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
+@@ -5,6 +5,7 @@ import net.minecraft.world.entity.Entity;
+ import java.util.Arrays;
+ import java.util.Iterator;
+ import java.util.NoSuchElementException;
++import java.util.concurrent.ConcurrentLinkedQueue; // Canvas
+ 
+ // list with O(1) remove & contains
+ 
+@@ -13,7 +14,7 @@ import java.util.NoSuchElementException;
+  */
+ public final class EntityList implements Iterable<Entity> {
+ 
+-    private final Int2IntOpenHashMap entityToIndex = new Int2IntOpenHashMap(2, 0.8f);
++    /* private final Int2IntOpenHashMap entityToIndex = new Int2IntOpenHashMap(2, 0.8f); // Canvas
+     {
+         this.entityToIndex.defaultReturnValue(Integer.MIN_VALUE);
+     }
+@@ -21,18 +22,19 @@ public final class EntityList implements Iterable<Entity> {
+     private static final Entity[] EMPTY_LIST = new Entity[0];
+ 
+     private Entity[] entities = EMPTY_LIST;
+-    private int count;
++    private int count; */ // Canvas
++    private final ConcurrentLinkedQueue<Entity> handle = new ConcurrentLinkedQueue<>(); // Canvas
+ 
+     public int size() {
+-        return this.count;
++        return this.handle.size(); // Canvas
+     }
+ 
+     public boolean contains(final Entity entity) {
+-        return this.entityToIndex.containsKey(entity.getId());
++        return this.handle.contains(entity); // Canvas
+     }
+ 
+     public boolean remove(final Entity entity) {
+-        final int index = this.entityToIndex.remove(entity.getId());
++        /* final int index = this.entityToIndex.remove(entity.getId()); // Canvas
+         if (index == Integer.MIN_VALUE) {
+             return false;
+         }
+@@ -47,11 +49,12 @@ public final class EntityList implements Iterable<Entity> {
+         this.entities[index] = end;
+         this.entities[endIndex] = null;
+ 
+-        return true;
++        return true; */ // Canvas
++        return this.handle.remove(entity); // Canvas
+     }
+ 
+     public boolean add(final Entity entity) {
+-        final int count = this.count;
++        /* final int count = this.count; // Canvas
+         final int currIndex = this.entityToIndex.putIfAbsent(entity.getId(), count);
+ 
+         if (currIndex != Integer.MIN_VALUE) {
+@@ -68,33 +71,53 @@ public final class EntityList implements Iterable<Entity> {
+         list[count] = entity;
+         this.count = count + 1;
+ 
+-        return true;
++        return true; */ // Canvas
++        return this.handle.add(entity); // Canvas
+     }
+ 
+     public Entity getChecked(final int index) {
+-        if (index < 0 || index >= this.count) {
+-            throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
++        if (index < 0 || index >= this.size()) { // Canvas
++            throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.size());
+         }
+-        return this.entities[index];
++        return this.getUnchecked(index); // Canvas
+     }
+ 
+     public Entity getUnchecked(final int index) {
+-        return this.entities[index];
++        // Canvas start
++        // return this.entities[index];
++        int i = 0;
++        for (Entity element : this.handle) {
++            if (i == index) {
++                return element;
++            }
++            i++;
++        }
++        return null;
++        // Canvas end
+     }
+ 
+     public Entity[] getRawData() {
+-        return this.entities;
++        // Canvas start
++        // return this.entities;
++        Entity[] entityArray = new Entity[this.size()];
++        int i = 0;
++        for (Entity entity : this.handle) {
++            entityArray[i++] = entity;
++        }
++        return entityArray;
++        // Canvas end
+     }
+ 
+     public void clear() {
+-        this.entityToIndex.clear();
++        /* this.entityToIndex.clear(); // Canvas
+         Arrays.fill(this.entities, 0, this.count, null);
+-        this.count = 0;
++        this.count = 0; */ // Canvas
++        this.handle.clear(); // Canvas
+     }
+ 
+     @Override
+     public Iterator<Entity> iterator() {
+-        return new Iterator<>() {
++        /* return new Iterator<>() { // Canvas
+             private Entity lastRet;
+             private int current;
+ 
+@@ -123,6 +146,7 @@ public final class EntityList implements Iterable<Entity> {
+                 EntityList.this.remove(lastRet);
+                 --this.current;
+             }
+-        };
++        }; */ // Canvas
++        return this.handle.iterator(); // Canvas
+     }
+ }
+diff --git a/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java b/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java
+index 99dfa36a4f00217c7f9566af988b5210d99a273c..b6a7dc031af2195481e5690befe2220a56bed469 100644
+--- a/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java
++++ b/src/main/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java
+@@ -30,22 +30,19 @@ public class LegacyRandomSource implements BitRandomSource {
+ 
+     @Override
+     public void setSeed(long seed) {
+-        if (!this.seed.compareAndSet(this.seed.get(), (seed ^ 25214903917L) & 281474976710655L)) {
+-            throw ThreadingDetector.makeThreadingException("LegacyRandomSource", null);
+-        } else {
+-            this.gaussianSource.reset();
+-        }
++        this.seed.set((seed ^ 25214903917L) & 281474976710655L);
+     }
+ 
+     @Override
+     public int next(int bits) {
+-        long l = this.seed.get();
+-        long m = l * 25214903917L + 11L & 281474976710655L;
+-        if (!this.seed.compareAndSet(l, m)) {
+-            throw ThreadingDetector.makeThreadingException("LegacyRandomSource", null);
+-        } else {
+-            return (int)(m >> 48 - bits);
+-        }
++        long l;
++        long m;
++        do {
++            l = this.seed.get();
++            m = l * 25214903917L + 11L & 281474976710655L;
++        } while (!this.seed.compareAndSet(l, m));
++
++        return (int)(m >>> 48 - bits);
+     }
+ 
+     @Override
