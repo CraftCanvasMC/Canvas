@@ -1,0 +1,283 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Sun, 22 Dec 2024 15:19:26 -0800
+Subject: [PATCH] Threaded Connection Handling
+
+
+diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
+index 075477b84014b23969e15412d89ac993cce05c64..b854457fda79310106ade33d21c3c4165cba456d 100644
+--- a/src/main/java/io/github/dueris/canvas/Config.java
++++ b/src/main/java/io/github/dueris/canvas/Config.java
+@@ -15,6 +15,7 @@ public class Config implements JsonConfig {
+     public Pathfinding pathfinding = new Pathfinding();
+     public EntityTracking entityTracking = new EntityTracking();
+     public boolean enableAsyncSpawning = true;
++    public boolean enableThreadedConnections = true;
+ 
+     public static Config init() {
+         final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
+diff --git a/src/main/java/net/minecraft/network/Connection.java b/src/main/java/net/minecraft/network/Connection.java
+index 8661c1b1cfe2b3db000e1f08814fd4409c4b7fab..f37c4e6be74c1f02cb4ed0556010ae8e94de7002 100644
+--- a/src/main/java/net/minecraft/network/Connection.java
++++ b/src/main/java/net/minecraft/network/Connection.java
+@@ -38,6 +38,7 @@ import java.nio.channels.ClosedChannelException;
+ import java.util.Objects;
+ import java.util.Queue;
+ import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.atomic.AtomicReference;
+ import java.util.function.Consumer;
+ import java.util.function.Supplier;
+ import javax.annotation.Nullable;
+@@ -60,6 +61,7 @@ import net.minecraft.network.protocol.login.LoginProtocols;
+ import net.minecraft.network.protocol.status.ClientStatusPacketListener;
+ import net.minecraft.network.protocol.status.StatusProtocols;
+ import net.minecraft.server.RunningOnDifferentThreadException;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.debugchart.LocalSampleLogger;
+ import org.apache.commons.lang3.Validate;
+@@ -175,6 +177,23 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+         }
+ 
+     }
++    // Canvas start - threaded connections
++    private AtomicReference<ServerLevel> holdingLevel = new AtomicReference<>(null);
++
++    public void transferToLevel(ServerLevel level) {
++        if (holdingLevel.get() != null) {
++            // Player was on a diff world before, remove from previous context
++            level.removeConnection(this);
++        }
++        holdingLevel.set(level);
++        level.notifyNewConnection(this);
++    }
++
++    @Nullable
++    public ServerLevel getHoldingLevel() {
++        return holdingLevel.get();
++    }
++    // Canvas end
+ 
+     public void channelInactive(ChannelHandlerContext channelhandlercontext) {
+         this.disconnect((Component) Component.translatable("disconnect.endOfStream"));
+diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
+index a35f3ab56599fdd06aafd9ee2b182a2e25ae5d86..a43f7c1696fca5232c3935b5a0c74580c86c26c7 100644
+--- a/src/main/java/net/minecraft/server/MinecraftServer.java
++++ b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -76,6 +76,7 @@ import net.minecraft.core.RegistryAccess;
+ import net.minecraft.core.registries.Registries;
+ import net.minecraft.data.worldgen.features.MiscOverworldFeatures;
+ import net.minecraft.gametest.framework.GameTestTicker;
++import net.minecraft.network.Connection;
+ import net.minecraft.network.chat.ChatDecorator;
+ import net.minecraft.network.chat.ChatType;
+ import net.minecraft.network.chat.Component;
+@@ -1976,9 +1977,18 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     protected void tickChildren(BooleanSupplier shouldKeepTicking) {
+         ProfilerFiller gameprofilerfiller = Profiler.get();
+ 
+-        this.getPlayerList().getPlayers().forEach((entityplayer) -> {
++        // Canvas start
++        /* this.getPlayerList().getPlayers().forEach((entityplayer) -> {
+             entityplayer.connection.suspendFlushing();
+-        });
++        }); */
++        for (final ServerPlayer player : this.playerList.players) {
++            if (player.connection.connection.getHoldingLevel() == null
++                /*holding level is null, meaning they havent been moved
++                    to a level thread yet, so we handle on main*/) {
++                player.connection.suspendFlushing();
++            }
++        }
++        // Canvas end
+         this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
+         // Paper start - Folia scheduler API
+         ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler) Bukkit.getGlobalRegionScheduler()).tick();
+@@ -2084,12 +2094,22 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         gameprofilerfiller.popPush("send chunks");
+         Iterator<ServerPlayer> iterator = this.playerList.getPlayers().iterator(); // Canvas - new iterable var since old doesnt exist anymore
+ 
+-        while (iterator.hasNext()) {
++        // Canvas start
++        /* while (iterator.hasNext()) {
+             ServerPlayer entityplayer = (ServerPlayer) iterator.next();
+ 
+             entityplayer.connection.chunkSender.sendNextChunks(entityplayer);
+             entityplayer.connection.resumeFlushing();
++        } */
++        for (final ServerPlayer player : this.playerList.players) {
++            if (player.connection.connection.getHoldingLevel() == null
++                /*holding level is null, meaning they havent been moved
++                    to a level thread yet, so we handle on main*/) {
++                player.connection.chunkSender.sendNextChunks(player);
++                player.connection.resumeFlushing();
++            }
+         }
++        // Canvas end
+ 
+         gameprofilerfiller.pop();
+     }
+diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
+index 404ff988eb332b4c0547668d62e3f0816fb253df..87cf0442e1dbacb9ed7a74d08ed16eadbf6920fe 100644
+--- a/src/main/java/net/minecraft/server/level/ServerLevel.java
++++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
+@@ -52,6 +52,7 @@ import javax.annotation.Nullable;
+ import net.minecraft.CrashReport;
+ import net.minecraft.CrashReportCategory;
+ import net.minecraft.ReportType;
++import net.minecraft.ReportedException;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+@@ -61,9 +62,12 @@ import net.minecraft.core.SectionPos;
+ import net.minecraft.core.particles.ParticleOptions;
+ import net.minecraft.core.registries.BuiltInRegistries;
+ import net.minecraft.core.registries.Registries;
++import net.minecraft.network.Connection;
++import net.minecraft.network.PacketSendListener;
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.network.chat.MutableComponent;
+ import net.minecraft.network.protocol.Packet;
++import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+ import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
+ import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
+ import net.minecraft.network.protocol.game.ClientboundDamageEventPacket;
+@@ -82,6 +86,7 @@ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.ServerScoreboard;
+ import net.minecraft.server.dedicated.DedicatedServer;
+ import net.minecraft.server.level.progress.ChunkProgressListener;
++import net.minecraft.server.network.ServerConnectionListener;
+ import net.minecraft.server.players.SleepStatus;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundSource;
+@@ -875,8 +880,15 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+ 
+         try {
+             try {
++                for (final ServerPlayer player : this.players) {
++                    player.connection.suspendFlushing();
++                }
+                 long iA = Util.getNanos();
+                 this.tick(flag ? () -> false : this::haveTime, tickCount);
++                for (final ServerPlayer player : this.players) {
++                    player.connection.chunkSender.sendNextChunks(player);
++                    player.connection.resumeFlushing();
++                }
+                 this.lastNanoTickTime = Util.getNanos() - iA;
+ 
+                 this.mayHaveDelayedTasks = true;
+@@ -916,7 +928,52 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+ 
+     }
+ 
++    private final List<Connection> activeConnections = new ObjectArrayList<>();
++    private final Object lock = new Object();
++
++    public void notifyNewConnection(Connection connection) {
++        synchronized (lock) {
++            activeConnections.add(connection);
++        }
++    }
++
++    public void removeConnection(Connection connection) {
++        synchronized (lock)  {
++            activeConnections.remove(connection);
++        }
++    }
++
+     public void tick(BooleanSupplier shouldKeepTicking, int tickCount) {
++        synchronized (lock) {
++            Iterator<Connection> iterator = this.activeConnections.iterator();
++            while (iterator.hasNext()) {
++                Connection networkmanager = iterator.next();
++
++                if (!networkmanager.isConnecting()) {
++                    if (networkmanager.isConnected()) {
++                        try {
++                            networkmanager.tick();
++                        } catch (Exception exception) {
++                            if (networkmanager.isMemoryConnection()) {
++                                throw new ReportedException(CrashReport.forThrowable(exception, "Ticking memory connection"));
++                            }
++
++                            LOGGER.warn("Failed to handle packet for {}", networkmanager.getLoggableAddress(this.server.logIPs()), exception);
++                            MutableComponent ichatmutablecomponent = Component.literal("Internal server error");
++
++                            networkmanager.send(new ClientboundDisconnectPacket(ichatmutablecomponent), PacketSendListener.thenRun(() -> {
++                                networkmanager.disconnect(ichatmutablecomponent);
++                            }));
++                            networkmanager.setReadOnly();
++                        }
++                    } else {
++                        if (networkmanager.preparing) continue;
++                        iterator.remove();
++                        networkmanager.handleDisconnection();
++                    }
++                }
++            }
++        }
+         chunkSource.tick(() -> true, false);
+ 
+         final boolean doDaylight = getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
+diff --git a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java b/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
+index 3a9e25b436f366fffe08c3b0c1fce11ed42ee646..589f898c2633c66046f9022aebd85f443e80c9d7 100644
+--- a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
++++ b/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
+@@ -4,6 +4,7 @@ import com.google.common.base.Suppliers;
+ import com.google.common.collect.Lists;
+ import com.google.common.util.concurrent.ThreadFactoryBuilder;
+ import com.mojang.logging.LogUtils;
++import io.github.dueris.canvas.Config;
+ import io.netty.bootstrap.ServerBootstrap;
+ import io.netty.channel.Channel;
+ import io.netty.channel.ChannelException;
+@@ -29,6 +30,7 @@ import io.netty.util.Timer;
+ import java.io.IOException;
+ import java.net.InetAddress;
+ import java.net.SocketAddress;
++import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.Iterator;
+ import java.util.List;
+@@ -238,9 +240,18 @@ public class ServerConnectionListener {
+             }
+             // Spigot End
+             Iterator<Connection> iterator = this.connections.iterator();
+-
++            List<Connection> pendingRemoval = new ArrayList<>(); // Canvas
+             while (iterator.hasNext()) {
+                 Connection networkmanager = (Connection) iterator.next();
++                // Canvas start
++                if (Config.INSTANCE.enableThreadedConnections) {
++                    if (networkmanager.getPlayer() != null && networkmanager.getPlayer().serverLevel() != null) {
++                        // Player is ready to be transferred off main
++                        networkmanager.transferToLevel(networkmanager.getPlayer().serverLevel());
++                        pendingRemoval.add(networkmanager);
++                    }
++                }
++                // Canvas end
+ 
+                 if (!networkmanager.isConnecting()) {
+                     if (networkmanager.isConnected()) {
+@@ -269,6 +280,7 @@ public class ServerConnectionListener {
+                     }
+                 }
+             }
++            pendingRemoval.forEach(this.connections::remove); // Canvas
+ 
+         }
+     }
+diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
+index d839392b219672c7ed82b82f32369d804b75e117..84c28d8f4fd4c9f1f415035c98181f1fede4d79c 100644
+--- a/src/main/java/net/minecraft/world/entity/Entity.java
++++ b/src/main/java/net/minecraft/world/entity/Entity.java
+@@ -4075,6 +4075,9 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+     }
+ 
+     private Entity teleportCrossDimension(ServerLevel world, TeleportTransition teleportTarget) {
++        if (this instanceof ServerPlayer player) {
++            player.serverLevel().notifyNewConnection(player.connection.connection);
++        }
+         List<Entity> list = this.getPassengers();
+         List<Entity> list1 = new ArrayList(list.size());
+ 

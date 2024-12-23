@@ -19,7 +19,7 @@ allprojects {
 
     java {
         toolchain {
-            languageVersion = JavaLanguageVersion.of(21)
+            languageVersion = JavaLanguageVersion.of(22)
         }
     }
 
@@ -30,12 +30,12 @@ allprojects {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
-val mcVersion = "1.21.3"
+val mcVersion = "1.21.4"
 
 subprojects {
     tasks.withType<JavaCompile>().configureEach {
         options.encoding = Charsets.UTF_8.name()
-        options.release = 21
+        options.release = 22
     }
     tasks.withType<Javadoc> {
         options.encoding = Charsets.UTF_8.name()
@@ -73,9 +73,6 @@ dependencies {
     remapper("net.fabricmc:tiny-remapper:0.10.3:fat")
     decompiler("net.minecraftforge:forgeflower:2.0.627.2")
     paperclip("io.papermc:paperclip:3.0.3")
-    // implementation(libs.build.nexus)
-    // implementation(libs.build.shadow)
-    // implementation(libs.build.spotless)
     compileOnly(files(libs.javaClass.superclass.protectionDomain.codeSource.location))
 }
 
@@ -123,8 +120,11 @@ tasks.register("printMinecraftVersion") {
     }
 }
 
-fun copyToTarget() {
-    val shadowJar: CreatePaperclipJar = tasks.getByName<CreatePaperclipJar>("createMojmapPaperclipJar")
+tasks.register<DefaultTask>("createCanvasServer") {
+    dependsOn(":createMojmapPaperclipJar")
+
+    doLast {
+        val shadowJar: CreatePaperclipJar = tasks.getByName<CreatePaperclipJar>("createMojmapPaperclipJar")
         val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
 
         Files.createDirectories(targetJarDirectory)
@@ -133,13 +133,6 @@ fun copyToTarget() {
             targetJarDirectory.resolve("canvas-launcher.jar"),
             StandardCopyOption.REPLACE_EXISTING
         )
-}
-
-tasks.register<DefaultTask>("createCanvasServer") {
-    dependsOn(":createMojmapPaperclipJar")
-
-    doLast {
-        copyToTarget()
     }
 }
 

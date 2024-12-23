@@ -1,0 +1,273 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Sun, 22 Dec 2024 13:52:29 -0800
+Subject: [PATCH] Optimize Spawning
+
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java b/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java
+index c21e00812f1aaa1279834a0562d360d6b89e146c..f48a6f890b34bc1b6175731caacef368fe2ac35f 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/list/IteratorSafeOrderedReferenceSet.java
+@@ -18,7 +18,7 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+ 
+     private final double maxFragFactor;
+ 
+-    private int iteratorCount;
++    private final java.util.concurrent.atomic.AtomicInteger iteratorCount = new java.util.concurrent.atomic.AtomicInteger(); // Canvas
+ 
+     public IteratorSafeOrderedReferenceSet() {
+         this(16, 0.75f, 16, 0.2);
+@@ -79,7 +79,7 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public int createRawIterator() {
+-        ++this.iteratorCount;
++        this.iteratorCount.incrementAndGet(); // Canvas
+         if (this.indexMap.isEmpty()) {
+             return -1;
+         } else {
+@@ -100,7 +100,7 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public void finishRawIterator() {
+-        if (--this.iteratorCount == 0) {
++        if (this.iteratorCount.decrementAndGet() == 0) { // Canvas
+             if (this.getFragFactor() >= this.maxFragFactor) {
+                 this.defrag();
+             }
+@@ -117,7 +117,7 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+                 throw new IllegalStateException();
+             }
+             this.listElements[index] = null;
+-            if (this.iteratorCount == 0 && this.getFragFactor() >= this.maxFragFactor) {
++            if (this.iteratorCount.get() == 0 && this.getFragFactor() >= this.maxFragFactor) { // Canvas
+                 this.defrag();
+             }
+             //this.check();
+@@ -219,7 +219,7 @@ public final class IteratorSafeOrderedReferenceSet<E> {
+     }
+ 
+     public IteratorSafeOrderedReferenceSet.Iterator<E> iterator(final int flags) {
+-        ++this.iteratorCount;
++        this.iteratorCount.incrementAndGet(); // Canvas
+         return new BaseIterator<>(this, true, (flags & ITERATOR_FLAG_SEE_ADDITIONS) != 0 ? Integer.MAX_VALUE : this.listSize);
+     }
+ 
+diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
+index 5137d3e0afa7f9be1455b87dcc691a4a9e65936a..075477b84014b23969e15412d89ac993cce05c64 100644
+--- a/src/main/java/io/github/dueris/canvas/Config.java
++++ b/src/main/java/io/github/dueris/canvas/Config.java
+@@ -14,6 +14,7 @@ public class Config implements JsonConfig {
+     public ChunkGeneration chunkgen = new ChunkGeneration();
+     public Pathfinding pathfinding = new Pathfinding();
+     public EntityTracking entityTracking = new EntityTracking();
++    public boolean enableAsyncSpawning = true;
+ 
+     public static Config init() {
+         final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
+diff --git a/src/main/java/io/github/dueris/canvas/util/AsyncProcessor.java b/src/main/java/io/github/dueris/canvas/util/AsyncProcessor.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..a28d0888975541166a85d9cc4daae7c61a3b357b
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/util/AsyncProcessor.java
+@@ -0,0 +1,72 @@
++package io.github.dueris.canvas.util;
++
++import org.apache.logging.log4j.LogManager;
++import org.apache.logging.log4j.Logger;
++import java.util.concurrent.BlockingQueue;
++import java.util.concurrent.LinkedBlockingQueue;
++
++public class AsyncProcessor {
++    private static final Logger LOGGER = LogManager.getLogger(AsyncProcessor.class);
++    private final BlockingQueue<Runnable> taskQueue;
++    private final Thread workerThread;
++    private volatile boolean isRunning;
++
++    public AsyncProcessor(String threadName) {
++        this.taskQueue = new LinkedBlockingQueue<>();
++        this.isRunning = true;
++
++        this.workerThread = new Thread(() -> {
++            while (isRunning || !taskQueue.isEmpty()) {
++                try {
++                    Runnable task = taskQueue.take();
++                    task.run();
++                } catch (InterruptedException e) {
++                    Thread.currentThread().interrupt();
++                    break;
++                } catch (Exception e) {
++                    LOGGER.error("An unexpected error occurred when running async processor: {}", e.getMessage(), e);
++                }
++            }
++        }, threadName);
++
++        this.workerThread.start();
++    }
++
++    /**
++     * Submits a task to be executed asynchronously.
++     *
++     * @param task The task to execute
++     */
++    public void submit(Runnable task) {
++        if (!isRunning) {
++            throw new IllegalStateException("AsyncExecutor is not running.");
++        }
++        taskQueue.offer(task);
++    }
++
++    /**
++     * Gracefully shuts down the executor after processing all tasks in the queue.
++     */
++    public void shutdown() {
++        isRunning = false;
++        workerThread.interrupt();
++    }
++
++    /**
++     * Forcefully stops the executor, clearing all pending tasks in the queue.
++     */
++    public void shutdownNow() {
++        isRunning = false;
++        workerThread.interrupt();
++        taskQueue.clear();
++    }
++
++    /**
++     * Checks if the executor is running.
++     *
++     * @return true if running, false otherwise
++     */
++    public boolean isRunning() {
++        return isRunning;
++    }
++}
+diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
+index 596109662103092bf9d01262a924a25b03dcd9b0..a35f3ab56599fdd06aafd9ee2b182a2e25ae5d86 100644
+--- a/src/main/java/net/minecraft/server/MinecraftServer.java
++++ b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -14,6 +14,7 @@ import com.mojang.jtracy.DiscontinuousFrame;
+ import com.mojang.jtracy.TracyClient;
+ import com.mojang.logging.LogUtils;
+ import io.github.dueris.canvas.server.ThreadedServer;
++import io.github.dueris.canvas.util.AsyncProcessor;
+ import io.github.dueris.canvas.util.MultiThreadBooleanLock;
+ import it.unimi.dsi.fastutil.longs.LongIterator;
+ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+@@ -332,6 +333,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     private final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping
+     public boolean lagging = false; // Purpur - Lagging threshold
+     protected boolean upnp = false; // Purpur - UPnP Port Forwarding
++    public AsyncProcessor mobSpawnExecutor = new AsyncProcessor("mob_spawning"); // Canvas
+ 
+     public volatile Thread shutdownThread; // Paper
+     public volatile boolean abnormalExit = false; // Paper
+diff --git a/src/main/java/net/minecraft/server/level/ServerChunkCache.java b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
+index 6b9de9ce41a6b7bbcc6568380f1ccfeb6e15aec1..04496669bab815d3083337550751e8daf1db42f6 100644
+--- a/src/main/java/net/minecraft/server/level/ServerChunkCache.java
++++ b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
+@@ -3,8 +3,8 @@ package net.minecraft.server.level;
+ import com.google.common.annotations.VisibleForTesting;
+ import com.mojang.datafixers.DataFixer;
+ import com.mojang.logging.LogUtils;
++import io.github.dueris.canvas.Config;
+ import io.netty.util.internal.ConcurrentSet;
+-import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+ import java.io.IOException;
+ import java.nio.file.Path;
+ import java.util.ArrayList;
+@@ -184,6 +184,9 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     // Paper end - chunk tick iteration optimisations
+ 
+ 
++    public boolean firstRunSpawnCounts = true; // Canvas
++    public final java.util.concurrent.atomic.AtomicBoolean spawnCountsReady = new java.util.concurrent.atomic.AtomicBoolean(false); // Canvas
++
+     public ServerChunkCache(ServerLevel world, LevelStorageSource.LevelStorageAccess session, DataFixer dataFixer, StructureTemplateManager structureTemplateManager, Executor workerExecutor, ChunkGenerator chunkGenerator, int viewDistance, int simulationDistance, boolean dsync, ChunkProgressListener worldGenerationProgressListener, ChunkStatusUpdateListener chunkStatusChangeListener, Supplier<DimensionDataStorage> persistentStateManagerFactory) {
+         this.level = world;
+         this.mainThreadProcessor = new ServerChunkCache.MainThreadExecutor(world);
+@@ -514,6 +517,34 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             this.broadcastChangedChunks(gameprofilerfiller);
+             gameprofilerfiller.pop();
+         }
++        // Canvas start
++        if (Config.INSTANCE.enableAsyncSpawning) {
++            for (ServerPlayer player : this.level.players) {
++                for (int ii = 0; ii < ServerPlayer.MOBCATEGORY_TOTAL_ENUMS; ii++) {
++                    player.mobCounts[ii] = 0;
++
++                    int newBackoff = player.mobBackoffCounts[ii] - 1;
++                    if (newBackoff < 0) {
++                        newBackoff = 0;
++                    }
++                    player.mobBackoffCounts[ii] = newBackoff;
++                }
++            }
++            if (firstRunSpawnCounts) {
++                firstRunSpawnCounts = false;
++                spawnCountsReady.set(true);
++            }
++            if (spawnCountsReady.getAndSet(false)) {
++                MinecraftServer.getServer().mobSpawnExecutor.submit(() -> {
++                    int mapped = distanceManager.getNaturalSpawnChunkCount();
++                    try {
++                        lastSpawnState = NaturalSpawner.createState(mapped, new ArrayList<>(level.entityTickList.entities), this::getFullChunk, null, true);
++                    } finally { }
++                    spawnCountsReady.set(true);
++                });
++            }
++        }
++        // Canvas end
+     }
+ 
+     private void broadcastChangedChunks(ProfilerFiller profiler) {
+@@ -564,6 +595,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         final int naturalSpawnChunkCount = j;
+         NaturalSpawner.SpawnState spawnercreature_d; // moved down
+         if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
++            if (!Config.INSTANCE.enableAsyncSpawning) { // Canvas
+             // re-set mob counts
+             for (ServerPlayer player : this.level.players) {
+                 // Paper start - per player mob spawning backoff
+@@ -578,13 +610,17 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+                 }
+                 // Paper end - per player mob spawning backoff
+             }
+-            spawnercreature_d = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, null, true);
++            lastSpawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, null, true); // Canvas
++            } // Canvas
+         } else {
+-            spawnercreature_d = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++            // Canvas start
++            lastSpawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++            spawnCountsReady.set(true);
++            // Canvas end
+         }
+         // Paper end - Optional per player mob spawns
+ 
+-        this.lastSpawnState = spawnercreature_d;
++        // this.lastSpawnState = spawnercreature_d; // Canvas
+         profiler.popPush("spawnAndTick");
+         boolean flag = this.level.getGameRules().getBoolean(GameRules.RULE_DOMOBSPAWNING) && !this.level.players().isEmpty(); // CraftBukkit
+         int k = this.level.getGameRules().getInt(GameRules.RULE_RANDOMTICKING);
+@@ -601,7 +637,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             // Paper end - PlayerNaturallySpawnCreaturesEvent
+             boolean flag1 = this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) != 0L && this.level.getLevelData().getGameTime() % this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) == 0L; // CraftBukkit
+ 
+-            list1 = NaturalSpawner.getFilteredSpawningCategories(spawnercreature_d, this.spawnFriendlies, this.spawnEnemies, flag1, this.level); // CraftBukkit
++            list1 = NaturalSpawner.getFilteredSpawningCategories(lastSpawnState, this.spawnFriendlies, this.spawnEnemies, flag1, this.level); // CraftBukkit // Canvas
+         } else {
+             list1 = List.of();
+         }
+@@ -613,8 +649,8 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             ChunkPos chunkcoordintpair = chunk.getPos();
+ 
+             chunk.incrementInhabitedTime(timeDelta);
+-            if (!list1.isEmpty() && this.level.getWorldBorder().isWithinBounds(chunkcoordintpair) && this.chunkMap.anyPlayerCloseEnoughForSpawning(chunkcoordintpair, true)) { // Spigot
+-                NaturalSpawner.spawnForChunk(this.level, chunk, spawnercreature_d, list1);
++            if (!list1.isEmpty() && this.level.getWorldBorder().isWithinBounds(chunkcoordintpair) && (!Config.INSTANCE.enableAsyncSpawning || spawnCountsReady.get()) && this.chunkMap.anyPlayerCloseEnoughForSpawning(chunkcoordintpair, true)) { // Spigot // Canvas
++                NaturalSpawner.spawnForChunk(this.level, chunk, lastSpawnState, list1); // Canvas
+             }
+ 
+             if (true) { // Paper - rewrite chunk system

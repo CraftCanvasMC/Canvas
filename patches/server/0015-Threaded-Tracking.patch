@@ -1,0 +1,283 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Sun, 22 Dec 2024 13:19:27 -0800
+Subject: [PATCH] Threaded Tracking
+
+
+diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
+index 9d2d4f80579d2d152bbe64bb5886fb8d2eaba0c9..5137d3e0afa7f9be1455b87dcc691a4a9e65936a 100644
+--- a/src/main/java/io/github/dueris/canvas/Config.java
++++ b/src/main/java/io/github/dueris/canvas/Config.java
+@@ -1,5 +1,6 @@
+ package io.github.dueris.canvas;
+ 
++import io.github.dueris.canvas.entity.tracking.ThreadedTracker;
+ import net.skillcode.jsonconfig.JsonConfig;
+ import net.skillcode.jsonconfig.JsonConfigAPI;
+ import java.io.File;
+@@ -12,6 +13,7 @@ public class Config implements JsonConfig {
+ 
+     public ChunkGeneration chunkgen = new ChunkGeneration();
+     public Pathfinding pathfinding = new Pathfinding();
++    public EntityTracking entityTracking = new EntityTracking();
+ 
+     public static Config init() {
+         final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
+@@ -34,6 +36,7 @@ public class Config implements JsonConfig {
+                 t.printStackTrace();
+             }
+         }
++        ThreadedTracker.init();
+         enabled = actuallyEnabled;
+         return INSTANCE;
+     }
+@@ -50,4 +53,10 @@ public class Config implements JsonConfig {
+         public int maxProcessors = 2;
+         public int keepAlive = 60;
+     }
++
++    public static class EntityTracking {
++        public boolean enableThreadedTracking = true;
++        public int maxProcessors = 1;
++        public int keepAlive = 60;
++    }
+ }
+diff --git a/src/main/java/io/github/dueris/canvas/entity/tracking/ThreadedTracker.java b/src/main/java/io/github/dueris/canvas/entity/tracking/ThreadedTracker.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..df6c2ff56136b04d76fc499c8317b3456e0d767c
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/entity/tracking/ThreadedTracker.java
+@@ -0,0 +1,88 @@
++package io.github.dueris.canvas.entity.tracking;
++
++import ca.spottedleaf.moonrise.common.list.ReferenceList;
++import ca.spottedleaf.moonrise.common.misc.NearbyPlayers;
++import ca.spottedleaf.moonrise.common.util.TickThread;
++import ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity;
++import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel;
++import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup;
++import ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity;
++import ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity;
++import io.github.dueris.canvas.Config;
++import io.github.dueris.canvas.util.NamedAgnosticThreadFactory;
++import java.util.concurrent.LinkedBlockingQueue;
++import java.util.concurrent.ThreadPoolExecutor;
++import java.util.concurrent.TimeUnit;
++import javax.annotation.Nullable;
++import net.minecraft.server.level.ChunkMap;
++import net.minecraft.server.level.FullChunkStatus;
++import net.minecraft.world.entity.Entity;
++import org.jetbrains.annotations.NotNull;
++
++public class ThreadedTracker {
++    private static final ThreadPoolExecutor processor = new ThreadPoolExecutor(
++        1,
++        Config.INSTANCE.entityTracking.maxProcessors,
++        Config.INSTANCE.entityTracking.keepAlive, TimeUnit.SECONDS,
++        new LinkedBlockingQueue<>(),
++        new NamedAgnosticThreadFactory<>("entity_tracker", TrackerThread::new, Thread.NORM_PRIORITY - 2)
++    );
++    public static ThreadedTracker INSTANCE;
++    private final boolean enableThreading;
++
++    ThreadedTracker(boolean enableThreading) {
++        this.enableThreading = enableThreading;
++    }
++
++    public static void init() {
++        INSTANCE = new ThreadedTracker(Config.INSTANCE.entityTracking.enableThreadedTracking);
++    }
++
++    public static ThreadPoolExecutor getProcessor() {
++        return processor;
++    }
++
++    public void tick(@NotNull ChunkSystemServerLevel chunkSystemServerLevel) {
++        if (this.enableThreading) {
++            final NearbyPlayers nearbyPlayers = chunkSystemServerLevel.moonrise$getNearbyPlayers();
++            final Entity[] trackerEntitiesRaw = ((ServerEntityLookup) chunkSystemServerLevel.moonrise$getEntityLookup()).trackerEntities.getRawDataUnchecked();
++
++            processor.execute(() -> {
++                for (final Entity entity : trackerEntitiesRaw) {
++                    if (entity == null) continue;
++
++                    final ChunkMap.TrackedEntity trackedInstance = ((EntityTrackerEntity) entity).moonrise$getTrackedEntity();
++                    if (trackedInstance == null) continue;
++
++                    ((EntityTrackerTrackedEntity) trackedInstance).moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition()));
++                    trackedInstance.serverEntity.sendChanges();
++                }
++            });
++        } else {
++            final ServerEntityLookup entityLookup = (ServerEntityLookup) chunkSystemServerLevel.moonrise$getEntityLookup();
++
++            final ReferenceList<Entity> trackerEntities = entityLookup.trackerEntities;
++            final Entity[] trackerEntitiesRaw = trackerEntities.getRawDataUnchecked();
++            for (int i = 0, len = trackerEntities.size(); i < len; ++i) {
++                final Entity entity = trackerEntitiesRaw[i];
++                if (entity == null) continue;
++                final ChunkMap.TrackedEntity tracker = ((EntityTrackerEntity) entity).moonrise$getTrackedEntity();
++                if (tracker == null) {
++                    continue;
++                }
++                ((EntityTrackerTrackedEntity) tracker).moonrise$tick(((ChunkSystemEntity) entity).moonrise$getChunkData() == null ? null : ((ChunkSystemEntity) entity).moonrise$getChunkData().nearbyPlayers);
++                @Nullable FullChunkStatus chunkStatus = ((ChunkSystemEntity) entity).moonrise$getChunkStatus();
++                if (((EntityTrackerTrackedEntity) tracker).moonrise$hasPlayers()
++                    || (chunkStatus != null && chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) {
++                    tracker.serverEntity.sendChanges();
++                }
++            }
++        }
++    }
++
++    public static class TrackerThread extends TickThread {
++        public TrackerThread(final ThreadGroup group, final Runnable runnable, final String name) {
++            super(group, runnable, name);
++        }
++    }
++}
+diff --git a/src/main/java/io/github/dueris/canvas/util/NamedAgnosticThreadFactory.java b/src/main/java/io/github/dueris/canvas/util/NamedAgnosticThreadFactory.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..94bf5e4d4f911b990bdde506dfc4deed3ba30425
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/util/NamedAgnosticThreadFactory.java
+@@ -0,0 +1,42 @@
++package io.github.dueris.canvas.util;
++
++import com.mojang.logging.LogUtils;
++import java.util.concurrent.ThreadFactory;
++import java.util.concurrent.atomic.AtomicInteger;
++import org.jetbrains.annotations.NotNull;
++import org.slf4j.Logger;
++
++public class NamedAgnosticThreadFactory<T extends Thread> implements ThreadFactory {
++    private static final Logger LOGGER = LogUtils.getLogger();
++    private final ThreadGroup group;
++    private final AtomicInteger threadNumber = new AtomicInteger(1);
++    private final String namePrefix;
++    private final ThreadBuilderFunction<T> typeOfThread;
++    private final int priority;
++
++    public NamedAgnosticThreadFactory(String name, ThreadBuilderFunction<T> typeOfThread, int priority) {
++        this.typeOfThread = typeOfThread;
++        this.priority = priority;
++        SecurityManager securityManager = System.getSecurityManager();
++        this.group = securityManager != null ? securityManager.getThreadGroup() : Thread.currentThread().getThreadGroup();
++        this.namePrefix = name + "-";
++    }
++
++    @Override
++    public Thread newThread(@NotNull Runnable runnable) {
++        T thread = typeOfThread.apply(this.group, runnable, this.namePrefix + this.threadNumber.getAndIncrement());
++        thread.setUncaughtExceptionHandler((threadx, throwable) -> {
++            LOGGER.error("Caught exception in thread {} from {}", threadx, runnable);
++            LOGGER.error("", throwable);
++        });
++        if (thread.getPriority() != priority) {
++            thread.setPriority(priority);
++        }
++
++        return thread;
++    }
++
++    public interface ThreadBuilderFunction<T extends Thread> {
++        T apply(ThreadGroup threadGroup, Runnable runnable, String name);
++    }
++}
+diff --git a/src/main/java/net/minecraft/server/level/ChunkMap.java b/src/main/java/net/minecraft/server/level/ChunkMap.java
+index f71d379904be64bdcf6140787abb9d45a3f25a24..f6c9c2c1715d43e936b83db6aab1e568d04e3f16 100644
+--- a/src/main/java/net/minecraft/server/level/ChunkMap.java
++++ b/src/main/java/net/minecraft/server/level/ChunkMap.java
+@@ -3,9 +3,11 @@ package net.minecraft.server.level;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.Lists;
++import com.google.common.collect.Sets;
+ import com.google.common.util.concurrent.ThreadFactoryBuilder;
+ import com.mojang.datafixers.DataFixer;
+ import com.mojang.logging.LogUtils;
++import io.github.dueris.canvas.entity.tracking.ThreadedTracker;
+ import io.github.dueris.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
+ import io.github.dueris.canvas.util.fastutil.Long2ByteConcurrentHashMap;
+ import io.netty.util.internal.ConcurrentSet;
+@@ -959,6 +961,12 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+ 
+     // Paper start - optimise entity tracker
+     private void newTrackerTick() {
++        // Canvas start - threaded tracker
++        if (true) {
++            ThreadedTracker.INSTANCE.tick(level);
++            return;
++        }
++        // Canvas end
+         final ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup entityLookup = (ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup)((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getEntityLookup();;
+ 
+         final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.world.entity.Entity> trackerEntities = entityLookup.trackerEntities;
+@@ -1130,7 +1138,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+         final Entity entity;
+         private final int range;
+         SectionPos lastSectionPos;
+-        public final Set<ServerPlayerConnection> seenBy = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(); // Paper - Perf: optimise map impl
++        public final Set<ServerPlayerConnection> seenBy = Sets.newConcurrentHashSet(); // Paper - Perf: optimise map impl // Canvas - threaded tracker, and make this concurrent-compatible for threaded dimensions
+ 
+         // Paper start - optimise entity tracker
+         private long lastChunkUpdate = -1L;
+diff --git a/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeInstance.java b/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeInstance.java
+index 27a7852a5d3f8c8960f098646ff5587c50556aa5..5cc2d13f952f202e60040274b6a370cda7dbd076 100644
+--- a/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeInstance.java
++++ b/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeInstance.java
+@@ -8,6 +8,7 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+ import java.util.Collection;
+ import java.util.Map;
+ import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
+ import java.util.function.Consumer;
+ import javax.annotation.Nullable;
+ import net.minecraft.core.Holder;
+@@ -24,8 +25,10 @@ public class AttributeInstance {
+     private final Map<AttributeModifier.Operation, Map<ResourceLocation, AttributeModifier>> modifiersByOperation = Maps.newEnumMap(
+         AttributeModifier.Operation.class
+     );
+-    private final Map<ResourceLocation, AttributeModifier> modifierById = new Object2ObjectArrayMap<>();
+-    private final Map<ResourceLocation, AttributeModifier> permanentModifiers = new Object2ObjectArrayMap<>();
++    // Canvas start
++    private final Map<ResourceLocation, AttributeModifier> modifierById = new ConcurrentHashMap<>();
++    private final Map<ResourceLocation, AttributeModifier> permanentModifiers = new ConcurrentHashMap<>();
++    // Canvas end
+     private double baseValue;
+     private boolean dirty = true;
+     private double cachedValue;
+diff --git a/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeMap.java b/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeMap.java
+index d6c98612ca15e506657d85f6872c1278e0b73652..f42fa824980324e61175833165f2b30cc5de667a 100644
+--- a/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeMap.java
++++ b/src/main/java/net/minecraft/world/entity/ai/attributes/AttributeMap.java
+@@ -1,12 +1,14 @@
+ package net.minecraft.world.entity.ai.attributes;
+ 
+ import com.google.common.collect.Multimap;
++import com.google.common.collect.Sets;
+ import com.mojang.logging.LogUtils;
+ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+ import java.util.Collection;
+ import java.util.Map;
+ import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
+ import java.util.stream.Collectors;
+ import javax.annotation.Nullable;
+ import net.minecraft.Util;
+@@ -19,9 +21,11 @@ import org.slf4j.Logger;
+ 
+ public class AttributeMap {
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private final Map<Holder<Attribute>, AttributeInstance> attributes = new Object2ObjectOpenHashMap<>();
+-    private final Set<AttributeInstance> attributesToSync = new ObjectOpenHashSet<>();
+-    private final Set<AttributeInstance> attributesToUpdate = new ObjectOpenHashSet<>();
++    // Canvas start
++    private final Map<Holder<Attribute>, AttributeInstance> attributes = new ConcurrentHashMap<>();
++    private final Set<AttributeInstance> attributesToSync = Sets.newConcurrentHashSet();
++    private final Set<AttributeInstance> attributesToUpdate = Sets.newConcurrentHashSet();
++    // Canvas end
+     private final AttributeSupplier supplier;
+     private final net.minecraft.world.entity.LivingEntity entity; // Purpur - Ridables
+ 
