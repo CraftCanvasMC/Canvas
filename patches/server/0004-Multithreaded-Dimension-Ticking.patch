@@ -828,10 +828,10 @@ index 0000000000000000000000000000000000000000..8f1df9289279a23b2b127c089a6106e0
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..611b10dbf6e1befa4382149db388953ad0238c85
+index 0000000000000000000000000000000000000000..577fbfcf7bf48759ae523aa61b6c975546443ec8
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,193 @@
 +package io.github.dueris.canvas.server;
 +
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -845,6 +845,7 @@ index 0000000000000000000000000000000000000000..611b10dbf6e1befa4382149db388953a
 +import java.util.List;
 +import java.util.concurrent.CopyOnWriteArrayList;
 +import java.util.function.BooleanSupplier;
++import java.util.function.Function;
 +import net.minecraft.CrashReport;
 +import net.minecraft.ReportType;
 +import net.minecraft.Util;
@@ -871,6 +872,17 @@ index 0000000000000000000000000000000000000000..611b10dbf6e1befa4382149db388953a
 +    private final MinecraftServer server;
 +    private ThreadedContextStage contextStage = ThreadedContextStage.NOT_STARTED_YET;
 +    private long tickSection;
++    private static int priority = 0;
++    public static Function<CraftWorld, Thread> spinner = (threadedInstance) -> {
++        try {
++            Thread levelThread = new TickThread(serverThreadGroup, threadedInstance.getHandle()::spin, "levelThread:" + threadedInstance.getName());
++            levelThread.setPriority(priority == 0 ? Thread.currentThread().getPriority() : priority);
++            levelThread.start();
++            return levelThread;
++        } catch (Throwable throwable) {
++            throw new RuntimeException("Unable to spin world '" + threadedInstance.getName() + "'!", throwable);
++        }
++    };
 +
 +    public ThreadedServer(MinecraftServer server) {
 +        this.server = server;
@@ -916,13 +928,10 @@ index 0000000000000000000000000000000000000000..611b10dbf6e1befa4382149db388953a
 +            setContextStage(ThreadedContextStage.PREPARING);
 +            Thread thisThread = Thread.currentThread();
 +            thisThread.setName("Threaded Main");
++            priority = thisThread.getPriority();
 +
 +            // Prepare world contexts
-+            for (final CraftWorld threadedInstance : this.craftWorlds) {
-+                Thread levelThread = new TickThread(serverThreadGroup, threadedInstance.getHandle()::spin, "levelThread:" + threadedInstance.getName());
-+                levelThread.setPriority(thisThread.getPriority());
-+                levelThread.start();
-+            }
++            this.craftWorlds.forEach(spinner::apply);
 +            setContextStage(ThreadedContextStage.STARTED);
 +
 +            this.server.nextTickTimeNanos = Util.getNanos();
@@ -2593,6 +2602,26 @@ index 778e6476c86d823dc8efe603a95e589e8b2ea9d9..c2112304a357649a43c6a708e4fd4954
              if (m <= time) {
                  LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(l);
                  if (levelChunkTicks == null) {
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index badf280a6b01b06e8148c552330872d64e6256b7..73d82fc65fa27ad7b05634c0f246dac399c575ac 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -13,6 +13,7 @@ import com.mojang.brigadier.StringReader;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.serialization.Dynamic;
+ import com.mojang.serialization.Lifecycle;
++import io.github.dueris.canvas.server.ThreadedServer;
+ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+ import java.awt.image.BufferedImage;
+ import java.io.ByteArrayOutputStream;
+@@ -1468,6 +1469,7 @@ public final class CraftServer implements Server {
+         // Paper - rewrite chunk system
+ 
+         this.pluginManager.callEvent(new WorldLoadEvent(internal.getWorld()));
++        ThreadedServer.spinner.apply(internal.getWorld()); // Canvas - init spin after world load
+         return internal.getWorld();
+     }
+ 
 diff --git a/src/main/java/org/spigotmc/SpigotConfig.java b/src/main/java/org/spigotmc/SpigotConfig.java
 index 4dbb109d0526afee99b9190fc256585121aac9b5..51daba58ca02fb7d82f8603799538bdaccf21432 100644
 --- a/src/main/java/org/spigotmc/SpigotConfig.java
