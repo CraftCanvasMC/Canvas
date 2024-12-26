@@ -1,0 +1,345 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Thu, 26 Dec 2024 11:16:30 -0800
+Subject: [PATCH] Optimize Fluid Spread
+
+
+diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
+index 01a012bdcf8d7dce5772b3e2cac9fd694fe03dce..2c1f52d496225c27517c895a0968424a77dfd47e 100644
+--- a/src/main/java/io/github/dueris/canvas/Config.java
++++ b/src/main/java/io/github/dueris/canvas/Config.java
+@@ -18,6 +18,7 @@ public class Config implements JsonConfig {
+     public boolean enableThreadedConnections = true;
+     public int skipTicksAdvancements = 3;
+     public boolean skipUselessSecondaryPoiSensor = true;
++    public boolean optimizeFluidSpread = true;
+ 
+     public static Config init() {
+         final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
+diff --git a/src/main/java/io/github/dueris/canvas/util/DirectionConstants.java b/src/main/java/io/github/dueris/canvas/util/DirectionConstants.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..bb2c85484b9374ce4f206b5aaa51b203b716862a
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/util/DirectionConstants.java
+@@ -0,0 +1,12 @@
++package io.github.dueris.canvas.util;
++
++import net.minecraft.core.Direction;
++
++public final class DirectionConstants {
++    private DirectionConstants() {}
++
++    public static final Direction[] ALL = Direction.values();
++    public static final Direction[] VERTICAL = {Direction.DOWN, Direction.UP};
++    public static final Direction[] HORIZONTAL = {Direction.WEST, Direction.EAST, Direction.NORTH, Direction.SOUTH};
++    public static final byte[] HORIZONTAL_OPPOSITE_INDICES = {1, 0, 3, 2};
++}
+diff --git a/src/main/java/net/minecraft/world/level/material/FlowingFluid.java b/src/main/java/net/minecraft/world/level/material/FlowingFluid.java
+index 6f024a29e8824a604ff0c74f88522d23423beb5c..b5aec8a094fce542740f0f13cd0b3e6eb60972b4 100644
+--- a/src/main/java/net/minecraft/world/level/material/FlowingFluid.java
++++ b/src/main/java/net/minecraft/world/level/material/FlowingFluid.java
+@@ -1,7 +1,13 @@
+ package net.minecraft.world.level.material;
+ 
+ import com.google.common.collect.Maps;
++import io.github.dueris.canvas.Config;
++import io.github.dueris.canvas.util.DirectionConstants;
++import it.unimi.dsi.fastutil.bytes.Byte2BooleanOpenHashMap;
++import it.unimi.dsi.fastutil.bytes.Byte2ByteMap;
++import it.unimi.dsi.fastutil.bytes.Byte2ByteOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.Object2ByteLinkedOpenHashMap;
++import it.unimi.dsi.fastutil.objects.ObjectIterator;
+ import it.unimi.dsi.fastutil.shorts.Short2BooleanMap;
+ import it.unimi.dsi.fastutil.shorts.Short2BooleanOpenHashMap;
+ import it.unimi.dsi.fastutil.shorts.Short2ObjectMap;
+@@ -9,10 +15,12 @@ import it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap;
+ import java.util.Iterator;
+ import java.util.Map;
+ import java.util.Map.Entry;
++import java.util.function.Supplier;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.BlockTags;
++import net.minecraft.tags.TagKey;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.BlockGetter;
+ import net.minecraft.world.level.Level;
+@@ -23,6 +31,7 @@ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.DoorBlock;
+ import net.minecraft.world.level.block.IceBlock;
+ import net.minecraft.world.level.block.LiquidBlockContainer;
++import net.minecraft.world.level.block.SignBlock;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.block.state.StateDefinition;
+ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+@@ -69,6 +78,165 @@ public abstract class FlowingFluid extends Fluid {
+     private static final int COLLISION_OCCLUSION_CACHE_SIZE = 2048;
+     private static final ThreadLocal<ca.spottedleaf.moonrise.patches.collisions.util.FluidOcclusionCacheKey[]> COLLISION_OCCLUSION_CACHE = ThreadLocal.withInitial(() -> new ca.spottedleaf.moonrise.patches.collisions.util.FluidOcclusionCacheKey[COLLISION_OCCLUSION_CACHE_SIZE]);
+ 
++    // Canvas start
++    private static int getNumIndicesFromRadius(int radius) {
++        return (radius + 1) * (2 * radius + 1);
++    }
++
++    private static byte indexFromDiamondXZOffset(BlockPos originPos, BlockPos offsetPos, int radius) {
++        int xOffset = offsetPos.getX() - originPos.getX();
++        int zOffset = offsetPos.getZ() - originPos.getZ();
++
++        int row = (xOffset + zOffset + radius) / 2; //Range [0, radius]
++        int column = (xOffset - zOffset + radius); //Range [0, 2*radius]
++        int rowLength = 2 * radius + 1;
++        return (byte) (row * rowLength + column);
++    }
++
++    private BlockState getBlock(Level world, BlockPos pos, BlockState[] blockStateCache, int key) {
++        BlockState blockState = blockStateCache[key];
++        if (blockState == null) {
++            blockState = world.getBlockState(pos);
++            blockStateCache[key] = blockState;
++        }
++        return blockState;
++    }
++
++    private void removeDirectionsWithoutHoleAccess(byte holeAccess, Map<Direction, FluidState> flowResultByDirection) {
++        for (int i = 0; i < DirectionConstants.HORIZONTAL.length; i++) {
++            if ((holeAccess & (1 << i)) == 0) {
++                flowResultByDirection.remove(DirectionConstants.HORIZONTAL[i]);
++            }
++        }
++    }
++
++    private boolean canMaybeFlowIntoBlock(Level world, BlockState blockState, BlockPos flowTargetPos) {
++        return canHoldFluid(world, flowTargetPos, blockState, this.getSource());
++    }
++
++    private void calculateComplexFluidFlowDirections(ServerLevel world, BlockPos startPos, BlockState startState, BlockState[] blockStateCache, Map<Direction, FluidState> flowResultByDirection) {
++        //Search like breadth-first-search for paths the fluid can flow
++        //Only move in directions the fluid can move (e.g. block can contain / be replaced by fluid) (vanilla conditions)
++        //For each node remember the first move step (direction) of the paths that led to this node
++        //Break when the BFS found all paths of a length up to some length, if any of those paths found a node with a
++        // hole below. Then return the union of the stored first move steps of the nodes with a hole below.
++        //In total, this finds the directions from the starting location which are the first step towards one of the
++        // closest holes, just like vanilla.
++
++        //For each position relevant:
++        // Is there a hole below
++        // What is the shortest path length to center -
++        // Which direct neighbors of the center are on a shortest-path to this location - 4 bits
++        // Which direct neighbors of the pos are previous node on the path from center - 4 bits
++
++        Byte2ByteOpenHashMap prevPositions = new Byte2ByteOpenHashMap();
++        Byte2ByteOpenHashMap currentPositions = new Byte2ByteOpenHashMap();
++        Byte2BooleanOpenHashMap holeCache = new Byte2BooleanOpenHashMap();
++        byte holeAccess = 0;
++        int searchRadius = this.getSlopeFindDistance(world) + 1;
++
++        //Like vanilla, the first iteration is separate, because getUpdatedState is called to check whether a
++        // renewable fluid source block is created in the flow direction.
++        for (int i = 0; i < DirectionConstants.HORIZONTAL.length; i++) {
++            Direction flowDirection = DirectionConstants.HORIZONTAL[i];
++            BlockPos flowTargetPos = startPos.relative(flowDirection);
++            byte blockIndex = indexFromDiamondXZOffset(startPos, flowTargetPos, searchRadius);
++
++            BlockState targetBlockState = getBlock(world, flowTargetPos, blockStateCache, blockIndex);
++            //TODO use block cache in getUpdatedState
++            if (this.canMaybePassThrough(world, flowTargetPos, startState, flowDirection, flowTargetPos, targetBlockState, targetBlockState.getFluidState())) {
++                FluidState targetNewFluidState = this.getNewLiquid(world, flowTargetPos, targetBlockState);
++                if (canHoldSpecificFluid(world, flowTargetPos, targetBlockState, targetNewFluidState.getType())) {//Store the resulting fluid state for each direction, remove later if no closest hole access in this direction.
++                    // 1.21.2+ Specialty: Only add the direction if the fluid can replace the other fluid. If it cannot, it still counts for the hole search though.
++                    if (targetBlockState.getFluidState().canBeReplacedWith(world, flowTargetPos, targetNewFluidState.getType(), flowDirection)) {
++                        flowResultByDirection.put(flowDirection, targetNewFluidState);
++                    }
++
++                    if (this.canPassThrough(world, targetNewFluidState.getType(), startPos, startState, flowDirection, flowTargetPos, targetBlockState, targetBlockState.getFluidState())) {
++                        prevPositions.put(blockIndex, (byte) (0b10001 << i));
++                        if (isHoleBelow(world, holeCache, blockIndex, flowTargetPos, targetBlockState)) {
++                            holeAccess |= (byte) (1 << i);
++                        }
++                    }
++                }
++
++            }
++        }
++
++        //Iterate over the positions and find the shortest path to the center
++        //If a hole is found, stop the iteration
++        for (int i = 0; i < this.getSlopeFindDistance(world) && holeAccess == 0; i++) {
++            Fluid targetFluid = this.getFlowing();
++            for (ObjectIterator<Byte2ByteMap.Entry> iterator = prevPositions.byte2ByteEntrySet().fastIterator(); iterator.hasNext(); ) {
++                Byte2ByteMap.Entry entry = iterator.next();
++                byte blockIndex = entry.getByteKey();
++                byte currentInfo = entry.getByteValue();
++
++                int rowLength = 2 * searchRadius + 1;
++                int row = blockIndex / rowLength;
++                int column = blockIndex % rowLength;
++                int unevenColumn = column % 2;
++                int xOffset = (row * 2 + column + unevenColumn - searchRadius * 2) / 2;
++                int zOffset = xOffset - column + searchRadius;
++
++                BlockPos currentPos = startPos.offset(xOffset, 0, zOffset);
++                BlockState currentState = blockStateCache[blockIndex];
++
++                for (int j = 0; j < DirectionConstants.HORIZONTAL.length; j++) {
++                    Direction flowDirection = DirectionConstants.HORIZONTAL[j];
++                    int oppositeDirection = DirectionConstants.HORIZONTAL_OPPOSITE_INDICES[j];
++
++                    if (((currentInfo >> 4) & (1 << oppositeDirection)) != (byte) 0) {
++                        //In this direction is one of the disallowed directions
++                        continue;
++                    }
++                    BlockPos flowTargetPos = currentPos.relative(flowDirection);
++                    byte targetPosBlockIndex = indexFromDiamondXZOffset(startPos, flowTargetPos, searchRadius);
++                    if (prevPositions.containsKey(targetPosBlockIndex)) {
++                        continue;
++                    }
++
++                    byte oldInfo = currentPositions.getOrDefault(targetPosBlockIndex, (byte) 0);
++                    byte newInfo = oldInfo;
++                    newInfo |= (byte) (0b10000 << j); //Disallow search direction
++                    newInfo |= (byte) (currentInfo & 0b1111); //Shortest-reachable with the starting directions
++                    if ((newInfo & 0b1111) == (oldInfo & 0b1111)) {
++                        currentPositions.put(targetPosBlockIndex, newInfo);
++                        continue;
++                    }
++                    BlockState targetBlockState = getBlock(world, flowTargetPos, blockStateCache, targetPosBlockIndex);
++                    if (this.canPassThrough(world, targetFluid, currentPos, currentState, flowDirection, flowTargetPos, targetBlockState, targetBlockState.getFluidState())) {
++                        currentPositions.put(targetPosBlockIndex, newInfo);
++                        if (isHoleBelow(world, holeCache, targetPosBlockIndex, flowTargetPos, targetBlockState)) {
++                            holeAccess |= (byte) (currentInfo & 0b1111);
++                        }
++                    }
++                }
++            }
++
++            var tmp = prevPositions;
++            prevPositions = currentPositions;
++            currentPositions = tmp;
++            currentPositions.clear();
++        }
++
++        if (holeAccess != 0) {
++            //Found at least one hole in any iteration, keep the directions which lead to the closest holes.
++            removeDirectionsWithoutHoleAccess(holeAccess, flowResultByDirection);
++        }
++    }
++
++    private boolean isHoleBelow(LevelReader world, Byte2BooleanOpenHashMap holeCache, byte key, BlockPos flowTargetPos, BlockState targetBlockState) {
++        if (holeCache.get(key)) {
++            return true;
++        }
++        BlockPos downPos = flowTargetPos.below();
++        BlockState downBlock = world.getBlockState(downPos);
++        boolean holeFound = this.isWaterHole(world, flowTargetPos, targetBlockState, downPos, downBlock);
++        holeCache.put(key, holeFound);
++        return holeFound;
++    }
++    // Canvas end
+ 
+     /**
+      * Due to init order, we need to use callbacks to initialise our state
+@@ -413,10 +581,20 @@ public abstract class FlowingFluid extends Fluid {
+     }
+ 
+     boolean isWaterHole(BlockGetter world, BlockPos pos, BlockState state, BlockPos fromPos, BlockState fromState) {
++        // Canvas start - rearrange to have cheaper checks first
++        if (Config.INSTANCE.optimizeFluidSpread) {
++            return (fromState.getFluidState().getType().isSame(this) || canHoldFluid(world, fromPos, fromState, this.getFlowing())) && canPassThroughWall(Direction.DOWN, world, pos, state, fromPos, fromState);
++        }
++        // Canvas end
+         return !FlowingFluid.canPassThroughWall(Direction.DOWN, world, pos, state, fromPos, fromState) ? false : (fromState.getFluidState().getType().isSame(this) ? true : FlowingFluid.canHoldFluid(world, fromPos, fromState, this.getFlowing()));
+     }
+ 
+     private boolean canPassThrough(BlockGetter world, Fluid fluid, BlockPos pos, BlockState state, Direction face, BlockPos fromPos, BlockState fromState, FluidState fluidState) {
++        // Canvas start - rearrange to have cheaper checks first
++        if (Config.INSTANCE.optimizeFluidSpread) {
++            return canHoldSpecificFluid(world, fromPos, fromState, fluid) && this.canMaybePassThrough(world, pos, state, face, fromPos, fromState, fluidState);
++        }
++        // Canvas end
+         return this.canMaybePassThrough(world, pos, state, face, fromPos, fromState, fluidState) && FlowingFluid.canHoldSpecificFluid(world, fromPos, fromState, fluid);
+     }
+ 
+@@ -448,6 +626,7 @@ public abstract class FlowingFluid extends Fluid {
+     }
+ 
+     protected Map<Direction, FluidState> getSpread(ServerLevel world, BlockPos pos, BlockState state) {
++        Supplier<Map<Direction, FluidState>> original = () -> { // Canvas - optimize fluid spread
+         int i = 1000;
+         Map<Direction, FluidState> map = Maps.newEnumMap(Direction.class);
+         FlowingFluid.SpreadContext fluidtypeflowing_b = null;
+@@ -492,13 +671,73 @@ public abstract class FlowingFluid extends Fluid {
+         }
+ 
+         return map;
++        // Canvas start
++        };
++        if (Config.INSTANCE.optimizeFluidSpread) {
++            // check immediate walls if branching is possible (at most 2 walls)
++            // if branching is possible, do the complex flow calculations
++            // otherwise just handle the single possible direction
++
++            Map<Direction, FluidState> flowResultByDirection = Maps.newEnumMap(Direction.class);
++            int searchRadius = this.getSlopeFindDistance(world) + 1;
++            int numIndicesFromRadius = getNumIndicesFromRadius(searchRadius);
++            if (numIndicesFromRadius > 256) {
++                //We use bytes to represent the indices, which works with vanilla search radius of up to 5
++                //Fall back to vanilla code in case the search radius is too large
++                return original.get();
++            }
++            BlockState[] blockStateCache = new BlockState[numIndicesFromRadius];
++
++            Direction onlyPossibleFlowDirection = null;
++            BlockPos onlyBlockPos = null;
++            BlockState onlyBlockState = null;
++            for (Direction flowDirection : DirectionConstants.HORIZONTAL) {
++                BlockPos flowTargetPos = pos.relative(flowDirection);
++                byte blockIndex = indexFromDiamondXZOffset(pos, flowTargetPos, searchRadius);
++                BlockState flowTargetBlock = world.getBlockState(flowTargetPos);
++                blockStateCache[blockIndex] = flowTargetBlock;
++                if (this.canMaybeFlowIntoBlock(world, flowTargetBlock, flowTargetPos)) {
++                    if (onlyPossibleFlowDirection == null) {
++                        onlyPossibleFlowDirection = flowDirection;
++                        onlyBlockPos = flowTargetPos;
++                        onlyBlockState = flowTargetBlock;
++                    } else {
++                        this.calculateComplexFluidFlowDirections(world, pos, state, blockStateCache, flowResultByDirection);
++                        return flowResultByDirection;
++                    }
++                }
++            }
++            if (onlyPossibleFlowDirection != null) {
++                FluidState onlyFluidState = onlyBlockState.getFluidState();
++                if (this.canMaybePassThrough(world, pos, state, onlyPossibleFlowDirection, onlyBlockPos, onlyBlockState, onlyFluidState)) {
++                    FluidState targetNewFluidState = this.getNewLiquid(world, onlyBlockPos, onlyBlockState);
++                    if (canHoldSpecificFluid(world, onlyBlockPos, onlyBlockState, targetNewFluidState.getType())) {
++                        if (onlyFluidState.canBeReplacedWith(world, onlyBlockPos, targetNewFluidState.getType(), onlyPossibleFlowDirection)) {
++                            flowResultByDirection.put(onlyPossibleFlowDirection, targetNewFluidState);
++                        }
++                    }
++                }
++            }
++            return flowResultByDirection;
++        } else {
++            return original.get();
++        }
+     }
+ 
+     private static boolean canHoldAnyFluid(BlockState state) {
+         Block block = state.getBlock();
++    // Canvas start - optimize fluid spread
++        return block instanceof LiquidBlockContainer ? true : (state.blocksMotion() ? false : !(block instanceof DoorBlock) && !isSign(state, BlockTags.SIGNS, block) && !state.is(Blocks.LADDER) && !state.is(Blocks.SUGAR_CANE) && !state.is(Blocks.BUBBLE_COLUMN) && !state.is(Blocks.NETHER_PORTAL) && !state.is(Blocks.END_PORTAL) && !state.is(Blocks.END_GATEWAY) && !state.is(Blocks.STRUCTURE_VOID));
++    }
+ 
+-        return block instanceof LiquidBlockContainer ? true : (state.blocksMotion() ? false : !(block instanceof DoorBlock) && !state.is(BlockTags.SIGNS) && !state.is(Blocks.LADDER) && !state.is(Blocks.SUGAR_CANE) && !state.is(Blocks.BUBBLE_COLUMN) && !state.is(Blocks.NETHER_PORTAL) && !state.is(Blocks.END_PORTAL) && !state.is(Blocks.END_GATEWAY) && !state.is(Blocks.STRUCTURE_VOID));
++    private static boolean isSign(BlockState blockState, TagKey<Block> tagKey, Block block) {
++        if (tagKey == BlockTags.SIGNS) {
++            //The sign check is expensive when using the block tag lookup.
++            return block instanceof SignBlock;
++        }
++        return blockState.is(tagKey);
+     }
++    // Canvas end
+ 
+     private static boolean canHoldFluid(BlockGetter world, BlockPos pos, BlockState state, Fluid fluid) {
+         return FlowingFluid.canHoldAnyFluid(state) && FlowingFluid.canHoldSpecificFluid(world, pos, state, fluid);
