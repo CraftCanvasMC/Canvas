@@ -1,0 +1,309 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Wed, 25 Dec 2024 20:57:56 -0800
+Subject: [PATCH] Paletted Container Strategy Optimizations
+
+
+diff --git a/src/main/java/io/github/dueris/canvas/util/LithiumHashPalette.java b/src/main/java/io/github/dueris/canvas/util/LithiumHashPalette.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..8bd2ee4e1d1aadaf4c08ed940e8984cc86733eec
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/util/LithiumHashPalette.java
+@@ -0,0 +1,194 @@
++package io.github.dueris.canvas.util;
++
++
++import com.google.common.collect.ImmutableList;
++import it.unimi.dsi.fastutil.HashCommon;
++import it.unimi.dsi.fastutil.objects.Reference2IntMap;
++import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
++import net.minecraft.core.IdMap;
++import net.minecraft.network.FriendlyByteBuf;
++import net.minecraft.network.VarInt;
++import net.minecraft.world.level.chunk.MissingPaletteEntryException;
++import net.minecraft.world.level.chunk.Palette;
++import net.minecraft.world.level.chunk.PaletteResize;
++
++import java.util.Arrays;
++import java.util.List;
++import java.util.function.Predicate;
++
++import static it.unimi.dsi.fastutil.Hash.FAST_LOAD_FACTOR;
++
++public class LithiumHashPalette<T> implements Palette<T> {
++    private static final int ABSENT_VALUE = -1;
++
++    private final IdMap<T> idList;
++    private final PaletteResize<T> resizeHandler;
++    private final int indexBits;
++
++    private final Reference2IntMap<T> table;
++    private T[] entries;
++    private int size = 0;
++
++    public LithiumHashPalette(IdMap<T> idList, PaletteResize<T> resizeHandler, int indexBits, T[] entries, Reference2IntMap<T> table, int size) {
++        this.idList = idList;
++        this.resizeHandler = resizeHandler;
++        this.indexBits = indexBits;
++        this.entries = entries;
++        this.table = table;
++        this.size = size;
++    }
++
++    public LithiumHashPalette(IdMap<T> idList, int bits, PaletteResize<T> resizeHandler, List<T> list) {
++        this(idList, bits, resizeHandler);
++
++        for (T t : list) {
++            this.addEntry(t);
++        }
++    }
++
++    @SuppressWarnings("unchecked")
++    public LithiumHashPalette(IdMap<T> idList, int bits, PaletteResize<T> resizeHandler) {
++        this.idList = idList;
++        this.indexBits = bits;
++        this.resizeHandler = resizeHandler;
++
++        int capacity = 1 << bits;
++
++        this.entries = (T[]) new Object[capacity];
++        this.table = new Reference2IntOpenHashMap<>(capacity, FAST_LOAD_FACTOR);
++        this.table.defaultReturnValue(ABSENT_VALUE);
++    }
++
++    @Override
++    public int idFor(T obj) {
++        int id = this.table.getInt(obj);
++
++        if (id == ABSENT_VALUE) {
++            id = this.computeEntry(obj);
++        }
++
++        return id;
++    }
++
++    @Override
++    public boolean maybeHas(Predicate<T> predicate) {
++        for (int i = 0; i < this.size; ++i) {
++            if (predicate.test(this.entries[i])) {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    private int computeEntry(T obj) {
++        int id = this.addEntry(obj);
++
++        if (id >= 1 << this.indexBits) {
++            if (this.resizeHandler == null) {
++                throw new IllegalStateException("Cannot grow");
++            } else {
++                id = this.resizeHandler.onResize(this.indexBits + 1, obj);
++            }
++        }
++
++        return id;
++    }
++
++    private int addEntry(T obj) {
++        int nextId = this.size;
++
++        if (nextId >= this.entries.length) {
++            this.resize(this.size);
++        }
++
++        this.table.put(obj, nextId);
++        this.entries[nextId] = obj;
++
++        this.size++;
++
++        return nextId;
++    }
++
++    private void resize(int neededCapacity) {
++        this.entries = Arrays.copyOf(this.entries, HashCommon.nextPowerOfTwo(neededCapacity + 1));
++    }
++
++    @Override
++    public T valueFor(int id) {
++        T[] entries = this.entries;
++
++        T entry = null;
++        if (id >= 0 && id < entries.length) {
++            entry = entries[id];
++        }
++
++        if (entry != null) {
++            return entry;
++        } else {
++            throw new MissingPaletteEntryException(id);
++        }
++    }
++
++    @Override
++    public void read(FriendlyByteBuf buf) {
++        this.clear();
++
++        int entryCount = buf.readVarInt();
++
++        for (int i = 0; i < entryCount; ++i) {
++            this.addEntry(this.idList.byId(buf.readVarInt()));
++        }
++    }
++
++    @Override
++    public void write(FriendlyByteBuf buf) {
++        int size = this.size;
++        buf.writeVarInt(size);
++
++        for (int i = 0; i < size; ++i) {
++            buf.writeVarInt(this.idList.getId(this.valueFor(i)));
++        }
++    }
++
++    @Override
++    public int getSerializedSize() {
++        int size = VarInt.getByteSize(this.size);
++
++        for (int i = 0; i < this.size; ++i) {
++            size += VarInt.getByteSize(this.idList.getId(this.valueFor(i)));
++        }
++
++        return size;
++    }
++
++    @Override
++    public int getSize() {
++        return this.size;
++    }
++
++    @Override
++    public Palette<T> copy(PaletteResize<T> resizeHandler) {
++        return new LithiumHashPalette<>(this.idList, resizeHandler, this.indexBits, this.entries.clone(), new Reference2IntOpenHashMap<>(this.table), this.size);
++    }
++
++    private void clear() {
++        Arrays.fill(this.entries, null);
++        this.table.clear();
++        this.size = 0;
++    }
++
++    public List<T> getElements() {
++        ImmutableList.Builder<T> builder = new ImmutableList.Builder<>();
++        for (T entry : this.entries) {
++            if (entry != null) {
++                builder.add(entry);
++            }
++        }
++        return builder.build();
++    }
++
++    public static <A> Palette<A> create(int bits, IdMap<A> idList, PaletteResize<A> listener, List<A> list) {
++        return new LithiumHashPalette<>(idList, bits, listener, list);
++    }
++}
+diff --git a/src/main/java/net/minecraft/world/level/chunk/PaletteResize.java b/src/main/java/net/minecraft/world/level/chunk/PaletteResize.java
+index acae3eb30e0689048937f479dc3070f0688abdad..3b8ad3b46c7b6352cbd671e9db97c70c64671497 100644
+--- a/src/main/java/net/minecraft/world/level/chunk/PaletteResize.java
++++ b/src/main/java/net/minecraft/world/level/chunk/PaletteResize.java
+@@ -1,5 +1,5 @@
+ package net.minecraft.world.level.chunk;
+ 
+-interface PaletteResize<T> {
++public interface PaletteResize<T> { // Canvas - package-private -> public
+     int onResize(int newBits, T object);
+ }
+diff --git a/src/main/java/net/minecraft/world/level/chunk/PalettedContainer.java b/src/main/java/net/minecraft/world/level/chunk/PalettedContainer.java
+index 3384ea43c8257653ec539e8065f33a677d1af539..1ee524d865559a32f5f6adfae089e14d74ba77df 100644
+--- a/src/main/java/net/minecraft/world/level/chunk/PalettedContainer.java
++++ b/src/main/java/net/minecraft/world/level/chunk/PalettedContainer.java
+@@ -3,6 +3,7 @@ package net.minecraft.world.level.chunk;
+ import com.mojang.serialization.Codec;
+ import com.mojang.serialization.DataResult;
+ import com.mojang.serialization.codecs.RecordCodecBuilder;
++import io.github.dueris.canvas.util.LithiumHashPalette;
+ import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+ import it.unimi.dsi.fastutil.ints.IntArraySet;
+ import it.unimi.dsi.fastutil.ints.IntSet;
+@@ -505,7 +506,11 @@ public class PalettedContainer<T> implements PaletteResize<T>, PalettedContainer
+         public static final Palette.Factory LINEAR_PALETTE_FACTORY = LinearPalette::create;
+         public static final Palette.Factory HASHMAP_PALETTE_FACTORY = HashMapPalette::create;
+         static final Palette.Factory GLOBAL_PALETTE_FACTORY = GlobalPalette::create;
+-        public static final PalettedContainer.Strategy SECTION_STATES = new PalettedContainer.Strategy(4) {
++        // Canvas start
++        private static final PalettedContainer.Configuration<?>[] BLOCKSTATE_DATA_PROVIDERS;
++        private static final PalettedContainer.Configuration<?>[] BIOME_DATA_PROVIDERS;
++        private static final Palette.Factory HASH = LithiumHashPalette::create;
++        public static final PalettedContainer.Strategy SECTION_STATES;/* = new PalettedContainer.Strategy(4) {
+             @Override
+             public <A> PalettedContainer.Configuration<A> getConfiguration(IdMap<A> idList, int bits) {
+                 return switch (bits) {
+@@ -515,8 +520,54 @@ public class PalettedContainer<T> implements PaletteResize<T>, PalettedContainer
+                     default -> new PalettedContainer.Configuration(PalettedContainer.Strategy.GLOBAL_PALETTE_FACTORY, Mth.ceillog2(idList.size()));
+                 };
+             }
+-        };
+-        public static final PalettedContainer.Strategy SECTION_BIOMES = new PalettedContainer.Strategy(2) {
++        };*/
++        static {
++            Palette.Factory idListFactory = GLOBAL_PALETTE_FACTORY;
++
++            PalettedContainer.Configuration<?> arrayDataProvider4bit = new PalettedContainer.Configuration<>(LINEAR_PALETTE_FACTORY, 4);
++            PalettedContainer.Configuration<?> hashDataProvider4bit = new PalettedContainer.Configuration<>(HASH, 4);
++            BLOCKSTATE_DATA_PROVIDERS = new PalettedContainer.Configuration<?>[]{
++                new PalettedContainer.Configuration<>(SINGLE_VALUE_PALETTE_FACTORY, 0),
++                arrayDataProvider4bit,
++                arrayDataProvider4bit,
++                hashDataProvider4bit,
++                hashDataProvider4bit,
++                new PalettedContainer.Configuration<>(HASH, 5),
++                new PalettedContainer.Configuration<>(HASH, 6),
++                new PalettedContainer.Configuration<>(HASH, 7),
++                new PalettedContainer.Configuration<>(HASH, 8)
++            };
++            SECTION_STATES = new PalettedContainer.Strategy(4) {
++                @Override
++                public <A> PalettedContainer.Configuration<A> getConfiguration(IdMap<A> idList, int bits) {
++                    if (bits >= 0 && bits < BLOCKSTATE_DATA_PROVIDERS.length) {
++                        //noinspection unchecked
++                        return (PalettedContainer.Configuration<A>) BLOCKSTATE_DATA_PROVIDERS[bits];
++                    }
++                    return new PalettedContainer.Configuration<>(idListFactory, Mth.ceillog2(idList.size()));
++                }
++            };
++
++            BIOME_DATA_PROVIDERS = new PalettedContainer.Configuration<?>[]{
++                new PalettedContainer.Configuration<>(SINGLE_VALUE_PALETTE_FACTORY, 0),
++                new PalettedContainer.Configuration<>(LINEAR_PALETTE_FACTORY, 1),
++                new PalettedContainer.Configuration<>(LINEAR_PALETTE_FACTORY, 2),
++                new PalettedContainer.Configuration<>(HASH, 3)
++            };
++
++
++            SECTION_BIOMES = new PalettedContainer.Strategy(2) {
++                @Override
++                public <A> PalettedContainer.Configuration<A> getConfiguration(IdMap<A> idList, int bits) {
++                    if (bits >= 0 && bits < BIOME_DATA_PROVIDERS.length) {
++                        //noinspection unchecked
++                        return (PalettedContainer.Configuration<A>) BIOME_DATA_PROVIDERS[bits];
++                    }
++                    return new PalettedContainer.Configuration<>(idListFactory, Mth.ceillog2(idList.size()));
++                }
++            };
++        }
++        public static final PalettedContainer.Strategy SECTION_BIOMES;/* = new PalettedContainer.Strategy(2) {
+             @Override
+             public <A> PalettedContainer.Configuration<A> getConfiguration(IdMap<A> idList, int bits) {
+                 return switch (bits) {
+@@ -525,7 +576,8 @@ public class PalettedContainer<T> implements PaletteResize<T>, PalettedContainer
+                     default -> new PalettedContainer.Configuration(PalettedContainer.Strategy.GLOBAL_PALETTE_FACTORY, Mth.ceillog2(idList.size()));
+                 };
+             }
+-        };
++        };*/
++        // Canvas end
+         private final int sizeBits;
+ 
+         Strategy(int edgeBits) {
