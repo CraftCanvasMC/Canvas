@@ -1,0 +1,341 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Wed, 25 Dec 2024 16:48:27 -0800
+Subject: [PATCH] Optimize Brain
+
+
+diff --git a/src/main/java/io/github/dueris/canvas/util/collections/MaskedList.java b/src/main/java/io/github/dueris/canvas/util/collections/MaskedList.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..fedb62855471149e7cba89d421198fd406a86597
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/util/collections/MaskedList.java
+@@ -0,0 +1,152 @@
++package io.github.dueris.canvas.util.collections;
++
++import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
++import it.unimi.dsi.fastutil.objects.ObjectArrayList;
++import java.util.AbstractList;
++import java.util.BitSet;
++import java.util.Iterator;
++import java.util.Spliterator;
++import java.util.Spliterators;
++import java.util.function.Consumer;
++
++public class MaskedList<E> extends AbstractList<E> {
++    private final ObjectArrayList<E> allElements;
++    private final BitSet visibleMask;
++    private final Object2IntOpenHashMap<E> element2Index;
++    private final boolean defaultVisibility;
++    private int numCleared;
++
++    public MaskedList(ObjectArrayList<E> allElements, boolean defaultVisibility) {
++        this.allElements = new ObjectArrayList<>();
++        this.visibleMask = new BitSet();
++        this.defaultVisibility = defaultVisibility;
++        this.element2Index = new Object2IntOpenHashMap<>();
++        this.element2Index.defaultReturnValue(-1);
++
++        this.addAll(allElements);
++    }
++
++    public MaskedList() {
++        this(new ObjectArrayList<>(), true);
++    }
++
++    public int totalSize() {
++        return this.allElements.size();
++    }
++
++
++    public void addOrSet(E element, boolean visible) {
++        int index = this.element2Index.getInt(element);
++        if (index != -1) {
++            this.visibleMask.set(index, visible);
++        } else {
++            this.add(element);
++            this.setVisible(element, visible);
++        }
++    }
++
++    public void setVisible(E element, final boolean visible) {
++        int index = this.element2Index.getInt(element);
++        if (index != -1) {
++            this.visibleMask.set(index, visible);
++        }
++        //ignore when the element is not in the collection
++    }
++
++    @Override
++    public Iterator<E> iterator() {
++        return new Iterator<>() {
++            int nextIndex = 0;
++            int cachedNext = -1;
++
++            @Override
++            public boolean hasNext() {
++                return (this.cachedNext = MaskedList.this.visibleMask.nextSetBit(this.nextIndex)) != -1;
++            }
++
++            @Override
++            public E next() {
++                int index = this.cachedNext;
++                this.cachedNext = -1;
++                this.nextIndex = index + 1;
++                return MaskedList.this.allElements.get(index);
++            }
++        };
++    }
++
++    @Override
++    public Spliterator<E> spliterator() {
++        return new Spliterators.AbstractSpliterator<E>(Long.MAX_VALUE, Spliterator.ORDERED | Spliterator.NONNULL) {
++            int nextIndex = 0;
++
++            @Override
++            public boolean tryAdvance(Consumer<? super E> action) {
++                int index = MaskedList.this.visibleMask.nextSetBit(this.nextIndex);
++                if (index == -1) {
++                    return false;
++                }
++                this.nextIndex = index + 1;
++                action.accept(MaskedList.this.allElements.get(index));
++                return true;
++            }
++        };
++    }
++
++    @Override
++    public boolean add(E e) {
++        int oldIndex = this.element2Index.put(e, this.allElements.size());
++        if (oldIndex != -1) {
++            throw new IllegalStateException("MaskedList must not contain duplicates! Trying to add " + e + " but it is already present at index " + oldIndex + ". Current size: " + this.allElements.size());
++        }
++        this.visibleMask.set(this.allElements.size(), this.defaultVisibility);
++        return this.allElements.add(e);
++    }
++
++    @Override
++    public boolean remove(Object o) {
++        int index = this.element2Index.removeInt(o);
++        if (index == -1) {
++            return false;
++        }
++        this.visibleMask.clear(index);
++        this.allElements.set(index, null);
++        this.numCleared++;
++
++
++        if (this.numCleared * 2 > this.allElements.size()) {
++            ObjectArrayList<E> clonedElements = this.allElements.clone();
++            BitSet clonedVisibleMask = (BitSet) this.visibleMask.clone();
++            this.allElements.clear();
++            this.visibleMask.clear();
++            this.element2Index.clear();
++            for (int i = 0; i < clonedElements.size(); i++) {
++                E element = clonedElements.get(i);
++                int newIndex = this.allElements.size();
++                this.allElements.add(element);
++                this.visibleMask.set(newIndex, clonedVisibleMask.get(i));
++                this.element2Index.put(element, newIndex);
++            }
++            this.numCleared = 0;
++        }
++        return true;
++    }
++
++    @Override
++    public E get(int index) {
++        if (index < 0 || index >= this.size()) {
++            throw new IndexOutOfBoundsException(index);
++        }
++
++        int i = 0;
++        while (index >= 0) {
++            index--;
++            i = this.visibleMask.nextSetBit(i + 1);
++        }
++        return this.allElements.get(i);
++    }
++
++    @Override
++    public int size() {
++        return this.visibleMask.cardinality();
++    }
++}
+diff --git a/src/main/java/net/minecraft/world/entity/ai/Brain.java b/src/main/java/net/minecraft/world/entity/ai/Brain.java
+index 4525483dbada9555cac8d8bd2fe9df476f836661..92eadfbaa32f3da8dbb06f95e8620699b69574ca 100644
+--- a/src/main/java/net/minecraft/world/entity/ai/Brain.java
++++ b/src/main/java/net/minecraft/world/entity/ai/Brain.java
+@@ -15,7 +15,9 @@ import com.mojang.serialization.DynamicOps;
+ import com.mojang.serialization.MapCodec;
+ import com.mojang.serialization.MapLike;
+ import com.mojang.serialization.RecordBuilder;
++import io.github.dueris.canvas.util.collections.MaskedList;
+ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
++import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.List;
+ import java.util.Map;
+@@ -55,6 +57,63 @@ public class Brain<E extends LivingEntity> {
+     private final Set<Activity> activeActivities = Sets.newHashSet();
+     private Activity defaultActivity = Activity.IDLE;
+     private long lastScheduleUpdate = -9999L;
++    // Canvas start - optimize brain
++    private ArrayList<BehaviorControl<? super E>> possibleTasks;
++    private MaskedList<BehaviorControl<? super E>> runningTasks;
++
++    private void onTasksChanged() {
++        this.runningTasks = null;
++        this.onPossibleActivitiesChanged();
++    }
++
++    private void onPossibleActivitiesChanged() {
++        this.possibleTasks = null;
++    }
++
++    private void initPossibleTasks() {
++        this.possibleTasks = new ArrayList<>();
++        for (Map<Activity, Set<BehaviorControl<? super E>>> map : this.availableBehaviorsByPriority.values()) {
++            for (Map.Entry<Activity, Set<BehaviorControl<? super E>>> entry : map.entrySet()) {
++                Activity activity = entry.getKey();
++                if (!this.activeActivities.contains(activity)) {
++                    continue;
++                }
++                Set<BehaviorControl<? super E>> set = entry.getValue();
++                for (BehaviorControl<? super E> task : set) {
++                    //noinspection UseBulkOperation
++                    this.possibleTasks.add(task);
++                }
++            }
++        }
++    }
++
++    private ArrayList<BehaviorControl<? super E>> getPossibleTasks() {
++        if (this.possibleTasks == null) {
++            this.initPossibleTasks();
++        }
++        return this.possibleTasks;
++    }
++
++    private MaskedList<BehaviorControl<? super E>> getCurrentlyRunningTasks() {
++        if (this.runningTasks == null) {
++            this.initCurrentlyRunningTasks();
++        }
++        return this.runningTasks;
++    }
++
++    private void initCurrentlyRunningTasks() {
++        MaskedList<BehaviorControl<? super E>> list = new MaskedList<>(new ObjectArrayList<>(), false);
++
++        for (Map<Activity, Set<BehaviorControl<? super E>>> map : this.availableBehaviorsByPriority.values()) {
++            for (Set<BehaviorControl<? super E>> set : map.values()) {
++                for (BehaviorControl<? super E> task : set) {
++                    list.addOrSet(task, task.getStatus() == Behavior.Status.RUNNING);
++                }
++            }
++        }
++        this.runningTasks = list;
++    }
++    // Canvas end
+ 
+     public static <E extends LivingEntity> Brain.Provider<E> provider(
+         Collection<? extends MemoryModuleType<?>> memoryModules, Collection<? extends SensorType<? extends Sensor<? super E>>> sensors
+@@ -145,6 +204,7 @@ public class Brain<E extends LivingEntity> {
+         for (Brain.MemoryValue<?> memoryValue : memoryEntries) {
+             memoryValue.setMemoryInternal(this);
+         }
++        this.onTasksChanged(); // Canvas - optimize brain
+     }
+ 
+     public <T> DataResult<T> serializeStart(DynamicOps<T> ops) {
+@@ -252,19 +312,7 @@ public class Brain<E extends LivingEntity> {
+     @Deprecated
+     @VisibleForDebug
+     public List<BehaviorControl<? super E>> getRunningBehaviors() {
+-        List<BehaviorControl<? super E>> list = new ObjectArrayList<>();
+-
+-        for (Map<Activity, Set<BehaviorControl<? super E>>> map : this.availableBehaviorsByPriority.values()) {
+-            for (Set<BehaviorControl<? super E>> set : map.values()) {
+-                for (BehaviorControl<? super E> behaviorControl : set) {
+-                    if (behaviorControl.getStatus() == Behavior.Status.RUNNING) {
+-                        list.add(behaviorControl);
+-                    }
+-                }
+-            }
+-        }
+-
+-        return list;
++        return this.getCurrentlyRunningTasks(); // Canvas - optimize brain
+     }
+ 
+     public void useDefaultActivity() {
+@@ -295,6 +343,7 @@ public class Brain<E extends LivingEntity> {
+             this.activeActivities.clear();
+             this.activeActivities.addAll(this.coreActivities);
+             this.activeActivities.add(except);
++            this.onPossibleActivitiesChanged(); // Canvas - optimize brain
+         }
+     }
+ 
+@@ -375,11 +424,13 @@ public class Brain<E extends LivingEntity> {
+                 .computeIfAbsent(activity, activity2 -> Sets.newLinkedHashSet())
+                 .add((BehaviorControl<? super E>)pair.getSecond());
+         }
++        this.onTasksChanged(); // Canvas - optimize brain
+     }
+ 
+     @VisibleForTesting
+     public void removeAllBehaviors() {
+         this.availableBehaviorsByPriority.clear();
++        this.onTasksChanged(); // Canvas - optimize brain
+     }
+ 
+     public boolean isActive(Activity activity) {
+@@ -430,22 +481,24 @@ public class Brain<E extends LivingEntity> {
+ 
+         for (BehaviorControl<? super E> behaviorControl : this.getRunningBehaviors()) {
+             behaviorControl.doStop(world, entity, l);
++            // Canvas start - optimize brain
++            if (this.runningTasks != null) {
++                this.runningTasks.setVisible(behaviorControl, false);
++            }
++            // Canvas end
+         }
+     }
+ 
+     private void startEachNonRunningBehavior(ServerLevel world, E entity) {
+-        long l = world.getGameTime();
+-
+-        for (Map<Activity, Set<BehaviorControl<? super E>>> map : this.availableBehaviorsByPriority.values()) {
+-            for (Entry<Activity, Set<BehaviorControl<? super E>>> entry : map.entrySet()) {
+-                Activity activity = entry.getKey();
+-                if (this.activeActivities.contains(activity)) {
+-                    for (BehaviorControl<? super E> behaviorControl : entry.getValue()) {
+-                        if (behaviorControl.getStatus() == Behavior.Status.STOPPED) {
+-                            behaviorControl.tryStart(world, entity, l);
+-                        }
+-                    }
++        // Canvas start - optimize brain
++        long startTime = world.getGameTime();
++        for (BehaviorControl<? super E> task : this.getPossibleTasks()) {
++            if (task.getStatus() == Behavior.Status.STOPPED) {
++                task.tryStart(world, entity, startTime);
++                if (this.runningTasks != null && task.getStatus() == Behavior.Status.RUNNING) {
++                    this.runningTasks.setVisible(task, true);
+                 }
++        // Canvas end
+             }
+         }
+     }
+@@ -455,6 +508,11 @@ public class Brain<E extends LivingEntity> {
+ 
+         for (BehaviorControl<? super E> behaviorControl : this.getRunningBehaviors()) {
+             behaviorControl.tickOrStop(world, entity, l);
++            // Canvas start - optimize brain
++            if (this.runningTasks != null && behaviorControl.getStatus() != Behavior.Status.RUNNING) {
++                this.runningTasks.setVisible(behaviorControl, false);
++            }
++            // Canvas end
+         }
+     }
+ 
