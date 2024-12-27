@@ -1,0 +1,171 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Thu, 26 Dec 2024 22:33:13 -0800
+Subject: [PATCH] Async Locate Command
+
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+index 217d1f908a36a5177ba3cbb80a33f73d4dab0fa0..1193467609aaff1aa47383e8832a16db4f0c105f 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+@@ -72,6 +72,13 @@ public class TickThread extends Thread {
+ 
+     private static final AtomicInteger ID_GENERATOR = new AtomicInteger();
+ 
++    // Canvas start
++    public TickThread(final Runnable runnable) {
++        super(runnable);
++        id = ID_GENERATOR.incrementAndGet();
++    }
++
++    // Canvas end
+     public TickThread(final String name) {
+         this(null, name);
+     }
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+index 7ce9ebba8ce304d1f3f21d4f15ee5f3560d7700b..58443e9262effadff78c04815eba295e7023a54c 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperEventManager.java
+@@ -36,11 +36,12 @@ class PaperEventManager {
+ 
+     // SimplePluginManager
+     public void callEvent(@NotNull Event event) {
+-        if (event.isAsynchronous() && this.server.isPrimaryThread()) {
++        // Canvas start
++        /* if (event.isAsynchronous() && this.server.isPrimaryThread()) {
+             throw new IllegalStateException(event.getEventName() + " may only be triggered asynchronously.");
+         } else if (!event.isAsynchronous() && !this.server.isPrimaryThread() && !this.server.isStopping()) {
+             throw new IllegalStateException(event.getEventName() + " may only be triggered synchronously.");
+-        }
++        } */ // Canvas end
+ 
+         HandlerList handlers = event.getHandlers();
+         RegisteredListener[] listeners = handlers.getRegisteredListeners();
+diff --git a/src/main/java/io/papermc/paper/util/MCUtil.java b/src/main/java/io/papermc/paper/util/MCUtil.java
+index a4ac34ebb58a404f4fca7e763e61d4ab05ee3af4..0256e33a4e25fcbea7a307d5894920ba65a49552 100644
+--- a/src/main/java/io/papermc/paper/util/MCUtil.java
++++ b/src/main/java/io/papermc/paper/util/MCUtil.java
+@@ -1,5 +1,6 @@
+ package io.papermc.paper.util;
+ 
++import ca.spottedleaf.moonrise.common.util.TickThread;
+ import com.google.common.collect.Collections2;
+ import com.google.common.collect.Lists;
+ import com.google.common.util.concurrent.ThreadFactoryBuilder;
+@@ -40,6 +41,7 @@ public final class MCUtil {
+     public static final ExecutorService ASYNC_EXECUTOR = Executors.newFixedThreadPool(2, new ThreadFactoryBuilder()
+         .setNameFormat("Paper Async Task Handler Thread - %1$d")
+         .setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(MinecraftServer.LOGGER))
++            .setThreadFactory(TickThread::new) // Canvas
+         .build()
+     );
+ 
+diff --git a/src/main/java/net/minecraft/server/commands/LocateCommand.java b/src/main/java/net/minecraft/server/commands/LocateCommand.java
+index 2972f041eea95b92b37c2ab869f9f8ed3d142a27..4fbb05b935aeea76680243f90caac78005ecfc56 100644
+--- a/src/main/java/net/minecraft/server/commands/LocateCommand.java
++++ b/src/main/java/net/minecraft/server/commands/LocateCommand.java
+@@ -8,6 +8,7 @@ import com.mojang.datafixers.util.Pair;
+ import com.mojang.logging.LogUtils;
+ import java.time.Duration;
+ import java.util.Optional;
++import io.papermc.paper.util.MCUtil;
+ import net.minecraft.ChatFormatting;
+ import net.minecraft.Util;
+ import net.minecraft.commands.CommandBuildContext;
+@@ -99,10 +100,19 @@ public class LocateCommand {
+     }
+ 
+     private static int locateStructure(CommandSourceStack source, ResourceOrTagKeyArgument.Result<Structure> predicate) throws CommandSyntaxException {
++        // Canvas start - async locate command
++        LOGGER.info("Starting locate call off-main, please wait...");
++        MCUtil.scheduleAsyncTask(() -> {
+         Registry<Structure> registry = source.getLevel().registryAccess().lookupOrThrow(Registries.STRUCTURE);
+-        HolderSet<Structure> holderSet = (HolderSet<Structure>)getHolders(predicate, registry)
+-            .orElseThrow(() -> ERROR_STRUCTURE_INVALID.create(predicate.asPrintable()));
+-        BlockPos blockPos = BlockPos.containing(source.getPosition());
++            HolderSet<Structure> holderSet;
++            try {
++                holderSet = getHolders(predicate, registry)
++                    .orElseThrow(() -> ERROR_STRUCTURE_INVALID.create(predicate.asPrintable()));
++            } catch (CommandSyntaxException e) {
++                source.sendFailure(Component.literal(e.getMessage()));
++                return;
++            }
++            BlockPos blockPos = BlockPos.containing(source.getPosition());
+         ServerLevel serverLevel = source.getLevel();
+         Stopwatch stopwatch = Stopwatch.createStarted(Util.TICKER);
+         Pair<BlockPos, Holder<Structure>> pair = serverLevel.getChunkSource()
+@@ -110,25 +120,41 @@ public class LocateCommand {
+             .findNearestMapStructure(serverLevel, holderSet, blockPos, 100, false);
+         stopwatch.stop();
+         if (pair == null) {
+-            throw ERROR_STRUCTURE_NOT_FOUND.create(predicate.asPrintable());
++            try {
++                throw ERROR_STRUCTURE_NOT_FOUND.create(predicate.asPrintable());
++            } catch (CommandSyntaxException e) {
++                source.sendFailure(Component.literal(e.getMessage()));
++            }
+         } else {
+-            return showLocateResult(source, predicate, blockPos, pair, "commands.locate.structure.success", false, stopwatch.elapsed());
++            showLocateResult(source, predicate, blockPos, pair, "commands.locate.structure.success", false, stopwatch.elapsed());
+         }
++        });
++        return 0;
+     }
+ 
+     private static int locateBiome(CommandSourceStack source, ResourceOrTagArgument.Result<Biome> predicate) throws CommandSyntaxException {
++        LOGGER.info("Starting locate call off-main, please wait...");
++        MCUtil.scheduleAsyncTask(() -> {
+         BlockPos blockPos = BlockPos.containing(source.getPosition());
+         Stopwatch stopwatch = Stopwatch.createStarted(Util.TICKER);
+         Pair<BlockPos, Holder<Biome>> pair = source.getLevel().findClosestBiome3d(predicate, blockPos, 6400, 32, 64);
+         stopwatch.stop();
+         if (pair == null) {
+-            throw ERROR_BIOME_NOT_FOUND.create(predicate.asPrintable());
++            try {
++                throw ERROR_BIOME_NOT_FOUND.create(predicate.asPrintable());
++            } catch (CommandSyntaxException e) {
++                source.sendFailure(Component.literal(e.getMessage()));
++            }
+         } else {
+-            return showLocateResult(source, predicate, blockPos, pair, "commands.locate.biome.success", true, stopwatch.elapsed());
++            showLocateResult(source, predicate, blockPos, pair, "commands.locate.biome.success", true, stopwatch.elapsed());
+         }
++        });
++        return 0;
+     }
+ 
+     private static int locatePoi(CommandSourceStack source, ResourceOrTagArgument.Result<PoiType> predicate) throws CommandSyntaxException {
++        LOGGER.info("Starting locate call off-main, please wait...");
++        MCUtil.scheduleAsyncTask(() -> {
+         BlockPos blockPos = BlockPos.containing(source.getPosition());
+         ServerLevel serverLevel = source.getLevel();
+         Stopwatch stopwatch = Stopwatch.createStarted(Util.TICKER);
+@@ -136,10 +162,17 @@ public class LocateCommand {
+             .findClosestWithType(predicate, blockPos, 256, PoiManager.Occupancy.ANY);
+         stopwatch.stop();
+         if (optional.isEmpty()) {
+-            throw ERROR_POI_NOT_FOUND.create(predicate.asPrintable());
++            try {
++                throw ERROR_POI_NOT_FOUND.create(predicate.asPrintable());
++            } catch (CommandSyntaxException e) {
++                source.sendFailure(Component.literal(e.getMessage()));
++            }
+         } else {
+-            return showLocateResult(source, predicate, blockPos, optional.get().swap(), "commands.locate.poi.success", false, stopwatch.elapsed());
++            showLocateResult(source, predicate, blockPos, optional.get().swap(), "commands.locate.poi.success", false, stopwatch.elapsed());
+         }
++        });
++        return 0;
++        // Canvas end
+     }
+ 
+     public static int showLocateResult(
+@@ -192,6 +225,7 @@ public class LocateCommand {
+             );
+         source.sendSuccess(() -> Component.translatable(successMessage, entryString, component, i), false);
+         LOGGER.info("Locating element " + entryString + " took " + timeTaken.toMillis() + " ms");
++        LOGGER.info("Located element on Thread:'{}'", Thread.currentThread().getName());
+         return i;
+     }
+ 
