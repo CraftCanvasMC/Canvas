@@ -1,0 +1,137 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Sat, 28 Dec 2024 01:51:14 -0800
+Subject: [PATCH] Compact Sine LUT
+
+
+diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
+index fb5d2586c9f9fe91728b5c104cd318a324eac1cc..74987f55a0dccf552986774c10f59dbcc5dc9046 100644
+--- a/src/main/java/io/github/dueris/canvas/Config.java
++++ b/src/main/java/io/github/dueris/canvas/Config.java
+@@ -21,6 +21,7 @@ public class Config implements JsonConfig {
+     public boolean optimizeFluidSpread = true;
+     public boolean optimizePistonMovingBlockEntity = true;
+     public boolean clumpOrbs = true;
++    public boolean useCompactSineLUT = true;
+ 
+     public static Config init() {
+         final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
+diff --git a/src/main/java/io/github/dueris/canvas/util/CompactSineLUT.java b/src/main/java/io/github/dueris/canvas/util/CompactSineLUT.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..b7100c2458b4b238e9198ae0355a73da97fc051c
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/util/CompactSineLUT.java
+@@ -0,0 +1,67 @@
++package io.github.dueris.canvas.util;
++
++import net.minecraft.util.Mth;
++
++public class CompactSineLUT {
++    private static final int[] SINE_TABLE_INT = new int[16384 + 1];
++    private static final float SINE_TABLE_MIDPOINT;
++
++    static {
++        // Copy the sine table, covering to raw int bits
++        for (int i = 0; i < SINE_TABLE_INT.length; i++) {
++            SINE_TABLE_INT[i] = Float.floatToRawIntBits(Mth.SIN[i]);
++        }
++
++        SINE_TABLE_MIDPOINT = Mth.SIN[Mth.SIN.length / 2];
++
++        // Test that the lookup table is correct during runtime
++        for (int i = 0; i < Mth.SIN.length; i++) {
++            float expected = Mth.SIN[i];
++            float value = lookup(i);
++
++            if (expected != value) {
++                throw new IllegalArgumentException(String.format("LUT error at index %d (expected: %s, found: %s)", i, expected, value));
++            }
++        }
++    }
++
++    public static void init() {
++    }
++
++    // [VanillaCopy] MathHelper#sin(float)
++    public static float sin(float f) {
++        return lookup((int) (f * 10430.378f) & 0xFFFF);
++    }
++
++    // [VanillaCopy] MathHelper#cos(float)
++    public static float cos(float f) {
++        return lookup((int) (f * 10430.378f + 16384.0f) & 0xFFFF);
++    }
++
++    private static float lookup(int index) {
++        // A special case... Is there some way to eliminate this?
++        if (index == 32768) {
++            return SINE_TABLE_MIDPOINT;
++        }
++
++        // Trigonometric identity: sin(-x) = -sin(x)
++        // Given a domain of 0 <= x <= 2*pi, just negate the value if x > pi.
++        // This allows the sin table size to be halved.
++        int neg = (index & 0x8000) << 16;
++
++        // All bits set if (pi/2 <= x), none set otherwise
++        // Extracts the 15th bit from 'half'
++        int mask = (index << 17) >> 31;
++
++        // Trigonometric identity: sin(x) = sin(pi/2 - x)
++        int pos = (0x8001 & mask) + (index ^ mask);
++
++        // Wrap the position in the table. Moving this down to immediately before the array access
++        // seems to help the Hotspot compiler optimize the bit math better.
++        pos &= 0x7fff;
++
++        // Fetch the corresponding value from the LUT and invert the sign bit as needed
++        // This directly manipulate the sign bit on the float bits to simplify logic
++        return Float.intBitsToFloat(SINE_TABLE_INT[pos] ^ neg);
++    }
++}
+diff --git a/src/main/java/net/minecraft/util/Mth.java b/src/main/java/net/minecraft/util/Mth.java
+index ef93fc37759e0b54387c8a59adc2b19258cfeb7d..4ee69d0f46ee1136f5f6cad4a7d351b5e21d66b6 100644
+--- a/src/main/java/net/minecraft/util/Mth.java
++++ b/src/main/java/net/minecraft/util/Mth.java
+@@ -4,6 +4,8 @@ import java.util.Locale;
+ import java.util.UUID;
+ import java.util.function.IntPredicate;
+ import java.util.stream.IntStream;
++import io.github.dueris.canvas.Config;
++import io.github.dueris.canvas.util.CompactSineLUT;
+ import net.minecraft.Util;
+ import net.minecraft.core.Vec3i;
+ import net.minecraft.world.phys.AABB;
+@@ -29,7 +31,7 @@ public class Mth {
+     public static final Vector3f Y_AXIS = new Vector3f(0.0F, 1.0F, 0.0F);
+     public static final Vector3f X_AXIS = new Vector3f(1.0F, 0.0F, 0.0F);
+     public static final Vector3f Z_AXIS = new Vector3f(0.0F, 0.0F, 1.0F);
+-    private static final float[] SIN = Util.make(new float[65536], sineTable -> {
++    public static final float[] SIN = Util.make(new float[65536], sineTable -> { // Canvas - private -> public
+         for (int ix = 0; ix < sineTable.length; ix++) {
+             sineTable[ix] = (float)Math.sin((double)ix * Math.PI * 2.0 / 65536.0);
+         }
+@@ -45,11 +47,23 @@ public class Mth {
+     private static final double[] ASIN_TAB = new double[257];
+     private static final double[] COS_TAB = new double[257];
+ 
++    // Canvas start
++    static {
++        CompactSineLUT.init();
++    }
++
+     public static float sin(float value) {
++        if (Config.INSTANCE.useCompactSineLUT) {
++            return CompactSineLUT.sin(value);
++        }
+         return SIN[(int)(value * 10430.378F) & 65535];
+     }
+ 
+     public static float cos(float value) {
++        if (Config.INSTANCE.useCompactSineLUT) {
++            return CompactSineLUT.cos(value);
++        }
++    // Canvas end
+         return SIN[(int)(value * 10430.378F + 16384.0F) & 65535];
+     }
+ 
