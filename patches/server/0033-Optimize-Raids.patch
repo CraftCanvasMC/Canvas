@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Sat, 28 Dec 2024 14:36:02 -0800
+Subject: [PATCH] Optimize Raids
+
+
+diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
+index 3848c74e349ad29b566a8cc10d1fe87fdbb76270..0138a5faee15a26f665ab98403359c462126eef5 100644
+--- a/src/main/java/net/minecraft/server/level/ServerLevel.java
++++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
+@@ -56,6 +56,7 @@ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.HolderSet;
++import net.minecraft.core.RegistryAccess;
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.core.particles.ParticleOptions;
+ import net.minecraft.core.registries.BuiltInRegistries;
+@@ -125,6 +126,7 @@ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.entity.raid.Raid;
+ import net.minecraft.world.entity.raid.Raids;
+ import net.minecraft.world.flag.FeatureFlagSet;
++import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.alchemy.PotionBrewing;
+ import net.minecraft.world.item.crafting.RecipeManager;
+ import net.minecraft.world.level.BlockEventData;
+@@ -216,6 +218,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     public final ServerChunkCache chunkSource;
+     private final MinecraftServer server;
+     public final PrimaryLevelData serverLevelData; // CraftBukkit - type
++    public ItemStack ominousBanner; // Canvas
+     private int lastSpawnChunkRadius;
+     final EntityTickList entityTickList = new EntityTickList();
+     // Paper - rewrite chunk system
+@@ -715,6 +718,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         // Paper end - rewrite chunk system
+         this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
+         this.preciseTime = this.serverLevelData.getDayTime(); // Purpur - Configurable daylight cycle
++        this.ominousBanner = Objects.requireNonNullElse(this.registryAccess(), RegistryAccess.EMPTY).lookup(Registries.BANNER_PATTERN).map(Raid::getOminousBannerInstance).orElse(null); // Canvas
+     }
+ 
+     // Paper start
+diff --git a/src/main/java/net/minecraft/world/entity/raid/Raid.java b/src/main/java/net/minecraft/world/entity/raid/Raid.java
+index 11cf2d9def087b0898c828eaa21eb5f7b8811d5f..b226b90ee0e5061075af598a91e7b7f3f5a17532 100644
+--- a/src/main/java/net/minecraft/world/entity/raid/Raid.java
++++ b/src/main/java/net/minecraft/world/entity/raid/Raid.java
+@@ -289,8 +289,16 @@ public class Raid {
+         this.raidEvent.removeAllPlayers();
+         this.status = Raid.RaidStatus.STOPPED;
+     }
++    // Canvas start
++    private boolean isBarDirty;
+ 
+     public void tick() {
++        if (this.isBarDirty) {
++            this.raidEvent.setProgress(Mth.clamp(this.getHealthOfLivingRaiders() / this.totalHealth, 0.0F, 1.0F));
++
++            this.isBarDirty = false;
++        }
++    // Canvas end
+         if (!this.isStopped()) {
+             if (this.status == Raid.RaidStatus.ONGOING) {
+                 boolean flag = this.active;
+@@ -652,7 +660,7 @@ public class Raid {
+     }
+ 
+     public void updateBossbar() {
+-        this.raidEvent.setProgress(Mth.clamp(this.getHealthOfLivingRaiders() / this.totalHealth, 0.0F, 1.0F));
++        this.isBarDirty = true; // Canvas
+     }
+ 
+     public float getHealthOfLivingRaiders() {
+diff --git a/src/main/java/net/minecraft/world/entity/raid/Raider.java b/src/main/java/net/minecraft/world/entity/raid/Raider.java
+index 65206bc0c3276fda449936cae88cc819a346e299..d7e18b5b5250adf56500b87f09fbe23437cfff88 100644
+--- a/src/main/java/net/minecraft/world/entity/raid/Raider.java
++++ b/src/main/java/net/minecraft/world/entity/raid/Raider.java
+@@ -10,6 +10,7 @@ import java.util.Optional;
+ import java.util.function.Predicate;
+ import javax.annotation.Nullable;
+ import net.minecraft.core.BlockPos;
++import net.minecraft.core.HolderGetter;
+ import net.minecraft.core.registries.Registries;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.network.syncher.EntityDataAccessor;
+@@ -38,6 +39,7 @@ import net.minecraft.world.entity.monster.PatrollingMonster;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.ServerLevelAccessor;
++import net.minecraft.world.level.block.entity.BannerPattern;
+ import net.minecraft.world.level.pathfinder.Path;
+ import net.minecraft.world.phys.Vec3;
+ // CraftBukkit start
+@@ -47,9 +49,25 @@ import org.bukkit.event.entity.EntityRemoveEvent;
+ public abstract class Raider extends PatrollingMonster {
+ 
+     protected static final EntityDataAccessor<Boolean> IS_CELEBRATING = SynchedEntityData.defineId(Raider.class, EntityDataSerializers.BOOLEAN);
+-    static final Predicate<ItemEntity> ALLOWED_ITEMS = (entityitem) -> {
+-        return !entityitem.hasPickUpDelay() && entityitem.isAlive() && ItemStack.matches(entityitem.getItem(), Raid.getOminousBannerInstance(entityitem.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)));
++    // Canvas start
++    static final Predicate<ItemEntity> ALLOWED_ITEMS = (itemEntity) -> {
++        ItemStack ominousBanner = ((ServerLevel) itemEntity.level()).ominousBanner;
++        if (ominousBanner == null) {
++            ominousBanner = Raid.getOminousBannerInstance(itemEntity.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN));
++        }
++
++        return !itemEntity.hasPickUpDelay() && itemEntity.isAlive() &&
++            ItemStack.matches(itemEntity.getItem(), ominousBanner);
+     };
++
++    private ItemStack getOminousBanner(HolderGetter<BannerPattern> bannerPatternLookup) {
++        ItemStack ominousBanner = ((ServerLevel) this.level()).ominousBanner;
++        if (ominousBanner == null) {
++            ominousBanner = Raid.getOminousBannerInstance(bannerPatternLookup);
++        }
++        return ominousBanner;
++    }
++    // Canvas end
+     @Nullable
+     protected Raid raid;
+     private int wave;
+@@ -155,7 +173,7 @@ public abstract class Raider extends PatrollingMonster {
+ 
+     public boolean isCaptain() {
+         ItemStack itemstack = this.getItemBySlot(EquipmentSlot.HEAD);
+-        boolean flag = !itemstack.isEmpty() && ItemStack.matches(itemstack, Raid.getOminousBannerInstance(this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)));
++        boolean flag = !itemstack.isEmpty() && ItemStack.matches(itemstack, getOminousBanner(this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN))); // Canvas
+         boolean flag1 = this.isPatrolLeader();
+ 
+         return flag && flag1;
+@@ -227,7 +245,7 @@ public abstract class Raider extends PatrollingMonster {
+         ItemStack itemstack = itemEntity.getItem();
+         boolean flag = this.hasActiveRaid() && this.getCurrentRaid().getLeader(this.getWave()) != null;
+ 
+-        if (this.hasActiveRaid() && !flag && ItemStack.matches(itemstack, Raid.getOminousBannerInstance(this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)))) {
++        if (this.hasActiveRaid() && !flag && ItemStack.matches(itemstack, getOminousBanner(this.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)))) { // Canvas
+             // Paper start - EntityPickupItemEvent fixes
+             if (org.bukkit.craftbukkit.event.CraftEventFactory.callEntityPickupItemEvent(this, itemEntity, 0, false).isCancelled()) {
+                 return;
+@@ -343,6 +361,16 @@ public abstract class Raider extends PatrollingMonster {
+         public boolean canContinueToUse() {
+             return this.pursuedBannerItemEntity != null && this.pathToBanner != null ? (this.pursuedBannerItemEntity.isRemoved() ? false : (this.pathToBanner.isDone() ? false : !this.cannotPickUpBanner())) : false;
+         }
++        // Canvas start
++
++        private ItemStack getOminousBanner(HolderGetter<BannerPattern> bannerPatternLookup) {
++            ItemStack ominousBanner = ((ServerLevel) this.mob.level()).ominousBanner;
++            if (ominousBanner == null) {
++                ominousBanner = Raid.getOminousBannerInstance(bannerPatternLookup);
++            }
++            return ominousBanner;
++        }
++        // Canvas end
+ 
+         private boolean cannotPickUpBanner() {
+             if ((!this.mob.level().purpurConfig.pillagerBypassMobGriefing == !getServerLevel(this.mob).getGameRules().getBoolean(net.minecraft.world.level.GameRules.RULE_MOBGRIEFING)) || !this.mob.canPickUpLoot()) return false; // Paper - respect game and entity rules for picking up items // Purpur - Add mobGriefing bypass to everything affected
+@@ -352,7 +380,10 @@ public abstract class Raider extends PatrollingMonster {
+                 return true;
+             } else if (!this.mob.canBeLeader()) {
+                 return true;
+-            } else if (ItemStack.matches(this.mob.getItemBySlot(EquipmentSlot.HEAD), Raid.getOminousBannerInstance(this.mob.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)))) {
++            // Canvas start
++            } else if (ItemStack.matches(this.mob.getItemBySlot(EquipmentSlot.HEAD),
++                getOminousBanner(this.mob.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN)))) {
++            // Canvas end
+                 return true;
+             } else {
+                 Raider entityraider = Raider.this.raid.getLeader(this.mob.getWave());
