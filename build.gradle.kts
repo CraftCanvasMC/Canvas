@@ -56,6 +56,8 @@ subprojects {
         maven(paperMavenPublicUrl)
         maven("https://jitpack.io")
         maven("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+        maven("https://maven.shedaniel.me/")
+        maven("https://maven.terraformersmc.com/releases/")
     }
 }
 
