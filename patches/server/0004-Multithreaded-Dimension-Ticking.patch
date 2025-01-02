@@ -741,14 +741,23 @@ index 0000000000000000000000000000000000000000..40c13d4f2d807395e9bd8e7168fdc3e7
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/command/ThreadedTpsCommand.java b/src/main/java/io/github/dueris/canvas/command/ThreadedTpsCommand.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..ab107c45cd3142353db32c555d74087288a36b82
+index 0000000000000000000000000000000000000000..d020be6fc566e713e64ba5e4df88d7002c8a7067
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/command/ThreadedTpsCommand.java
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,175 @@
 +package io.github.dueris.canvas.command;
 +
 +import ca.spottedleaf.moonrise.common.util.MoonriseCommon;
 +import io.papermc.paper.command.MSPTCommand;
++import java.lang.management.ManagementFactory;
++import java.lang.management.ThreadMXBean;
++import java.text.DecimalFormat;
++import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.Collections;
++import java.util.List;
++import java.util.function.Function;
++import java.util.stream.Collectors;
 +import net.kyori.adventure.text.Component;
 +import net.kyori.adventure.text.TextComponent;
 +import net.minecraft.server.MinecraftServer;
@@ -759,13 +768,6 @@ index 0000000000000000000000000000000000000000..ab107c45cd3142353db32c555d740872
 +import org.bukkit.craftbukkit.CraftWorld;
 +import org.jetbrains.annotations.NotNull;
 +import org.spigotmc.SpigotConfig;
-+import java.lang.management.ManagementFactory;
-+import java.lang.management.ThreadMXBean;
-+import java.text.DecimalFormat;
-+import java.util.Arrays;
-+import java.util.Collections;
-+import java.util.List;
-+import java.util.stream.Collectors;
 +
 +import static java.lang.String.valueOf;
 +import static net.kyori.adventure.text.Component.text;
@@ -778,6 +780,12 @@ index 0000000000000000000000000000000000000000..ab107c45cd3142353db32c555d740872
 +
 +    protected ThreadedTpsCommand(@NotNull final String name) {
 +        super(name);
++    }
++
++    public static @NotNull Double simplifyNumber(@NotNull Float num, boolean min) {
++        DecimalFormat df = new DecimalFormat("###.##");
++        double r = Double.parseDouble(df.format(num.doubleValue()));
++        return min ? Math.min(r, 20.00) : r;
 +    }
 +
 +    @Override
@@ -803,60 +811,70 @@ index 0000000000000000000000000000000000000000..ab107c45cd3142353db32c555d740872
 +            min = max = median = 0.0f;
 +        }
 +
-+        TextComponent base = text("").color(color(0x4EA2ED));
-+        TextComponent header = text("==================================")
-+            .color(color(0x2F8FE9));
++        sendCollective((l) -> {
++            TextComponent base = text("").color(color(0x4EA2ED));
++            TextComponent header = text("==================================")
++                .color(color(0x2F8FE9));
 +
-+        sender.sendMessage(header);
-+        sender.sendMessage(base.append(text("Server Status Report").color(color(HEADER))));
++            l.add(header);
++            l.add(base.append(text("Server Status Report").color(color(HEADER))));
 +
-+        sendReportLine(sender, " Online Players: ", valueOf(server.getOnlinePlayers().size()), 0x4EA2ED, 0x2F8FE9);
-+        sendReportLine(sender, " Lowest Thread TPS: ", createColoredComponent(simplifyNumber(min, true).toString(), min, 20F), 0x4EA2ED);
-+        sendReportLine(sender, " Median Thread TPS: ", createColoredComponent(simplifyNumber(median, true).toString(), median, 20F), 0x4EA2ED);
-+        sendReportLine(sender, " Highest Thread TPS: ", createColoredComponent(simplifyNumber(max, true).toString(), max, 20F), 0x4EA2ED);
++            l.add(reportLine(" Online Players: ", valueOf(server.getOnlinePlayers().size()), 0x4EA2ED, 0x2F8FE9));
++            l.add(reportLine(" Lowest Thread TPS: ", createColoredComponent(simplifyNumber(min, true).toString(), min, 20F), 0x4EA2ED));
++            l.add(reportLine(" Median Thread TPS: ", createColoredComponent(simplifyNumber(median, true).toString(), median, 20F), 0x4EA2ED));
++            l.add(reportLine(" Highest Thread TPS: ", createColoredComponent(simplifyNumber(max, true).toString(), max, 20F), 0x4EA2ED));
++            l.add(reportLine(" MinecraftServer MSPT: ", MSPTCommand.getColor(MinecraftServer.getServer().tickTimes5s.getAverage()), 0x4EA2ED));
 +
-+        sender.sendMessage(header);
++            l.add(header);
 +
-+        sender.sendMessage(base.append(text(" Thread Analysis").color(color(HEADER))));
-+        sendReportLine(sender, " MAX Available threads: ", valueOf(Runtime.getRuntime().availableProcessors()), 0x4EA2ED, 0x2F8FE9);
-+        sendReportLine(sender, " Current Available threads: ", valueOf(Runtime.getRuntime().availableProcessors() - usingThreads()), 0x4EA2ED, 0x2F8FE9);
++            l.add(base.append(text(" Thread Analysis").color(color(HEADER))));
++            l.add(reportLine(" MAX Available threads: ", valueOf(Runtime.getRuntime().availableProcessors()), 0x4EA2ED, 0x2F8FE9));
++            l.add(reportLine(" Current Available threads: ", valueOf(Runtime.getRuntime().availableProcessors() - usingThreads()), 0x4EA2ED, 0x2F8FE9));
 +
-+        sender.sendMessage(base.append(text(" Util ThreadCount:").color(color(0x4EA2ED))));
-+        sendSubReportLine(sender, "NettyIO: ", valueOf(SpigotConfig.getInt("settings.netty-threads", 4)), 0x2F8FE9, VALUE);
-+        sendSubReportLine(sender, "Moonrise Workers: ", valueOf(MoonriseCommon.WORKER_POOL.getCoreThreads().length), 0x2F8FE9, VALUE);
++            l.add(base.append(text(" Util ThreadCount:").color(color(0x4EA2ED))));
++            l.add(subReportLine("NettyIO: ", valueOf(SpigotConfig.getInt("settings.netty-threads", 4)), 0x2F8FE9, VALUE));
++            l.add(subReportLine("Moonrise Workers: ", valueOf(MoonriseCommon.WORKER_POOL.getCoreThreads().length), 0x2F8FE9, VALUE));
 +
-+        sender.sendMessage(header);
++            l.add(header);
 +
-+        for (ServerLevel level : MinecraftServer.getThreadedServer().getThreadedWorlds().stream()
-+            .map(CraftWorld.class::cast)
-+            .map(CraftWorld::getHandle).collect(Collectors.toSet()))
-+        {
-+            int chunkCount = level.getChunkSource().getLoadedChunksCount();
-+            int playerCount = level.players().size();
-+            int entityCount = level.moonrise$getEntityLookup().getEntityCount();
++            for (ServerLevel level : MinecraftServer.getThreadedServer().getThreadedWorlds().stream()
++                .map(CraftWorld.class::cast)
++                .map(CraftWorld::getHandle).collect(Collectors.toSet())) {
++                int chunkCount = level.getChunkSource().getLoadedChunksCount();
++                int playerCount = level.players().size();
++                int entityCount = level.moonrise$getEntityLookup().getEntityCount();
 +
-+            sender.sendMessage(base.append(text(" - ThreadedLevel [")
-+                .append(text(level.dimension().location().toString()).color(color(0x96D6F0)))
-+                .append(text("]").color(color(0x4EA2ED)))));
++                l.add(base.append(text(" - ThreadedLevel [")
++                    .append(text(level.dimension().location().toString()).color(color(0x96D6F0)))
++                    .append(text("]").color(color(0x4EA2ED)))));
 +
-+            sender.sendMessage(base.append(Component.text("   ")).append(MSPTCommand.getColor((double) level.getNanoSecondsFromLastTick() / 1_000_000)
-+                .append(text(" MSPT at "))
-+                .append(createColoredComponent(simplifyNumber((float) level.recentTps[0], true).toString(), (float) level.recentTps[0], 20F))
-+                .append(text(" TPS"))));
++                l.add(base.append(Component.text("   ")).append(MSPTCommand.getColor(level.getNanoSecondsFromLastTick() / 1_000_000)
++                    .append(text(" MSPT at "))
++                    .append(createColoredComponent(simplifyNumber((float) level.recentTps[0], true).toString(), (float) level.recentTps[0], 20F))
++                    .append(text(" TPS"))));
 +
-+            float threadUtil = (float) (((level.getNanoSecondsFromLastTick() / 1_000_000.0) / 50) * 100);
-+            if (threadUtil > 100) threadUtil = 100;
++                float threadUtil = (float) (((level.getNanoSecondsFromLastTick() / 1_000_000.0) / 50) * 100);
++                if (threadUtil > 100) threadUtil = 100;
 +
-+            sender.sendMessage(base.append(text("   Chunks: ")
-+                .append(text(valueOf(chunkCount)).color(color(VALUE)))
-+                .append(text(" Players: ").append(text(valueOf(playerCount)).color(color(VALUE))))
-+                .append(text(" Entities: ").append(text(valueOf(entityCount)).color(color(VALUE))))
-+                .append(text(" Thread Utilization: ").append(createColoredUtilComponent(simplifyNumber(threadUtil, false) + "%", threadUtil)))));
-+        }
++                l.add(base.append(text("   Chunks: ")
++                    .append(text(valueOf(chunkCount)).color(color(VALUE)))
++                    .append(text(" Players: ").append(text(valueOf(playerCount)).color(color(VALUE))))
++                    .append(text(" Entities: ").append(text(valueOf(entityCount)).color(color(VALUE))))
++                    .append(text(" Thread Utilization: ").append(createColoredUtilComponent(simplifyNumber(threadUtil, false) + "%", threadUtil)))));
++            }
 +
-+        sender.sendMessage(header);
-+
++            l.add(header);
++            return l;
++        }, sender);
 +        return true;
++    }
++
++    public void sendCollective(@NotNull Function<List<TextComponent>, List<TextComponent>> builder, CommandSender sender) {
++        Component base = Component.text("").appendNewline();
++        for (final TextComponent textComponent : builder.apply(new ArrayList<>())) {
++            base = base.append(textComponent).appendNewline();
++        }
++        sender.sendMessage(base);
 +    }
 +
 +    @Override
@@ -864,17 +882,17 @@ index 0000000000000000000000000000000000000000..ab107c45cd3142353db32c555d740872
 +        return Collections.emptyList();
 +    }
 +
-+    private void sendReportLine(@NotNull CommandSender sender, String label, String value, int labelColor, int valueColor) {
-+        sender.sendMessage(text(label).color(color(labelColor))
++    private @NotNull TextComponent reportLine(String label, String value, int labelColor, int valueColor) {
++        return (text(label).color(color(labelColor))
 +            .append(text(value).color(color(valueColor))));
 +    }
 +
-+    private void sendReportLine(@NotNull CommandSender sender, String label, Component value, int labelColor) {
-+        sender.sendMessage(text(label).color(color(labelColor)).append(value));
++    private @NotNull TextComponent reportLine(String label, Component value, int labelColor) {
++        return (text(label).color(color(labelColor)).append(value));
 +    }
 +
-+    private void sendSubReportLine(@NotNull CommandSender sender, String label, String value, int labelColor, int valueColor) {
-+        sender.sendMessage(text("   " + label).color(color(labelColor))
++    private @NotNull TextComponent subReportLine(String label, String value, int labelColor, int valueColor) {
++        return (text("   " + label).color(color(labelColor))
 +            .append(text(value).color(color(valueColor))));
 +    }
 +
@@ -901,49 +919,44 @@ index 0000000000000000000000000000000000000000..ab107c45cd3142353db32c555d740872
 +
 +        return text(text).color(color(red, green, 0));
 +    }
++}
+diff --git a/src/main/java/io/github/dueris/canvas/server/LevelTickProcessor.java b/src/main/java/io/github/dueris/canvas/server/LevelTickProcessor.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..a9fcab341e55a23f5a8196a260573ebbadc3ba50
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/server/LevelTickProcessor.java
+@@ -0,0 +1,25 @@
++package io.github.dueris.canvas.server;
 +
-+    public static @NotNull Double simplifyNumber(@NotNull Float num, boolean min) {
-+        DecimalFormat df = new DecimalFormat("###.##");
-+        double r = Double.parseDouble(df.format(num.doubleValue()));
-+        return min ? Math.min(r, 20.00) : r;
++import java.util.Objects;
++import java.util.function.BiConsumer;
++import java.util.function.BooleanSupplier;
++import org.jetbrains.annotations.NotNull;
++
++@FunctionalInterface
++public interface LevelTickProcessor {
++    void process(BooleanSupplier shouldKeepTicking, int tickCount);
++
++    default void processAndThen(BooleanSupplier shouldKeepTicking, int tickCount, @NotNull Runnable postTick) {
++        process(shouldKeepTicking, tickCount);
++        postTick.run();
 +    }
-+}
-diff --git a/src/main/java/io/github/dueris/canvas/server/LevelContextBuilder.java b/src/main/java/io/github/dueris/canvas/server/LevelContextBuilder.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..5d339680b2e0f910a1993efd29c1763989b68d02
---- /dev/null
-+++ b/src/main/java/io/github/dueris/canvas/server/LevelContextBuilder.java
-@@ -0,0 +1,9 @@
-+package io.github.dueris.canvas.server;
 +
-+import java.util.function.Function;
++    default BiConsumer<BooleanSupplier, Integer> andThen(BiConsumer<? super BooleanSupplier, ? super Integer> after) {
++        Objects.requireNonNull(after);
 +
-+import io.github.dueris.canvas.server.level.ThreadedLevel;
-+import net.minecraft.server.level.ServerLevel;
-+
-+public interface LevelContextBuilder extends Function<ServerLevel, ThreadedLevel> {
-+}
-diff --git a/src/main/java/io/github/dueris/canvas/server/ThreadedInstance.java b/src/main/java/io/github/dueris/canvas/server/ThreadedInstance.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..8f1df9289279a23b2b127c089a6106e07bd188cf
---- /dev/null
-+++ b/src/main/java/io/github/dueris/canvas/server/ThreadedInstance.java
-@@ -0,0 +1,9 @@
-+package io.github.dueris.canvas.server;
-+
-+public interface ThreadedInstance {
-+    void tick();
-+
-+    String getName();
-+
-+    void spin();
++        return (l, r) -> {
++            process(l, r);
++            after.accept(l, r);
++        };
++    }
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..49980bf4b6a0dd3378525abcf6cd31671f4401fc
+index 0000000000000000000000000000000000000000..1db3a5a3cadd27ce72acea70144f781646657a88
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,205 @@
 +package io.github.dueris.canvas.server;
 +
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -978,14 +991,9 @@ index 0000000000000000000000000000000000000000..49980bf4b6a0dd3378525abcf6cd3167
 + */
 +public class ThreadedServer implements ThreadedMinecraftServer {
 +    public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
-+    public static BooleanSupplier shouldKeepTicking;
 +    public static final ThreadGroup serverThreadGroup = new ThreadGroup("ServerThreadGroup");
-+    private final List<CraftWorld> craftWorlds = new CopyOnWriteArrayList<>();
-+    private final MinecraftServer server;
-+    private ThreadedContextStage contextStage = ThreadedContextStage.NOT_STARTED_YET;
-+    private long tickSection;
++    public static BooleanSupplier shouldKeepTicking;
 +    private static int priority = 0;
-+    private boolean booted = false;
 +    public static Function<CraftWorld, Thread> spinner = (threadedInstance) -> {
 +        try {
 +            Thread levelThread = new TickThread(serverThreadGroup, threadedInstance.getHandle()::spin, "levelThread:" + threadedInstance.getName());
@@ -996,6 +1004,11 @@ index 0000000000000000000000000000000000000000..49980bf4b6a0dd3378525abcf6cd3167
 +            throw new RuntimeException("Unable to spin world '" + threadedInstance.getName() + "'!", throwable);
 +        }
 +    };
++    private final List<CraftWorld> craftWorlds = new CopyOnWriteArrayList<>();
++    private final MinecraftServer server;
++    private ThreadedContextStage contextStage = ThreadedContextStage.NOT_STARTED_YET;
++    private long tickSection;
++    private boolean booted = false;
 +
 +    public ThreadedServer(MinecraftServer server) {
 +        this.server = server;
@@ -1025,6 +1038,16 @@ index 0000000000000000000000000000000000000000..49980bf4b6a0dd3378525abcf6cd3167
 +        ThreadedContextChangeEvent event = new ThreadedContextChangeEvent(this.contextStage, stage, this);
 +        event.callEvent();
 +        contextStage = stage;
++    }
++
++    public boolean ownedByThreadedContext(Thread thread) {
++        for (final CraftWorld craftWorld : this.craftWorlds) {
++            if (craftWorld.getHandle().getRunningThread() == null) continue;
++            if (craftWorld.getHandle().getRunningThread().equals(thread)) {
++                return true;
++            }
++        }
++        return false;
 +    }
 +
 +    public MinecraftServer getServer() {
@@ -1139,6 +1162,22 @@ index 0000000000000000000000000000000000000000..49980bf4b6a0dd3378525abcf6cd3167
 +    }
 +
 +}
+diff --git a/src/main/java/io/github/dueris/canvas/server/VisibleAfterSpin.java b/src/main/java/io/github/dueris/canvas/server/VisibleAfterSpin.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..79c4e4e78d55e5fd8e05f559176617ec5b5009a5
+--- /dev/null
++++ b/src/main/java/io/github/dueris/canvas/server/VisibleAfterSpin.java
+@@ -0,0 +1,10 @@
++package io.github.dueris.canvas.server;
++
++import org.jetbrains.annotations.UnknownNullability;
++import java.lang.annotation.Retention;
++import java.lang.annotation.RetentionPolicy;
++
++@UnknownNullability
++@Retention(RetentionPolicy.SOURCE)
++public @interface VisibleAfterSpin {
++}
 diff --git a/src/main/java/io/github/dueris/canvas/server/level/LeveledEventLoop.java b/src/main/java/io/github/dueris/canvas/server/level/LeveledEventLoop.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..eba78e78b0a1b1120d8743d2d470f6317199a8d6
@@ -1241,54 +1280,293 @@ index 0000000000000000000000000000000000000000..eba78e78b0a1b1120d8743d2d470f631
 +        return level;
 +    }
 +}
-diff --git a/src/main/java/io/github/dueris/canvas/server/level/ThreadedLevel.java b/src/main/java/io/github/dueris/canvas/server/level/ThreadedLevel.java
+diff --git a/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java b/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..cc8e462506f10454d1185fcd83e1c4580d889f5e
+index 0000000000000000000000000000000000000000..c406bdf1366182f3b73385365bc142ed8b90c108
 --- /dev/null
-+++ b/src/main/java/io/github/dueris/canvas/server/level/ThreadedLevel.java
-@@ -0,0 +1,44 @@
++++ b/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java
+@@ -0,0 +1,283 @@
 +package io.github.dueris.canvas.server.level;
 +
-+import io.github.dueris.canvas.server.ThreadedInstance;
-+import io.github.dueris.canvas.server.ThreadedServer;
++import io.github.dueris.canvas.server.LevelTickProcessor;
++import io.github.dueris.canvas.server.VisibleAfterSpin;
++import io.github.dueris.canvas.util.MultiThreadBooleanLock;
++import java.nio.file.Path;
++import java.util.Arrays;
++import java.util.Queue;
++import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.concurrent.locks.LockSupport;
++import java.util.function.BooleanSupplier;
++import net.minecraft.CrashReport;
++import net.minecraft.ReportType;
++import net.minecraft.Util;
 +import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.TickTask;
 +import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.TimeUtil;
++import net.minecraft.util.debugchart.SampleLogger;
++import net.minecraft.util.debugchart.TpsDebugDimensions;
++import net.minecraft.util.thread.ReentrantBlockableEventLoop;
++import org.apache.logging.log4j.LogManager;
++import org.apache.logging.log4j.Logger;
 +import org.jetbrains.annotations.NotNull;
 +
-+public final class ThreadedLevel implements ThreadedInstance {
-+    private final ServerLevel level;
-+    private int tickCount = 0;
++public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<TickTask> {
++    private static final Logger LOGGER = LogManager.getLogger("MinecraftServerWorld");
++    public final double[] recentTps = new double[4];
++    public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
++    public final MinecraftServer.RollingAverage tps1 = new MinecraftServer.RollingAverage(60);
++    public final MinecraftServer.RollingAverage tps5 = new MinecraftServer.RollingAverage(60 * 5);
++    public final MinecraftServer.RollingAverage tps15 = new MinecraftServer.RollingAverage(60 * 15);
++    protected final Queue<Runnable> nextTickSchedule = new ConcurrentLinkedQueue<>();
++    private final long catchupTime = 0;
++    public int tickCount;
++    public boolean waitingForNextTick;
++    public long nextTickTimeNanos;
++    public long idleTimeNanos;
++    public boolean mayHaveDelayedTasks;
++    public long delayedTasksMaxNextTickTimeNanos;
++    public boolean lagging = false;
++    public boolean running = false;
++    private MinecraftServer server;
++    private Thread owner;
++    private long tickSection = 0;
++    private long lastOverloadWarningNanos;
++    private long taskExecutionStartNanos;
++    private long lastTick = 0;
++    private long lastNanoTickTime = 0L;
++    private long preTickNanos = 0L;
++    private long postTickNanos = 0L;
++    private long lastMidTickExecute;
++    private long lastMidTickExecuteFailure;
 +
-+    public ThreadedLevel(ServerLevel level) {
-+        this.level = level;
++    public MinecraftServerWorld(final String name) {
++        super(name);
 +    }
 +
-+    public @NotNull ThreadedServer getThreadedServer() {
-+        return MinecraftServer.getThreadedServer();
++
++    @Override
++    public @VisibleAfterSpin @NotNull Thread getRunningThread() {
++        return this.owner;
 +    }
 +
 +    @Override
-+    public void tick() {
-+        level.tick(ThreadedServer.shouldKeepTicking, tickCount);
++    public void managedBlock(@NotNull BooleanSupplier stopCondition) {
++        super.managedBlock(() -> MinecraftServer.throwIfFatalException() && stopCondition.getAsBoolean());
 +    }
 +
-+    @Override
-+    public @NotNull String getName() {
-+        return level.dimension().location().toString();
++    public double getNanoSecondsFromLastTick() {
++        return this.lastNanoTickTime;
 +    }
 +
-+    @Override
 +    public void spin() {
-+        this.level.prepareContextOnThread(level);
-+        this.level.spin();
++        try {
++            if (!(this instanceof ServerLevel serverLevel)) {
++                throw new RuntimeException("MinecraftServerWorld#spin() was called from a non-ServerLevel instance!");
++            }
++            LOGGER.info("[ThreadedServer] Spinning ServerLevel, {}", serverLevel.dimension().location());
++
++            this.running = true;
++            this.server = serverLevel.getServer();
++            this.owner = Thread.currentThread();
++            serverLevel.chunkSource.mainThread = this.owner; // Point main thread executor to level threads
++            Arrays.fill(this.recentTps, 20);
++
++            MultiThreadBooleanLock tickLock = server.tickLock;
++            try {
++                // Lock down this thread until the MinecraftServer starts the first tick
++                tickLock.waitUntilTrue();
++            } catch (InterruptedException e) {
++                throw new RuntimeException("An unexpected exception occurred when locking the level thread!", e);
++            }
++
++            tickSection = Util.getNanos();
++            nextTickTimeNanos = Util.getNanos();
++            while (running) {
++                this.tickSection = blockLevel(tickSection, serverLevel, serverLevel::tick);
++            }
++        } catch (Throwable throwable) {
++            if (throwable instanceof ThreadDeath) {
++                MinecraftServer.LOGGER.error("World thread terminated by WatchDog due to hard crash", throwable);
++                return;
++            }
++            MinecraftServer.LOGGER.error("Encountered an unexpected exception", throwable);
++            CrashReport crashreport = MinecraftServer.constructOrExtractCrashReport(throwable);
++
++            this.server.fillSystemReport(crashreport.getSystemReport());
++            Path path = this.server.getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
++
++            if (crashreport.saveToFile(path, ReportType.CRASH)) {
++                MinecraftServer.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
++            } else {
++                MinecraftServer.LOGGER.error("We were unable to save this crash report to disk.");
++            }
++
++            this.server.onServerCrash(crashreport);
++
++            try {
++                this.server.stopped = true;
++                this.server.stopServer();
++            } catch (Throwable throwable3) {
++                MinecraftServer.LOGGER.error("Exception stopping the server", throwable3);
++            } finally {
++                if (this.server.services.profileCache() != null) {
++                    this.server.services.profileCache().clearExecutor();
++                }
++            }
++        }
++
++    }
++
++    public void stopSpin() {
++        running = false;
++    }
++
++    public long getTickSection() {
++        return tickSection;
++    }
++
++    public long blockLevel(long tickSection, final ServerLevel serverLevel, final @NotNull LevelTickProcessor tickProcessor) {
++        long currentTime;
++        long i;
++
++        if (!this.server.isPaused() && this.server.tickRateManager().isSprinting() && this.server.tickRateManager().checkShouldSprintThisTick()) {
++            i = 0L;
++            this.nextTickTimeNanos = Util.getNanos();
++            this.lastOverloadWarningNanos = this.nextTickTimeNanos;
++        } else {
++            i = this.server.tickRateManager().nanosecondsPerTick();
++            long j = Util.getNanos() - this.nextTickTimeNanos;
++
++            if (j > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * i && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * i) {
++                long k = j / i;
++
++                if (this.server.server.getWarnOnOverload()) {
++                    MinecraftServer.LOGGER.warn("Can't keep up! Is the level overloaded? Running {}ms or {} ticks behind on level-thread: {}", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k, serverLevel.dimension().location());
++                }
++                this.nextTickTimeNanos += k * i;
++                this.lastOverloadWarningNanos = this.nextTickTimeNanos;
++            }
++        }
++
++        currentTime = Util.getNanos();
++        if (++MinecraftServer.currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
++            final long diff = currentTime - tickSection;
++            final java.math.BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
++            tps5s.add(currentTps, diff);
++            tps1.add(currentTps, diff);
++            tps5.add(currentTps, diff);
++            tps15.add(currentTps, diff);
++
++            this.recentTps[0] = tps5s.getAverage();
++            this.recentTps[1] = tps1.getAverage();
++            this.recentTps[2] = tps5.getAverage();
++            this.recentTps[3] = tps15.getAverage();
++            lagging = recentTps[0] < org.purpurmc.purpur.PurpurConfig.laggingThreshold;
++            tickSection = currentTime;
++        }
++
++        boolean flag = i == 0L;
++
++        lastTick = currentTime;
++        postTickNanos = i;
++        this.nextTickTimeNanos += i;
++
++        this.preTickNanos = Util.getNanos();
++        tickProcessor.processAndThen(flag ? () -> false : this::haveTime, tickCount, this::postTick);
++
++        return tickSection;
++    }
++
++    private void postTick() {
++        this.lastNanoTickTime = Util.getNanos() - preTickNanos;
++
++        this.mayHaveDelayedTasks = true;
++        this.delayedTasksMaxNextTickTimeNanos = Math.max(Util.getNanos() + postTickNanos, this.nextTickTimeNanos);
++        if (!org.purpurmc.purpur.PurpurConfig.tpsCatchup) {
++            this.nextTickTimeNanos = lastTick + postTickNanos;
++            this.delayedTasksMaxNextTickTimeNanos = nextTickTimeNanos;
++        }
++        this.startMeasuringTaskExecutionTime();
++        this.waitUntilNextTick();
++        this.finishMeasuringTaskExecutionTime();
++    }
++
++    private void startMeasuringTaskExecutionTime() {
++        if (this.server.isTickTimeLoggingEnabled()) {
++            this.taskExecutionStartNanos = Util.getNanos();
++            this.idleTimeNanos = 0L;
++        }
++
++    }
++
++    private void finishMeasuringTaskExecutionTime() {
++        if (this.server.isTickTimeLoggingEnabled()) {
++            SampleLogger samplelogger = this.server.getTickTimeLogger();
++
++            samplelogger.logPartialSample(Util.getNanos() - this.taskExecutionStartNanos - this.idleTimeNanos, TpsDebugDimensions.SCHEDULED_TASKS.ordinal());
++            samplelogger.logPartialSample(this.idleTimeNanos, TpsDebugDimensions.IDLE.ordinal());
++        }
++
++    }
++
++    public void scheduleNextTick(Runnable runnable) {
++        nextTickSchedule.add(runnable);
++    }
++
++    protected void waitUntilNextTick() {
++        this.runAllTasks();
++        this.waitingForNextTick = true;
++
++        try {
++            this.managedBlock(() -> !this.haveTime());
++        } finally {
++            this.waitingForNextTick = false;
++        }
++
++    }
++
++    @Override
++    public void waitForTasks() {
++        boolean flag = this.server.isTickTimeLoggingEnabled();
++        long i = flag ? Util.getNanos() : 0L;
++        long j = this.waitingForNextTick ? this.nextTickTimeNanos - Util.getNanos() : 100000L;
++
++        LockSupport.parkNanos("waiting for tasks", j);
++        if (flag) {
++            this.idleTimeNanos += Util.getNanos() - i;
++        }
++
++    }
++
++    @Override
++    public @NotNull TickTask wrapRunnable(@NotNull Runnable runnable) {
++        if (this.server.hasStopped && Thread.currentThread().equals(server.shutdownThread)) {
++            runnable.run();
++            runnable = () -> {
++            };
++        }
++        return new TickTask(this.tickCount, runnable);
++    }
++
++    protected boolean shouldRun(@NotNull TickTask ticktask) {
++        return ticktask.getTick() + 3 < this.tickCount || this.haveTime();
++    }
++
++    protected boolean haveTime() {
++        return this.server.forceTicks || this.runningTask() || Util.getNanos() < (this.mayHaveDelayedTasks ? this.delayedTasksMaxNextTickTimeNanos : this.nextTickTimeNanos);
++    }
++
++    @Override
++    public boolean pollTask() {
++        boolean flag = super.pollTask();
++
++        this.mayHaveDelayedTasks = flag;
++        return flag;
 +    }
 +
 +    public ServerLevel level() {
-+        return level;
-+    }
-+
-+    public int getTickCount() {
-+        return tickCount;
++        return (ServerLevel) this;
 +    }
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/util/ConcurrentLinkedDequeTree.java b/src/main/java/io/github/dueris/canvas/util/ConcurrentLinkedDequeTree.java
@@ -1380,7 +1658,7 @@ index 8b5293b0c696ef21d0101493ffa41b60bf0bc86b..4d061ceba635ab6fc1563026f6f10e16
      }
  }
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b03dcd9b0 100644
+index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..ae6fa3cbbc128a7a7f222ee07388864d883946e7 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -3,9 +3,6 @@ package net.minecraft.server;
@@ -1492,7 +1770,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
          }, "Server thread");
  
          thread.setUncaughtExceptionHandler((thread1, throwable) -> {
-@@ -360,7 +371,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -360,16 +371,16 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      // Paper start - rewrite chunk system
@@ -1501,6 +1779,18 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
  
      @Override
      public final void moonrise$setChunkSystemCrash(final Throwable throwable) {
+         this.chunkSystemCrash = throwable;
+     }
+ 
+-    private static final long CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME = 25L * 1000L; // 25us
+-    private static final long MAX_CHUNK_EXEC_TIME = 1000L; // 1us
+-    private static final long TASK_EXECUTION_FAILURE_BACKOFF = 5L * 1000L; // 5us
++    public static final long CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME = 25L * 1000L; // 25us // Canvas - private -> public
++    public static final long MAX_CHUNK_EXEC_TIME = 1000L; // 1us // Canvas - private -> public
++    public static final long TASK_EXECUTION_FAILURE_BACKOFF = 5L * 1000L; // 5us // Canvas - private -> public
+ 
+     private long lastMidTickExecute;
+     private long lastMidTickExecuteFailure;
 @@ -521,7 +532,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          persistentStateManager.computeIfAbsent(this.getScoreboard().dataFactory(), "scoreboard");
      }
@@ -1519,7 +1809,35 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
      private boolean hasLoggedStop = false; // Paper - Debugging
      public volatile boolean hasFullyShutdown = false; // Paper
      private final Object stopLock = new Object();
-@@ -1210,7 +1221,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1056,7 +1067,26 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             this.cancelRecordingMetrics();
+         }
+ 
+-        MinecraftServer.LOGGER.info("Stopping server");
++        // Canvas start
++        ThreadedServer.LOGGER.info("Halting level-threads");
++        long startNanos = Util.getNanos();
++        Thread currentThread = Thread.currentThread();
++        for (final ServerLevel level : this.getAllLevels()) {
++            if (level.running) {
++                level.stopSpin();
++                if (currentThread.equals(level.getRunningThread())) {
++                    continue;
++                }
++                try {
++                    level.getRunningThread().join();
++                } catch (InterruptedException e) {
++                    throw new RuntimeException(e);
++                }
++            }
++        }
++        long nanoTickTime = Util.getNanos() - startNanos;
++        ThreadedServer.LOGGER.info("Successfully halted levels in {}ms", (nanoTickTime / 1_000_000));
++        // Canvas end
+         Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
+         // Purpur start - UPnP Port Forwarding
+         if (upnp) {
+@@ -1210,7 +1240,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          private final java.math.BigDecimal[] samples;
          private final long[] times;
  
@@ -1528,7 +1846,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
              this.size = size;
              this.time = size * SEC_IN_NANO;
              this.total = dec(TPS).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
-@@ -1241,11 +1252,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1241,11 +1271,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              return total.divide(dec(time), 30, java.math.RoundingMode.HALF_UP).doubleValue();
          }
      }
@@ -1543,7 +1861,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
          try {
              long serverStartTime = Util.getNanos(); // Paper
              if (!this.initServer()) {
-@@ -1463,6 +1476,121 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1463,6 +1495,121 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          }
  
      }
@@ -1665,7 +1983,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
  
      private void logFullTickTime() {
          long i = Util.getNanos();
-@@ -1492,7 +1620,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1492,7 +1639,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
      }
  
@@ -1674,7 +1992,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
          ReportedException reportedexception = null;
  
          for (Throwable throwable1 = throwable; throwable1 != null; throwable1 = throwable1.getCause()) {
-@@ -1624,7 +1752,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1624,7 +1771,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          super.doRunTask(ticktask);
      }
  
@@ -1683,7 +2001,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
          Optional<Path> optional = Optional.of(this.getFile("server-icon.png")).filter((path) -> {
              return Files.isRegularFile(path, new LinkOption[0]);
          }).or(() -> {
-@@ -1692,10 +1820,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1692,10 +1839,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                  while ((task = this.processQueue.poll()) != null) {
                      task.run();
                  }
@@ -1698,7 +2016,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
                  // Paper end - avoid issues with certain tasks not processing during sleep
                  this.server.spark.executeMainThreadTasks(); // Paper - spark
                  this.tickConnection();
-@@ -1809,11 +1939,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1809,11 +1958,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
      }
  
@@ -1712,7 +2030,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
          ServerStatus.Players serverping_serverpingplayersample = this.buildPlayerStatus();
  
          return new ServerStatus(io.papermc.paper.adventure.PaperAdventure.asVanilla(this.motd), Optional.of(serverping_serverpingplayersample), Optional.of(ServerStatus.Version.current()), Optional.ofNullable(this.statusIcon), this.enforceSecureProfile()); // Paper - Adventure
-@@ -1876,7 +2006,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1876,7 +2025,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
          // Send time updates to everyone, it will get the right time from the world the player is in.
          // Paper start - Perf: Optimize time updates
@@ -1722,7 +2040,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
              final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
              final long dayTime = level.getDayTime();
              long worldTime = level.getGameTime();
-@@ -1892,9 +2023,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1892,9 +2042,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                  entityplayer.connection.send(packet); // Add support for per player time
                  // Paper end - Perf: Optimize time updates
              }
@@ -1734,7 +2052,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
          Iterator iterator = this.getAllLevels().iterator(); // Paper - Throw exception on world create while being ticked; move down
          while (iterator.hasNext()) {
              ServerLevel worldserver = (ServerLevel) iterator.next();
-@@ -1915,7 +2046,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1915,7 +2065,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                  this.synchronizeTime(worldserver);
                  gameprofilerfiller.pop();
              }
@@ -1743,7 +2061,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
  
              gameprofilerfiller.push("tick");
  
-@@ -1932,7 +2063,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1932,7 +2082,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              gameprofilerfiller.pop();
              worldserver.explosionDensityCache.clear(); // Paper - Optimize explosions
          }
@@ -1752,7 +2070,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
  
          gameprofilerfiller.popPush("connection");
          this.tickConnection();
-@@ -1949,7 +2080,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1949,7 +2099,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          }
  
          gameprofilerfiller.popPush("send chunks");
@@ -1761,7 +2079,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
  
          while (iterator.hasNext()) {
              ServerPlayer entityplayer = (ServerPlayer) iterator.next();
-@@ -2019,6 +2150,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2019,6 +2169,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.put(level.dimension(), level);
          this.levels = Collections.unmodifiableMap(newLevels);
@@ -1769,7 +2087,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
      }
  
      public void removeLevel(ServerLevel level) {
-@@ -2026,6 +2158,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2026,6 +2177,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.remove(level.dimension());
          this.levels = Collections.unmodifiableMap(newLevels);
@@ -1777,7 +2095,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..596109662103092bf9d01262a924a25b
      }
      // CraftBukkit end
  
-@@ -2926,6 +3059,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2926,6 +3078,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      public static MinecraftServer getServer() {
          return SERVER; // Paper
      }
@@ -1966,7 +2284,7 @@ index cfeeddf2cb4ff50dbc29c6913e78ca1dee076790..4c477ab3529a423cc8fb752c58e3b702
          ChunkMap.TrackedEntity playerchunkmap_entitytracker;
  
 diff --git a/src/main/java/net/minecraft/server/level/ServerChunkCache.java b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
-index 1c87904bb99cc40bafc9357fb2fc1703b759c3df..bf352aa52f9f3584972c7cd15083545f6dbba7dd 100644
+index 1c87904bb99cc40bafc9357fb2fc1703b759c3df..d723228eee3d38f115d5e8645a09b4226bf1491c 100644
 --- a/src/main/java/net/minecraft/server/level/ServerChunkCache.java
 +++ b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
 @@ -3,6 +3,7 @@ package net.minecraft.server.level;
@@ -1977,6 +2295,15 @@ index 1c87904bb99cc40bafc9357fb2fc1703b759c3df..bf352aa52f9f3584972c7cd15083545f
  import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
  import java.io.IOException;
  import java.nio.file.Path;
+@@ -57,7 +58,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private final DistanceManager distanceManager;
+     private final ServerLevel level;
+-    public final Thread mainThread;
++    public Thread mainThread; // Canvas - mutable
+     final ThreadedLevelLightEngine lightEngine;
+     public final ServerChunkCache.MainThreadExecutor mainThreadProcessor;
+     public final ChunkMap chunkMap;
 @@ -70,7 +71,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
      private final ChunkStatus[] lastChunkStatus = new ChunkStatus[4];
      private final ChunkAccess[] lastChunk = new ChunkAccess[4];
@@ -2016,7 +2343,7 @@ index 1c87904bb99cc40bafc9357fb2fc1703b759c3df..bf352aa52f9f3584972c7cd15083545f
  
              if (!this.isChunkNearPlayer(chunkMap, levelChunk.getPos(), levelChunk)) {
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..280580bfb621f76c128fdd99f9607ed49730f058 100644
+index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..47be116639ee8224873d1eff08bf1e2c3eab2b77 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -5,6 +5,11 @@ import com.google.common.collect.Lists;
@@ -2127,184 +2454,13 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..280580bfb621f76c128fdd99f9607ed4
  
      // CraftBukkit start
      public final LevelStorageSource.LevelStorageAccess convertable;
-@@ -730,8 +749,206 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -730,8 +749,35 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      public StructureManager structureManager() {
          return this.structureManager;
      }
 +    // Canvas start - Multithreaded Dimension Ticking
  
 -    public void tick(BooleanSupplier shouldKeepTicking) {
-+    private long tickSection = 0;
-+    private long lastOverloadWarningNanos;
-+    public final double[] recentTps = new double[4];
-+    private long taskExecutionStartNanos;
-+    private long lastTick = 0;
-+    private long catchupTime = 0;
-+    public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
-+    public final MinecraftServer.RollingAverage tps1 = new MinecraftServer.RollingAverage(60);
-+    public final MinecraftServer.RollingAverage tps5 = new MinecraftServer.RollingAverage(60 * 5);
-+    public final MinecraftServer.RollingAverage tps15 = new MinecraftServer.RollingAverage(60 * 15);
-+    public boolean lagging = false;
-+    public boolean running = true;
-+    private long lastNanoTickTime = 0L;
-+
-+    public double getNanoSecondsFromLastTick() {
-+        return this.lastNanoTickTime;
-+    }
-+
-+    public void spin() {
-+        try {
-+            LOGGER.info("[ThreadedServer] Spinning ServerLevel, {}", this.dimension().location());
-+
-+            Arrays.fill(this.recentTps, 20);
-+
-+            MultiThreadBooleanLock tickLock = server.tickLock;
-+            try {
-+                // Lock down this thread until the MinecraftServer starts the first tick
-+                tickLock.waitUntilTrue();
-+            } catch (InterruptedException e) {
-+                throw new RuntimeException("An unexpected exception occurred when locking the level thread!", e);
-+            }
-+
-+            tickSection = Util.getNanos();
-+            nextTickTimeNanos = Util.getNanos();
-+            while (this.server.isRunning() && running) {
-+                this.tickSection = tickLevel(tickSection);
-+            }
-+        } catch (Throwable throwable) {
-+            if (throwable instanceof ThreadDeath) {
-+                MinecraftServer.LOGGER.error("World thread terminated by WatchDog due to hard crash", throwable);
-+                return;
-+            }
-+            MinecraftServer.LOGGER.error("Encountered an unexpected exception", throwable);
-+            CrashReport crashreport = MinecraftServer.constructOrExtractCrashReport(throwable);
-+
-+            this.server.fillSystemReport(crashreport.getSystemReport());
-+            Path path = this.server.getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
-+
-+            if (crashreport.saveToFile(path, ReportType.CRASH)) {
-+                MinecraftServer.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
-+            } else {
-+                MinecraftServer.LOGGER.error("We were unable to save this crash report to disk.");
-+            }
-+
-+            this.server.onServerCrash(crashreport);
-+
-+            try {
-+                this.server.stopped = true;
-+                this.server.stopServer();
-+            } catch (Throwable throwable3) {
-+                MinecraftServer.LOGGER.error("Exception stopping the server", throwable3);
-+            } finally {
-+                if (this.server.services.profileCache() != null) {
-+                    this.server.services.profileCache().clearExecutor();
-+                }
-+            }
-+        }
-+
-+    }
-+
-+    public void stopSpin() {
-+        running = false;
-+    }
-+
-+    public long getTickSection() {
-+        return tickSection;
-+    }
-+
-+    public long tickLevel(long tickSection) {
-+        long currentTime;
-+        long i;
-+
-+        if (!this.server.isPaused() && this.server.tickRateManager().isSprinting() && this.server.tickRateManager().checkShouldSprintThisTick()) {
-+            i = 0L;
-+            this.nextTickTimeNanos = Util.getNanos();
-+            this.lastOverloadWarningNanos = this.nextTickTimeNanos;
-+        } else {
-+            i = this.server.tickRateManager().nanosecondsPerTick();
-+            long j = Util.getNanos() - this.nextTickTimeNanos;
-+
-+            if (j > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * i && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * i) {
-+                long k = j / i;
-+
-+                if (this.server.server.getWarnOnOverload()) {
-+                    MinecraftServer.LOGGER.warn("Can't keep up! Is the level overloaded? Running {}ms or {} ticks behind on level-thread: {}", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k, this.dimension().location());
-+                }
-+                this.nextTickTimeNanos += k * i;
-+                this.lastOverloadWarningNanos = this.nextTickTimeNanos;
-+            }
-+        }
-+
-+        currentTime = Util.getNanos();
-+        if (++MinecraftServer.currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
-+            final long diff = currentTime - tickSection;
-+            final java.math.BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
-+            tps5s.add(currentTps, diff);
-+            tps1.add(currentTps, diff);
-+            tps5.add(currentTps, diff);
-+            tps15.add(currentTps, diff);
-+
-+            this.recentTps[0] = tps5s.getAverage();
-+            this.recentTps[1] = tps1.getAverage();
-+            this.recentTps[2] = tps5.getAverage();
-+            this.recentTps[3] = tps15.getAverage();
-+            lagging = recentTps[0] < org.purpurmc.purpur.PurpurConfig.laggingThreshold;
-+            tickSection = currentTime;
-+        }
-+
-+        boolean flag = i == 0L;
-+
-+        lastTick = currentTime;
-+        this.nextTickTimeNanos += i;
-+
-+        try {
-+            try {
-+                long iA = Util.getNanos();
-+                this.tick(flag ? () -> false : this::haveTime, tickCount);
-+                this.lastNanoTickTime = Util.getNanos() - iA;
-+
-+                this.mayHaveDelayedTasks = true;
-+                this.delayedTasksMaxNextTickTimeNanos = Math.max(Util.getNanos() + i, this.nextTickTimeNanos);
-+                if (!org.purpurmc.purpur.PurpurConfig.tpsCatchup) {
-+                    this.nextTickTimeNanos = currentTime + i;
-+                    this.delayedTasksMaxNextTickTimeNanos = nextTickTimeNanos;
-+                }
-+                this.startMeasuringTaskExecutionTime();
-+                this.waitUntilNextTick();
-+                this.finishMeasuringTaskExecutionTime();
-+            } catch (Throwable throwable) {
-+                throw throwable;
-+            }
-+
-+        } finally {
-+        }
-+
-+        return tickSection;
-+    }
-+
-+    private void startMeasuringTaskExecutionTime() {
-+        if (this.server.isTickTimeLoggingEnabled()) {
-+            this.taskExecutionStartNanos = Util.getNanos();
-+            this.idleTimeNanos = 0L;
-+        }
-+
-+    }
-+
-+    private void finishMeasuringTaskExecutionTime() {
-+        if (this.server.isTickTimeLoggingEnabled()) {
-+            SampleLogger samplelogger = this.server.getTickTimeLogger();
-+
-+            samplelogger.logPartialSample(Util.getNanos() - this.taskExecutionStartNanos - this.idleTimeNanos, TpsDebugDimensions.SCHEDULED_TASKS.ordinal());
-+            samplelogger.logPartialSample(this.idleTimeNanos, TpsDebugDimensions.IDLE.ordinal());
-+        }
-+
-+    }
-+
-+    private final Queue<Runnable> nextTickSchedule = new ConcurrentLinkedQueue<>();
-+    public void scheduleNextTick(Runnable runnable) {
-+        nextTickSchedule.add(runnable);
-+    }
-+
 +    public void tick(BooleanSupplier shouldKeepTicking, int tickCount) {
 +        if (!nextTickSchedule.isEmpty()) {
 +            nextTickSchedule.remove().run();
@@ -2335,7 +2491,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..280580bfb621f76c128fdd99f9607ed4
          ProfilerFiller gameprofilerfiller = Profiler.get();
  
          this.handlingTick = true;
-@@ -844,6 +1061,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -844,6 +890,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
          gameprofilerfiller.push("entityManagement");
          // Paper - rewrite chunk system
          gameprofilerfiller.pop();
@@ -2343,7 +2499,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..280580bfb621f76c128fdd99f9607ed4
      }
  
      @Override
-@@ -2626,7 +2844,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -2626,7 +2673,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
  
      @Override
@@ -2507,27 +2663,53 @@ index c00a48fef499bc3b18a92010d88b32f10c839898..d839392b219672c7ed82b82f32369d80
          }
          // Paper end - rewrite chunk system
 diff --git a/src/main/java/net/minecraft/world/level/Level.java b/src/main/java/net/minecraft/world/level/Level.java
-index 1aa251cfdf941027f529ce02f0c16c815ade296f..eef1b72b3bc292c3cafac614d548cb1babd320b1 100644
+index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fed0f06ffc 100644
 --- a/src/main/java/net/minecraft/world/level/Level.java
 +++ b/src/main/java/net/minecraft/world/level/Level.java
-@@ -10,6 +10,7 @@ import java.util.Objects;
+@@ -10,9 +10,9 @@ import java.util.Objects;
  import java.util.function.Consumer;
  import java.util.function.Predicate;
  import javax.annotation.Nullable;
-+import io.github.dueris.canvas.server.level.LeveledEventLoop;
++import io.github.dueris.canvas.server.level.MinecraftServerWorld;
  import net.minecraft.CrashReport;
  import net.minecraft.CrashReportCategory;
- import net.minecraft.ReportedException;
-@@ -106,7 +107,7 @@ import org.bukkit.entity.SpawnCategory;
+-import net.minecraft.ReportedException;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.Holder;
+@@ -25,14 +25,12 @@ import net.minecraft.core.registries.Registries;
+ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.resources.ResourceLocation;
+-import io.papermc.paper.util.MCUtil;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.FullChunkStatus;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+-import net.minecraft.util.AbortableIterationConsumer;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+@@ -44,7 +42,6 @@ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.damagesource.DamageSources;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.boss.EnderDragonPart;
+-import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+ import net.minecraft.world.entity.item.ItemEntity;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
+@@ -106,7 +103,7 @@ import org.bukkit.entity.SpawnCategory;
  import org.bukkit.event.block.BlockPhysicsEvent;
  // CraftBukkit end
  
 -public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel, ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemEntityGetter { // Paper - rewrite chunk system // Paper - optimise collisions
-+public abstract class Level extends LeveledEventLoop implements LevelAccessor, AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel, ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemEntityGetter { // Paper - rewrite chunk system // Paper - optimise collisions // Canvas - Multithreaded Dimension Ticking
++public abstract class Level extends MinecraftServerWorld implements LevelAccessor, AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel, ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemEntityGetter { // Paper - rewrite chunk system // Paper - optimise collisions // Canvas - Multithreaded Dimension Ticking
  
      public static final Codec<ResourceKey<Level>> RESOURCE_KEY_CODEC = ResourceKey.codec(Registries.DIMENSION);
      public static final ResourceKey<Level> OVERWORLD = ResourceKey.create(Registries.DIMENSION, ResourceLocation.withDefaultNamespace("overworld"));
-@@ -875,7 +876,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+@@ -875,7 +872,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
      }
      // Paper end - optimise random ticking
  
@@ -2537,7 +2719,7 @@ index 1aa251cfdf941027f529ce02f0c16c815ade296f..eef1b72b3bc292c3cafac614d548cb1b
          // Paper start - getblock optimisations - cache world height/sections
          final DimensionType dimType = holder.value();
          this.minY = dimType.minY();
-@@ -1685,8 +1687,15 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+@@ -1685,8 +1683,15 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
  
      }
  

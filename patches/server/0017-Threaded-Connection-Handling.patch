@@ -1,18 +1,18 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Fri, 27 Dec 2024 21:34:31 -0800
+Date: Thu, 2 Jan 2025 00:33:29 -0800
 Subject: [PATCH] Threaded Connection Handling
 
 
 diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
-index 075477b84014b23969e15412d89ac993cce05c64..b854457fda79310106ade33d21c3c4165cba456d 100644
+index 075477b84014b23969e15412d89ac993cce05c64..7cdb8c9e43cb33920ecddb48ce910775723ac71f 100644
 --- a/src/main/java/io/github/dueris/canvas/Config.java
 +++ b/src/main/java/io/github/dueris/canvas/Config.java
 @@ -15,6 +15,7 @@ public class Config implements JsonConfig {
      public Pathfinding pathfinding = new Pathfinding();
      public EntityTracking entityTracking = new EntityTracking();
      public boolean enableAsyncSpawning = true;
-+    public boolean enableThreadedConnections = true;
++    public boolean enableThreadedConnections = false;
  
      public static Config init() {
          final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
@@ -61,7 +61,7 @@ index 8661c1b1cfe2b3db000e1f08814fd4409c4b7fab..f37c4e6be74c1f02cb4ed0556010ae8e
      public void channelInactive(ChannelHandlerContext channelhandlercontext) {
          this.disconnect((Component) Component.translatable("disconnect.endOfStream"));
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index a35f3ab56599fdd06aafd9ee2b182a2e25ae5d86..a43f7c1696fca5232c3935b5a0c74580c86c26c7 100644
+index 046e1d7061c9b79018daad904a36157eb5343915..d92ab36613b0b0b895a5b22a35b30b6a8989df03 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -76,6 +76,7 @@ import net.minecraft.core.RegistryAccess;
@@ -72,7 +72,7 @@ index a35f3ab56599fdd06aafd9ee2b182a2e25ae5d86..a43f7c1696fca5232c3935b5a0c74580
  import net.minecraft.network.chat.ChatDecorator;
  import net.minecraft.network.chat.ChatType;
  import net.minecraft.network.chat.Component;
-@@ -1976,9 +1977,18 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1995,9 +1996,18 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      protected void tickChildren(BooleanSupplier shouldKeepTicking) {
          ProfilerFiller gameprofilerfiller = Profiler.get();
  
@@ -93,7 +93,7 @@ index a35f3ab56599fdd06aafd9ee2b182a2e25ae5d86..a43f7c1696fca5232c3935b5a0c74580
          this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
          // Paper start - Folia scheduler API
          ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler) Bukkit.getGlobalRegionScheduler()).tick();
-@@ -2084,12 +2094,22 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2103,12 +2113,22 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          gameprofilerfiller.popPush("send chunks");
          Iterator<ServerPlayer> iterator = this.playerList.getPlayers().iterator(); // Canvas - new iterable var since old doesnt exist anymore
  
@@ -118,7 +118,7 @@ index a35f3ab56599fdd06aafd9ee2b182a2e25ae5d86..a43f7c1696fca5232c3935b5a0c74580
          gameprofilerfiller.pop();
      }
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 280580bfb621f76c128fdd99f9607ed49730f058..c7b8e5796148d5bd5e593051c8a4b200974d5bec 100644
+index 47be116639ee8224873d1eff08bf1e2c3eab2b77..92463766fa78582e32e92e1f0f15bb0d97ed1bd5 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -53,6 +53,7 @@ import javax.annotation.Nullable;
@@ -150,27 +150,11 @@ index 280580bfb621f76c128fdd99f9607ed49730f058..c7b8e5796148d5bd5e593051c8a4b200
  import net.minecraft.server.players.SleepStatus;
  import net.minecraft.sounds.SoundEvent;
  import net.minecraft.sounds.SoundSource;
-@@ -876,8 +881,15 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
- 
-         try {
-             try {
-+                for (final ServerPlayer player : this.players) {
-+                    player.connection.suspendFlushing();
-+                }
-                 long iA = Util.getNanos();
-                 this.tick(flag ? () -> false : this::haveTime, tickCount);
-+                for (final ServerPlayer player : this.players) {
-+                    player.connection.chunkSender.sendNextChunks(player);
-+                    player.connection.resumeFlushing();
-+                }
-                 this.lastNanoTickTime = Util.getNanos() - iA;
- 
-                 this.mayHaveDelayedTasks = true;
-@@ -917,6 +929,21 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
- 
+@@ -751,10 +756,55 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
+     // Canvas start - Multithreaded Dimension Ticking
  
-+    private final List<Connection> activeConnections = new ObjectArrayList<>();
++        private final List<Connection> activeConnections = new ObjectArrayList<>();
 +    private final Object lock = new Object();
 +
 +    public void notifyNewConnection(Connection connection) {
@@ -185,10 +169,7 @@ index 280580bfb621f76c128fdd99f9607ed49730f058..c7b8e5796148d5bd5e593051c8a4b200
 +        }
 +    }
 +
-     private final Queue<Runnable> nextTickSchedule = new ConcurrentLinkedQueue<>();
-     public void scheduleNextTick(Runnable runnable) {
-         nextTickSchedule.add(runnable);
-@@ -926,6 +953,36 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     public void tick(BooleanSupplier shouldKeepTicking, int tickCount) {
          if (!nextTickSchedule.isEmpty()) {
              nextTickSchedule.remove().run();
          }
