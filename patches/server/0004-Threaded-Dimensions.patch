@@ -4,134 +4,6 @@ Date: Thu, 2 Jan 2025 19:02:28 -0800
 Subject: [PATCH] Threaded Dimensions
 
 
-diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
-index 7fed43a1e7bcf35c4d7fd3224837a47fedd59860..4cec1b832b42a78c59ae9b2f01122a2c5eafe47a 100644
---- a/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
-+++ b/src/main/java/ca/spottedleaf/moonrise/common/list/EntityList.java
-@@ -2,9 +2,16 @@ package ca.spottedleaf.moonrise.common.list;
- 
- import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
- import net.minecraft.world.entity.Entity;
-+import org.jetbrains.annotations.Contract;
-+import org.jetbrains.annotations.NotNull;
-+
-+import java.util.ArrayList;
- import java.util.Arrays;
- import java.util.Iterator;
-+import java.util.Map;
- import java.util.NoSuchElementException;
-+import java.util.concurrent.ConcurrentHashMap;
-+import java.util.concurrent.ConcurrentLinkedQueue;
- 
- // list with O(1) remove & contains
- 
-@@ -13,10 +20,7 @@ import java.util.NoSuchElementException;
-  */
- public final class EntityList implements Iterable<Entity> {
- 
--    private final Int2IntOpenHashMap entityToIndex = new Int2IntOpenHashMap(2, 0.8f);
--    {
--        this.entityToIndex.defaultReturnValue(Integer.MIN_VALUE);
--    }
-+    private final Map<Integer, Integer> entityToIndex = new ConcurrentHashMap<>(); // Canvas
- 
-     private static final Entity[] EMPTY_LIST = new Entity[0];
- 
-@@ -24,14 +28,17 @@ public final class EntityList implements Iterable<Entity> {
-     private int count;
- 
-     public int size() {
--        return this.count;
-+        return count;
-     }
- 
--    public boolean contains(final Entity entity) {
-+    public synchronized boolean contains(final @NotNull Entity entity) {
-         return this.entityToIndex.containsKey(entity.getId());
-     }
- 
--    public boolean remove(final Entity entity) {
-+    public synchronized boolean remove(final Entity entity) {
-+        if (entity == null) {
-+            return false;
-+        }
-         final int index = this.entityToIndex.remove(entity.getId());
-         if (index == Integer.MIN_VALUE) {
-             return false;
-@@ -50,9 +57,15 @@ public final class EntityList implements Iterable<Entity> {
-         return true;
-     }
- 
--    public boolean add(final Entity entity) {
-+    public synchronized boolean add(final Entity entity) {
-+        if (entity == null) {
-+            return false;
-+        }
-         final int count = this.count;
--        final int currIndex = this.entityToIndex.putIfAbsent(entity.getId(), count);
-+        Integer currIndex = this.entityToIndex.putIfAbsent(entity.getId(), count);
-+        if (currIndex == null) {
-+            currIndex = Integer.MIN_VALUE;
-+        }
- 
-         if (currIndex != Integer.MIN_VALUE) {
-             return false; // already in this list
-@@ -71,29 +84,47 @@ public final class EntityList implements Iterable<Entity> {
-         return true;
-     }
- 
--    public Entity getChecked(final int index) {
--        if (index < 0 || index >= this.count) {
--            throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
-+    public synchronized Entity getChecked(final int index) {
-+        if (index < 0 || index >= this.size()) { // Canvas
-+            throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.size());
-         }
--        return this.entities[index];
-+        return this.getUnchecked(index);
-     }
- 
-     public Entity getUnchecked(final int index) {
-         return this.entities[index];
-     }
- 
--    public Entity[] getRawData() {
--        return this.entities;
-+    public synchronized Entity @NotNull [] getRawData() {
-+        int count = 0;
-+
-+        for (Entity entity : this.entities) {
-+            if (entity != null) {
-+                count++;
-+            }
-+        }
-+
-+        Entity[] result = new Entity[count];
-+        int index = 0;
-+
-+        for (Entity entity : this.entities) {
-+            if (entity != null) {
-+                result[index++] = entity;
-+            }
-+        }
-+
-+        this.entities = result;
-+        return result;
-     }
- 
--    public void clear() {
-+    public synchronized void clear() {
-         this.entityToIndex.clear();
-         Arrays.fill(this.entities, 0, this.count, null);
-         this.count = 0;
-     }
- 
-     @Override
--    public Iterator<Entity> iterator() {
-+    public synchronized @NotNull Iterator<Entity> iterator() {
-         return new Iterator<>() {
-             private Entity lastRet;
-             private int current;
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
 index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..bad9b25a027f5ce25b3771dc371da9a5d4a59ea9 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
@@ -966,10 +838,10 @@ index 0000000000000000000000000000000000000000..a9fcab341e55a23f5a8196a260573ebb
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..1db3a5a3cadd27ce72acea70144f781646657a88
+index 0000000000000000000000000000000000000000..6db2334f039eae45c1b147040e1344cf35a2cc46
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
-@@ -0,0 +1,205 @@
+@@ -0,0 +1,206 @@
 +package io.github.dueris.canvas.server;
 +
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -1004,6 +876,7 @@ index 0000000000000000000000000000000000000000..1db3a5a3cadd27ce72acea70144f7816
 + */
 +public class ThreadedServer implements ThreadedMinecraftServer {
 +    public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
++    public static final long MAX_NANOSECONDS_FOR_TICK_FRAME = 50_000_000;
 +    public static final ThreadGroup serverThreadGroup = new ThreadGroup("ServerThreadGroup");
 +    public static BooleanSupplier shouldKeepTicking;
 +    private static int priority = 0;
@@ -1193,10 +1066,10 @@ index 0000000000000000000000000000000000000000..ec5011421fe0d9b589742effb9fdeded
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java b/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b633929b3
+index 0000000000000000000000000000000000000000..925d2a0b7851b5804ac46c64de7c6cbbc488a308
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java
-@@ -0,0 +1,336 @@
+@@ -0,0 +1,341 @@
 +package io.github.dueris.canvas.server.level;
 +
 +import io.github.dueris.canvas.server.LevelTickProcessor;
@@ -1247,7 +1120,6 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +    public long delayedTasksMaxNextTickTimeNanos;
 +    public boolean lagging = false;
 +    public boolean running = false;
-+    private MinecraftServer server;
 +    private Thread owner;
 +    private long tickSection = 0;
 +    private long lastOverloadWarningNanos;
@@ -1259,6 +1131,7 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +    private long lastMidTickExecute;
 +    private long lastMidTickExecuteFailure;
 +    private volatile boolean ticking = false;
++    private int currentTick;
 +
 +    public MinecraftServerWorld(final String name) {
 +        super(name);
@@ -1288,13 +1161,12 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +            LOGGER.info("[ThreadedServer] Spinning ServerLevel, {}", serverLevel.dimension().location());
 +
 +            this.running = true;
-+            this.server = serverLevel.getServer();
 +            this.owner = Thread.currentThread();
 +            WatchdogThread.tickLevel(serverLevel);
 +            serverLevel.chunkSource.mainThread = this.owner; // Point main thread executor to level threads
 +            Arrays.fill(this.recentTps, 20);
 +
-+            MultiThreadBooleanLock tickLock = server.tickLock;
++            MultiThreadBooleanLock tickLock = MinecraftServer.getServer().tickLock;
 +            try {
 +                // Lock down this thread until the MinecraftServer starts the first tick
 +                tickLock.waitUntilTrue();
@@ -1316,8 +1188,8 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +            MinecraftServer.LOGGER.error("Encountered an unexpected exception", throwable);
 +            CrashReport crashreport = MinecraftServer.constructOrExtractCrashReport(throwable);
 +
-+            this.server.fillSystemReport(crashreport.getSystemReport());
-+            Path path = this.server.getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
++            MinecraftServer.getServer().fillSystemReport(crashreport.getSystemReport());
++            Path path = MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
 +
 +            if (crashreport.saveToFile(path, ReportType.CRASH)) {
 +                MinecraftServer.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
@@ -1325,18 +1197,20 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +                MinecraftServer.LOGGER.error("We were unable to save this crash report to disk.");
 +            }
 +
-+            this.server.onServerCrash(crashreport);
++            MinecraftServer.getServer().onServerCrash(crashreport);
 +
 +            try {
-+                this.server.stopped = true;
-+                this.server.stopServer();
++                MinecraftServer.getServer().stopped = true;
++                MinecraftServer.getServer().stopServer();
 +            } catch (Throwable throwable3) {
 +                MinecraftServer.LOGGER.error("Exception stopping the server", throwable3);
 +            } finally {
-+                if (this.server.services.profileCache() != null) {
-+                    this.server.services.profileCache().clearExecutor();
++                if (MinecraftServer.getServer().services.profileCache() != null) {
++                    MinecraftServer.getServer().services.profileCache().clearExecutor();
 +                }
 +            }
++        } finally {
++            LOGGER.info("Successfully terminated level {}", this.level().dimension().location().toString());
 +        }
 +
 +    }
@@ -1349,22 +1223,26 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +        return tickSection;
 +    }
 +
++    public int getCurrentTick() {
++        return currentTick;
++    }
++
 +    public long blockLevel(long tickSection, final ServerLevel serverLevel, final @NotNull LevelTickProcessor tickProcessor) {
 +        long currentTime;
 +        long i;
 +
-+        if (!this.server.isPaused() && this.server.tickRateManager().isSprinting() && this.server.tickRateManager().checkShouldSprintThisTick()) {
++        if (!MinecraftServer.getServer().isPaused() && MinecraftServer.getServer().tickRateManager().isSprinting() && MinecraftServer.getServer().tickRateManager().checkShouldSprintThisTick()) {
 +            i = 0L;
 +            this.nextTickTimeNanos = Util.getNanos();
 +            this.lastOverloadWarningNanos = this.nextTickTimeNanos;
 +        } else {
-+            i = this.server.tickRateManager().nanosecondsPerTick();
++            i = MinecraftServer.getServer().tickRateManager().nanosecondsPerTick();
 +            long j = Util.getNanos() - this.nextTickTimeNanos;
 +
 +            if (j > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * i && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * i) {
 +                long k = j / i;
 +
-+                if (this.server.server.getWarnOnOverload()) {
++                if (MinecraftServer.getServer().server.getWarnOnOverload()) {
 +                    MinecraftServer.LOGGER.warn("Can't keep up! Is the level overloaded? Running {}ms or {} ticks behind on level-thread: {}", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k, serverLevel.dimension().location());
 +                }
 +                this.nextTickTimeNanos += k * i;
@@ -1373,7 +1251,7 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +        }
 +
 +        currentTime = Util.getNanos();
-+        if (++MinecraftServer.currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
++        if (++currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
 +            final long diff = currentTime - tickSection;
 +            final java.math.BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
 +            tps5s.add(currentTps, diff);
@@ -1414,7 +1292,7 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +    }
 +
 +    private void startMeasuringTaskExecutionTime() {
-+        if (this.server.isTickTimeLoggingEnabled()) {
++        if (MinecraftServer.getServer().isTickTimeLoggingEnabled()) {
 +            this.taskExecutionStartNanos = Util.getNanos();
 +            this.idleTimeNanos = 0L;
 +        }
@@ -1422,8 +1300,8 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +    }
 +
 +    private void finishMeasuringTaskExecutionTime() {
-+        if (this.server.isTickTimeLoggingEnabled()) {
-+            SampleLogger samplelogger = this.server.getTickTimeLogger();
++        if (MinecraftServer.getServer().isTickTimeLoggingEnabled()) {
++            SampleLogger samplelogger = MinecraftServer.getServer().getTickTimeLogger();
 +
 +            samplelogger.logPartialSample(Util.getNanos() - this.taskExecutionStartNanos - this.idleTimeNanos, TpsDebugDimensions.SCHEDULED_TASKS.ordinal());
 +            samplelogger.logPartialSample(this.idleTimeNanos, TpsDebugDimensions.IDLE.ordinal());
@@ -1449,11 +1327,11 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +
 +    @Override
 +    public void waitForTasks() {
-+        boolean flag = this.server.isTickTimeLoggingEnabled();
++        boolean flag = MinecraftServer.getServer().isTickTimeLoggingEnabled();
 +        long i = flag ? Util.getNanos() : 0L;
 +        long j = this.waitingForNextTick ? this.nextTickTimeNanos - Util.getNanos() : 100000L;
 +
-+        LockSupport.parkNanos("waiting for tasks", j);
++        LockSupport.parkNanos(level(), j);
 +        if (flag) {
 +            this.idleTimeNanos += Util.getNanos() - i;
 +        }
@@ -1462,7 +1340,7 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +
 +    @Override
 +    public @NotNull TickTask wrapRunnable(@NotNull Runnable runnable) {
-+        if (this.server.hasStopped && Thread.currentThread().equals(server.shutdownThread)) {
++        if (MinecraftServer.getServer().hasStopped && Thread.currentThread().equals(MinecraftServer.getServer().shutdownThread)) {
 +            runnable.run();
 +            runnable = () -> {
 +            };
@@ -1475,7 +1353,7 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +    }
 +
 +    protected boolean haveTime() {
-+        return this.server.forceTicks || this.runningTask() || Util.getNanos() < (this.mayHaveDelayedTasks ? this.delayedTasksMaxNextTickTimeNanos : this.nextTickTimeNanos);
++        return MinecraftServer.getServer().forceTicks || this.runningTask() || Util.getNanos() < (this.mayHaveDelayedTasks ? this.delayedTasksMaxNextTickTimeNanos : this.nextTickTimeNanos);
 +    }
 +
 +    @Override
@@ -1491,7 +1369,7 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +            return true;
 +        } else {
 +            boolean ret = false;
-+            if (this.server.tickRateManager().isSprinting() || this.haveTime()) {
++            if (MinecraftServer.getServer().tickRateManager().isSprinting() || this.haveTime()) {
 +                ServerLevel worldserver = level();
 +
 +                if (worldserver.getChunkSource().pollTask()) {
@@ -1518,12 +1396,12 @@ index 0000000000000000000000000000000000000000..dcaa5947853b0eef586f7d2bf127038b
 +
 +    @Override
 +    public CommandSourceStack createCommandSourceStack() {
-+        return this.server.createCommandSourceStack();
++        return MinecraftServer.getServer().createCommandSourceStack();
 +    }
 +
 +    @Override
 +    public void onTickRateChanged() {
-+        this.server.onTickRateChanged();
++        MinecraftServer.getServer().onTickRateChanged();
 +    }
 +
 +    @Override
@@ -2733,7 +2611,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..7ffdb528571c51d4a947823397518b79
          // Paper - rewrite chunk system
      }
 diff --git a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java b/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
-index 9b706276dc5b5f55b966c5472c6c4e864342b916..0be266d3a378518d916137c059b9634574a8a257 100644
+index 9b706276dc5b5f55b966c5472c6c4e864342b916..4108af47dbe2965a02b647381ffacd6c28d83d47 100644
 --- a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
 +++ b/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
 @@ -6,6 +6,7 @@ import com.mojang.jtracy.TracyClient;
@@ -2755,7 +2633,7 @@ index 9b706276dc5b5f55b966c5472c6c4e864342b916..0be266d3a378518d916137c059b96345
  import net.minecraft.util.profiling.metrics.MetricCategory;
  import net.minecraft.util.profiling.metrics.MetricSampler;
  import net.minecraft.util.profiling.metrics.MetricsRegistry;
-@@ -125,13 +128,31 @@ public abstract class BlockableEventLoop<R extends Runnable> implements Profiler
+@@ -125,13 +128,29 @@ public abstract class BlockableEventLoop<R extends Runnable> implements Profiler
          } else if (this.blockingCount == 0 && !this.shouldRun(runnable)) {
              return false;
          } else {
@@ -2767,8 +2645,6 @@ index 9b706276dc5b5f55b966c5472c6c4e864342b916..0be266d3a378518d916137c059b96345
 +                this.doRunTask(a);
 +            } catch (NoSuchElementException ignored) {
 +                return false;
-+            } catch (Exception e) {
-+                throw new RuntimeException("Uh oh we died...", e);
 +            }
 +            // Canvas end
              return true;
