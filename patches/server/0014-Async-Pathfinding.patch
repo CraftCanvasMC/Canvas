@@ -5,24 +5,25 @@ Subject: [PATCH] Async Pathfinding
 
 
 diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
-index 35366b581ebf6f0198a4e0850e8941c81fc8e748..4172b45cd08c5341993c9d120e88310dd80b5abf 100644
+index 6f136d52119b954d84d3e17c8a0b26979f95a42d..d0692212fface06561a57b33f829981744cfc9a3 100644
 --- a/src/main/java/io/github/dueris/canvas/Config.java
 +++ b/src/main/java/io/github/dueris/canvas/Config.java
-@@ -12,6 +12,7 @@ public class Config implements JsonConfig {
- 
+@@ -13,6 +13,7 @@ public class Config implements JsonConfig {
+     public boolean emptySleepPerWorlds = true;
      public boolean allowPacketsThreadCheckOffMain = true;
      public ChunkGeneration chunkgen = new ChunkGeneration();
 +    public Pathfinding pathfinding = new Pathfinding();
  
      public static Config init() {
          final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
-@@ -44,4 +45,10 @@ public class Config implements JsonConfig {
+@@ -45,4 +46,11 @@ public class Config implements JsonConfig {
          public boolean allowAVX512 = false;
          public boolean nativeAccelerationEnabled = true;
      }
 +
 +    public static class Pathfinding {
 +        public boolean enableThreadedPathfinding = true;
++        public boolean useThreadedWorldForScheduling = true;
 +        public int maxProcessors = 2;
 +        public int keepAlive = 60;
 +    }
@@ -321,10 +322,10 @@ index 0000000000000000000000000000000000000000..c54d9dc8d8080fe4287df25c630fbec7
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/entity/pathfinding/AsyncPathProcessor.java b/src/main/java/io/github/dueris/canvas/entity/pathfinding/AsyncPathProcessor.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..d6c5a94a343c4a2d632db1bbef1da0ebca2fec7f
+index 0000000000000000000000000000000000000000..a6af788153b087a53fac8df6bc1471cf26b80d29
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/entity/pathfinding/AsyncPathProcessor.java
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,60 @@
 +package io.github.dueris.canvas.entity.pathfinding;
 +
 +import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -336,6 +337,8 @@ index 0000000000000000000000000000000000000000..d6c5a94a343c4a2d632db1bbef1da0eb
 +import java.util.concurrent.TimeUnit;
 +import java.util.function.Consumer;
 +import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.level.Level;
 +import net.minecraft.world.level.pathfinder.Path;
 +import org.jetbrains.annotations.NotNull;
 +import org.jetbrains.annotations.Nullable;
@@ -367,11 +370,17 @@ index 0000000000000000000000000000000000000000..d6c5a94a343c4a2d632db1bbef1da0eb
 +     * @param path            a path to wait on
 +     * @param afterProcessing a consumer to be called
 +     */
-+    public static void awaitProcessing(@Nullable Path path, Consumer<@Nullable Path> afterProcessing) {
++    public static void awaitProcessing(@Nullable Path path, final @NotNull Level level, Consumer<@Nullable Path> afterProcessing) {
++        if (!(level instanceof ServerLevel serverLevel)) throw new IllegalArgumentException("Level must be a ServerLevel to execute processing.");
 +        if (path != null && !path.isProcessed() && path instanceof AsyncPath asyncPath) {
-+            asyncPath.postProcessing(() ->
-+                MinecraftServer.getServer().scheduleOnMain(() -> afterProcessing.accept(path))
-+            );
++            asyncPath.postProcessing(() -> {
++                if (Config.INSTANCE.pathfinding.useThreadedWorldForScheduling && MinecraftServer.getThreadedServer().isBooted()) {
++                    // Schedule on level instead of main.
++                    serverLevel.schedule(serverLevel.wrapRunnable(() -> afterProcessing.accept(path)));
++                    return;
++                }
++                MinecraftServer.getServer().scheduleOnMain(() -> afterProcessing.accept(path));
++            });
 +        } else {
 +            afterProcessing.accept(path);
 +        }
@@ -510,7 +519,7 @@ index 0000000000000000000000000000000000000000..fca0e8fa249b8c2ce00e5b26d2a5c9d2
 +    COMPLETED,
 +}
 diff --git a/src/main/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java b/src/main/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
-index 273ba657926ce72a7c82861e880a82bf7f322a0b..2b16f9f451e426ebce167feaca10dd2fa48f1322 100644
+index 273ba657926ce72a7c82861e880a82bf7f322a0b..93cb3ad3dfc1108c379638b3586291ca3bbf6db7 100644
 --- a/src/main/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
 +++ b/src/main/java/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
 @@ -1,6 +1,8 @@
@@ -549,7 +558,7 @@ index 273ba657926ce72a7c82861e880a82bf7f322a0b..2b16f9f451e426ebce167feaca10dd2f
 +                                        Path possiblePath = findPathToPois(entity, set);
 +
 +                                        // wait on the path to be processed
-+                                        AsyncPathProcessor.awaitProcessing(possiblePath, path -> {
++                                        AsyncPathProcessor.awaitProcessing(possiblePath, world, path -> {
 +                                            // read canReach check
 +                                            if (path == null || !path.canReach()) {
 +                                                for (Pair<Holder<PoiType>, BlockPos> pair : set) {
@@ -752,7 +761,7 @@ index 2a7a26ca447cc78f24e61a2bf557411c31eb16b2..451c5fe1d442005bad26ef7bf82a65f8
      private boolean tryComputePath(Mob entity, WalkTarget walkTarget, long time) {
          BlockPos blockPos = walkTarget.getTarget().currentBlockPosition();
 diff --git a/src/main/java/net/minecraft/world/entity/ai/behavior/SetClosestHomeAsWalkTarget.java b/src/main/java/net/minecraft/world/entity/ai/behavior/SetClosestHomeAsWalkTarget.java
-index 6802e0c4d331c7125114dd86409f6a110465ab82..3944e398a8a48514d01dbd1911dfb48dd90f97d4 100644
+index 6802e0c4d331c7125114dd86409f6a110465ab82..bddaf4d60cd86db19765f235298a0af7dda73a4c 100644
 --- a/src/main/java/net/minecraft/world/entity/ai/behavior/SetClosestHomeAsWalkTarget.java
 +++ b/src/main/java/net/minecraft/world/entity/ai/behavior/SetClosestHomeAsWalkTarget.java
 @@ -1,6 +1,8 @@
@@ -779,7 +788,7 @@ index 6802e0c4d331c7125114dd86409f6a110465ab82..3944e398a8a48514d01dbd1911dfb48d
 +                                        if (Config.INSTANCE.pathfinding.enableThreadedPathfinding) {
 +                                            Path possiblePath = AcquirePoi.findPathToPois(entity, set);
 +
-+                                            AsyncPathProcessor.awaitProcessing(possiblePath, path -> {
++                                            AsyncPathProcessor.awaitProcessing(possiblePath, world, path -> {
 +                                                if (path == null || !path.canReach() || mutableInt.getValue() < 5) { // read canReach check
 +                                                    long2LongMap.long2LongEntrySet().removeIf(entry -> entry.getLongValue() < mutableLong.getValue());
 +                                                    return;
@@ -949,7 +958,7 @@ index 2796df7af365c452b28373adfd7daf1d6730bac5..cad21c89b677e60f0338eaa22479b2dc
      }
  
 diff --git a/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 48c0de870a5bbf647309e69361dfb10ab56c65ab..8159d92715c1b0598eb5eaf5193f44999455429a 100644
+index 48c0de870a5bbf647309e69361dfb10ab56c65ab..5c4b35b660b894a849fc0014cdbe074bcc646841 100644
 --- a/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 +++ b/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java
 @@ -5,6 +5,9 @@ import java.util.Set;
@@ -986,7 +995,7 @@ index 48c0de870a5bbf647309e69361dfb10ab56c65ab..8159d92715c1b0598eb5eaf5193f4499
 +            if (Config.INSTANCE.pathfinding.enableThreadedPathfinding) {
 +                if (!positions.isEmpty()) this.targetPos = positions.iterator().next();
 +
-+                AsyncPathProcessor.awaitProcessing(path, processedPath -> {
++                AsyncPathProcessor.awaitProcessing(path, this.mob.level(), processedPath -> {
 +                    if (processedPath != this.path) return;
 +
 +                    if (processedPath != null && processedPath.getTarget() != null) {
@@ -1085,7 +1094,7 @@ index 943c9944ae17fa7cd72e437cce61beaf3fc9505e..465b3492e61a28bfe505f630d4f2c2d9
      }
  
 diff --git a/src/main/java/net/minecraft/world/entity/ai/sensing/NearestBedSensor.java b/src/main/java/net/minecraft/world/entity/ai/sensing/NearestBedSensor.java
-index 9104d7010bda6f9f73b478c11490ef9c53f76da2..05751e84ebe4ebc87e2a08bf35eda08eb8f42397 100644
+index 9104d7010bda6f9f73b478c11490ef9c53f76da2..8f38480f6c8110bf111ed49248077e4553b41a5a 100644
 --- a/src/main/java/net/minecraft/world/entity/ai/sensing/NearestBedSensor.java
 +++ b/src/main/java/net/minecraft/world/entity/ai/sensing/NearestBedSensor.java
 @@ -2,12 +2,13 @@ package net.minecraft.world.entity.ai.sensing;
@@ -1117,7 +1126,7 @@ index 9104d7010bda6f9f73b478c11490ef9c53f76da2..05751e84ebe4ebc87e2a08bf35eda08e
 +            // Canvas start
 +            if (Config.INSTANCE.pathfinding.enableThreadedPathfinding) {
 +                Path possiblePath = AcquirePoi.findPathToPois(entity, new java.util.HashSet<>(poiposes));
-+                AsyncPathProcessor.awaitProcessing(possiblePath, path -> {
++                AsyncPathProcessor.awaitProcessing(possiblePath, world, path -> {
 +                    // read canReach check
 +                    if ((path == null || !path.canReach()) && this.triedCount < 5) {
 +                        this.batchCache.long2LongEntrySet().removeIf(entry -> entry.getLongValue() < this.lastUpdate);
