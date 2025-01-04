@@ -581,13 +581,14 @@ index 3990834a41116682d6ae779a3bf24b0fd989d97d..773a0bc946b800a36953004fedac02fd
          boolean ret = false;
  
 diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
-index f49062bae8c2348ae2dad2c5112837d3a47ee3d7..28ac06745c8c75c81d69d8fa26032fa5a56d505e 100644
+index f49062bae8c2348ae2dad2c5112837d3a47ee3d7..808e82a634e67a9008f8ab85b7269b98c75e4f0b 100644
 --- a/src/main/java/io/github/dueris/canvas/Config.java
 +++ b/src/main/java/io/github/dueris/canvas/Config.java
-@@ -9,6 +9,10 @@ public class Config implements JsonConfig {
+@@ -9,6 +9,11 @@ public class Config implements JsonConfig {
  
      public static Config INSTANCE = new Config();
  
++    public boolean dontSuspendFlushing = true;
 +    public boolean useLevelThreadsAsChunkSourceMain = true;
 +    public boolean disableLeafTicking = true;
 +    public boolean emptySleepPerWorlds = true;
@@ -1596,7 +1597,7 @@ index 1f7f68aad97ee73763c042837f239bdc7167db55..4f308894d999b7edbc45d99f78ebe9c3
          }
      }
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..e79ed5b471b1dfd7dcff9715d83d1c5529e0dcca 100644
+index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..fe47b28f0f7c7c804bd61a35a67d2d4e94b137f8 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -3,9 +3,6 @@ package net.minecraft.server;
@@ -2122,7 +2123,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..e79ed5b471b1dfd7dcff9715d83d1c55
  
          gameprofilerfiller.popPush("send chunks");
 -        iterator = this.playerList.getPlayers().iterator();
-+        Iterator<ServerPlayer> iterator = this.playerList.getPlayers().iterator(); // Canvas - new iterable var since old doesnt exist anymore
++        // Iterator<ServerPlayer> iterator = this.playerList.getPlayers().iterator(); // Canvas - dont use anymore
  
 -        while (iterator.hasNext()) {
 +        // Canvas start
@@ -2491,7 +2492,7 @@ index 1c87904bb99cc40bafc9357fb2fc1703b759c3df..621abfb5d9790a823d4580d138b79373
          // CraftBukkit start - process pending Chunk loadCallback() and unloadCallback() after each run task
          public boolean pollTask() {
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..24f100a5dfb467fbcced207995932a2cf3bcfae2 100644
+index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..a796bacff1015b0b859158e93e5a27e0d4e547d8 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -5,6 +5,11 @@ import com.google.common.collect.Lists;
@@ -2626,7 +2627,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..24f100a5dfb467fbcced207995932a2c
  
      public LevelChunk getChunkIfLoaded(int x, int z) {
          return this.chunkSource.getChunkAtIfLoadedImmediately(x, z); // Paper - Use getChunkIfLoadedImmediately
-@@ -730,8 +752,110 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -730,8 +752,115 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -2653,6 +2654,11 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..24f100a5dfb467fbcced207995932a2c
 +            nextTickSchedule.remove().run();
 +        }
 +        synchronized (lock) {
++            for (ServerPlayer player : this.players) {
++                if (player.connection.connection.getHoldingLevel() == this) {
++                    player.connection.suspendFlushing();
++                }
++            }
 +            Iterator<Connection> iterator = this.activeConnections.iterator();
 +            while (iterator.hasNext()) {
 +                Connection networkmanager = iterator.next();
@@ -2738,15 +2744,23 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..24f100a5dfb467fbcced207995932a2c
          ProfilerFiller gameprofilerfiller = Profiler.get();
  
          this.handlingTick = true;
-@@ -844,6 +968,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -844,6 +973,15 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
          gameprofilerfiller.push("entityManagement");
          // Paper - rewrite chunk system
          gameprofilerfiller.pop();
-+        explosionDensityCache.clear(); // Canvas - Multithreaded Dimension Ticking
++        // Canvas start - Threaded Dimensions
++        for (ServerPlayer player : this.players) {
++            if (player.connection.connection.getHoldingLevel() == this) {
++                player.connection.chunkSender.sendNextChunks(player);
++                player.connection.resumeFlushing();
++            }
++        }
++        explosionDensityCache.clear();
++        // Canvas end
      }
  
      @Override
-@@ -2616,7 +2741,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -2616,7 +2754,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
  
      public void onStructureStartsAvailable(ChunkAccess chunk) {
@@ -2755,7 +2769,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..24f100a5dfb467fbcced207995932a2c
              this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts());
          });
      }
-@@ -2626,7 +2751,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -2626,7 +2764,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
  
      @Override
@@ -2764,6 +2778,26 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..24f100a5dfb467fbcced207995932a2c
          super.close();
          // Paper - rewrite chunk system
      }
+diff --git a/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+index df48c2754dc1ebd52addd8ae768cba5916ce3969..44f3bce3821ddf2e2f9ac2d649b288402ec1dc03 100644
+--- a/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/src/main/java/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
+ import com.mojang.logging.LogUtils;
+ import java.util.Objects;
+ import javax.annotation.Nullable;
++import io.github.dueris.canvas.Config;
+ import net.minecraft.ChatFormatting;
+ import net.minecraft.CrashReport;
+ import net.minecraft.CrashReportCategory;
+@@ -323,6 +324,7 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+     }
+ 
+     public void suspendFlushing() {
++        if (Config.INSTANCE.dontSuspendFlushing) return;
+         this.suspendFlushingOnServerThread = true;
+     }
+ 
 diff --git a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java b/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
 index 3a9e25b436f366fffe08c3b0c1fce11ed42ee646..42ee19995c7a2ed0326674a27f7d069ac34dbba2 100644
 --- a/src/main/java/net/minecraft/server/network/ServerConnectionListener.java
