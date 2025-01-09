@@ -18,207 +18,46 @@ index 7ec1873c4ea495a4ab5938946e2831c7658bbbb0..988d7d681a201344ec02c2804f5c231d
      implementation("org.apache.logging.log4j:log4j-iostreams:2.24.1") // Paper - remove exclusion
      implementation("org.ow2.asm:asm-commons:9.7.1")
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
-index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..bad9b25a027f5ce25b3771dc371da9a5d4a59ea9 100644
+index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..728a13205e3c0ce09cf89100ac3aa97dd5875616 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
-@@ -1,40 +1,66 @@
+@@ -1,6 +1,9 @@
  package ca.spottedleaf.moonrise.common.list;
  
++import it.unimi.dsi.fastutil.objects.Reference2IntMap;
++import it.unimi.dsi.fastutil.objects.Reference2IntMaps;
  import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
-+import org.jetbrains.annotations.Contract;
 +import org.jetbrains.annotations.NotNull;
  import java.util.Arrays;
  import java.util.Iterator;
  import java.util.NoSuchElementException;
-+import java.util.Objects;
-+import java.util.concurrent.ConcurrentHashMap;
-+import java.util.concurrent.locks.ReentrantReadWriteLock;
- 
- public final class ReferenceList<E> implements Iterable<E> {
+@@ -9,7 +12,7 @@ public final class ReferenceList<E> implements Iterable<E> {
  
      private static final Object[] EMPTY_LIST = new Object[0];
-+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
  
 -    private final Reference2IntOpenHashMap<E> referenceToIndex;
-+    private final ConcurrentHashMap<E, Integer> referenceToIndex; // Canvas
++    private final Reference2IntMap<E> referenceToIndex; // Canvas
      private E[] references;
      private int count;
  
-+    @SuppressWarnings("unchecked") // Canvas
-     public ReferenceList() {
-         this((E[])EMPTY_LIST);
-     }
+@@ -19,7 +22,7 @@ public final class ReferenceList<E> implements Iterable<E> {
  
      public ReferenceList(final E[] referenceArray) {
          this.references = referenceArray;
 -        this.referenceToIndex = new Reference2IntOpenHashMap<>(2, 0.8f);
--        this.referenceToIndex.defaultReturnValue(Integer.MIN_VALUE);
-+        // Canvas start
-+        this.referenceToIndex = new ConcurrentHashMap<>() {
-+            @Override
-+            public Integer remove(@NotNull final Object key) {
-+                if (!containsKey(key)) {
-+                    return Integer.MIN_VALUE;
-+                }
-+                Integer v = super.remove(key);
-+                return Objects.requireNonNullElse(v, Integer.MIN_VALUE);
-+            }
-+        };
-+        // Canvas end
++        this.referenceToIndex = Reference2IntMaps.synchronize(new Reference2IntOpenHashMap<>(2, 0.8f)); // Canvas
+         this.referenceToIndex.defaultReturnValue(Integer.MIN_VALUE);
      }
  
--    private ReferenceList(final E[] references, final int count, final Reference2IntOpenHashMap<E> referenceToIndex) {
-+    private ReferenceList(final E[] references, final int count, final ConcurrentHashMap<E, Integer> referenceToIndex) {
-         this.references = references;
-         this.count = count;
-         this.referenceToIndex = referenceToIndex;
+@@ -30,7 +33,7 @@ public final class ReferenceList<E> implements Iterable<E> {
      }
  
--    public ReferenceList<E> copy() {
+     public ReferenceList<E> copy() {
 -        return new ReferenceList<>(this.references.clone(), this.count, this.referenceToIndex.clone());
-+    // Canvas start
-+    public @NotNull ReferenceList<E> copy() {
-+        return new ReferenceList<>(this.references.clone(), this.count, new ConcurrentHashMap<>(this.referenceToIndex));
-+    // Canvas end
++        return new ReferenceList<>(this.references.clone(), this.count, new Reference2IntOpenHashMap<>(this.referenceToIndex)); // Canvas
      }
  
      public int size() {
-+        // Canvas start
-+        lock.readLock().lock();
-+        try {
-         return this.count;
-+        } finally {
-+            lock.readLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     public boolean contains(final E obj) {
-@@ -42,7 +68,10 @@ public final class ReferenceList<E> implements Iterable<E> {
-     }
- 
-     public boolean remove(final E obj) {
--        final int index = this.referenceToIndex.removeInt(obj);
-+        // Canvas start
-+        lock.writeLock().lock();
-+        try {
-+        final int index = this.referenceToIndex.remove(obj); // Canvas
-         if (index == Integer.MIN_VALUE) {
-             return false;
-         }
-@@ -56,13 +85,22 @@ public final class ReferenceList<E> implements Iterable<E> {
-         }
-         this.references[index] = end;
-         this.references[endIndex] = null;
--
-         return true;
-+        } finally {
-+            lock.writeLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     public boolean add(final E obj) {
-+        // Canvas start
-+        lock.writeLock().lock();
-+        try {
-         final int count = this.count;
--        final int currIndex = this.referenceToIndex.putIfAbsent(obj, count);
-+        Integer currIndex = this.referenceToIndex.putIfAbsent(obj, count);
-+        if (currIndex == null) {
-+            currIndex = Integer.MIN_VALUE;
-+        }
- 
-         if (currIndex != Integer.MIN_VALUE) {
-             return false; // already in this list
-@@ -79,35 +117,77 @@ public final class ReferenceList<E> implements Iterable<E> {
-         this.count = count + 1;
- 
-         return true;
-+        } finally {
-+            lock.writeLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     public E getChecked(final int index) {
-+        // Canvas start
-+        lock.readLock().lock();
-+        try {
-         if (index < 0 || index >= this.count) {
-             throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
-         }
-         return this.references[index];
-+        } finally {
-+            lock.readLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     public E getUnchecked(final int index) {
-+        // Canvas start
-+        lock.readLock().lock();
-+        try {
-         return this.references[index];
-+        } finally {
-+            lock.readLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     public Object[] getRawData() {
-+        // Canvas start
-+        lock.readLock().lock();
-+        try {
-         return this.references;
-+        } finally {
-+            lock.readLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     public E[] getRawDataUnchecked() {
-+        // Canvas start
-+        lock.readLock().lock();
-+        try {
-         return this.references;
-+        } finally {
-+            lock.readLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     public void clear() {
-+        // Canvas start
-+        lock.writeLock().lock();
-+        try {
-         this.referenceToIndex.clear();
-         Arrays.fill(this.references, 0, this.count, null);
-         this.count = 0;
-+        } finally {
-+            lock.writeLock().unlock();
-+        }
-+        // Canvas end
-     }
- 
-     @Override
-     public Iterator<E> iterator() {
-+        // Canvas start
-+        lock.readLock().lock();
-+        try {
-         return new Iterator<>() {
-             private E lastRet;
-             private int current;
-@@ -138,5 +218,9 @@ public final class ReferenceList<E> implements Iterable<E> {
-                 --this.current;
-             }
-         };
-+        } finally {
-+            lock.readLock().unlock();
-+        }
-+        // Canvas end
-     }
- }
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
 index d21ce54ebb5724c04eadf56a2cde701d5eeb5db2..d9fad142bded299cb185ddb58adf2438459e65d2 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
@@ -1478,6 +1317,27 @@ index 8b5293b0c696ef21d0101493ffa41b60bf0bc86b..4d061ceba635ab6fc1563026f6f10e16
          return text(DF.format(avg), avg >= 50 ? RED : avg >= 40 ? YELLOW : GREEN);
      }
  }
+diff --git a/src/main/java/net/minecraft/core/BlockPos.java b/src/main/java/net/minecraft/core/BlockPos.java
+index 6714b4a39180affd101f1cab0d587cf2d3e6886a..09dc69502190ce2a6ba9317ee71b60cfaa6bce35 100644
+--- a/src/main/java/net/minecraft/core/BlockPos.java
++++ b/src/main/java/net/minecraft/core/BlockPos.java
+@@ -28,6 +28,7 @@ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ import org.apache.commons.lang3.Validate;
+ import org.apache.commons.lang3.tuple.Pair;
++import org.jetbrains.annotations.NotNull;
+ import org.slf4j.Logger;
+ 
+ @Immutable
+@@ -223,7 +224,7 @@ public class BlockPos extends Vec3i {
+     }
+ 
+     @Override
+-    public BlockPos relative(Direction direction) {
++    public synchronized @NotNull BlockPos relative(Direction direction) { // Canvas
+         // Paper start - Perf: Optimize BlockPosition
+         switch(direction) {
+             case UP:
 diff --git a/src/main/java/net/minecraft/network/Connection.java b/src/main/java/net/minecraft/network/Connection.java
 index 8661c1b1cfe2b3db000e1f08814fd4409c4b7fab..f37c4e6be74c1f02cb4ed0556010ae8e94de7002 100644
 --- a/src/main/java/net/minecraft/network/Connection.java
