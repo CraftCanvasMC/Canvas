@@ -18,29 +18,33 @@ index ebbf963582bf89e13a3048f0838038debd1ab756..0af5fe5c1a038c7675df9b26449a81a9
      implementation("org.apache.logging.log4j:log4j-iostreams:2.24.1") // Paper - remove exclusion
      implementation("org.ow2.asm:asm-commons:9.7.1")
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
-index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..728a13205e3c0ce09cf89100ac3aa97dd5875616 100644
+index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..1744ae331bd2f2dad703a06f3340dbe36df273e8 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
-@@ -1,6 +1,9 @@
+@@ -1,17 +1,20 @@
  package ca.spottedleaf.moonrise.common.list;
  
 +import it.unimi.dsi.fastutil.objects.Reference2IntMap;
 +import it.unimi.dsi.fastutil.objects.Reference2IntMaps;
  import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
-+import org.jetbrains.annotations.NotNull;
  import java.util.Arrays;
  import java.util.Iterator;
  import java.util.NoSuchElementException;
-@@ -9,7 +12,7 @@ public final class ReferenceList<E> implements Iterable<E> {
++import java.util.concurrent.atomic.AtomicInteger;
+ 
+ public final class ReferenceList<E> implements Iterable<E> {
  
      private static final Object[] EMPTY_LIST = new Object[0];
  
 -    private final Reference2IntOpenHashMap<E> referenceToIndex;
 +    private final Reference2IntMap<E> referenceToIndex; // Canvas
      private E[] references;
-     private int count;
+-    private int count;
++    private final AtomicInteger count = new AtomicInteger(); // Canvas - atomic
  
-@@ -19,7 +22,7 @@ public final class ReferenceList<E> implements Iterable<E> {
+     public ReferenceList() {
+         this((E[])EMPTY_LIST);
+@@ -19,22 +22,22 @@ public final class ReferenceList<E> implements Iterable<E> {
  
      public ReferenceList(final E[] referenceArray) {
          this.references = referenceArray;
@@ -49,15 +53,84 @@ index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..728a13205e3c0ce09cf89100ac3aa97d
          this.referenceToIndex.defaultReturnValue(Integer.MIN_VALUE);
      }
  
-@@ -30,7 +33,7 @@ public final class ReferenceList<E> implements Iterable<E> {
+     private ReferenceList(final E[] references, final int count, final Reference2IntOpenHashMap<E> referenceToIndex) {
+         this.references = references;
+-        this.count = count;
++        this.count.set(count); // Canvas - atomic
+         this.referenceToIndex = referenceToIndex;
      }
  
      public ReferenceList<E> copy() {
 -        return new ReferenceList<>(this.references.clone(), this.count, this.referenceToIndex.clone());
-+        return new ReferenceList<>(this.references.clone(), this.count, new Reference2IntOpenHashMap<>(this.referenceToIndex)); // Canvas
++        return new ReferenceList<>(this.references.clone(), this.count.get(), new Reference2IntOpenHashMap<>(this.referenceToIndex)); // Canvas // - atomic
      }
  
      public int size() {
+-        return this.count;
++        return this.count.get(); // Canvas - atomic
+     }
+ 
+     public boolean contains(final E obj) {
+@@ -48,7 +51,7 @@ public final class ReferenceList<E> implements Iterable<E> {
+         }
+ 
+         // move the object at the end to this index
+-        final int endIndex = --this.count;
++        final int endIndex = this.count.decrementAndGet(); // Canvas - atomic
+         final E end = (E)this.references[endIndex];
+         if (index != endIndex) {
+             // not empty after this call
+@@ -61,7 +64,7 @@ public final class ReferenceList<E> implements Iterable<E> {
+     }
+ 
+     public boolean add(final E obj) {
+-        final int count = this.count;
++        final int count = this.count.get(); // Canvas - atomic
+         final int currIndex = this.referenceToIndex.putIfAbsent(obj, count);
+ 
+         if (currIndex != Integer.MIN_VALUE) {
+@@ -76,13 +79,13 @@ public final class ReferenceList<E> implements Iterable<E> {
+         }
+ 
+         list[count] = obj;
+-        this.count = count + 1;
++        this.count.set(count + 1); // Canvas - atomic
+ 
+         return true;
+     }
+ 
+     public E getChecked(final int index) {
+-        if (index < 0 || index >= this.count) {
++        if (index < 0 || index >= this.count.get()) { // Canvas - atomic
+             throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
+         }
+         return this.references[index];
+@@ -102,8 +105,8 @@ public final class ReferenceList<E> implements Iterable<E> {
+ 
+     public void clear() {
+         this.referenceToIndex.clear();
+-        Arrays.fill(this.references, 0, this.count, null);
+-        this.count = 0;
++        Arrays.fill(this.references, 0, this.count.get(), null); // Canvas - atomic
++        this.count.set(0); // Canvas - atomic
+     }
+ 
+     @Override
+@@ -114,12 +117,12 @@ public final class ReferenceList<E> implements Iterable<E> {
+ 
+             @Override
+             public boolean hasNext() {
+-                return this.current < ReferenceList.this.count;
++                return this.current < ReferenceList.this.count.get(); // Canvas - atomic
+             }
+ 
+             @Override
+             public E next() {
+-                if (this.current >= ReferenceList.this.count) {
++                if (this.current >= ReferenceList.this.count.get()) { // Canvas - atomic
+                     throw new NoSuchElementException();
+                 }
+                 return this.lastRet = ReferenceList.this.references[this.current++];
 diff --git a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java b/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
 index d21ce54ebb5724c04eadf56a2cde701d5eeb5db2..d9fad142bded299cb185ddb58adf2438459e65d2 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
