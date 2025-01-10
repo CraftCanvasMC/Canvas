@@ -5,7 +5,7 @@ Subject: [PATCH] Threaded Dimensions
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index ebbf963582bf89e13a3048f0838038debd1ab756..0af5fe5c1a038c7675df9b26449a81a907f37f91 100644
+index bf1eccdc5b4553f2b25a3049c468a35e64cce3dc..795ff47f075eff2699819a0cc6bac799682b0c0e 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
 @@ -43,7 +43,7 @@ dependencies {
@@ -18,7 +18,7 @@ index ebbf963582bf89e13a3048f0838038debd1ab756..0af5fe5c1a038c7675df9b26449a81a9
      implementation("org.apache.logging.log4j:log4j-iostreams:2.24.1") // Paper - remove exclusion
      implementation("org.ow2.asm:asm-commons:9.7.1")
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
-index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..1744ae331bd2f2dad703a06f3340dbe36df273e8 100644
+index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..7a4fd6a1762bba8ed784eaebc45b64f3970f8bf9 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
 @@ -1,17 +1,20 @@
@@ -71,16 +71,22 @@ index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..1744ae331bd2f2dad703a06f3340dbe3
      }
  
      public boolean contains(final E obj) {
-@@ -48,7 +51,7 @@ public final class ReferenceList<E> implements Iterable<E> {
+@@ -48,7 +51,13 @@ public final class ReferenceList<E> implements Iterable<E> {
          }
  
          // move the object at the end to this index
 -        final int endIndex = --this.count;
-+        final int endIndex = this.count.decrementAndGet(); // Canvas - atomic
++        // Canvas start - convert count to atomic, set count to 0 if endIndex < 0
++        int endIndex = this.count.decrementAndGet();
++        if(endIndex < 0) {
++            this.count.set(0);
++            endIndex = 0;
++        }
++        // Canvas end
          final E end = (E)this.references[endIndex];
          if (index != endIndex) {
              // not empty after this call
-@@ -61,7 +64,7 @@ public final class ReferenceList<E> implements Iterable<E> {
+@@ -61,7 +70,7 @@ public final class ReferenceList<E> implements Iterable<E> {
      }
  
      public boolean add(final E obj) {
@@ -89,7 +95,7 @@ index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..1744ae331bd2f2dad703a06f3340dbe3
          final int currIndex = this.referenceToIndex.putIfAbsent(obj, count);
  
          if (currIndex != Integer.MIN_VALUE) {
-@@ -76,13 +79,13 @@ public final class ReferenceList<E> implements Iterable<E> {
+@@ -76,13 +85,13 @@ public final class ReferenceList<E> implements Iterable<E> {
          }
  
          list[count] = obj;
@@ -105,7 +111,7 @@ index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..1744ae331bd2f2dad703a06f3340dbe3
              throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
          }
          return this.references[index];
-@@ -102,8 +105,8 @@ public final class ReferenceList<E> implements Iterable<E> {
+@@ -102,8 +111,8 @@ public final class ReferenceList<E> implements Iterable<E> {
  
      public void clear() {
          this.referenceToIndex.clear();
@@ -116,7 +122,7 @@ index 2e876b918672e8ef3b5197b7e6b1597247fdeaa1..1744ae331bd2f2dad703a06f3340dbe3
      }
  
      @Override
-@@ -114,12 +117,12 @@ public final class ReferenceList<E> implements Iterable<E> {
+@@ -114,12 +123,12 @@ public final class ReferenceList<E> implements Iterable<E> {
  
              @Override
              public boolean hasNext() {
@@ -1530,6 +1536,19 @@ index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..4d5aff469934bd2b401b68d4d2db8a04
          this.states = blockChanges.values().toArray(new BlockState[0]);
      }
      // Paper end - Multi Block Change API
+diff --git a/src/main/java/net/minecraft/network/protocol/game/ServerPacketListener.java b/src/main/java/net/minecraft/network/protocol/game/ServerPacketListener.java
+index 6ba6933bec2a4d82df29fa2f571f0ef76902ef56..5f395f5b1af5b6018b1cfd3b317ae538a90f3670 100644
+--- a/src/main/java/net/minecraft/network/protocol/game/ServerPacketListener.java
++++ b/src/main/java/net/minecraft/network/protocol/game/ServerPacketListener.java
+@@ -11,6 +11,7 @@ public interface ServerPacketListener extends ServerboundPacketListener {
+ 
+     @Override
+     default void onPacketError(Packet packet, Exception exception) throws ReportedException {
+-        LOGGER.error("Failed to handle packet {}, suppressing error", packet, exception);
++        LOGGER.error("Failed to handle packet {} on thread {}, suppressing error", packet, Thread.currentThread().getName(), exception);
++        new Throwable().printStackTrace();
+     }
+ }
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
 index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..ff0603fcee012958a184ffd13f9430b45e35c64b 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
