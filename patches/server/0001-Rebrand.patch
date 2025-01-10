@@ -5,7 +5,7 @@ Subject: [PATCH] Rebrand
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 8e1d6848e5da82db4c38c27af6bef71c6d843036..7ec1873c4ea495a4ab5938946e2831c7658bbbb0 100644
+index 8e1d6848e5da82db4c38c27af6bef71c6d843036..ebbf963582bf89e13a3048f0838038debd1ab756 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
 @@ -25,7 +25,8 @@ abstract class MockitoAgentProvider : CommandLineArgumentProvider {
@@ -18,15 +18,19 @@ index 8e1d6848e5da82db4c38c27af6bef71c6d843036..7ec1873c4ea495a4ab5938946e2831c7
      implementation("ca.spottedleaf:concurrentutil:0.0.2") // Paper - Add ConcurrentUtil dependency
      // Paper start
      implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
-@@ -39,6 +40,7 @@ dependencies {
-           Scanning takes about 1-2 seconds so adding this speeds up the server start.
-      */
-     implementation("org.apache.logging.log4j:log4j-core:2.19.0") // Paper - implementation
-+    implementation(project(mapOf("path" to ":canvas-api"))) // Canvas
-     log4jPlugins.annotationProcessorConfigurationName("org.apache.logging.log4j:log4j-core:2.19.0") // Paper - Needed to generate meta for our Log4j plugins
-     runtimeOnly(log4jPlugins.output)
-     alsoShade(log4jPlugins.output)
-@@ -104,14 +106,14 @@ tasks.jar {
+@@ -85,6 +86,11 @@ dependencies {
+     implementation("me.lucko:spark-api:0.1-20240720.200737-2")
+     implementation("me.lucko:spark-paper:1.10.119-SNAPSHOT")
+     // Paper end - spark
++    // Canvas start - cloth config
++    implementation("me.shedaniel.cloth:cloth-config-fabric:17.0.144") {
++        exclude(group = "net.fabricmc")
++    }
++    // Canvas end
+ }
+ 
+ paperweight {
+@@ -104,19 +110,20 @@ tasks.jar {
          val gitBranch = git("rev-parse", "--abbrev-ref", "HEAD").getText().trim() // Paper
          attributes(
              "Main-Class" to "org.bukkit.craftbukkit.Main",
@@ -46,6 +50,12 @@ index 8e1d6848e5da82db4c38c27af6bef71c6d843036..7ec1873c4ea495a4ab5938946e2831c7
              "Build-Number" to (build ?: ""),
              "Build-Time" to Instant.now().toString(),
              "Git-Branch" to gitBranch, // Paper
+             "Git-Commit" to gitHash, // Paper
+             "CraftBukkit-Package-Version" to paperweight.craftBukkitPackageVersion.get(), // Paper
++            "Experimental" to true // Canvas - experimental flagging
+         )
+         for (tld in setOf("net", "com", "org")) {
+             attributes("$tld/bukkit", "Sealed" to true)
 diff --git a/src/main/java/com/destroystokyo/paper/Metrics.java b/src/main/java/com/destroystokyo/paper/Metrics.java
 index be1bb14dca9367b9685841985b6198376986c496..c5ba24ae9a329df24e998d81926db18bf421b4c9 100644
 --- a/src/main/java/com/destroystokyo/paper/Metrics.java
@@ -114,36 +124,123 @@ index bc7e4e5560708fea89c584b1d8b471f4966f311a..94125390020bc69dc33dcb72d8fbd09a
                  .option(LineReader.Option.COMPLETE_IN_WORD, true);
 diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f49062bae8c2348ae2dad2c5112837d3a47ee3d7
+index 0000000000000000000000000000000000000000..b27d93400e3d8d7b81acea9784e1287f009d861a
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/Config.java
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,62 @@
 +package io.github.dueris.canvas;
 +
-+import net.skillcode.jsonconfig.JsonConfig;
-+import net.skillcode.jsonconfig.JsonConfigAPI;
-+import java.io.File;
++import me.shedaniel.autoconfig.AutoConfig;
++import me.shedaniel.autoconfig.ConfigData;
++import me.shedaniel.autoconfig.serializer.JanksonConfigSerializer;
++import org.apache.logging.log4j.LogManager;
++import org.apache.logging.log4j.Logger;
++import org.jetbrains.annotations.NotNull;
++
++import java.lang.reflect.Field;
++import java.util.Objects;
++
++@me.shedaniel.autoconfig.annotation.Config(name = "canvas_server")
++public class Config implements ConfigData {
++
++	private static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
++	public static Config INSTANCE = new Config();
++
++	public static Config init() {
++		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
++		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
++		Config defaulted = new Config();
++
++		if (defaulted == null || INSTANCE == null) {
++			throw new NullPointerException("Defaulted config or registered config was null!");
++		}
++
++		detectModifications(defaulted, INSTANCE, Config.class);
++		return INSTANCE;
++	}
++
++	private static void detectModifications(Object obj1, Object obj2, Class<?> parentClass) {
++		if (obj1 == null || obj2 == null) {
++			throw new NullPointerException("One of the objects to compare is null!");
++		}
++
++		Class<?> clazz = obj1.getClass();
++		Field[] fields = clazz.getDeclaredFields();
++
++		for (Field field : fields) {
++			field.setAccessible(true);
++			try {
++				Object value1 = field.get(obj1);
++				Object value2 = field.get(obj2);
++
++				if (!Objects.equals(value1, value2) && !isInnerClassOf(value1.getClass(), parentClass)) {
++					LOGGER.info("Detected modified arg, '{}', was changed to: {}", field.getName(), value2);
++				}
++
++				if (value1 != null && value2 != null && isInnerClassOf(value1.getClass(), parentClass)) {
++					detectModifications(value1, value2, value1.getClass());
++				}
++			} catch (IllegalAccessException e) {
++				LOGGER.error("Cannot access field: {}", field.getName());
++			}
++		}
++	}
++
++	private static boolean isInnerClassOf(@NotNull Class<?> clazz, Class<?> parentClass) {
++		return clazz.getEnclosingClass() != null && clazz.getEnclosingClass().equals(parentClass);
++	}
++}
+diff --git a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
+index b36e30fd4057a938e4d90cb42a2dca661f16478e..43515a9156f5b0ad307df07140b0c2be00ca2a46 100644
+--- a/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
++++ b/src/main/java/io/papermc/paper/ServerBuildInfoImpl.java
+@@ -23,15 +23,17 @@ public record ServerBuildInfoImpl(
+     Optional<String> gitBranch,
+     Optional<String> gitCommit
+ ) implements ServerBuildInfo {
++    public static boolean IS_EXPERIMENTAL = false; // Canvas - experimental toggle
+     private static final String ATTRIBUTE_BRAND_ID = "Brand-Id";
+     private static final String ATTRIBUTE_BRAND_NAME = "Brand-Name";
+     private static final String ATTRIBUTE_BUILD_TIME = "Build-Time";
+     private static final String ATTRIBUTE_BUILD_NUMBER = "Build-Number";
+     private static final String ATTRIBUTE_GIT_BRANCH = "Git-Branch";
+     private static final String ATTRIBUTE_GIT_COMMIT = "Git-Commit";
++    private static final String ATTRIBUTE_EXPERIMENTAL = "Experimental"; // Canvas - experimental toggle
+ 
+     private static final String BRAND_PAPER_NAME = "Paper";
+-    private static final String BRAND_PURPUR_NAME = "Purpur"; // Purpur - Rebrand
++    private static final String BRAND_PURPUR_NAME = "Canvas"; // Purpur - Rebrand // Canvas - Rebrand
+ 
+     private static final String BUILD_DEV = "DEV";
+ 
+@@ -58,6 +60,7 @@ public record ServerBuildInfoImpl(
+             getManifestAttribute(manifest, ATTRIBUTE_GIT_BRANCH),
+             getManifestAttribute(manifest, ATTRIBUTE_GIT_COMMIT)
+         );
++        IS_EXPERIMENTAL = Boolean.parseBoolean(getManifestAttribute(manifest, ATTRIBUTE_EXPERIMENTAL).orElse("false"));
+     }
+ 
+     @Override
+diff --git a/src/main/java/net/fabricmc/loader/api/FabricLoader.java b/src/main/java/net/fabricmc/loader/api/FabricLoader.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b4c0c69de84e5126abb72640a7ba9c1e9f98ea5
+--- /dev/null
++++ b/src/main/java/net/fabricmc/loader/api/FabricLoader.java
+@@ -0,0 +1,15 @@
++package net.fabricmc.loader.api;
++
++import org.jetbrains.annotations.NotNull;
++import java.nio.file.Path;
 +import java.nio.file.Paths;
 +
-+public class Config implements JsonConfig {
-+
-+    public static Config INSTANCE = new Config();
-+
-+    public long chunkDataCacheSoftLimit = 8192L;
-+    public long chunkDataCacheLimit = 32678L;
-+
-+    public static Config init() {
-+        final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
-+        File serverJson = new File(Paths.get(".").toFile(), "canvas_server.json");
-+        String parentPath = Paths.get(".").toFile().getAbsolutePath() + File.separator;
-+
-+        jsonConfigAPI.registerConfig(
-+            INSTANCE,
-+            parentPath,
-+            serverJson.getName()
-+        );
-+        return INSTANCE;
++/**
++ * Implemented for AutoConfig
++ */
++public interface FabricLoader {
++    static @NotNull FabricLoader getInstance() {
++        return () -> Paths.get("./");
 +    }
++    Path getConfigDir();
 +}
 diff --git a/src/main/java/net/minecraft/CrashReport.java b/src/main/java/net/minecraft/CrashReport.java
 index 710477ae27ebc5afdf0012ef0867d05efd293c24..5cf35d4bd53dee2d3baf388f25374d439eb1a6a2 100644
@@ -159,18 +256,20 @@ index 710477ae27ebc5afdf0012ef0867d05efd293c24..5cf35d4bd53dee2d3baf388f25374d43
      public CrashReport(String message, Throwable cause) {
          io.papermc.paper.util.StacktraceDeobfuscator.INSTANCE.deobfuscateThrowable(cause); // Paper
 diff --git a/src/main/java/net/minecraft/server/Main.java b/src/main/java/net/minecraft/server/Main.java
-index a880f4e5cf712654649ad043e58e073e9a87c0fe..80402b8ba1a96c909677d310b253ad3cf7c0c0b6 100644
+index a880f4e5cf712654649ad043e58e073e9a87c0fe..b2b6b3edfecde01f4907d2ce28466bd53c9566dc 100644
 --- a/src/main/java/net/minecraft/server/Main.java
 +++ b/src/main/java/net/minecraft/server/Main.java
-@@ -16,6 +16,7 @@ import java.nio.file.Paths;
+@@ -16,6 +16,9 @@ import java.nio.file.Paths;
  import java.util.Optional;
  import java.util.function.BooleanSupplier;
  import javax.annotation.Nullable;
 +import io.github.dueris.canvas.Config;
++import io.papermc.paper.ServerBuildInfo;
++import io.papermc.paper.ServerBuildInfoImpl;
  import joptsimple.OptionParser;
  import joptsimple.OptionSet;
  import joptsimple.OptionSpec;
-@@ -68,11 +69,13 @@ import java.io.InputStreamReader;
+@@ -68,11 +71,21 @@ import java.io.InputStreamReader;
  import java.util.concurrent.atomic.AtomicReference;
  import net.minecraft.SharedConstants;
  import org.bukkit.configuration.file.YamlConfiguration;
@@ -180,7 +279,15 @@ index a880f4e5cf712654649ad043e58e073e9a87c0fe..80402b8ba1a96c909677d310b253ad3c
  public class Main {
  
      private static final Logger LOGGER = LogUtils.getLogger();
-+    protected static final Config CANVAS_CONFIG = Config.init(); // Canvas - init config
++    // Canvas start - config - experimental toggle
++    protected static final Config CANVAS_CONFIG = Config.init();
++    static {
++        ServerBuildInfo info = ServerBuildInfo.buildInfo();
++        if (ServerBuildInfoImpl.IS_EXPERIMENTAL) {
++            LOGGER.warn("Running an experimental version of {}, please proceed with caution.", info.brandName());
++        }
++    }
++    // Canvas end
  
      public Main() {}
  

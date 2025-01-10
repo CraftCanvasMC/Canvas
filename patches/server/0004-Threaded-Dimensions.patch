@@ -1,14 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Wed, 8 Jan 2025 22:49:10 -0800
+Date: Thu, 9 Jan 2025 19:58:39 -0800
 Subject: [PATCH] Threaded Dimensions
 
 
 diff --git a/build.gradle.kts b/build.gradle.kts
-index 7ec1873c4ea495a4ab5938946e2831c7658bbbb0..988d7d681a201344ec02c2804f5c231dd3ac854d 100644
+index ebbf963582bf89e13a3048f0838038debd1ab756..0af5fe5c1a038c7675df9b26449a81a907f37f91 100644
 --- a/build.gradle.kts
 +++ b/build.gradle.kts
-@@ -44,7 +44,7 @@ dependencies {
+@@ -43,7 +43,7 @@ dependencies {
      log4jPlugins.annotationProcessorConfigurationName("org.apache.logging.log4j:log4j-core:2.19.0") // Paper - Needed to generate meta for our Log4j plugins
      runtimeOnly(log4jPlugins.output)
      alsoShade(log4jPlugins.output)
@@ -433,27 +433,44 @@ index 3990834a41116682d6ae779a3bf24b0fd989d97d..773a0bc946b800a36953004fedac02fd
          boolean ret = false;
  
 diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
-index f49062bae8c2348ae2dad2c5112837d3a47ee3d7..a73612c550ff6de57a01f6caf9752f144c05983f 100644
+index b27d93400e3d8d7b81acea9784e1287f009d861a..fa5661f553e168ca0c490e8f7bad8c11e1bfb6fb 100644
 --- a/src/main/java/io/github/dueris/canvas/Config.java
 +++ b/src/main/java/io/github/dueris/canvas/Config.java
-@@ -9,6 +9,11 @@ public class Config implements JsonConfig {
+@@ -3,6 +3,7 @@ package io.github.dueris.canvas;
+ import me.shedaniel.autoconfig.AutoConfig;
+ import me.shedaniel.autoconfig.ConfigData;
+ import me.shedaniel.autoconfig.serializer.JanksonConfigSerializer;
++import me.shedaniel.cloth.clothconfig.shadowed.blue.endless.jankson.Comment;
+ import org.apache.logging.log4j.LogManager;
+ import org.apache.logging.log4j.Logger;
+ import org.jetbrains.annotations.NotNull;
+@@ -16,6 +17,20 @@ public class Config implements ConfigData {
+ 	private static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
+ 	public static Config INSTANCE = new Config();
  
-     public static Config INSTANCE = new Config();
- 
++    // Threaded Dimensions
++    @Comment("Amount of ticks until the level will resync time with the player")
++    public int timeResyncInterval = 20;
++    @Comment("Thread priority for level threads, must be a value between 1-10.")
 +    public int levelThreadPriority = 9;
++    @Comment("In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to schedule to the level thread")
 +    public boolean useLevelThreadsAsChunkSourceMain = true;
++    @Comment("Disables leaves from ticking")
 +    public boolean disableLeafTicking = true;
++    @Comment("Enables each world to have the \"empty server\" logic per world introduced in Minecraft 1.21.4")
 +    public boolean emptySleepPerWorlds = true;
-+    public boolean allowPacketsThreadCheckOffMain = true;
-     public long chunkDataCacheSoftLimit = 8192L;
-     public long chunkDataCacheLimit = 32678L;
- 
++    @Comment("Enables the \"threadedtick\" command, which is an implementation of the vanilla \"tick\" command for the Canvas threaded context")
++    public boolean enableCanvasTickCommand = true;
++
+ 	public static Config init() {
+ 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
+ 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
 diff --git a/src/main/java/io/github/dueris/canvas/command/CanvasCommands.java b/src/main/java/io/github/dueris/canvas/command/CanvasCommands.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..40c13d4f2d807395e9bd8e7168fdc3e757205606
+index 0000000000000000000000000000000000000000..7726d236aced7bac14bb9b50dbcc489b8bf20d73
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/command/CanvasCommands.java
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,21 @@
 +package io.github.dueris.canvas.command;
 +
 +import java.util.HashMap;
@@ -468,10 +485,6 @@ index 0000000000000000000000000000000000000000..40c13d4f2d807395e9bd8e7168fdc3e7
 +
 +    private static final Map<String, Command> COMMANDS = new HashMap<>();
 +
-+    static {
-+        COMMANDS.put("threadedtps", new ThreadedTpsCommand("threadedtps"));
-+    }
-+
 +    private CanvasCommands() {
 +    }
 +
@@ -479,12 +492,12 @@ index 0000000000000000000000000000000000000000..40c13d4f2d807395e9bd8e7168fdc3e7
 +        COMMANDS.forEach((s, command) -> server.server.getCommandMap().register(s, "Canvas", command));
 +    }
 +}
-diff --git a/src/main/java/io/github/dueris/canvas/command/ThreadedTpsCommand.java b/src/main/java/io/github/dueris/canvas/command/ThreadedTpsCommand.java
+diff --git a/src/main/java/io/github/dueris/canvas/command/ThreadedTickDiagnosis.java b/src/main/java/io/github/dueris/canvas/command/ThreadedTickDiagnosis.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3198542dd
+index 0000000000000000000000000000000000000000..1ae54a700bb1b28c19e7cbf26f28dd39e4f98b1b
 --- /dev/null
-+++ b/src/main/java/io/github/dueris/canvas/command/ThreadedTpsCommand.java
-@@ -0,0 +1,171 @@
++++ b/src/main/java/io/github/dueris/canvas/command/ThreadedTickDiagnosis.java
+@@ -0,0 +1,159 @@
 +package io.github.dueris.canvas.command;
 +
 +import ca.spottedleaf.moonrise.common.util.MoonriseCommon;
@@ -497,7 +510,6 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +import java.util.Collections;
 +import java.util.List;
 +import java.util.function.Function;
-+import java.util.stream.Collectors;
 +import net.kyori.adventure.text.Component;
 +import net.kyori.adventure.text.TextComponent;
 +import net.minecraft.server.MinecraftServer;
@@ -505,7 +517,6 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +import org.bukkit.command.Command;
 +import org.bukkit.command.CommandSender;
 +import org.bukkit.craftbukkit.CraftServer;
-+import org.bukkit.craftbukkit.CraftWorld;
 +import org.jetbrains.annotations.NotNull;
 +import org.spigotmc.SpigotConfig;
 +
@@ -513,14 +524,10 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +import static net.kyori.adventure.text.Component.text;
 +import static net.kyori.adventure.text.format.TextColor.color;
 +
-+public class ThreadedTpsCommand extends Command {
++public class ThreadedTickDiagnosis {
 +    private static final List<String> TPS_OPTIONS = Arrays.asList("tps5", "tps10", "tps60");
 +    static int HEADER = 0x5FC3DD;
 +    static int VALUE = 0x96D6F0;
-+
-+    protected ThreadedTpsCommand(@NotNull final String name) {
-+        super(name);
-+    }
 +
 +    public static @NotNull Double simplifyNumber(@NotNull Float num, boolean min) {
 +        DecimalFormat df = new DecimalFormat("###.##");
@@ -528,8 +535,7 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +        return min ? Math.min(r, 20.00) : r;
 +    }
 +
-+    @Override
-+    public boolean execute(@NotNull final CommandSender sender, @NotNull final String commandLabel, @NotNull final String @NotNull [] args) {
++    public static boolean execute(@NotNull final CommandSender sender) {
 +        CraftServer server = (CraftServer) sender.getServer();
 +        float min;
 +        float max;
@@ -605,7 +611,7 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +        return true;
 +    }
 +
-+    public void sendCollective(@NotNull Function<List<TextComponent>, List<TextComponent>> builder, CommandSender sender) {
++    public static void sendCollective(@NotNull Function<List<TextComponent>, List<TextComponent>> builder, CommandSender sender) {
 +        Component base = Component.text("").appendNewline();
 +        for (final TextComponent textComponent : builder.apply(new ArrayList<>())) {
 +            base = base.append(textComponent).appendNewline();
@@ -613,26 +619,21 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +        sender.sendMessage(base);
 +    }
 +
-+    @Override
-+    public @NotNull List<String> tabComplete(@NotNull final CommandSender sender, @NotNull final String alias, @NotNull final String @NotNull [] args) {
-+        return Collections.emptyList();
-+    }
-+
-+    private @NotNull TextComponent reportLine(String label, String value, int labelColor, int valueColor) {
++    private static @NotNull TextComponent reportLine(String label, String value, int labelColor, int valueColor) {
 +        return (text(label).color(color(labelColor))
 +            .append(text(value).color(color(valueColor))));
 +    }
 +
-+    private @NotNull TextComponent reportLine(String label, Component value, int labelColor) {
++    private static @NotNull TextComponent reportLine(String label, Component value, int labelColor) {
 +        return (text(label).color(color(labelColor)).append(value));
 +    }
 +
-+    private @NotNull TextComponent subReportLine(String label, String value, int labelColor, int valueColor) {
++    private static @NotNull TextComponent subReportLine(String label, String value, int labelColor, int valueColor) {
 +        return (text("   " + label).color(color(labelColor))
 +            .append(text(value).color(color(valueColor))));
 +    }
 +
-+    public int usingThreads() {
++    public static int usingThreads() {
 +        ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
 +        return (int) java.util.Arrays.stream(threadMXBean.getAllThreadIds())
 +            .mapToObj(threadMXBean::getThreadInfo)
@@ -640,7 +641,7 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +            .count();
 +    }
 +
-+    public Component createColoredUtilComponent(String text, float value) {
++    public static @NotNull Component createColoredUtilComponent(String text, float value) {
 +        float ratio = Math.max(0, Math.min(100, value)) / 100.0f;
 +        int red = (ratio <= 0.5) ? (int) (ratio * 510) : 255;
 +        int green = (ratio <= 0.5) ? 255 : (int) ((1.0f - ratio) * 510);
@@ -648,7 +649,7 @@ index 0000000000000000000000000000000000000000..2054349e146bae3bd1d7bde96d85c5c3
 +        return text(text).color(color(red, green, 0));
 +    }
 +
-+    public Component createColoredComponent(String text, float value, float outOf) {
++    public static @NotNull Component createColoredComponent(String text, float value, float outOf) {
 +        float ratio = Math.max(0, Math.min(outOf, value)) / outOf;
 +        int red = (int) ((1 - ratio) * 255);
 +        int green = (int) (ratio * 255);
@@ -689,10 +690,10 @@ index 0000000000000000000000000000000000000000..a9fcab341e55a23f5a8196a260573ebb
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f44552f06f505fc64615e8af67ba4f8e912d99cd
+index 0000000000000000000000000000000000000000..e903c0fb9c1824c0c4a7707cabbcaa4d2bd1b257
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/server/ThreadedServer.java
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,173 @@
 +package io.github.dueris.canvas.server;
 +
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -701,6 +702,7 @@ index 0000000000000000000000000000000000000000..f44552f06f505fc64615e8af67ba4f8e
 +import java.io.IOException;
 +import java.nio.file.Path;
 +import java.util.Arrays;
++import java.util.Collection;
 +import java.util.List;
 +import java.util.concurrent.CopyOnWriteArrayList;
 +import java.util.function.BooleanSupplier;
@@ -861,6 +863,9 @@ index 0000000000000000000000000000000000000000..f44552f06f505fc64615e8af67ba4f8e
 +        LOGGER.info("Removed level from threaded context: {}", level.dimension().location());
 +    }
 +
++    public Collection<ServerLevel> getAllLevels() {
++        return MinecraftServer.getServer().levels.values();
++    }
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/VisibleAfterSpin.java b/src/main/java/io/github/dueris/canvas/server/VisibleAfterSpin.java
 new file mode 100644
@@ -880,10 +885,10 @@ index 0000000000000000000000000000000000000000..ec5011421fe0d9b589742effb9fdeded
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java b/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..d02093b25fb4c8f9c45821b93dbef108efcd403a
+index 0000000000000000000000000000000000000000..0801d6cd725d85a871d13e4d9ab3a89332486203
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/server/level/MinecraftServerWorld.java
-@@ -0,0 +1,332 @@
+@@ -0,0 +1,338 @@
 +package io.github.dueris.canvas.server.level;
 +
 +import io.github.dueris.canvas.Config;
@@ -1215,17 +1220,24 @@ index 0000000000000000000000000000000000000000..d02093b25fb4c8f9c45821b93dbef108
 +            ((ServerPlayer) player).connection.send(packet);
 +        }
 +    }
++
++    @Override
++    public void skipTickWait() {
++        this.delayedTasksMaxNextTickTimeNanos = Util.getNanos();
++        this.nextTickTimeNanos = Util.getNanos();
++    }
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/level/TickRateManagerInstance.java b/src/main/java/io/github/dueris/canvas/server/level/TickRateManagerInstance.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..02633c7342e9e3d4307763ab7b1cafbd97eab412
+index 0000000000000000000000000000000000000000..c59f6423f559e048ec2581f67adaf8566997447d
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/server/level/TickRateManagerInstance.java
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,17 @@
 +package io.github.dueris.canvas.server.level;
 +
 +import net.minecraft.commands.CommandSourceStack;
 +import net.minecraft.network.protocol.Packet;
++import net.minecraft.server.ServerTickRateManager;
 +
 +public interface TickRateManagerInstance {
 +    void broadcastPacketsToPlayers(Packet<?> packet);
@@ -1233,6 +1245,10 @@ index 0000000000000000000000000000000000000000..02633c7342e9e3d4307763ab7b1cafbd
 +    CommandSourceStack createCommandSourceStack();
 +
 +    void onTickRateChanged();
++
++    ServerTickRateManager tickRateManager();
++
++    void skipTickWait();
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/server/level/WatchdogWatcher.java b/src/main/java/io/github/dueris/canvas/server/level/WatchdogWatcher.java
 new file mode 100644
@@ -1482,7 +1498,7 @@ index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..4d5aff469934bd2b401b68d4d2db8a04
      }
      // Paper end - Multi Block Change API
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67526dd3a6 100644
+index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..f2c84143277b14acc787667bc3a446ea60303e06 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -3,9 +3,6 @@ package net.minecraft.server;
@@ -1535,7 +1551,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
      private static final int OVERLOADED_TICKS_WARNING_INTERVAL = 100;
      private static final long STATUS_EXPIRE_TIME_NANOS = 5L * TimeUtil.NANOSECONDS_PER_SECOND;
      private static final long PREPARE_LEVELS_DEFAULT_DELAY_NANOS = 10L * TimeUtil.NANOSECONDS_PER_MILLISECOND;
-@@ -239,9 +241,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -239,19 +241,19 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      private ServerConnectionListener connection;
      public final ChunkProgressListenerFactory progressListenerFactory;
      @Nullable
@@ -1547,7 +1563,10 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
      private final RandomSource random;
      public final DataFixer fixerUpper;
      private String localIp;
-@@ -251,7 +253,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     private int port;
+     private final LayeredRegistryAccess<RegistryLayer> registries;
+-    private Map<ResourceKey<Level>, ServerLevel> levels;
++    public Map<ResourceKey<Level>, ServerLevel> levels; // Canvas - private -> public
      private PlayerList playerList;
      private volatile boolean running;
      private volatile boolean isRestarting = false; // Paper - flag to signify we're attempting to restart
@@ -2040,15 +2059,25 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
          this.playerList.broadcastAll(new ClientboundSetTimePacket(world.getGameTime(), world.getDayTime(), world.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT)), world.dimension());
      }
  
-@@ -1980,6 +2170,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1973,13 +2163,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         ProfilerFiller gameprofilerfiller = Profiler.get();
  
-             this.synchronizeTime(worldserver);
+         gameprofilerfiller.push("timeSync");
+-        Iterator iterator = this.getAllLevels().iterator();
+-
+-        while (iterator.hasNext()) {
+-            ServerLevel worldserver = (ServerLevel) iterator.next();
+-
+-            this.synchronizeTime(worldserver);
++        // Canvas start
++        for (final ServerLevel level : this.getAllLevels()) {
++            level.syncTimeToPlayers();
          }
 +        // Canvas end
  
          gameprofilerfiller.pop();
      }
-@@ -2019,6 +2210,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2019,6 +2207,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.put(level.dimension(), level);
          this.levels = Collections.unmodifiableMap(newLevels);
@@ -2056,7 +2085,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
      }
  
      public void removeLevel(ServerLevel level) {
-@@ -2026,6 +2218,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2026,6 +2215,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.remove(level.dimension());
          this.levels = Collections.unmodifiableMap(newLevels);
@@ -2064,7 +2093,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
      }
      // CraftBukkit end
  
-@@ -2367,6 +2560,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2367,6 +2557,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
      @Override
      public void executeIfPossible(Runnable runnable) {
@@ -2077,7 +2106,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
          if (this.isStopped()) {
              throw new io.papermc.paper.util.ServerStopRejectedExecutionException("Server already shutting down"); // Paper - do not prematurely disconnect players on stop
          } else {
-@@ -2378,6 +2577,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2378,6 +2574,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      public Thread getRunningThread() {
          return this.serverThread;
      }
@@ -2091,7 +2120,25 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
  
      public int getCompressionThreshold() {
          return 256;
-@@ -2926,6 +3132,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2669,7 +2872,17 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         return this.smoothedTickTimeMillis;
+     }
+ 
++    // Canvas start
++
++    @Override
++    public void skipTickWait() {
++        this.delayedTasksMaxNextTickTimeNanos = Util.getNanos();
++        this.nextTickTimeNanos = Util.getNanos();
++    }
++
++    @Override
+     public ServerTickRateManager tickRateManager() {
++    // Canvas end
+         return this.tickRateManager;
+     }
+ 
+@@ -2926,6 +3139,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      public static MinecraftServer getServer() {
          return SERVER; // Paper
      }
@@ -2104,7 +2151,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
  
      @Deprecated
      public static RegistryAccess getDefaultRegistryAccess() {
-@@ -3146,7 +3358,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -3146,7 +3365,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          return ServerLinks.EMPTY;
      }
  
@@ -2114,7 +2161,7 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..4a3072e973b494a2ec7d099d3fc2df67
      }
  
 diff --git a/src/main/java/net/minecraft/server/ServerTickRateManager.java b/src/main/java/net/minecraft/server/ServerTickRateManager.java
-index 37dcf3dc3e50afd85912a7496c828576a38a4e9c..65de1de0cab5bd1b8d6aedf2013cffa915c1977e 100644
+index 37dcf3dc3e50afd85912a7496c828576a38a4e9c..dd32d97752d4d78abafcaecfd28842c116a2bbe9 100644
 --- a/src/main/java/net/minecraft/server/ServerTickRateManager.java
 +++ b/src/main/java/net/minecraft/server/ServerTickRateManager.java
 @@ -1,5 +1,6 @@
@@ -2150,6 +2197,22 @@ index 37dcf3dc3e50afd85912a7496c828576a38a4e9c..65de1de0cab5bd1b8d6aedf2013cffa9
      }
  
      public boolean stepGameIfPaused(int ticks) {
+@@ -132,4 +133,15 @@ public class ServerTickRateManager extends TickRateManager {
+         player.connection.send(ClientboundTickingStatePacket.from(this));
+         player.connection.send(ClientboundTickingStepPacket.from(this));
+     }
++    // Canvas start
++
++    private boolean unlocked = false;
++
++    public void toggleUnlockTickRate(boolean unlocked) {
++        this.unlocked = unlocked;
++    }
++
++    public boolean isUnlockedTickRate() {
++        return unlocked;
++    }
+ }
 diff --git a/src/main/java/net/minecraft/server/commands/FillCommand.java b/src/main/java/net/minecraft/server/commands/FillCommand.java
 index 0509e28f79d13615b5baefc34799b0ad2df071be..568c24ebd3fc98bef7a7b9865b675aa828dbe3e9 100644
 --- a/src/main/java/net/minecraft/server/commands/FillCommand.java
@@ -2185,6 +2248,172 @@ index 0509e28f79d13615b5baefc34799b0ad2df071be..568c24ebd3fc98bef7a7b9865b675aa8
          }
      }
  
+diff --git a/src/main/java/net/minecraft/server/commands/TickCommand.java b/src/main/java/net/minecraft/server/commands/TickCommand.java
+index 13d96b54f48d60b098b80e04ba6168762c335c75..f8380522eb3e4ef7c4e0b41236fc3c27ac9a259f 100644
+--- a/src/main/java/net/minecraft/server/commands/TickCommand.java
++++ b/src/main/java/net/minecraft/server/commands/TickCommand.java
+@@ -1,23 +1,161 @@
+ package net.minecraft.server.commands;
+ 
+ import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.Message;
+ import com.mojang.brigadier.arguments.FloatArgumentType;
+ import com.mojang.brigadier.arguments.IntegerArgumentType;
++import java.util.ArrayList;
+ import java.util.Arrays;
++import java.util.List;
+ import java.util.Locale;
++import java.util.function.Consumer;
++import java.util.stream.Collectors;
++import com.mojang.brigadier.arguments.StringArgumentType;
++import com.mojang.brigadier.exceptions.CommandSyntaxException;
++import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
++import io.github.dueris.canvas.Config;
++import io.github.dueris.canvas.command.ThreadedTickDiagnosis;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.SharedSuggestionProvider;
+ import net.minecraft.commands.arguments.TimeArgument;
++import net.minecraft.core.registries.Registries;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.resources.ResourceKey;
++import net.minecraft.resources.ResourceLocation;
++import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.ServerTickRateManager;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.TimeUtil;
++import org.jetbrains.annotations.NotNull;
+ 
+ public class TickCommand {
+     private static final float MAX_TICKRATE = 10000.0F;
+     private static final String DEFAULT_TICKRATE = String.valueOf(20);
++    // Canvas start
++    private static final String UNCAPPED_TICKRATE = String.valueOf(-1);
++    private static final String[] RATE_SUGGESTIONS = new String[]{DEFAULT_TICKRATE, UNCAPPED_TICKRATE};
+ 
+     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
++        if (Config.INSTANCE.enableCanvasTickCommand) {
++            dispatcher.register(
++                Commands.literal("threadedtick")
++                    .requires(source -> source.hasPermission(3))
++                    .then(Commands.literal("diagnosis").executes(context -> {
++                        CommandSourceStack commandSourceStack = context.getSource();
++                        ThreadedTickDiagnosis.execute(commandSourceStack.getBukkitSender());
++                        return 1;
++                    }))
++                    .then(
++                        Commands.argument("threadstate", StringArgumentType.word())
++                            .suggests((_, builder) -> SharedSuggestionProvider.suggest(getThreadStates(), builder))
++                            .then(Commands.literal("rate")
++                                .then(Commands.argument("rate", FloatArgumentType.floatArg(-1.0F, 10000.0F))
++                                    .suggests((_, suggestionsBuilder) -> SharedSuggestionProvider.suggest(RATE_SUGGESTIONS, suggestionsBuilder)).executes(context -> {
++                                        float rate = FloatArgumentType.getFloat(context, "rate");
++                                        execute(StringArgumentType.getString(context, "threadstate"), (serverTickRateManager) -> {
++                                            if (rate == -1) {
++                                                serverTickRateManager.toggleUnlockTickRate(true);
++                                            } else if (rate > 0) {
++                                                serverTickRateManager.setTickRate(rate);
++                                            }
++                                        });
++                                        if (rate == -1) {
++                                            context.getSource().sendSuccess(() -> Component.literal("Toggled unbound tickrate."), true);
++                                        } else if (rate > 0) {
++                                            String string = String.format(Locale.ROOT, "%.1f", rate);
++                                            context.getSource().sendSuccess(() -> Component.translatable("commands.tick.rate.success", string), true);
++                                        }
++                                        return 1;
++                                    })
++                                )
++                            )
++                            .then(Commands.literal("unbind").executes(context -> {
++                                execute(StringArgumentType.getString(context, "threadstate"), (serverTickRateManager) -> {
++                                    serverTickRateManager.toggleUnlockTickRate(true);
++                                });
++                                context.getSource().sendSuccess(() -> Component.literal("Toggled unbound tickrate on thread(s)."), true);
++                                return 1;
++                            }))
++                            .then(Commands.literal("rebind").executes(context -> {
++                                execute(StringArgumentType.getString(context, "threadstate"), (serverTickRateManager) -> {
++                                    serverTickRateManager.toggleUnlockTickRate(false);
++                                });
++                                context.getSource().sendSuccess(() -> Component.literal("Rebound tickrate to thread(s)."), true);
++                                return 1;
++                            }))
++                            .then(Commands.literal("unfreeze").executes(context -> {
++                                boolean frozen = false;
++                                execute(StringArgumentType.getString(context, "threadstate"), (serverTickRateManager) -> {
++                                    serverTickRateManager.setFrozen(frozen);
++                                    context.getSource().sendSuccess(() -> Component.translatable("commands.tick.status.running"), true);
++                                });
++                                return 1;
++                            }))
++                            .then(Commands.literal("freeze").executes(context -> {
++                                boolean frozen = true;
++                                execute(StringArgumentType.getString(context, "threadstate"), (serverTickRateManager) -> {
++                                    if (serverTickRateManager.isSprinting()) {
++                                        serverTickRateManager.stopSprinting();
++                                    }
++
++                                    if (serverTickRateManager.isSteppingForward()) {
++                                        serverTickRateManager.stopStepping();
++                                    }
++
++                                    serverTickRateManager.setFrozen(frozen);
++                                    context.getSource().sendSuccess(() -> Component.translatable("commands.tick.status.frozen"), true);
++                                });
++                                return 1;
++                            }))
++                    )
++            );
++        }
++        tickCommand(dispatcher);
++    }
++
++    public static void execute(@NotNull String state, Consumer<ServerTickRateManager> action) throws CommandSyntaxException {
++        if (state.equalsIgnoreCase("global")) {
++            action.accept(MinecraftServer.getServer().tickRateManager());
++            for (final ServerLevel level : MinecraftServer.getThreadedServer().getAllLevels()) {
++                action.accept((ServerTickRateManager) level.tickRateManager());
++            }
++        } else if (state.equalsIgnoreCase("main")) {
++            action.accept(MinecraftServer.getServer().tickRateManager());
++        } else {
++            if (!state.contains(":")) {
++                Message message = Component.literal("State isn't valid or known: " + state);
++                throw new CommandSyntaxException(new SimpleCommandExceptionType(message), message);
++            }
++            ResourceLocation location = ResourceLocation.parse(state);
++            ServerLevel level = MinecraftServer.getServer().getLevel(ResourceKey.create(Registries.DIMENSION, location));
++            if (level == null) {
++                Message message = Component.literal("Couldn't build level: " + state);
++                throw new CommandSyntaxException(new SimpleCommandExceptionType(message), message);
++            }
++            action.accept((ServerTickRateManager) level.tickRateManager());
++        }
++    }
++
++    private static String[] getThreadStates() {
++        List<String> states = new ArrayList<>();
++        states.add("global");
++        states.add("main");
++        states.addAll(MinecraftServer.getThreadedServer().getAllLevels()
++            .stream()
++            .map(ServerLevel::dimension)
++            .map(ResourceKey::location)
++            .map(ResourceLocation::toString).collect(Collectors.toSet()));
++        return states.toArray(new String[0]);
++    }
++
++    /**
++     * @deprecated Use threadedtick command instead of this. This runs on a global
++     * state, while threadedtick can be more powerful for specific contexts.
++     */
++    @Deprecated(forRemoval = true)
++    private static void tickCommand(CommandDispatcher<CommandSourceStack> dispatcher) {
++        // Canvas end
+         dispatcher.register(
+             Commands.literal("tick")
+                 .requires(source -> source.hasPermission(3))
 diff --git a/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java b/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
 index df035169ea89c4078e9a9226ac6e752f29d585a1..128ee3ff8457bb7c62b81436502f258421d95f98 100644
 --- a/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
@@ -2423,7 +2652,7 @@ index 1c87904bb99cc40bafc9357fb2fc1703b759c3df..621abfb5d9790a823d4580d138b79373
          // CraftBukkit start - process pending Chunk loadCallback() and unloadCallback() after each run task
          public boolean pollTask() {
 diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539fe2171c2 100644
+index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..f6612a33bcdfff27fd000505711e846908ff2122 100644
 --- a/src/main/java/net/minecraft/server/level/ServerLevel.java
 +++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
 @@ -5,6 +5,11 @@ import com.google.common.collect.Lists;
@@ -2495,17 +2724,18 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
  import net.minecraft.network.protocol.game.ClientboundSoundEntityPacket;
  import net.minecraft.network.protocol.game.ClientboundSoundPacket;
  import net.minecraft.network.protocol.game.DebugPackets;
-@@ -68,7 +85,9 @@ import net.minecraft.resources.ResourceKey;
+@@ -68,7 +85,10 @@ import net.minecraft.resources.ResourceKey;
  import net.minecraft.resources.ResourceLocation;
  import net.minecraft.server.MinecraftServer;
  import net.minecraft.server.ServerScoreboard;
++import net.minecraft.server.ServerTickRateManager;
 +import net.minecraft.server.dedicated.DedicatedServer;
  import net.minecraft.server.level.progress.ChunkProgressListener;
 +import net.minecraft.server.network.ServerConnectionListener;
  import net.minecraft.server.players.SleepStatus;
  import net.minecraft.sounds.SoundEvent;
  import net.minecraft.sounds.SoundSource;
-@@ -82,6 +101,7 @@ import net.minecraft.util.Unit;
+@@ -82,6 +102,7 @@ import net.minecraft.util.Unit;
  import net.minecraft.util.datafix.DataFixTypes;
  import net.minecraft.util.profiling.Profiler;
  import net.minecraft.util.profiling.ProfilerFiller;
@@ -2513,7 +2743,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
  import net.minecraft.util.valueproviders.IntProvider;
  import net.minecraft.util.valueproviders.UniformInt;
  import net.minecraft.world.DifficultyInstance;
-@@ -196,7 +216,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -196,7 +217,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      private static final Logger LOGGER = LogUtils.getLogger();
      private static final int EMPTY_TIME_NO_TICK = 300;
      private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
@@ -2522,7 +2752,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
      public final ServerChunkCache chunkSource;
      private final MinecraftServer server;
      public final PrimaryLevelData serverLevelData; // CraftBukkit - type
-@@ -211,22 +231,23 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -211,22 +232,23 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      private final LevelTicks<Block> blockTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
      private final LevelTicks<Fluid> fluidTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
      private final PathTypeCache pathTypesByPosCache = new PathTypeCache();
@@ -2550,7 +2780,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
  
      // CraftBukkit start
      public final LevelStorageSource.LevelStorageAccess convertable;
-@@ -235,6 +256,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -235,6 +257,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      public boolean hasEntityMoveEvent; // Paper - Add EntityMoveEvent
      private final alternate.current.wire.WireHandler wireHandler = new alternate.current.wire.WireHandler(this); // Paper - optimize redstone (Alternate Current)
      public boolean hasRidableMoveEvent = false; // Purpur - Ridables
@@ -2558,7 +2788,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
  
      public LevelChunk getChunkIfLoaded(int x, int z) {
          return this.chunkSource.getChunkAtIfLoadedImmediately(x, z); // Paper - Use getChunkIfLoadedImmediately
-@@ -730,11 +752,120 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -730,11 +753,122 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -2580,7 +2810,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
 +            activeConnections.remove(connection);
 +        }
 +    }
-+
+ 
 +    private boolean tickEmptyLevel() {
 +        if (this.server.isEmptyTickSkipping()) {
 +            return true;
@@ -2592,7 +2822,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
 +            } else {
 +                this.emptyTicks = 0;
 +            }
- 
++
 +            if (this.emptyTicks >= serverEmptySecondsLimit) {
 +                if (this.emptyTicks == serverEmptySecondsLimit) {
 +                    MinecraftServer.LOGGER.info("Level empty for {} seconds, pausing", this.server.pauseWhileEmptySeconds());
@@ -2637,6 +2867,15 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
 +        }
 +    }
 +
++    public void syncTimeToPlayers() {
++        ClientboundSetTimePacket timePacket = new ClientboundSetTimePacket(getGameTime(), getDayTime(), getGameRules().getBoolean(GameRules.RULE_DAYLIGHT));
++        for (final ServerPlayer player : this.players) {
++            if (player.level() == this) {
++                player.connection.send(timePacket);
++            }
++        }
++    }
++
 +    public void tick(BooleanSupplier shouldKeepTicking, int tickCount) {
 +        this.tickRateManager.tick();
 +        this.tickConnection();
@@ -2658,16 +2897,9 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
 +        }
 +        chunkSource.tick(() -> true, false);
 +
-+        final boolean doDaylight = getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
-+        final long dayTime = getDayTime();
-+        long worldTime = getGameTime();
-+        final ClientboundSetTimePacket worldPacket = new ClientboundSetTimePacket(worldTime, dayTime, doDaylight);
-+        for (Player entityhuman : players()) {
-+            if (!(entityhuman instanceof ServerPlayer entityplayer) || (!isForceTime() && (tickCount + entityhuman.getId()) % 20 != 0) ||
-+                ((ServerPlayer) entityhuman).serverLevel() != this) {
-+                continue;
-+            }
-+            entityplayer.connection.send(worldPacket);
++        if (this.tickCount % Config.INSTANCE.timeResyncInterval == 0) {
++            // Resync time every configurable amount of ticks
++            syncTimeToPlayers();
 +        }
 +
 +        hasPhysicsEvent = org.bukkit.event.block.BlockPhysicsEvent.getHandlerList().getRegisteredListeners().length > 0;
@@ -2681,7 +2913,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
          TickRateManager tickratemanager = this.tickRateManager();
          boolean flag = tickratemanager.runsNormally();
  
-@@ -844,6 +975,13 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -844,6 +978,13 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
          gameprofilerfiller.push("entityManagement");
          // Paper - rewrite chunk system
          gameprofilerfiller.pop();
@@ -2695,7 +2927,15 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
      }
  
      @Override
-@@ -1256,25 +1394,28 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -910,6 +1051,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         (this.players.stream().filter(LivingEntity::isSleeping).collect(Collectors.toList())).forEach((entityplayer) -> { // CraftBukkit - decompile error
+             entityplayer.stopSleepInBed(false, false);
+         });
++        this.syncTimeToPlayers(); // Canvas - ensure time resync
+     }
+ 
+     // Paper start - optimise random ticking
+@@ -1256,25 +1398,28 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
              this.server.getPlayerList().broadcastAll(new PacketPlayOutGameStateChange(PacketPlayOutGameStateChange.THUNDER_LEVEL_CHANGE, this.thunderLevel));
          }
          // */
@@ -2733,7 +2973,18 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
          // CraftBukkit end
  
      }
-@@ -2616,7 +2757,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -2143,8 +2288,8 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     }
+ 
+     @Override
+-    public TickRateManager tickRateManager() {
+-        return this.server.tickRateManager();
++    public ServerTickRateManager tickRateManager() { // Canvas
++        return this.tickRateManager; // Canvas
+     }
+ 
+     @Override
+@@ -2616,7 +2761,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
  
      public void onStructureStartsAvailable(ChunkAccess chunk) {
@@ -2742,7 +2993,7 @@ index 1b647544ebd578d1f8fbb6b65a2c27ac07761683..65f3d7c3e88371e117bc97995c86b539
              this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts());
          });
      }
-@@ -2626,7 +2767,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -2626,7 +2771,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      }
  
      @Override
@@ -2876,7 +3127,7 @@ index 16069b9cbf6c7679c28a2e9a54e77d23cd10e541..79be4bf61e2ae13920b170ffbd0c1eec
              return;
          }
 diff --git a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java b/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
-index 9b706276dc5b5f55b966c5472c6c4e864342b916..c811d9defc456d93943caa99c895a390aa911179 100644
+index 9b706276dc5b5f55b966c5472c6c4e864342b916..e985b6bdaabfe26b1ca675d5c704544392a8e773 100644
 --- a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
 +++ b/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
 @@ -6,6 +6,7 @@ import com.mojang.jtracy.TracyClient;
@@ -2887,18 +3138,19 @@ index 9b706276dc5b5f55b966c5472c6c4e864342b916..c811d9defc456d93943caa99c895a390
  import java.util.Queue;
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.Executor;
-@@ -13,8 +14,10 @@ import java.util.concurrent.locks.LockSupport;
+@@ -13,8 +14,11 @@ import java.util.concurrent.locks.LockSupport;
  import java.util.function.BooleanSupplier;
  import java.util.function.Supplier;
  import javax.annotation.CheckReturnValue;
 +import io.github.dueris.canvas.server.level.MinecraftServerWorld;
++import io.github.dueris.canvas.server.level.TickRateManagerInstance;
  import net.minecraft.ReportedException;
  import net.minecraft.SharedConstants;
 +import net.minecraft.server.MinecraftServer;
  import net.minecraft.util.profiling.metrics.MetricCategory;
  import net.minecraft.util.profiling.metrics.MetricSampler;
  import net.minecraft.util.profiling.metrics.MetricsRegistry;
-@@ -125,13 +128,29 @@ public abstract class BlockableEventLoop<R extends Runnable> implements Profiler
+@@ -125,18 +129,42 @@ public abstract class BlockableEventLoop<R extends Runnable> implements Profiler
          } else if (this.blockingCount == 0 && !this.shouldRun(runnable)) {
              return false;
          } else {
@@ -2929,6 +3181,19 @@ index 9b706276dc5b5f55b966c5472c6c4e864342b916..c811d9defc456d93943caa99c895a390
  
          try {
              while (!stopCondition.getAsBoolean()) {
+                 if (!this.pollTask()) {
++                    // Canvas start
++                    if (this instanceof TickRateManagerInstance tickRateManagerInstance && !tickRateManagerInstance.tickRateManager().isUnlockedTickRate()) {
+                     this.waitForTasks();
++                    } else if (this instanceof TickRateManagerInstance tickRateManagerInstance) {
++                        // Skipping because unlocked
++                        tickRateManagerInstance.skipTickWait();
++                        break;
++                    }
++                    // Canvas end
+                 }
+             }
+         } finally {
 diff --git a/src/main/java/net/minecraft/world/entity/Entity.java b/src/main/java/net/minecraft/world/entity/Entity.java
 index c00a48fef499bc3b18a92010d88b32f10c839898..84c28d8f4fd4c9f1f415035c98181f1fede4d79c 100644
 --- a/src/main/java/net/minecraft/world/entity/Entity.java
@@ -3063,7 +3328,7 @@ index c00a48fef499bc3b18a92010d88b32f10c839898..84c28d8f4fd4c9f1f415035c98181f1f
          }
          // Paper end - rewrite chunk system
 diff --git a/src/main/java/net/minecraft/world/level/Level.java b/src/main/java/net/minecraft/world/level/Level.java
-index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fed0f06ffc 100644
+index 1aa251cfdf941027f529ce02f0c16c815ade296f..e2044af130738a64f327c4be8b85fb673175d4c4 100644
 --- a/src/main/java/net/minecraft/world/level/Level.java
 +++ b/src/main/java/net/minecraft/world/level/Level.java
 @@ -10,9 +10,9 @@ import java.util.Objects;
@@ -3077,12 +3342,13 @@ index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fe
  import net.minecraft.core.BlockPos;
  import net.minecraft.core.Direction;
  import net.minecraft.core.Holder;
-@@ -25,14 +25,12 @@ import net.minecraft.core.registries.Registries;
+@@ -25,14 +25,13 @@ import net.minecraft.core.registries.Registries;
  import net.minecraft.network.protocol.Packet;
  import net.minecraft.resources.ResourceKey;
  import net.minecraft.resources.ResourceLocation;
 -import io.papermc.paper.util.MCUtil;
  import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.ServerTickRateManager;
  import net.minecraft.server.level.FullChunkStatus;
  import net.minecraft.server.level.ServerLevel;
  import net.minecraft.sounds.SoundEvent;
@@ -3092,7 +3358,7 @@ index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fe
  import net.minecraft.util.Mth;
  import net.minecraft.util.RandomSource;
  import net.minecraft.util.StringRepresentable;
-@@ -44,7 +42,6 @@ import net.minecraft.world.damagesource.DamageSource;
+@@ -44,7 +43,6 @@ import net.minecraft.world.damagesource.DamageSource;
  import net.minecraft.world.damagesource.DamageSources;
  import net.minecraft.world.entity.Entity;
  import net.minecraft.world.entity.boss.EnderDragonPart;
@@ -3100,7 +3366,7 @@ index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fe
  import net.minecraft.world.entity.item.ItemEntity;
  import net.minecraft.world.entity.player.Player;
  import net.minecraft.world.item.ItemStack;
-@@ -106,7 +103,7 @@ import org.bukkit.entity.SpawnCategory;
+@@ -106,7 +104,7 @@ import org.bukkit.entity.SpawnCategory;
  import org.bukkit.event.block.BlockPhysicsEvent;
  // CraftBukkit end
  
@@ -3109,7 +3375,7 @@ index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fe
  
      public static final Codec<ResourceKey<Level>> RESOURCE_KEY_CODEC = ResourceKey.codec(Registries.DIMENSION);
      public static final ResourceKey<Level> OVERWORLD = ResourceKey.create(Registries.DIMENSION, ResourceLocation.withDefaultNamespace("overworld"));
-@@ -875,7 +872,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+@@ -875,7 +873,8 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
      }
      // Paper end - optimise random ticking
  
@@ -3119,7 +3385,7 @@ index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fe
          // Paper start - getblock optimisations - cache world height/sections
          final DimensionType dimType = holder.value();
          this.minY = dimType.minY();
-@@ -1685,8 +1683,15 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+@@ -1685,8 +1684,15 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
  
      }
  
@@ -3137,6 +3403,15 @@ index 1aa251cfdf941027f529ce02f0c16c815ade296f..4c57e1045fcf4fe9f5f233480c4484fe
      }
  
      @Nullable
+@@ -1851,7 +1857,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         return this.levelData;
+     }
+ 
+-    public abstract TickRateManager tickRateManager();
++    public abstract ServerTickRateManager tickRateManager(); // Canvas
+ 
+     public float getThunderLevel(float delta) {
+         return Mth.lerp(delta, this.oThunderLevel, this.thunderLevel) * this.getRainLevel(delta);
 diff --git a/src/main/java/net/minecraft/world/level/block/LeavesBlock.java b/src/main/java/net/minecraft/world/level/block/LeavesBlock.java
 index de9cbe4868276011d69536a0532ff57fe7a77bf3..d856f527f0132be383b557fa9619c275a087d976 100644
 --- a/src/main/java/net/minecraft/world/level/block/LeavesBlock.java

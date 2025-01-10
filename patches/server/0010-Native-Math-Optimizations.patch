@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Fri, 3 Jan 2025 11:56:19 -0800
+Date: Thu, 9 Jan 2025 20:01:06 -0800
 Subject: [PATCH] Native Math Optimizations
 
 
@@ -1804,35 +1804,34 @@ index 0000000000000000000000000000000000000000..92adf50f027f8f135583f41aefa841fb
 +
 +set(CMAKE_C_FLAGS "-march=x86-64 -Wl,--no-insert-timestamp")
 diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
-index a73612c550ff6de57a01f6caf9752f144c05983f..e31fdc220fb0a1f5e0f142cf2be18417082693ea 100644
+index 498a19f44fb8d806cf461584b3363be614c847ea..141b4d64eae4495a196ebe8dbdd4e34b785b293f 100644
 --- a/src/main/java/io/github/dueris/canvas/Config.java
 +++ b/src/main/java/io/github/dueris/canvas/Config.java
-@@ -16,6 +16,8 @@ public class Config implements JsonConfig {
-     public boolean allowPacketsThreadCheckOffMain = true;
-     public long chunkDataCacheSoftLimit = 8192L;
-     public long chunkDataCacheLimit = 32678L;
-+    public boolean allowAVX512 = false;
-+    public boolean nativeAccelerationEnabled = true;
- 
-     public static Config init() {
-         final JsonConfigAPI jsonConfigAPI = new JsonConfigAPI(true);
-@@ -27,6 +29,16 @@ public class Config implements JsonConfig {
-             parentPath,
-             serverJson.getName()
-         );
-+
-+        System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
-+        boolean configured = INSTANCE.nativeAccelerationEnabled;
-+        if (configured) {
-+            try {
-+                Class.forName("io.github.dueris.canvas.util.NativeLoader").getField("lookup").get(null);
-+            } catch (Throwable t) {
-+                t.printStackTrace();
-+            }
-+        }
-         return INSTANCE;
+@@ -37,6 +37,8 @@ public class Config implements ConfigData {
+     public static class ChunkGeneration {
+         public long chunkDataCacheSoftLimit = 8192L;
+         public long chunkDataCacheLimit = 32678L;
++        public boolean allowAVX512 = false;
++        public boolean nativeAccelerationEnabled = true;
      }
- }
+ 
+ 	public static Config init() {
+@@ -49,6 +51,15 @@ public class Config implements ConfigData {
+ 		}
+ 
+ 		detectModifications(defaulted, INSTANCE, Config.class);
++		System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
++		boolean configured = INSTANCE.chunkGeneration.nativeAccelerationEnabled;
++		if (configured) {
++			try {
++				Class.forName("io.github.dueris.canvas.util.NativeLoader").getField("lookup").get(null);
++			} catch (Throwable t) {
++				t.printStackTrace();
++			}
++		}
+ 		return INSTANCE;
+ 	}
+ 
 diff --git a/src/main/java/io/github/dueris/canvas/util/Bindings.java b/src/main/java/io/github/dueris/canvas/util/Bindings.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..310d3a380264dee555af3fab0ac00ace81f7fdc4
@@ -2413,7 +2412,7 @@ index 0000000000000000000000000000000000000000..9e3ac35656aa9e823bad7bfe66e4390a
 +}
 diff --git a/src/main/java/io/github/dueris/canvas/util/NativeLoader.java b/src/main/java/io/github/dueris/canvas/util/NativeLoader.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..1758eeecf924ae63936d5837ef096b3a409bf20a
+index 0000000000000000000000000000000000000000..590177d7b3e1d3e1eaec6ed781d3017749d5a477
 --- /dev/null
 +++ b/src/main/java/io/github/dueris/canvas/util/NativeLoader.java
 @@ -0,0 +1,173 @@
@@ -2449,7 +2448,7 @@ index 0000000000000000000000000000000000000000..1758eeecf924ae63936d5837ef096b3a
 +        lookup = load0(libName);
 +        if (lookup == null) {
 +            currentMachineTarget = null;
-+            Config.INSTANCE.chunkgen.nativeAccelerationEnabled = false;
++            Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled = false;
 +            LOGGER.warn("Disabling native math optimization(C2ME/Canvas) due to unsupported platform.");
 +        } else {
 +            try {
@@ -2460,7 +2459,7 @@ index 0000000000000000000000000000000000000000..1758eeecf924ae63936d5837ef096b3a
 +                        ValueLayout.JAVA_INT,
 +                        ValueLayout.JAVA_BOOLEAN
 +                    )
-+                ).invokeExact(Boolean.getBoolean("com.ishland.c2me.opts.natives_math.duringGameInit") ? Config.INSTANCE.allowAVX512 : true);
++                ).invokeExact(Boolean.getBoolean("com.ishland.c2me.opts.natives_math.duringGameInit") ? Config.INSTANCE.chunkGeneration.allowAVX512 : true);
 +                ISATarget target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];
 +                while (!target.isNativelySupported()) target = (ISATarget) ISATarget.getInstance().getEnumConstants()[target.ordinal() - 1];
 +                currentMachineTarget = target;
@@ -2664,7 +2663,7 @@ index 0000000000000000000000000000000000000000..f1d143b48bbad6b48c18c6365964f676
 +    }
 +}
 diff --git a/src/main/java/net/minecraft/world/level/biome/BiomeManager.java b/src/main/java/net/minecraft/world/level/biome/BiomeManager.java
-index c37b73290f52239abec7a74c332c7d77f4e8e095..e52a4c877795b65f4de563c7fc01e9ee16cb7aa9 100644
+index c37b73290f52239abec7a74c332c7d77f4e8e095..78f9e82c11ba23c972de42c0192a1dbd45f183b0 100644
 --- a/src/main/java/net/minecraft/world/level/biome/BiomeManager.java
 +++ b/src/main/java/net/minecraft/world/level/biome/BiomeManager.java
 @@ -1,6 +1,8 @@
@@ -2691,7 +2690,7 @@ index c37b73290f52239abec7a74c332c7d77f4e8e095..e52a4c877795b65f4de563c7fc01e9ee
 -        final double var8 = (double) (var2 & 3) / 4.0;
 -        int var9 = 0;
 -        double var10 = Double.POSITIVE_INFINITY;
-+        if (Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++        if (Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +            int mask = Bindings.c2me_natives_biome_access_sample(this.biomeZoomSeed, pos.getX(), pos.getY(), pos.getZ());
  
 -        for (int var11 = 0; var11 < 8; ++var11) {
@@ -2784,7 +2783,7 @@ index c37b73290f52239abec7a74c332c7d77f4e8e095..e52a4c877795b65f4de563c7fc01e9ee
      }
  
 diff --git a/src/main/java/net/minecraft/world/level/levelgen/DensityFunctions.java b/src/main/java/net/minecraft/world/level/levelgen/DensityFunctions.java
-index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851d78fd975 100644
+index ac8447e20531ad59d5e26c6db541d6e844d56c0f..d80e8a317a1791d3280f5e5abb3a027b3a7858e6 100644
 --- a/src/main/java/net/minecraft/world/level/levelgen/DensityFunctions.java
 +++ b/src/main/java/net/minecraft/world/level/levelgen/DensityFunctions.java
 @@ -5,7 +5,12 @@ import com.mojang.logging.LogUtils;
@@ -2817,7 +2816,7 @@ index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851
              randomSource.consumeCount(17292);
              this.islandNoise = new SimplexNoise(randomSource);
 +            // Canvas start
-+            if (Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++            if (Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +                int[] permutation = (this.islandNoise).p;
 +                MemorySegment segment = this.c2me$arena.allocate(permutation.length * 4L, 64);
 +                MemorySegment.copy(MemorySegment.ofArray(permutation), 0L, segment, 0L, permutation.length * 4L);
@@ -2834,7 +2833,7 @@ index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851
          @Override
          public double compute(DensityFunction.FunctionContext pos) {
 +            // Canvas start
-+            if (Config.INSTANCE.chunkgen.nativeAccelerationEnabled && this.c2me$samplerDataPtr != 0L) {
++            if (Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled && this.c2me$samplerDataPtr != 0L) {
 +                return ((double) Bindings.c2me_natives_end_islands_sample(this.c2me$samplerDataPtr, pos.blockX() / 8, pos.blockZ() / 8) - 8.0) / 128.0;
 +            } else {
              return ((double)getHeightValue(this.islandNoise, pos.blockX() / 8, pos.blockZ() / 8) - 8.0) / 128.0;
@@ -2849,7 +2848,7 @@ index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851
          public void fillArray(double[] densities, DensityFunction.ContextProvider applier) {
 -            applier.fillAllDirectly(densities, this);
 +            // Canvas start
-+            if (!Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++            if (!Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +                applier.fillAllDirectly(densities, this);
 +                return;
 +            }
@@ -2892,7 +2891,7 @@ index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851
 +
 +        @Override
 +        public void fillArray(final double[] densities, final ContextProvider applier) {
-+            if (!Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++            if (!Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +                applier.fillAllDirectly(densities, this);
 +                return;
 +            }
@@ -2939,7 +2938,7 @@ index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851
 +
 +        @Override
 +        public void fillArray(final double[] densities, final ContextProvider applier) {
-+            if (!Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++            if (!Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +                applier.fillAllDirectly(densities, this);
 +                return;
 +            }
@@ -2986,7 +2985,7 @@ index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851
 +
 +        @Override
 +        public void fillArray(final double[] densities, final ContextProvider applier) {
-+            if (!Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++            if (!Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +                applier.fillAllDirectly(densities, this);
 +                return;
 +            }
@@ -3026,7 +3025,7 @@ index ac8447e20531ad59d5e26c6db541d6e844d56c0f..ea091adf64fcd1a80b43d7fd5b1a4851
  
      interface ShiftNoise extends DensityFunction {
 diff --git a/src/main/java/net/minecraft/world/level/levelgen/synth/BlendedNoise.java b/src/main/java/net/minecraft/world/level/levelgen/synth/BlendedNoise.java
-index d0eabf6b5993c139d6858ea9c4d93fd60f5d4c2f..4989955068dc3a107500c7536b912c1308df6d91 100644
+index d0eabf6b5993c139d6858ea9c4d93fd60f5d4c2f..ddaf80b35d8a3b58877947ba9c74d3afaf20449f 100644
 --- a/src/main/java/net/minecraft/world/level/levelgen/synth/BlendedNoise.java
 +++ b/src/main/java/net/minecraft/world/level/levelgen/synth/BlendedNoise.java
 @@ -4,8 +4,13 @@ import com.google.common.annotations.VisibleForTesting;
@@ -3084,7 +3083,7 @@ index d0eabf6b5993c139d6858ea9c4d93fd60f5d4c2f..4989955068dc3a107500c7536b912c13
          this.yMultiplier = 684.412 * this.yScale;
          this.maxValue = lowerInterpolatedNoise.maxBrokenValue(this.yMultiplier);
 +        // Canvas start
-+        if (Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++        if (Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +            this.c2me$samplerData = BindingsTemplate.interpolated_noise_sampler$create(this.c2me$arena, this);
 +            this.c2me$samplerDataPtr = this.c2me$samplerData.address();
 +        }
@@ -3106,7 +3105,7 @@ index a02f6de4bc77f5f1618995268d9478e3ec5f464c..ce474f3e010800f6d7a702b425f5db98
      public final double yo;
      public final double zo;
 diff --git a/src/main/java/net/minecraft/world/level/levelgen/synth/NormalNoise.java b/src/main/java/net/minecraft/world/level/levelgen/synth/NormalNoise.java
-index 8bb1874f65d1deb18b98b6746578e1c857cb5311..551e91233962a11d660f35ce99d93c51df8d4fa8 100644
+index 8bb1874f65d1deb18b98b6746578e1c857cb5311..a34d4a63ec4b6f4f725a20857807cbb0496d4e44 100644
 --- a/src/main/java/net/minecraft/world/level/levelgen/synth/NormalNoise.java
 +++ b/src/main/java/net/minecraft/world/level/levelgen/synth/NormalNoise.java
 @@ -3,9 +3,14 @@ package net.minecraft.world.level.levelgen.synth;
@@ -3145,7 +3144,7 @@ index 8bb1874f65d1deb18b98b6746578e1c857cb5311..551e91233962a11d660f35ce99d93c51
          this.valueFactor = 0.16666666666666666 / expectedDeviation(k - j);
          this.maxValue = (this.first.maxValue() + this.second.maxValue()) * this.valueFactor;
 +        // Canvas start
-+        if (Config.INSTANCE.chunkgen.nativeAccelerationEnabled) {
++        if (Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled) {
 +            this.c2me$samplerData = BindingsTemplate.double_octave_sampler_data$create(this.c2me$arena, this.first, this.second, this.valueFactor);
 +            this.c2me$samplerDataPtr = this.c2me$samplerData.address();
 +        }
