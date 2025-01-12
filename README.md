@@ -32,6 +32,6 @@ Canvas implements a ton of more optimizations for entities, most notable async p
 
 ---
 These are just the more notable optimziations Canvas provides, but there are a TON more behind the scenes improving performance even more.
-Please consider <a href="https://ko-fi.com/dueris">donating</a>! I(Dueris) have put tons of hours into this project to make it as stable and performant as possible.
+Please consider <a href="https://ko-fi.com/dueris">donating</a>! I (Dueris) have put tons of hours into this project to make it as stable and performant as possible.
 
 Discord: https://discord.gg/cKUt92kbzj
