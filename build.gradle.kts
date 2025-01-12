@@ -122,27 +122,6 @@ tasks.register("printMinecraftVersion") {
     }
 }
 
-tasks.register<DefaultTask>("createCanvasServer") {
-    dependsOn(":createMojmapPaperclipJar")
-
-    doLast {
-        val shadowJar: CreatePaperclipJar = tasks.getByName<CreatePaperclipJar>("createMojmapPaperclipJar")
-        val targetJarDirectory: Path = projectDir.toPath().toAbsolutePath().resolve("target")
-
-        Files.createDirectories(targetJarDirectory)
-        Files.copy(
-            shadowJar.outputZip.get().asFile.toPath().toAbsolutePath(),
-            targetJarDirectory.resolve("canvas-launcher.jar"),
-            StandardCopyOption.REPLACE_EXISTING
-        )
-    }
-}
-
-tasks.register<Copy>("viewLauncherContents") {
-    from(zipTree(file("target/canvas-launcher.jar")))
-    into(file("target/view"))
-}
-
 publishing {
     publications.create<MavenPublication>("devBundle") {
         artifact(tasks.generateDevelopmentBundle) {
