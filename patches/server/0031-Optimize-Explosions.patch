@@ -1,0 +1,266 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Sun, 12 Jan 2025 13:55:34 -0800
+Subject: [PATCH] Optimize Explosions
+
+
+diff --git a/src/main/java/io/github/dueris/canvas/Config.java b/src/main/java/io/github/dueris/canvas/Config.java
+index 933c81c8c802b9599ce5e76285ebc8b1aceeccf6..263c1301526a978f44aa72e977e93c5c1197fe4f 100644
+--- a/src/main/java/io/github/dueris/canvas/Config.java
++++ b/src/main/java/io/github/dueris/canvas/Config.java
+@@ -79,6 +79,14 @@ public class Config implements ConfigData {
+ 	@Comment("Use faster sin/cos math operations")
+ 	public boolean useCompactSineLUT = true;
+ 
++    @Comment("TNT-related optimizations")
++    public TNT tnt = new TNT();
++    public static class TNT {
++        public boolean enableFasterTntOptimization = true;
++        public boolean explosionNoBlockDamage = false;
++        public double tntRandomRange = -1;
++    }
++
+ 	public static Config init() {
+ 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
+ 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
+diff --git a/src/main/java/net/minecraft/world/level/ServerExplosion.java b/src/main/java/net/minecraft/world/level/ServerExplosion.java
+index 4c7e4683c53afb0800b7f17c5964ba8ff31848d1..7338d00beabd3b5980345f5a02cbb50bf00de71b 100644
+--- a/src/main/java/net/minecraft/world/level/ServerExplosion.java
++++ b/src/main/java/net/minecraft/world/level/ServerExplosion.java
+@@ -1,7 +1,11 @@
+ package net.minecraft.world.level;
+ 
++import io.github.dueris.canvas.Config;
++import it.unimi.dsi.fastutil.objects.Object2DoubleOpenHashMap;
++import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+ import java.util.ArrayList;
++import java.util.Collections;
+ import java.util.HashMap;
+ import java.util.HashSet;
+ import java.util.Iterator;
+@@ -10,6 +14,7 @@ import java.util.Map;
+ import java.util.Optional;
+ import java.util.Set;
+ import javax.annotation.Nullable;
++import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Holder;
+@@ -26,6 +31,7 @@ import net.minecraft.world.entity.boss.EnderDragonPart;
+ import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+ import net.minecraft.world.entity.item.ItemEntity;
+ import net.minecraft.world.entity.item.PrimedTnt;
++import net.minecraft.world.entity.monster.breeze.Breeze;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.level.block.BaseFireBlock;
+@@ -37,11 +43,13 @@ import net.minecraft.world.phys.HitResult;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
++import org.apache.commons.lang3.tuple.Pair;
+ import org.bukkit.craftbukkit.event.CraftEventFactory;
+ import org.bukkit.craftbukkit.util.CraftLocation;
+ import org.bukkit.event.entity.EntityExplodeEvent;
+ import org.bukkit.Location;
+ import org.bukkit.event.block.BlockExplodeEvent;
++import org.jetbrains.annotations.NotNull;
+ // CraftBukkit end
+ 
+ public class ServerExplosion implements Explosion {
+@@ -54,9 +62,9 @@ public class ServerExplosion implements Explosion {
+     private final ServerLevel level;
+     private final Vec3 center;
+     @Nullable
+-    private final Entity source;
++    public final Entity source; // Canvas - private -> public
+     private final float radius;
+-    private final DamageSource damageSource;
++    public final DamageSource damageSource; // Canvas - private -> public
+     private final ExplosionDamageCalculator damageCalculator;
+     private final Map<Player, Vec3> hitPlayers = new HashMap();
+     // CraftBukkit - add field
+@@ -370,6 +378,11 @@ public class ServerExplosion implements Explosion {
+     }
+ 
+     private List<BlockPos> calculateExplodedPositions() {
++        // Canvas start
++        if (Config.INSTANCE.tnt.enableFasterTntOptimization && !level.isClientSide && !(getIndirectSourceEntity() instanceof Breeze)) {
++            return doExplosionA(this);
++        }
++        // Canvas end
+         // Paper start - collision optimisations
+         final ObjectArrayList<BlockPos> ret = new ObjectArrayList<>();
+ 
+@@ -466,6 +479,158 @@ public class ServerExplosion implements Explosion {
+         return ret;
+         // Paper end - collision optimisations
+     }
++    // Canvas start
++
++    private static final Object2DoubleOpenHashMap<Pair<Vec3, AABB>> densityCache = new Object2DoubleOpenHashMap<>();
++    private static final Object2ObjectOpenHashMap<BlockPos, BlockState> stateCache = new Object2ObjectOpenHashMap<>();
++    private static final Object2ObjectOpenHashMap<BlockPos, FluidState> fluidCache = new Object2ObjectOpenHashMap<>();
++    private static final BlockPos.MutableBlockPos posMutable = new BlockPos.MutableBlockPos(0, 0, 0);
++    private static final ObjectOpenHashSet<BlockPos> affectedBlockPositionsSet = new ObjectOpenHashSet<>();
++    private static boolean firstRay;
++    private static boolean rayCalcDone;
++
++    public static @NotNull List<BlockPos> doExplosionA(ServerExplosion e) {
++
++        List<BlockPos> toBlow;
++
++        if (!Config.INSTANCE.tnt.explosionNoBlockDamage && e.damageSource != null) {
++            rayCalcDone = false;
++            firstRay = true;
++            getAffectedPositionsOnPlaneY(e, 0, 0, 15, 0, 15); // bottom
++            getAffectedPositionsOnPlaneY(e, 15, 0, 15, 0, 15); // top
++            getAffectedPositionsOnPlaneX(e, 0, 1, 14, 0, 15); // west
++            getAffectedPositionsOnPlaneX(e, 15, 1, 14, 0, 15); // east
++            getAffectedPositionsOnPlaneZ(e, 0, 1, 14, 1, 14); // north
++            getAffectedPositionsOnPlaneZ(e, 15, 1, 14, 1, 14); // south
++            stateCache.clear();
++            fluidCache.clear();
++
++            toBlow = new ArrayList<>(affectedBlockPositionsSet);
++            affectedBlockPositionsSet.clear();
++        } else {
++            toBlow = Collections.emptyList();
++        }
++        densityCache.clear();
++
++        return toBlow;
++    }
++
++    private static void getAffectedPositionsOnPlaneX(Explosion e, int x, int yStart, int yEnd, int zStart, int zEnd) {
++        if (!rayCalcDone) {
++            final double xRel = (double) x / 15.0D * 2.0D - 1.0D;
++
++            for (int z = zStart; z <= zEnd; ++z) {
++                double zRel = (double) z / 15.0D * 2.0D - 1.0D;
++
++                for (int y = yStart; y <= yEnd; ++y) {
++                    double yRel = (double) y / 15.0D * 2.0D - 1.0D;
++
++                    if (checkAffectedPosition((ServerExplosion) e, xRel, yRel, zRel)) {
++                        return;
++                    }
++                }
++            }
++        }
++    }
++
++    private static void getAffectedPositionsOnPlaneY(Explosion e, int y, int xStart, int xEnd, int zStart, int zEnd) {
++        if (!rayCalcDone) {
++            final double yRel = (double) y / 15.0D * 2.0D - 1.0D;
++
++            for (int z = zStart; z <= zEnd; ++z) {
++                double zRel = (double) z / 15.0D * 2.0D - 1.0D;
++
++                for (int x = xStart; x <= xEnd; ++x) {
++                    double xRel = (double) x / 15.0D * 2.0D - 1.0D;
++
++                    if (checkAffectedPosition((ServerExplosion) e, xRel, yRel, zRel)) {
++                        return;
++                    }
++                }
++            }
++        }
++    }
++
++    private static void getAffectedPositionsOnPlaneZ(Explosion e, int z, int xStart, int xEnd, int yStart, int yEnd) {
++        if (!rayCalcDone) {
++            final double zRel = (double) z / 15.0D * 2.0D - 1.0D;
++
++            for (int x = xStart; x <= xEnd; ++x) {
++                double xRel = (double) x / 15.0D * 2.0D - 1.0D;
++
++                for (int y = yStart; y <= yEnd; ++y) {
++                    double yRel = (double) y / 15.0D * 2.0D - 1.0D;
++
++                    if (checkAffectedPosition((ServerExplosion) e, xRel, yRel, zRel)) {
++                        return;
++                    }
++                }
++            }
++        }
++    }
++
++    private static boolean checkAffectedPosition(ServerExplosion e, double xRel, double yRel, double zRel) {
++        double len = Math.sqrt(xRel * xRel + yRel * yRel + zRel * zRel);
++        double xInc = (xRel / len) * 0.3;
++        double yInc = (yRel / len) * 0.3;
++        double zInc = (zRel / len) * 0.3;
++        float rand = e.level().random.nextFloat();
++        float sizeRand = (Config.INSTANCE.tnt.tntRandomRange >= 0 ? (float) Config.INSTANCE.tnt.tntRandomRange : rand);
++        float size = e.radius() * (0.7F + sizeRand * 0.6F);
++        Vec3 vec3 = e.center();
++        double posX = vec3.x;
++        double posY = vec3.y;
++        double posZ = vec3.z;
++
++        for (float f1 = 0.3F; size > 0.0F; size -= 0.22500001F) {
++            posMutable.set(posX, posY, posZ);
++
++            // Don't query already cached positions again from the world
++            BlockState state = stateCache.get(posMutable);
++            FluidState fluid = fluidCache.get(posMutable);
++            BlockPos posImmutable = null;
++
++            if (state == null) {
++                posImmutable = posMutable.immutable();
++                state = e.level().getBlockState(posImmutable);
++                stateCache.put(posImmutable, state);
++                fluid = e.level().getFluidState(posImmutable);
++                fluidCache.put(posImmutable, fluid);
++            }
++
++            if (!state.isAir()) {
++                float resistance = Math.max(state.getBlock().getExplosionResistance(), fluid.getExplosionResistance());
++
++                if (e.source != null) {
++                    resistance = e.source.getBlockExplosionResistance(e, e.level(), posMutable, state, fluid, resistance);
++                }
++
++                size -= (resistance + 0.3F) * 0.3F;
++            }
++
++            if (size > 0.0F) {
++                if ((e.source == null || e.source.shouldBlockExplode(e, e.level(), posMutable, state, size)))
++                    affectedBlockPositionsSet.add(posImmutable != null ? posImmutable : posMutable.immutable());
++            } else if (firstRay) {
++                rayCalcDone = true;
++                return true;
++            }
++
++            firstRay = false;
++
++            posX += xInc;
++            posY += yInc;
++            posZ += zInc;
++        }
++
++        return false;
++    }
++
++    private Optional<Float> noBlockCalcsWithNoBLockDamage(final ExplosionDamageCalculator instance, final Explosion explosion, final BlockGetter blockGetter, final BlockPos blockPos, final BlockState blockState, final FluidState fluidState) {
++        if (Config.INSTANCE.tnt.explosionNoBlockDamage) return Optional.of(Blocks.BEDROCK.getExplosionResistance());
++        return instance.getBlockExplosionResistance(explosion, blockGetter, blockPos, blockState, fluidState);
++    }
++    // Canvas end
+ 
+     private void hurtEntities() {
+         float f = this.radius * 2.0F;
+@@ -572,6 +737,11 @@ public class ServerExplosion implements Explosion {
+     }
+ 
+     private void interactWithBlocks(List<BlockPos> positions) {
++        // Canvas start
++        if (Config.INSTANCE.tnt.explosionNoBlockDamage) {
++            positions.clear();
++        }
++        // Canvas end
+         List<ServerExplosion.StackCollector> list1 = new ArrayList();
+ 
+         Util.shuffle(positions, this.level.random);
