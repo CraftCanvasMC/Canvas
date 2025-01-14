@@ -3200,16 +3200,30 @@ index 3a9e25b436f366fffe08c3b0c1fce11ed42ee646..88967d0332cfe1ae67e803f9be8880a8
          }
      }
 diff --git a/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-index 5b33034f01c05b29cd1a90847aa27b356a02264f..4ac648ad65ff54243799c78464430de04ad38e0e 100644
+index 5b33034f01c05b29cd1a90847aa27b356a02264f..9cd9db4955748f6621e8ce85f6d5dc531f749eb1 100644
 --- a/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/src/main/java/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-@@ -1924,6 +1924,11 @@ public class ServerGamePacketListenerImpl extends ServerCommonPacketListenerImpl
+@@ -137,6 +137,7 @@ import net.minecraft.network.protocol.ping.ServerboundPingRequestPacket;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.resources.ResourceLocation;
+ import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.RunningOnDifferentThreadException;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.util.FutureChain;
+@@ -1923,7 +1924,16 @@ public class ServerGamePacketListenerImpl extends ServerCommonPacketListenerImpl
+ 
      @Override
      public void handlePlayerAction(ServerboundPlayerActionPacket packet) {
-         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.serverLevel());
-+        // Canvas start - ensure level main
-+        if (!this.player.serverLevel().isSameThread()) {
-+            throw new RuntimeException("Unable to process action packet off-level!");
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.serverLevel());
++        // Canvas start - rubberbanding fix
++        try {
++            PacketUtils.ensureRunningOnSameThread(packet, this, this.player.serverLevel());
++        } catch (RunningOnDifferentThreadException e) {
++            if (packet.getAction() == ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK) {
++                this.player.connection.send(new ClientboundBlockUpdatePacket(packet.getPos(), Blocks.AIR.defaultBlockState()));
++            }
++            throw e;
 +        }
 +        // Canvas end
          if (this.player.isImmobile()) return; // CraftBukkit
@@ -3283,6 +3297,30 @@ index 5b1705794a8c3914cb11fdd35f75c8e0c128ecd0..68cdfa3bb469df70263f6c8e8f14b412
          if (++this.sendAllPlayerInfoIn > 600) {
              // CraftBukkit start
              for (int i = 0; i < this.players.size(); ++i) {
+diff --git a/src/main/java/net/minecraft/util/debugchart/DebugSampleSubscriptionTracker.java b/src/main/java/net/minecraft/util/debugchart/DebugSampleSubscriptionTracker.java
+index 059fe0a63d3f1d5962858b279b6a2cc2de0a571d..9eb22cbc646eccfe25ef61a922b995eacc9279b0 100644
+--- a/src/main/java/net/minecraft/util/debugchart/DebugSampleSubscriptionTracker.java
++++ b/src/main/java/net/minecraft/util/debugchart/DebugSampleSubscriptionTracker.java
+@@ -1,8 +1,10 @@
+ package net.minecraft.util.debugchart;
+ 
+ import com.google.common.collect.Maps;
++import java.util.Collections;
+ import java.util.EnumMap;
+ import java.util.LinkedList;
++import java.util.List;
+ import java.util.Map;
+ import java.util.Queue;
+ import net.minecraft.Util;
+@@ -15,7 +17,7 @@ public class DebugSampleSubscriptionTracker {
+     public static final int STOP_SENDING_AFTER_MS = 10000;
+     private final PlayerList playerList;
+     private final EnumMap<RemoteDebugSampleType, Map<ServerPlayer, DebugSampleSubscriptionTracker.SubscriptionStartedAt>> subscriptions;
+-    private final Queue<DebugSampleSubscriptionTracker.SubscriptionRequest> subscriptionRequestQueue = new LinkedList<>();
++    private final List<SubscriptionRequest> subscriptionRequestQueue = Collections.synchronizedList(new LinkedList<>()); // Canvas
+ 
+     public DebugSampleSubscriptionTracker(PlayerList playerManager) {
+         this.playerList = playerManager;
 diff --git a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java b/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
 index 9b706276dc5b5f55b966c5472c6c4e864342b916..a4eecd90eeff2b3fe6ffa40cc5449aecfbe250f4 100644
 --- a/src/main/java/net/minecraft/util/thread/BlockableEventLoop.java
