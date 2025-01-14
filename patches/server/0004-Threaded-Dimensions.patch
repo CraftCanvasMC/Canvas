@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Fri, 10 Jan 2025 19:51:15 -0800
+Date: Mon, 13 Jan 2025 19:10:21 -0800
 Subject: [PATCH] Threaded Dimensions
 
 
@@ -577,7 +577,7 @@ index 0000000000000000000000000000000000000000..4cac3351f1894c83b5e21eb78e1b6bec
 +}
 diff --git a/src/main/java/io/canvasmc/canvas/command/ThreadedTickDiagnosis.java b/src/main/java/io/canvasmc/canvas/command/ThreadedTickDiagnosis.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..88527f75d5edd3f1282992d2f434ca89b1f13dbf
+index 0000000000000000000000000000000000000000..e99e96079c21f1a454fffc627c69f5d828ece2ec
 --- /dev/null
 +++ b/src/main/java/io/canvasmc/canvas/command/ThreadedTickDiagnosis.java
 @@ -0,0 +1,158 @@
@@ -638,10 +638,10 @@ index 0000000000000000000000000000000000000000..88527f75d5edd3f1282992d2f434ca89
 +
 +        sendCollective((l) -> {
 +            TextComponent base = text("").color(color(0x4EA2ED));
-+            TextComponent header = text("==================================")
++            TextComponent breaker = text("==================================")
 +                .color(color(0x2F8FE9));
 +
-+            l.add(header);
++            l.add(breaker);
 +            l.add(base.append(text("Server Status Report").color(color(HEADER))));
 +
 +            l.add(reportLine(" Online Players: ", valueOf(server.getOnlinePlayers().size()), 0x4EA2ED, 0x2F8FE9));
@@ -650,7 +650,7 @@ index 0000000000000000000000000000000000000000..88527f75d5edd3f1282992d2f434ca89
 +            l.add(reportLine(" Highest Thread TPS: ", createColoredComponent(simplifyNumber(max).toString(), max, 20F), 0x4EA2ED));
 +            l.add(reportLine(" MinecraftServer MSPT: ", MSPTCommand.getColor(MinecraftServer.getServer().tickTimes5s.getAverage()), 0x4EA2ED));
 +
-+            l.add(header);
++            l.add(breaker);
 +
 +            l.add(base.append(text(" Thread Analysis").color(color(HEADER))));
 +            l.add(reportLine(" Netty Version: ", valueOf(Version.identify().get("netty-common")), 0x4EA2ED, 0x2F8FE9));
@@ -661,7 +661,7 @@ index 0000000000000000000000000000000000000000..88527f75d5edd3f1282992d2f434ca89
 +            l.add(subReportLine("NettyIO: ", valueOf(SpigotConfig.getInt("settings.netty-threads", 4)), 0x2F8FE9, VALUE));
 +            l.add(subReportLine("Moonrise Workers: ", valueOf(MoonriseCommon.WORKER_POOL.getCoreThreads().length), 0x2F8FE9, VALUE));
 +
-+            l.add(header);
++            l.add(breaker);
 +
 +            for (ServerLevel level : MinecraftServer.getThreadedServer().getThreadedWorlds()) {
 +                int chunkCount = level.getChunkSource().getLoadedChunksCount();
@@ -687,7 +687,7 @@ index 0000000000000000000000000000000000000000..88527f75d5edd3f1282992d2f434ca89
 +                    .append(text(" Thread Utilization: ").append(createColoredUtilComponent(simplifyNumber(threadUtil) + "%", threadUtil)))));
 +            }
 +
-+            l.add(header);
++            l.add(breaker);
 +            return l;
 +        }, sender);
 +        return true;
@@ -772,14 +772,14 @@ index 0000000000000000000000000000000000000000..9fffd366c508794e281ecb6ddc99864d
 +}
 diff --git a/src/main/java/io/canvasmc/canvas/server/ThreadedServer.java b/src/main/java/io/canvasmc/canvas/server/ThreadedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..e5ba800953cecffa4f38f67568eba88d9daecf96
+index 0000000000000000000000000000000000000000..6b88938111b491b57575a55bdf8002f232ecdf36
 --- /dev/null
 +++ b/src/main/java/io/canvasmc/canvas/server/ThreadedServer.java
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,168 @@
 +package io.canvasmc.canvas.server;
 +
-+import ca.spottedleaf.moonrise.common.util.TickThread;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.server.level.LevelThread;
 +import java.io.File;
 +import java.io.IOException;
 +import java.nio.file.Path;
@@ -796,31 +796,27 @@ index 0000000000000000000000000000000000000000..e5ba800953cecffa4f38f67568eba88d
 +import net.minecraft.server.dedicated.DedicatedServer;
 +import net.minecraft.server.level.ServerLevel;
 +import org.bukkit.Bukkit;
-+import org.bukkit.craftbukkit.CraftWorld;
 +import org.jetbrains.annotations.NotNull;
 +import org.slf4j.Logger;
 +import org.slf4j.LoggerFactory;
 +
-+/**
-+ * Basically an implementation that acts as a manager for everything in the server that is threaded
-+ * using contexts
-+ */
 +public class ThreadedServer {
 +    public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
 +    public static final long MAX_NANOSECONDS_FOR_TICK_FRAME = 50_000_000;
-+    public static final ThreadGroup serverThreadGroup = new ThreadGroup("ServerThreadGroup");
-+    public static BooleanSupplier shouldKeepTicking;
-+    public static Function<CraftWorld, Thread> spinner = (threadedInstance) -> {
++    public static final ThreadGroup SERVER_THREAD_GROUP = new ThreadGroup("ServerThreadGroup");
++    public static BooleanSupplier SHOULD_KEEP_TICKING;
++    public static Function<ServerLevel, Thread> SPINNER = (level) -> {
 +        try {
-+            Thread levelThread = new TickThread(serverThreadGroup, threadedInstance.getHandle()::spin, "levelThread:" + threadedInstance.getName());
-+            levelThread.setPriority(Config.INSTANCE.levelThreadPriority);
-+            levelThread.start();
-+            return levelThread;
++            LevelThread dedicated = new LevelThread(SERVER_THREAD_GROUP, level::spin, "levelThread:" + level.getName(), level);
++            dedicated.setPriority(Config.INSTANCE.levelThreadPriority);
++            dedicated.setUncaughtExceptionHandler((thread, throwable) -> LOGGER.error("Uncaught exception in level thread, {}", ((LevelThread) thread).getLevel().getName(), throwable));
++            dedicated.start();
++            return dedicated;
 +        } catch (Throwable throwable) {
-+            throw new RuntimeException("Unable to spin world '" + threadedInstance.getName() + "'!", throwable);
++            throw new RuntimeException("Unable to spin world '" + level.getName() + "'!", throwable);
 +        }
 +    };
-+    private final List<CraftWorld> craftWorlds = new CopyOnWriteArrayList<>();
++    private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
 +    private final MinecraftServer server;
 +    private long tickSection;
 +    private boolean started = false;
@@ -830,7 +826,7 @@ index 0000000000000000000000000000000000000000..e5ba800953cecffa4f38f67568eba88d
 +    }
 +
 +    public List<ServerLevel> getThreadedWorlds() {
-+        return craftWorlds.stream().map(CraftWorld::getHandle).toList();
++        return levels;
 +    }
 +
 +    public boolean hasStarted() {
@@ -851,8 +847,7 @@ index 0000000000000000000000000000000000000000..e5ba800953cecffa4f38f67568eba88d
 +                throw new IllegalStateException("Failed to initialize server");
 +            }
 +
-+            // Prepare world contexts
-+            this.craftWorlds.forEach(spinner::apply);
++            this.levels.forEach(SPINNER::apply);
 +            started = true;
 +
 +            this.server.nextTickTimeNanos = Util.getNanos();
@@ -931,7 +926,7 @@ index 0000000000000000000000000000000000000000..e5ba800953cecffa4f38f67568eba88d
 +    }
 +
 +    public void loadLevel(@NotNull ServerLevel level) {
-+        this.craftWorlds.add(level.getWorld());
++        this.levels.add(level);
 +        LOGGER.info("Loaded level to threaded context: {}", level.dimension().location());
 +    }
 +
@@ -940,7 +935,7 @@ index 0000000000000000000000000000000000000000..e5ba800953cecffa4f38f67568eba88d
 +    }
 +
 +    public void stopLevel(@NotNull ServerLevel level) {
-+        this.craftWorlds.removeIf(craftWorld -> craftWorld.getHandle().equals(level));
++        this.levels.remove(level);
 +        level.stopSpin();
 +        LOGGER.info("Removed level from threaded context: {}", level.dimension().location());
 +    }
@@ -965,12 +960,35 @@ index 0000000000000000000000000000000000000000..930b5a18f8d2a4fc34d03c5d9d3aa5a3
 +@Retention(RetentionPolicy.SOURCE)
 +public @interface VisibleAfterSpin {
 +}
+diff --git a/src/main/java/io/canvasmc/canvas/server/level/LevelThread.java b/src/main/java/io/canvasmc/canvas/server/level/LevelThread.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..41c96b14d3780a2db7a936a5338d22899d0aadbb
+--- /dev/null
++++ b/src/main/java/io/canvasmc/canvas/server/level/LevelThread.java
+@@ -0,0 +1,17 @@
++package io.canvasmc.canvas.server.level;
++
++import ca.spottedleaf.moonrise.common.util.TickThread;
++import net.minecraft.server.level.ServerLevel;
++
++public class LevelThread extends TickThread {
++    private final ServerLevel level;
++
++    public LevelThread(final ThreadGroup group, final Runnable run, final String name, final ServerLevel level) {
++        super(group, run, name);
++        this.level = level;
++    }
++
++    public ServerLevel getLevel() {
++        return level;
++    }
++}
 diff --git a/src/main/java/io/canvasmc/canvas/server/level/MinecraftServerWorld.java b/src/main/java/io/canvasmc/canvas/server/level/MinecraftServerWorld.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..033dbd7b41b01e3ae1523390b54335fb20871a4a
+index 0000000000000000000000000000000000000000..e291f550a5ca37ff3573601c457e854ab3d9de21
 --- /dev/null
 +++ b/src/main/java/io/canvasmc/canvas/server/level/MinecraftServerWorld.java
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,340 @@
 +package io.canvasmc.canvas.server.level;
 +
 +import io.canvasmc.canvas.Config;
@@ -978,8 +996,6 @@ index 0000000000000000000000000000000000000000..033dbd7b41b01e3ae1523390b54335fb
 +import io.canvasmc.canvas.server.VisibleAfterSpin;
 +import java.nio.file.Path;
 +import java.util.Arrays;
-+import java.util.Queue;
-+import java.util.concurrent.ConcurrentLinkedQueue;
 +import java.util.concurrent.locks.LockSupport;
 +import java.util.function.BooleanSupplier;
 +import net.minecraft.CrashReport;
@@ -1020,7 +1036,8 @@ index 0000000000000000000000000000000000000000..033dbd7b41b01e3ae1523390b54335fb
 +    public long delayedTasksMaxNextTickTimeNanos;
 +    public boolean lagging = false;
 +    public boolean running = false;
-+    private Thread owner;
++    public int currentTick;
++    protected Thread owner;
 +    private long tickSection = 0;
 +    private long lastOverloadWarningNanos;
 +    private long taskExecutionStartNanos;
@@ -1031,7 +1048,6 @@ index 0000000000000000000000000000000000000000..033dbd7b41b01e3ae1523390b54335fb
 +    private long lastMidTickExecute;
 +    private long lastMidTickExecuteFailure;
 +    private volatile boolean ticking = false;
-+    public int currentTick;
 +
 +    public MinecraftServerWorld(final String name) {
 +        super(name);
@@ -1063,7 +1079,7 @@ index 0000000000000000000000000000000000000000..033dbd7b41b01e3ae1523390b54335fb
 +            this.running = true;
 +            this.owner = Thread.currentThread();
 +            WatchdogThread.tickLevel(serverLevel);
-+            if (Config.INSTANCE.useLevelThreadsAsChunkSourceMain) serverLevel.chunkSource.mainThread = this.owner; // Point main thread executor to level threads
++            if (Config.INSTANCE.useLevelThreadsAsChunkSourceMain) serverLevel.chunkSource.mainThread = this.owner;
 +            Arrays.fill(this.recentTps, 20);
 +
 +            // Block the current thread until the MinecraftServer has started the first tick.
@@ -1308,6 +1324,10 @@ index 0000000000000000000000000000000000000000..033dbd7b41b01e3ae1523390b54335fb
 +        this.delayedTasksMaxNextTickTimeNanos = Util.getNanos();
 +        this.nextTickTimeNanos = Util.getNanos();
 +    }
++
++    public boolean isLevelThread() {
++        return Thread.currentThread() instanceof LevelThread;
++    }
 +}
 diff --git a/src/main/java/io/canvasmc/canvas/server/level/TickRateManagerInstance.java b/src/main/java/io/canvasmc/canvas/server/level/TickRateManagerInstance.java
 new file mode 100644
@@ -1481,10 +1501,10 @@ index 8661c1b1cfe2b3db000e1f08814fd4409c4b7fab..f37c4e6be74c1f02cb4ed0556010ae8e
      public void channelInactive(ChannelHandlerContext channelhandlercontext) {
          this.disconnect((Component) Component.translatable("disconnect.endOfStream"));
 diff --git a/src/main/java/net/minecraft/network/protocol/PacketUtils.java b/src/main/java/net/minecraft/network/protocol/PacketUtils.java
-index 1f7f68aad97ee73763c042837f239bdc7167db55..28c318703a520e63672688e039a6710e9bfb5852 100644
+index 1f7f68aad97ee73763c042837f239bdc7167db55..a10603414b303088e5063272779aafbef99e6c84 100644
 --- a/src/main/java/net/minecraft/network/protocol/PacketUtils.java
 +++ b/src/main/java/net/minecraft/network/protocol/PacketUtils.java
-@@ -40,11 +40,7 @@ public class PacketUtils {
+@@ -40,12 +40,8 @@ public class PacketUtils {
  
      public PacketUtils() {}
  
@@ -1493,10 +1513,12 @@ index 1f7f68aad97ee73763c042837f239bdc7167db55..28c318703a520e63672688e039a6710e
 -    }
 -
 -    public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T listener, BlockableEventLoop<?> engine) throws RunningOnDifferentThreadException {
+-        if (!engine.isSameThread()) {
 +    public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T listener, ServerLevel engine) throws RunningOnDifferentThreadException { // Canvas - run on ServerLevel
-         if (!engine.isSameThread()) {
++        if (!engine.isLevelThread()) { // Canvas
              engine.executeIfPossible(() -> {
                  packetProcessing.push(listener); // Paper - detailed watchdog information
+                 try { // Paper - detailed watchdog information
 diff --git a/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java b/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java
 index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..4d5aff469934bd2b401b68d4d2db8a049936c8d4 100644
 --- a/src/main/java/net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java
@@ -1557,7 +1579,7 @@ index 1a37654aff9a9c86c9f7af10a1cf721371f0c5ec..4d5aff469934bd2b401b68d4d2db8a04
      }
      // Paper end - Multi Block Change API
 diff --git a/src/main/java/net/minecraft/server/MinecraftServer.java b/src/main/java/net/minecraft/server/MinecraftServer.java
-index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..7d0647e7800d194bd5c2ec2797ef264302b30373 100644
+index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..5855b51357e326c4537c9bcb75a520ff8e436ad8 100644
 --- a/src/main/java/net/minecraft/server/MinecraftServer.java
 +++ b/src/main/java/net/minecraft/server/MinecraftServer.java
 @@ -3,9 +3,6 @@ package net.minecraft.server;
@@ -1868,8 +1890,8 @@ index 115069f2bce9b7742d8d3fbf181a47cacf8b0046..7d0647e7800d194bd5c2ec2797ef2643
 +                gameprofilerfiller.push("tick");
 +                this.tickFrame.start();
 +                // We update it through here so that we can easily access this var throughout the lifecycle
-+                ThreadedServer.shouldKeepTicking = flag ? () -> false : this::haveTime;
-+                this.tickServer(ThreadedServer.shouldKeepTicking);
++                ThreadedServer.SHOULD_KEEP_TICKING = flag ? () -> false : this::haveTime;
++                this.tickServer(ThreadedServer.SHOULD_KEEP_TICKING);
 +
 +                final Throwable crash = this.chunkSystemCrash;
 +                if (crash != null) {
@@ -3768,7 +3790,7 @@ index 3a95e3236eafd14baed035e53503b58c2e21b68a..7b84d3e78bc57b3eab6aaeb87362e299
              this.stack.clear();
              this.addedThisLayer.clear();
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index badf280a6b01b06e8148c552330872d64e6256b7..cd527076b39458d9ae70ac682576a3653e51a6da 100644
+index badf280a6b01b06e8148c552330872d64e6256b7..a4bc7e6d89b120b4ab16696c7688115188be309a 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 @@ -13,6 +13,7 @@ import com.mojang.brigadier.StringReader;
@@ -3786,7 +3808,7 @@ index badf280a6b01b06e8148c552330872d64e6256b7..cd527076b39458d9ae70ac682576a365
 +        // Canvas start
 +        if (MinecraftServer.getThreadedServer().hasStarted()) {
 +            // only spin it here if the server already started
-+            ThreadedServer.spinner.apply(internal.getWorld());
++            ThreadedServer.SPINNER.apply(internal);
 +        }
 +        // Canvas end
          return internal.getWorld();
