@@ -772,10 +772,10 @@ index 0000000000000000000000000000000000000000..9fffd366c508794e281ecb6ddc99864d
 +}
 diff --git a/src/main/java/io/canvasmc/canvas/server/ThreadedServer.java b/src/main/java/io/canvasmc/canvas/server/ThreadedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..6b88938111b491b57575a55bdf8002f232ecdf36
+index 0000000000000000000000000000000000000000..d42f9313ffdda322afb19c25eaf62d3979936d9f
 --- /dev/null
 +++ b/src/main/java/io/canvasmc/canvas/server/ThreadedServer.java
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,169 @@
 +package io.canvasmc.canvas.server;
 +
 +import io.canvasmc.canvas.Config;
@@ -807,6 +807,9 @@ index 0000000000000000000000000000000000000000..6b88938111b491b57575a55bdf8002f2
 +    public static BooleanSupplier SHOULD_KEEP_TICKING;
 +    public static Function<ServerLevel, Thread> SPINNER = (level) -> {
 +        try {
++            if (!Thread.currentThread().equals(MinecraftServer.getServer().getRunningThread())) {
++                throw new WrongThreadException("Unable to spin level off-main");
++            }
 +            LevelThread dedicated = new LevelThread(SERVER_THREAD_GROUP, level::spin, "levelThread:" + level.getName(), level);
 +            dedicated.setPriority(Config.INSTANCE.levelThreadPriority);
 +            dedicated.setUncaughtExceptionHandler((thread, throwable) -> LOGGER.error("Uncaught exception in level thread, {}", ((LevelThread) thread).getLevel().getName(), throwable));
@@ -847,9 +850,7 @@ index 0000000000000000000000000000000000000000..6b88938111b491b57575a55bdf8002f2
 +                throw new IllegalStateException("Failed to initialize server");
 +            }
 +
-+            this.levels.forEach(SPINNER::apply);
-+            started = true;
-+
++            this.started = true;
 +            this.server.nextTickTimeNanos = Util.getNanos();
 +            this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
 +            this.server.status = this.server.buildServerStatus();
@@ -985,10 +986,10 @@ index 0000000000000000000000000000000000000000..41c96b14d3780a2db7a936a5338d2289
 +}
 diff --git a/src/main/java/io/canvasmc/canvas/server/level/MinecraftServerWorld.java b/src/main/java/io/canvasmc/canvas/server/level/MinecraftServerWorld.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..e291f550a5ca37ff3573601c457e854ab3d9de21
+index 0000000000000000000000000000000000000000..28429c48a505022a4762b5f5971388b24858f3a0
 --- /dev/null
 +++ b/src/main/java/io/canvasmc/canvas/server/level/MinecraftServerWorld.java
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,342 @@
 +package io.canvasmc.canvas.server.level;
 +
 +import io.canvasmc.canvas.Config;
@@ -1036,6 +1037,7 @@ index 0000000000000000000000000000000000000000..e291f550a5ca37ff3573601c457e854a
 +    public long delayedTasksMaxNextTickTimeNanos;
 +    public boolean lagging = false;
 +    public boolean running = false;
++    public boolean prepared = false;
 +    public int currentTick;
 +    protected Thread owner;
 +    private long tickSection = 0;
@@ -1081,6 +1083,7 @@ index 0000000000000000000000000000000000000000..e291f550a5ca37ff3573601c457e854a
 +            WatchdogThread.tickLevel(serverLevel);
 +            if (Config.INSTANCE.useLevelThreadsAsChunkSourceMain) serverLevel.chunkSource.mainThread = this.owner;
 +            Arrays.fill(this.recentTps, 20);
++            this.prepared = true;
 +
 +            // Block the current thread until the MinecraftServer has started the first tick.
 +            this.managedBlock(() -> MinecraftServer.getServer().isTicking());
@@ -2490,10 +2493,10 @@ index 13d96b54f48d60b098b80e04ba6168762c335c75..2153b46ed3505e360072e6bc7ecbd6a7
              Commands.literal("tick")
                  .requires(source -> source.hasPermission(3))
 diff --git a/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java b/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
-index df035169ea89c4078e9a9226ac6e752f29d585a1..e7a8d4013dec4d371234cdc8d66b206e4f8c39d1 100644
+index df035169ea89c4078e9a9226ac6e752f29d585a1..78b4c26534bd338ee340c5586f418191c9e93c5a 100644
 --- a/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
 +++ b/src/main/java/net/minecraft/server/dedicated/DedicatedServer.java
-@@ -1,24 +1,20 @@
+@@ -1,24 +1,23 @@
  package net.minecraft.server.dedicated;
  
 -import com.google.common.collect.Lists;
@@ -2514,12 +2517,23 @@ index df035169ea89c4078e9a9226ac6e752f29d585a1..e7a8d4013dec4d371234cdc8d66b206e
  import java.util.List;
  import java.util.Locale;
  import java.util.Optional;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.locks.LockSupport;
  import javax.annotation.Nullable;
 +
++import io.canvasmc.canvas.server.ThreadedServer;
  import net.minecraft.DefaultUncaughtExceptionHandler;
  import net.minecraft.DefaultUncaughtExceptionHandlerWithName;
  import net.minecraft.SharedConstants;
-@@ -64,8 +60,6 @@ import org.apache.logging.log4j.Level;
+@@ -45,6 +44,7 @@ import net.minecraft.server.rcon.RconConsoleSource;
+ import net.minecraft.server.rcon.thread.QueryThreadGs4;
+ import net.minecraft.server.rcon.thread.RconThread;
+ import net.minecraft.util.Mth;
++import net.minecraft.util.TimeUtil;
+ import net.minecraft.util.debugchart.DebugSampleSubscriptionTracker;
+ import net.minecraft.util.debugchart.RemoteDebugSampleType;
+ import net.minecraft.util.debugchart.RemoteSampleLogger;
+@@ -64,8 +64,6 @@ import org.apache.logging.log4j.Level;
  import org.apache.logging.log4j.LogManager;
  import org.apache.logging.log4j.io.IoBuilder;
  import org.bukkit.command.CommandSender;
@@ -2528,7 +2542,7 @@ index df035169ea89c4078e9a9226ac6e752f29d585a1..e7a8d4013dec4d371234cdc8d66b206e
  import org.bukkit.event.server.ServerCommandEvent;
  import org.bukkit.event.server.RemoteServerCommandEvent;
  // CraftBukkit end
-@@ -243,6 +237,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+@@ -243,6 +241,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
          org.spigotmc.WatchdogThread.doStart(org.spigotmc.SpigotConfig.timeoutTime, org.spigotmc.SpigotConfig.restartOnCrash); // Paper - start watchdog thread
          thread.start(); // Paper - Enhance console tab completions for brigadier commands; start console thread after MinecraftServer.console & PaperConfig are initialized
          io.papermc.paper.command.PaperCommands.registerCommands(this); // Paper - setup /paper command
@@ -2536,6 +2550,35 @@ index df035169ea89c4078e9a9226ac6e752f29d585a1..e7a8d4013dec4d371234cdc8d66b206e
          this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
          com.destroystokyo.paper.Metrics.PaperMetrics.startMetrics(); // Paper - start metrics
          // Purpur start - Purpur config files
+@@ -367,6 +366,28 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+             GameProfileCache.setUsesAuthentication(this.usesAuthentication());
+             DedicatedServer.LOGGER.info("Preparing level \"{}\"", this.getLevelIdName());
+             this.loadLevel(this.storageSource.getLevelId()); // CraftBukkit
++            // Canvas start - prepare the level for threaded context
++            for (final ServerLevel value : this.levels.values()) {
++                ThreadedServer.SPINNER.apply(value);
++            }
++
++            CompletableFuture<Void> allPreparedFuture = CompletableFuture.allOf(
++                this.levels.values().stream()
++                    .map(value -> CompletableFuture.runAsync(() -> {
++                        while (!value.prepared) {
++                            // Park for 1 millisecond to wait for prepared level threaded context
++                            LockSupport.parkNanos("waiting for prepared context", TimeUtil.NANOSECONDS_PER_MILLISECOND);
++                        }
++                    }))
++                    .toArray(CompletableFuture[]::new)
++            );
++
++            try {
++                allPreparedFuture.get();
++            } catch (Throwable e) {
++                throw new RuntimeException("An unexpected error occurred when waiting for levels to prepare threaded context", e);
++            }
++            // Canvas end
+             long j = Util.getNanos() - i;
+             String s = String.format(Locale.ROOT, "%.3fs", (double) j / 1.0E9D);
+ 
 diff --git a/src/main/java/net/minecraft/server/level/ChunkHolder.java b/src/main/java/net/minecraft/server/level/ChunkHolder.java
 index 8dd9375f2ad2c65a773a3195aeff1f977e09e7e0..85bed17924071fc73d42e44778b103ae5e01410e 100644
 --- a/src/main/java/net/minecraft/server/level/ChunkHolder.java
