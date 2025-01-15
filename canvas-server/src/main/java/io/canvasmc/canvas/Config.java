@@ -3,6 +3,7 @@ package io.canvasmc.canvas;
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.serializer.JanksonConfigSerializer;
+import me.shedaniel.cloth.clothconfig.shadowed.blue.endless.jankson.Comment;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -15,6 +16,24 @@ public class Config implements ConfigData {
 
 	private static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
 	public static Config INSTANCE = new Config();
+
+    // Threaded Dimensions
+    @Comment("Determines if the server should tick the playerlist assigned to each world on their own level threads, or if it should tick on the main thread(globally)")
+    public boolean runPlayerListTickOnIndependentLevel = true;
+    @Comment("Determines if the server should schedule auto-saves off-main, and have each level run its autosave on its own thread")
+    public boolean runAutoSaveThreaded = true;
+    @Comment("Amount of ticks until the level will resync time with the player")
+    public int timeResyncInterval = 20;
+    @Comment("Thread priority for level threads, must be a value between 1-10.")
+    public int levelThreadPriority = 9;
+    @Comment("In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to schedule to the level thread")
+    public boolean useLevelThreadsAsChunkSourceMain = true;
+    @Comment("Disables leaves from ticking")
+    public boolean disableLeafTicking = true;
+    @Comment("Enables each world to have the \"empty server\" logic per world introduced in Minecraft 1.21.4")
+    public boolean emptySleepPerWorlds = true;
+    @Comment("Enables the \"threadedtick\" command, which is an implementation of the vanilla \"tick\" command for the Canvas threaded context")
+    public boolean enableCanvasTickCommand = true;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
