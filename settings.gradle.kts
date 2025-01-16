@@ -1,6 +1,7 @@
 import java.util.Locale
 
 pluginManagement {
+    includeBuild("build-data")
     repositories {
         gradlePluginPortal()
         maven("https://repo.papermc.io/repository/maven-public/")
