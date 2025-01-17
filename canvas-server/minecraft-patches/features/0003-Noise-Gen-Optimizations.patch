@@ -1,0 +1,305 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Thu, 16 Jan 2025 19:08:50 -0800
+Subject: [PATCH] Noise Gen Optimizations
+
+
+diff --git a/net/minecraft/world/level/chunk/LevelChunkSection.java b/net/minecraft/world/level/chunk/LevelChunkSection.java
+index 412e7b1cf8c24f0ddf6d174967bedad576f10aba..1dcfd6939931720eb6ed80ecc20ca645a79a585a 100644
+--- a/net/minecraft/world/level/chunk/LevelChunkSection.java
++++ b/net/minecraft/world/level/chunk/LevelChunkSection.java
+@@ -18,11 +18,12 @@ public class LevelChunkSection implements ca.spottedleaf.moonrise.patches.block_
+     public static final int SECTION_HEIGHT = 16;
+     public static final int SECTION_SIZE = 4096;
+     public static final int BIOME_CONTAINER_BITS = 2;
+-    short nonEmptyBlockCount; // Paper - package private
+-    private short tickingBlockCount;
+-    private short tickingFluidCount;
++    public short nonEmptyBlockCount; // Paper - package private // Canvas - package-private -> public
++    public short tickingBlockCount; // Canvas - private -> public
++    public short tickingFluidCount; // Canvas - private -> public
+     public final PalettedContainer<BlockState> states;
+     private PalettedContainer<Holder<Biome>> biomes; // CraftBukkit - read/write
++    private static final int sliceSize = 4; // Canvas
+ 
+     // Paper start - block counting
+     private static final it.unimi.dsi.fastutil.shorts.ShortArrayList FULL_LIST = new it.unimi.dsi.fastutil.shorts.ShortArrayList(16*16*16);
+@@ -312,13 +313,15 @@ public class LevelChunkSection implements ca.spottedleaf.moonrise.patches.block_
+         PalettedContainer<Holder<Biome>> palettedContainer = this.biomes.recreate();
+         int i = 4;
+ 
+-        for (int i1 = 0; i1 < 4; i1++) {
+-            for (int i2 = 0; i2 < 4; i2++) {
+-                for (int i3 = 0; i3 < 4; i3++) {
+-                    palettedContainer.getAndSetUnchecked(i1, i2, i3, biomeResolver.getNoiseBiome(x + i1, y + i2, z + i3, climateSampler));
++        // Canvas start - noise gen optimizations
++        for (int posY = 0; posY < sliceSize; ++posY) {
++            for (int posZ = 0; posZ < sliceSize; ++posZ) {
++                for (int posX = 0; posX < sliceSize; ++posX) {
++                    palettedContainer.getAndSetUnchecked(posX, posY, posZ, biomeResolver.getNoiseBiome(x + posX, y + posY, z + posZ, climateSampler));
+                 }
+             }
+         }
++        // Canvas end
+ 
+         this.biomes = palettedContainer;
+     }
+diff --git a/net/minecraft/world/level/chunk/PalettedContainer.java b/net/minecraft/world/level/chunk/PalettedContainer.java
+index f5da433050fd3060e0335d4002d520ebe8cd691f..f63d8d08a4b01d5df561ee96d961ddeb3d6e377e 100644
+--- a/net/minecraft/world/level/chunk/PalettedContainer.java
++++ b/net/minecraft/world/level/chunk/PalettedContainer.java
+@@ -30,7 +30,7 @@ public class PalettedContainer<T> implements PaletteResize<T>, PalettedContainer
+     public final IdMap<T> registry;
+     private final T @org.jetbrains.annotations.Nullable [] presetValues; // Paper - Anti-Xray - Add preset values
+     public volatile PalettedContainer.Data<T> data; // Paper - optimise collisions - public
+-    private final PalettedContainer.Strategy strategy;
++    public final PalettedContainer.Strategy strategy; // Canvas - private -> public
+     //private final ThreadingDetector threadingDetector = new ThreadingDetector("PalettedContainer"); // Paper - unused
+ 
+     public void acquire() {
+@@ -432,7 +432,7 @@ public class PalettedContainer<T> implements PaletteResize<T>, PalettedContainer
+ 
+         private final PalettedContainer.Configuration<T> configuration;
+         private final BitStorage storage;
+-        private final Palette<T> palette;
++        public final Palette<T> palette; // Canvas - private -> public
+ 
+         private T[] moonrise$palette;
+ 
+diff --git a/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java b/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
+index 65728ef17e63d71833677fdcbd5bb90794b4822b..e1c69e585d025ca0cf795fb3bfb31e7f5dfea15a 100644
+--- a/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
++++ b/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java
+@@ -10,6 +10,8 @@ import java.util.List;
+ import java.util.OptionalInt;
+ import java.util.Set;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
+ import java.util.function.Predicate;
+ import java.util.function.Supplier;
+ import javax.annotation.Nullable;
+@@ -45,6 +47,7 @@ import net.minecraft.world.level.levelgen.blending.Blender;
+ import net.minecraft.world.level.levelgen.carver.CarvingContext;
+ import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
+ import org.apache.commons.lang3.mutable.MutableObject;
++import org.jetbrains.annotations.NotNull;
+ 
+ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+     public static final MapCodec<NoiseBasedChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(
+@@ -57,6 +60,7 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
+     public final Holder<NoiseGeneratorSettings> settings;
+     private final Supplier<Aquifer.FluidPicker> globalFluidPicker;
++    private static final ExecutorService NOISE_THREAD_POOL = Executors.newVirtualThreadPerTaskExecutor();
+ 
+     public NoiseBasedChunkGenerator(BiomeSource biomeSource, Holder<NoiseGeneratorSettings> settings) {
+         super(biomeSource);
+@@ -297,27 +301,29 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+         int i = Mth.floorDiv(minY, noiseSettings.getCellHeight());
+         int i1 = Mth.floorDiv(noiseSettings.height(), noiseSettings.getCellHeight());
+         return i1 <= 0 ? CompletableFuture.completedFuture(chunk) : CompletableFuture.supplyAsync(() -> {
+-            int sectionIndex = chunk.getSectionIndex(i1 * noiseSettings.getCellHeight() - 1 + minY);
+-            int sectionIndex1 = chunk.getSectionIndex(minY);
+-            Set<LevelChunkSection> set = Sets.newHashSet();
+-
+-            for (int i2 = sectionIndex; i2 >= sectionIndex1; i2--) {
+-                LevelChunkSection section = chunk.getSection(i2);
+-                section.acquire();
+-                set.add(section);
++            // Canvas start - optimize noise gen
++            final int startingChunkSectionIndex = chunk.getSectionIndex(
++                i1 * noiseSettings.verticalCellBlockCount() - 1 + i);
++            final int minimumYChunkSectionIndex = chunk.getSectionIndex(i);
++
++            @NotNull final var chunkSections = chunk.getSections();
++            for (int chunkSectionIndex = startingChunkSectionIndex; chunkSectionIndex >= minimumYChunkSectionIndex; --chunkSectionIndex) {
++                chunkSections[chunkSectionIndex].acquire();
+             }
+ 
+-            ChunkAccess var20;
++            @org.jetbrains.annotations.Nullable ChunkAccess chunkWithNoise;
+             try {
+-                var20 = this.doFill(blender, structureManager, randomState, chunk, i, i1);
++                chunkWithNoise = this.doFill(
++                    blender, structureManager, randomState, chunk, i, i1);
+             } finally {
+-                for (LevelChunkSection levelChunkSection1 : set) {
+-                    levelChunkSection1.release();
++                for (int chunkSectionIndex = startingChunkSectionIndex; chunkSectionIndex >= minimumYChunkSectionIndex; --chunkSectionIndex) {
++                    chunkSections[chunkSectionIndex].release();
+                 }
+             }
+ 
+-            return var20;
+-        }, Runnable::run); // Paper - rewrite chunk system
++            return chunkWithNoise;
++        }, NOISE_THREAD_POOL); // Paper - rewrite chunk system
++        // Canvas end
+     }
+ 
+     private ChunkAccess doFill(Blender blender, StructureManager structureManager, RandomState random, ChunkAccess chunk, int minCellY, int cellCountY) {
+@@ -375,7 +381,7 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+ 
+                                 interpolatedState = this.debugPreliminarySurfaceLevel(noiseChunk, i10, i7, i13, interpolatedState);
+                                 if (interpolatedState != AIR && !SharedConstants.debugVoidTerrain(chunk.getPos())) {
+-                                    section.setBlockState(i11, i8, i14, interpolatedState, false);
++                                    canvas$optimizeNoiseGen(section, i11, i8, i14, interpolatedState, false); // Canvas
+                                     heightmapUnprimed.update(i11, i7, i14, interpolatedState);
+                                     heightmapUnprimed1.update(i11, i7, i14, interpolatedState);
+                                     if (aquifer.shouldScheduleFluidUpdate() && !interpolatedState.getFluidState().isEmpty()) {
+@@ -396,6 +402,28 @@ public final class NoiseBasedChunkGenerator extends ChunkGenerator {
+         return chunk;
+     }
+ 
++    // Canvas start
++    private BlockState canvas$optimizeNoiseGen(@NotNull LevelChunkSection chunkSection, int chunkSectionBlockPosX, int chunkSectionBlockPosY, int chunkSectionBlockPosZ, @NotNull BlockState blockState, boolean lock) {
++        chunkSection.nonEmptyBlockCount += 1;
++
++        if (!blockState.getFluidState().isEmpty()) {
++            chunkSection.tickingFluidCount += 1;
++        }
++
++        if (blockState.isRandomlyTicking()) {
++            chunkSection.tickingBlockCount += 1;
++        }
++
++        var blockStateId = chunkSection.states.data.palette.idFor(blockState);
++        chunkSection.states.data.storage().set(
++            chunkSection.states.strategy.getIndex(chunkSectionBlockPosX, chunkSectionBlockPosY,
++                chunkSectionBlockPosZ
++            ), blockStateId);
++
++        return blockState;
++    }
++
++    // Canvas end
+     private BlockState debugPreliminarySurfaceLevel(NoiseChunk chunk, int x, int y, int z, BlockState state) {
+         return state;
+     }
+diff --git a/net/minecraft/world/level/levelgen/NoiseSettings.java b/net/minecraft/world/level/levelgen/NoiseSettings.java
+index 4cf3a364595ba5f81f741295695cb9a449bdf672..ad6b96dd82c88aace7b15ca1b52c61008de92d25 100644
+--- a/net/minecraft/world/level/levelgen/NoiseSettings.java
++++ b/net/minecraft/world/level/levelgen/NoiseSettings.java
+@@ -8,7 +8,7 @@ import net.minecraft.core.QuartPos;
+ import net.minecraft.world.level.LevelHeightAccessor;
+ import net.minecraft.world.level.dimension.DimensionType;
+ 
+-public record NoiseSettings(int minY, int height, int noiseSizeHorizontal, int noiseSizeVertical) {
++public record NoiseSettings(int minY, int height, int noiseSizeHorizontal, int noiseSizeVertical, int horizontalCellBlockCount, int verticalCellBlockCount) { // Canvas
+     public static final Codec<NoiseSettings> CODEC = RecordCodecBuilder.<NoiseSettings>create(
+             instance -> instance.group(
+                     Codec.intRange(DimensionType.MIN_Y, DimensionType.MAX_Y).fieldOf("min_y").forGetter(NoiseSettings::minY),
+@@ -16,7 +16,10 @@ public record NoiseSettings(int minY, int height, int noiseSizeHorizontal, int n
+                     Codec.intRange(1, 4).fieldOf("size_horizontal").forGetter(NoiseSettings::noiseSizeHorizontal),
+                     Codec.intRange(1, 4).fieldOf("size_vertical").forGetter(NoiseSettings::noiseSizeVertical)
+                 )
+-                .apply(instance, NoiseSettings::new)
++                // Canvas start - noise gen optimizations
++                .apply(instance, (Integer minY1, Integer height1, Integer noiseSizeHorizontal1, Integer noiseSizeVertical1) -> new NoiseSettings(minY1, height1, noiseSizeHorizontal1, noiseSizeVertical1,
++                    QuartPos.toBlock(noiseSizeHorizontal1), QuartPos.toBlock(noiseSizeVertical1)))
++                // Canvas end
+         )
+         .comapFlatMap(NoiseSettings::guardY, Function.identity());
+     protected static final NoiseSettings OVERWORLD_NOISE_SETTINGS = create(-64, 384, 1, 2);
+@@ -36,7 +39,7 @@ public record NoiseSettings(int minY, int height, int noiseSizeHorizontal, int n
+     }
+ 
+     public static NoiseSettings create(int minY, int height, int noiseSizeHorizontal, int noiseSizeVertical) {
+-        NoiseSettings noiseSettings = new NoiseSettings(minY, height, noiseSizeHorizontal, noiseSizeVertical);
++        NoiseSettings noiseSettings = new NoiseSettings(minY, height, noiseSizeHorizontal, noiseSizeVertical, QuartPos.toBlock(noiseSizeHorizontal), QuartPos.toBlock(noiseSizeVertical)); // Canvas - noise gen optimizations
+         guardY(noiseSettings).error().ifPresent(error -> {
+             throw new IllegalStateException(error.message());
+         });
+@@ -44,16 +47,16 @@ public record NoiseSettings(int minY, int height, int noiseSizeHorizontal, int n
+     }
+ 
+     public int getCellHeight() {
+-        return QuartPos.toBlock(this.noiseSizeVertical());
++        return verticalCellBlockCount(); // Canvas - noise gen optimizations
+     }
+ 
+     public int getCellWidth() {
+-        return QuartPos.toBlock(this.noiseSizeHorizontal());
++        return horizontalCellBlockCount(); // Canvas - noise gen optimizations
+     }
+ 
+     public NoiseSettings clampToHeightAccessor(LevelHeightAccessor heightAccessor) {
+         int max = Math.max(this.minY, heightAccessor.getMinY());
+         int i = Math.min(this.minY + this.height, heightAccessor.getMaxY() + 1) - max;
+-        return new NoiseSettings(max, i, this.noiseSizeHorizontal, this.noiseSizeVertical);
++        return new NoiseSettings(max, i, this.noiseSizeHorizontal, this.noiseSizeVertical, QuartPos.toBlock(this.noiseSizeHorizontal), QuartPos.toBlock(this.noiseSizeVertical)); // Canvas - noise gen optimizations
+     }
+ }
+diff --git a/net/minecraft/world/level/levelgen/synth/ImprovedNoise.java b/net/minecraft/world/level/levelgen/synth/ImprovedNoise.java
+index fb11a2eea540d55e50eab59f9857ca5d99f556f8..d7b3637e795c28a72f038ac9e9d252ecabb6b5b7 100644
+--- a/net/minecraft/world/level/levelgen/synth/ImprovedNoise.java
++++ b/net/minecraft/world/level/levelgen/synth/ImprovedNoise.java
+@@ -5,6 +5,26 @@ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ 
+ public final class ImprovedNoise {
++    // Canvas start
++    private static final double[] FLAT_SIMPLEX_GRAD = new double[]{
++        1, 1, 0, 0,
++        -1, 1, 0, 0,
++        1, -1, 0, 0,
++        -1, -1, 0, 0,
++        1, 0, 1, 0,
++        -1, 0, 1, 0,
++        1, 0, -1, 0,
++        -1, 0, -1, 0,
++        0, 1, 1, 0,
++        0, -1, 1, 0,
++        0, 1, -1, 0,
++        0, -1, -1, 0,
++        1, 1, 0, 0,
++        0, -1, 1, 0,
++        -1, 1, 0, 0,
++        0, -1, -1, 0,
++    };
++    // Canvas end
+     private static final float SHIFT_UP_EPSILON = 1.0E-7F;
+     private final byte[] p;
+     public final double xo;
+diff --git a/net/minecraft/world/level/levelgen/synth/PerlinNoise.java b/net/minecraft/world/level/levelgen/synth/PerlinNoise.java
+index da3c26fbad32d75d71f7e59c8c3341316a754756..83e56f5cd47145ff4fe2f394b15173e83ce26002 100644
+--- a/net/minecraft/world/level/levelgen/synth/PerlinNoise.java
++++ b/net/minecraft/world/level/levelgen/synth/PerlinNoise.java
+@@ -26,6 +26,8 @@ public class PerlinNoise {
+     private final double lowestFreqValueFactor;
+     private final double lowestFreqInputFactor;
+     private final double maxValue;
++    private int octaveSamplersCount = 0; // Canvas
++    private double[] amplitudesArray = null; // Canvas
+ 
+     @Deprecated
+     public static PerlinNoise createLegacyForBlendedNoise(RandomSource random, IntStream octaves) {
+@@ -127,6 +129,8 @@ public class PerlinNoise {
+         this.lowestFreqInputFactor = Math.pow(2.0, -i);
+         this.lowestFreqValueFactor = Math.pow(2.0, size - 1) / (Math.pow(2.0, size) - 1.0);
+         this.maxValue = this.edgeValue(2.0);
++        this.octaveSamplersCount = this.noiseLevels.length;
++        this.amplitudesArray = this.amplitudes.toDoubleArray();
+     }
+ 
+     protected double maxValue() {
+@@ -147,11 +151,15 @@ public class PerlinNoise {
+         double d1 = this.lowestFreqInputFactor;
+         double d2 = this.lowestFreqValueFactor;
+ 
+-        for (int i = 0; i < this.noiseLevels.length; i++) {
++        for (int i = 0; i < this.octaveSamplersCount; ++i) { // Canvas
+             ImprovedNoise improvedNoise = this.noiseLevels[i];
+             if (improvedNoise != null) {
+-                double d3 = improvedNoise.noise(wrap(x * d1), useFixedY ? -improvedNoise.yo : wrap(y * d1), wrap(z * d1), yScale * d1, yMax * d1);
+-                d += this.amplitudes.getDouble(i) * d3 * d2;
++                // Canvas start
++                double g = improvedNoise.noise(
++                    wrap(x * d1), wrap(y * d1), wrap(z * d1), 0.0, 0.0
++                );
++                d += this.amplitudesArray[i] * g * d2;
++                // Canvas end
+             }
+ 
+             d1 *= 2.0;
