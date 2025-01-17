@@ -74,6 +74,8 @@ public class Config implements ConfigData {
 	public boolean skipUselessSecondaryPoiSensor = true;
     @Comment("Optimizes piston block entities")
     public boolean optimizePistonMovingBlockEntity = true;
+    @Comment("More efficiently clumps XP orbs")
+    public boolean clumpOrbs = true;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
