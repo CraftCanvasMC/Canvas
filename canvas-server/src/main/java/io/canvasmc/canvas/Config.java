@@ -66,6 +66,9 @@ public class Config implements ConfigData {
 		public int keepAlive = 60;
 	}
 
+	@Comment("Enables a modified version of Pufferfish's async mob spawning patch")
+	public boolean enableAsyncSpawning = true;
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
