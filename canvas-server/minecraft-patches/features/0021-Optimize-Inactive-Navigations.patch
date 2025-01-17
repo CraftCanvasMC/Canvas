@@ -1,22 +1,22 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Sat, 28 Dec 2024 01:38:22 -0800
+Date: Fri, 17 Jan 2025 15:54:35 -0800
 Subject: [PATCH] Optimize Inactive Navigations
 
 
-diff --git a/src/main/java/net/minecraft/server/level/ServerLevel.java b/src/main/java/net/minecraft/server/level/ServerLevel.java
-index d04d1ec6317be3fc80a5b30d299e9089ad8556a3..8c684b26064e483f13d4b147ee16868f8d9ad11d 100644
---- a/src/main/java/net/minecraft/server/level/ServerLevel.java
-+++ b/src/main/java/net/minecraft/server/level/ServerLevel.java
-@@ -29,6 +29,7 @@ import java.nio.file.Path;
- import java.util.ArrayList;
- import java.util.Arrays;
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 1b33eada51a31dd50702176be4e5035275389fb7..8ddca228305848e5b3230d08e42d8b49ac1a0898 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -30,6 +30,7 @@ import java.util.EnumSet;
+ import java.util.Iterator;
+ import java.util.LinkedList;
  import java.util.Collection;
 +import java.util.Collections;
  import java.util.Comparator;
- import java.util.EnumSet;
- import java.util.Iterator;
-@@ -51,6 +52,7 @@ import java.util.stream.Collectors;
+ import java.util.List;
+ import java.util.Locale;
+@@ -49,6 +50,7 @@ import java.util.stream.Collectors;
  import java.util.stream.Stream;
  import javax.annotation.Nonnull;
  import javax.annotation.Nullable;
@@ -24,9 +24,9 @@ index d04d1ec6317be3fc80a5b30d299e9089ad8556a3..8c684b26064e483f13d4b147ee16868f
  import net.minecraft.CrashReport;
  import net.minecraft.CrashReportCategory;
  import net.minecraft.ReportType;
-@@ -1988,6 +1990,32 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -1933,6 +1935,32 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
          // Paper end - Prevent GameEvents being fired from unloaded chunks
-         this.gameEventDispatcher.post(event, emitterPos, emitter);
+         this.gameEventDispatcher.post(gameEvent, pos, context);
      }
 +    // Canvas start
 +    private final Set<PathNavigation> activeNavigations = new ConcurrentSet<>();
@@ -57,20 +57,25 @@ index d04d1ec6317be3fc80a5b30d299e9089ad8556a3..8c684b26064e483f13d4b147ee16868f
  
      @Override
      public void sendBlockUpdated(BlockPos pos, BlockState oldState, BlockState newState, int flags) {
-@@ -2005,7 +2033,8 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+@@ -1950,7 +1978,13 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+             List<PathNavigation> list = new ObjectArrayList<>();
  
-         if (Shapes.joinIsNotEmpty(voxelshape, voxelshape1, BooleanOp.NOT_SAME)) {
-             List<PathNavigation> list = new ObjectArrayList();
--            Iterator iterator = this.navigatingMobs.iterator();
-+            Iterator iterator = getActiveListeners(this.navigatingMobs); // Canvas
-+            updateActiveListeners(pos, list); // Canvas
- 
-             while (iterator.hasNext()) {
-                 // CraftBukkit start - fix SPIGOT-6362
-@@ -2914,8 +2943,35 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+             try { // Paper - catch CME see below why
+-            for (Mob mob : this.navigatingMobs) {
++                // Canvas start
++                Iterator<Mob> iterator = getActiveListeners(this.navigatingMobs);
++                updateActiveListeners(pos, list);
++
++                while (iterator.hasNext()) {
++                    Mob mob = iterator.next();
++                // Canvas end
+                 PathNavigation navigation = mob.getNavigation();
+                 if (navigation.shouldRecomputePath(pos)) {
+                     list.add(navigation);
+@@ -2828,6 +2862,35 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
      // Paper end - optimize redstone (Alternate Current)
  
-     private final class EntityCallbacks implements LevelCallback<Entity> {
+     final class EntityCallbacks implements LevelCallback<Entity> {
 +        // Canvas start
 +        private ServerLevel outer;
 +
@@ -87,8 +92,7 @@ index d04d1ec6317be3fc80a5b30d299e9089ad8556a3..8c684b26064e483f13d4b147ee16868f
 +            }
 +            return set.add(mobEntity);
 +        }
- 
--        EntityCallbacks() {}
++
 +        private boolean stopListeningOnEntityUnload(Set<Mob> set, Object mobEntityObj) {
 +            Mob mobEntity = (Mob) mobEntityObj;
 +            if ((mobEntity).lithium$isRegisteredToWorld()) {
@@ -101,32 +105,32 @@ index d04d1ec6317be3fc80a5b30d299e9089ad8556a3..8c684b26064e483f13d4b147ee16868f
 +            return set.remove(mobEntity);
 +        }
 +        // Canvas end
- 
-         public void onCreated(Entity entity) {}
- 
-@@ -2953,7 +3009,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
-                     Util.logAndPauseIfInIde("onTrackingStart called during navigation iteration", new IllegalStateException("onTrackingStart called during navigation iteration"));
+         @Override
+         public void onCreated(Entity entity) {
+         }
+@@ -2871,7 +2934,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+                     );
                  }
  
--                ServerLevel.this.navigatingMobs.add(entityinsentient);
-+                startListeningOnEntityLoad(this.outer.navigatingMobs, entityinsentient); // Canvas
+-                ServerLevel.this.navigatingMobs.add(mob);
++                startListeningOnEntityLoad(this.outer.navigatingMobs, mob); // Canvas
              }
  
-             if (entity instanceof EnderDragon entityenderdragon) {
-@@ -3034,7 +3090,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
-                     Util.logAndPauseIfInIde("onTrackingStart called during navigation iteration", new IllegalStateException("onTrackingStart called during navigation iteration"));
+             if (entity instanceof EnderDragon enderDragon) {
+@@ -2941,7 +3004,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+                     );
                  }
  
--                ServerLevel.this.navigatingMobs.remove(entityinsentient);
-+                stopListeningOnEntityUnload(this.outer.navigatingMobs, entityinsentient); // Canvas
+-                ServerLevel.this.navigatingMobs.remove(mob);
++                stopListeningOnEntityUnload(this.outer.navigatingMobs, mob); // Canvas
              }
  
-             if (entity instanceof EnderDragon entityenderdragon) {
-diff --git a/src/main/java/net/minecraft/world/entity/LivingEntity.java b/src/main/java/net/minecraft/world/entity/LivingEntity.java
-index 4ec31b94803c15b7caad5053dc94b900a8601d07..a7baa9e27aec06a2890b0f7dd58c40bf4a74d90a 100644
---- a/src/main/java/net/minecraft/world/entity/LivingEntity.java
-+++ b/src/main/java/net/minecraft/world/entity/LivingEntity.java
-@@ -4002,6 +4002,11 @@ public abstract class LivingEntity extends Entity implements Attackable {
+             if (entity instanceof EnderDragon enderDragon) {
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index db5a2227009bc4d655fc781d5850221f36f2d112..7f3102ab1c8564ddbfda69059fe2e84c2db49d59 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -3755,6 +3755,11 @@ public abstract class LivingEntity extends Entity implements Attackable {
      public void stopRiding() {
          // Paper start - Force entity dismount during teleportation
          this.stopRiding(false);
@@ -136,15 +140,15 @@ index 4ec31b94803c15b7caad5053dc94b900a8601d07..a7baa9e27aec06a2890b0f7dd58c40bf
 +        }
 +        // Canvas end
      }
-     @Override
-     public void stopRiding(boolean suppressCancellation) {
-diff --git a/src/main/java/net/minecraft/world/entity/Mob.java b/src/main/java/net/minecraft/world/entity/Mob.java
-index d6fbbbeaded272a36adfa1cf6a1def289c34fba2..e4e2ff2034cf69b8c7a985bf4fab216804b7bdcc 100644
---- a/src/main/java/net/minecraft/world/entity/Mob.java
-+++ b/src/main/java/net/minecraft/world/entity/Mob.java
-@@ -145,6 +145,35 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab
  
-     public int ticksSinceLastInteraction; // Purpur
+     @Override
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index 89e3fe8f2e99ec18cf5948d502e5bd67f09e3d15..02e79f5085a745283dfd11ec2f4fd3df98a2d9bd 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -144,6 +144,35 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab
+     private BlockPos restrictCenter = BlockPos.ZERO;
+     private float restrictRadius = -1.0F;
      public boolean aware = true; // CraftBukkit
 +    // Canvas start
 +    private PathNavigation registeredNavigation;
@@ -175,22 +179,22 @@ index d6fbbbeaded272a36adfa1cf6a1def289c34fba2..e4e2ff2034cf69b8c7a985bf4fab2168
 +        }
 +    }
 +    // Canvas end
+     public int ticksSinceLastInteraction; // Purpur - Entity lifespan
  
-     protected Mob(EntityType<? extends Mob> type, Level world) {
-         super(type, world);
-@@ -1683,6 +1712,7 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab
+     protected Mob(EntityType<? extends Mob> entityType, Level level) {
+@@ -1565,6 +1594,7 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab
              // Paper end - Expand EntityUnleashEvent
          }
  
 +        this.lithium$updateNavigationRegistration(); // Canvas
-         return flag1;
+         return flag;
      }
  
-diff --git a/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-index 2edd06a382dae50af4bb128c6997b136aceb7c2a..09b1537397a3450bf78136b12bccd8d784b53da9 100644
---- a/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-+++ b/src/main/java/net/minecraft/world/entity/ai/navigation/PathNavigation.java
-@@ -11,6 +11,7 @@ import io.canvasmc.canvas.entity.pathfinding.AsyncPathProcessor;
+diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+index 8ea650a29026fe1a54461d131b8b0ae75461bc63..5d3c27b7e1ec057d983be858b151631d565127e4 100644
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -8,6 +8,7 @@ import javax.annotation.Nullable;
  import net.minecraft.core.BlockPos;
  import net.minecraft.core.Vec3i;
  import net.minecraft.network.protocol.game.DebugPackets;
@@ -198,7 +202,7 @@ index 2edd06a382dae50af4bb128c6997b136aceb7c2a..09b1537397a3450bf78136b12bccd8d7
  import net.minecraft.tags.BlockTags;
  import net.minecraft.util.Mth;
  import net.minecraft.util.profiling.Profiler;
-@@ -103,6 +104,13 @@ public abstract class PathNavigation {
+@@ -100,6 +101,13 @@ public abstract class PathNavigation {
              if (this.targetPos != null) {
                  this.path = null;
                  this.path = this.createPath(this.targetPos, this.reachRange);
@@ -213,13 +217,13 @@ index 2edd06a382dae50af4bb128c6997b136aceb7c2a..09b1537397a3450bf78136b12bccd8d7
                  this.hasDelayedRecomputation = false;
              }
 @@ -264,6 +272,7 @@ public abstract class PathNavigation {
-     public boolean moveTo(@Nullable Path path, double speed) {
-         if (path == null) {
+     public boolean moveTo(@Nullable Path pathentity, double speed) {
+         if (pathentity == null) {
              this.path = null;
 +            updateListeningState2(path, speed); // Canvas
              return false;
          } else {
-             if (!path.sameAs(this.path)) {
+             if (!pathentity.sameAs(this.path)) {
 @@ -271,21 +280,36 @@ public abstract class PathNavigation {
              }
  
@@ -227,15 +231,15 @@ index 2edd06a382dae50af4bb128c6997b136aceb7c2a..09b1537397a3450bf78136b12bccd8d7
 +                updateListeningState2(path, speed); // Canvas
                  return false;
              } else {
-                 if (path.isProcessed()) this.trimPath(); // Canvas
-                 if (path.isProcessed() && this.path.getNodeCount() <= 0) { // Canvas
+                 if (path.isProcessed()) this.trimPath(); // Canvas - only trim if processed
+                 if (path.isProcessed() && this.path.getNodeCount() <= 0) { // Canvas - only check node count if processed
 +                    updateListeningState2(path, speed); // Canvas
                      return false;
                  } else {
                      this.speedModifier = speed;
-                     Vec3 vec3 = this.getTempMobPos();
+                     Vec3 tempMobPos = this.getTempMobPos();
                      this.lastStuckCheck = this.tick;
-                     this.lastStuckCheckPos = vec3;
+                     this.lastStuckCheckPos = tempMobPos;
 +                    updateListeningState2(path, speed); // Canvas
                      return true;
                  }
@@ -257,7 +261,7 @@ index 2edd06a382dae50af4bb128c6997b136aceb7c2a..09b1537397a3450bf78136b12bccd8d7
  
      @Nullable
      public Path getPath() {
-@@ -423,6 +447,11 @@ public abstract class PathNavigation {
+@@ -426,6 +450,11 @@ public abstract class PathNavigation {
  
      public void stop() {
          this.path = null;
@@ -269,11 +273,11 @@ index 2edd06a382dae50af4bb128c6997b136aceb7c2a..09b1537397a3450bf78136b12bccd8d7
      }
  
      protected abstract Vec3 getTempMobPos();
-diff --git a/src/main/java/net/minecraft/world/entity/monster/Drowned.java b/src/main/java/net/minecraft/world/entity/monster/Drowned.java
-index 917fb62d59c610a998e88a821dbcda08e9b90992..dcc77b6a8b174e7f37c0aa6d73b889842784cd40 100644
---- a/src/main/java/net/minecraft/world/entity/monster/Drowned.java
-+++ b/src/main/java/net/minecraft/world/entity/monster/Drowned.java
-@@ -294,9 +294,11 @@ public class Drowned extends Zombie implements RangedAttackMob {
+diff --git a/net/minecraft/world/entity/monster/Drowned.java b/net/minecraft/world/entity/monster/Drowned.java
+index 0b1b05a9be7acdafbdb944a1142d4160c2d49d19..d1e2fc87682ff426303e821a134b7da8249d2995 100644
+--- a/net/minecraft/world/entity/monster/Drowned.java
++++ b/net/minecraft/world/entity/monster/Drowned.java
+@@ -298,9 +298,11 @@ public class Drowned extends Zombie implements RangedAttackMob {
          if (!this.level().isClientSide) {
              if (this.isEffectiveAi() && this.isUnderWater() && this.wantsToSwim()) {
                  this.navigation = this.waterNavigation;
@@ -285,7 +289,7 @@ index 917fb62d59c610a998e88a821dbcda08e9b90992..dcc77b6a8b174e7f37c0aa6d73b88984
                  this.setSwimming(false);
              }
          }
-@@ -400,6 +402,7 @@ public class Drowned extends Zombie implements RangedAttackMob {
+@@ -401,6 +403,7 @@ public class Drowned extends Zombie implements RangedAttackMob {
              this.drowned.setSearchingForLand(false);
              this.drowned.navigation = this.drowned.groundNavigation;
              super.start();
