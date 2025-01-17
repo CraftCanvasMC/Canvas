@@ -68,6 +68,10 @@ public class Config implements ConfigData {
 
 	@Comment("Enables a modified version of Pufferfish's async mob spawning patch")
 	public boolean enableAsyncSpawning = true;
+	@Comment("Delays the inventory change trigger to tick at an interval to avoid excessive usage of advancement updates and recipe updates")
+	public int skipTicksAdvancements = 3;
+	@Comment("Disables the ticking of a useless secondary poi sensor")
+	public boolean skipUselessSecondaryPoiSensor = true;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
