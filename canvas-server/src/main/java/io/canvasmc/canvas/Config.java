@@ -76,6 +76,8 @@ public class Config implements ConfigData {
     public boolean optimizePistonMovingBlockEntity = true;
     @Comment("More efficiently clumps XP orbs")
     public boolean clumpOrbs = true;
+    @Comment("Use faster sin/cos math operations")
+    public boolean useCompactSineLUT = true;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
