@@ -35,6 +35,14 @@ public class Config implements ConfigData {
     @Comment("Enables the \"threadedtick\" command, which is an implementation of the vanilla \"tick\" command for the Canvas threaded context")
     public boolean enableCanvasTickCommand = true;
 
+    // Chunk Generation
+    @Comment("Chunk-Gen related config options")
+    public ChunkGeneration chunkGeneration = new ChunkGeneration();
+    public static class ChunkGeneration {
+        public long chunkDataCacheSoftLimit = 8192L;
+        public long chunkDataCacheLimit = 32678L;
+    }
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
