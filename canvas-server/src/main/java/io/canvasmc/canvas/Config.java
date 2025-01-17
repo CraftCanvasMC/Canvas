@@ -57,6 +57,15 @@ public class Config implements ConfigData {
         public int keepAlive = 60;
     }
 
+	// Entity Tracking
+	@Comment("Threaded EntityTracking options")
+	public EntityTracking entityTracking = new EntityTracking();
+	public static class EntityTracking {
+		public boolean enableThreadedTracking = true;
+		public int maxProcessors = 1;
+		public int keepAlive = 60;
+	}
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
@@ -76,6 +85,7 @@ public class Config implements ConfigData {
 				t.printStackTrace();
 			}
 		}
+		io.canvasmc.canvas.entity.tracking.ThreadedTracker.init();
 		return INSTANCE;
 	}
 
