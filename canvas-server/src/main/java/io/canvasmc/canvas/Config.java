@@ -41,6 +41,10 @@ public class Config implements ConfigData {
     public static class ChunkGeneration {
         public long chunkDataCacheSoftLimit = 8192L;
         public long chunkDataCacheLimit = 32678L;
+        public boolean allowAVX512 = false;
+        public boolean nativeAccelerationEnabled = true;
+        @Comment("Increases the default chunk worker count by the provided amount.")
+        public int increaseChunkWorkerCountBy = 2;
     }
 
 	public static Config init() {
@@ -53,6 +57,15 @@ public class Config implements ConfigData {
 		}
 
 		detectModifications(defaulted, INSTANCE, Config.class);
+		System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
+		boolean configured = INSTANCE.chunkGeneration.nativeAccelerationEnabled;
+		if (configured) {
+			try {
+				Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
+			} catch (Throwable t) {
+				t.printStackTrace();
+			}
+		}
 		return INSTANCE;
 	}
 
