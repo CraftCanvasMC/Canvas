@@ -1,136 +1,20 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Thu, 9 Jan 2025 18:01:26 -0800
+Date: Thu, 16 Jan 2025 20:39:48 -0800
 Subject: [PATCH] Optimize Commands
 
 
-diff --git a/build.gradle.kts b/build.gradle.kts
-index 795ff47f075eff2699819a0cc6bac799682b0c0e..1a5e385108d6dccccc532ae885b1aec1dfb2651d 100644
---- a/build.gradle.kts
-+++ b/build.gradle.kts
-@@ -86,6 +86,7 @@ dependencies {
-     implementation("me.lucko:spark-api:0.1-20240720.200737-2")
-     implementation("me.lucko:spark-paper:1.10.119-SNAPSHOT")
-     // Paper end - spark
-+    implementation("com.ibm.async:asyncutil:0.1.0") // Canvas - asyncutil
-     // Canvas start - cloth config
-     implementation("me.shedaniel.cloth:cloth-config-fabric:17.0.144") {
-         exclude(group = "net.fabricmc")
-diff --git a/src/main/java/io/canvasmc/canvas/util/AsyncChunkLoadUtil.java b/src/main/java/io/canvasmc/canvas/util/AsyncChunkLoadUtil.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..be9df4b7ad9ce82e42038d8bbbe58482e18ff85f
---- /dev/null
-+++ b/src/main/java/io/canvasmc/canvas/util/AsyncChunkLoadUtil.java
-@@ -0,0 +1,76 @@
-+package io.canvasmc.canvas.util;
-+
-+import com.ibm.asyncutil.locks.AsyncSemaphore;
-+import com.ibm.asyncutil.locks.FairAsyncSemaphore;
-+import net.minecraft.server.level.ChunkHolder;
-+import net.minecraft.server.level.ChunkLevel;
-+import net.minecraft.server.level.ChunkResult;
-+import net.minecraft.server.level.DistanceManager;
-+import net.minecraft.server.level.FullChunkStatus;
-+import net.minecraft.server.level.ServerChunkCache;
-+import net.minecraft.server.level.ServerLevel;
-+import net.minecraft.server.level.TicketType;
-+import net.minecraft.util.Unit;
-+import net.minecraft.world.level.ChunkPos;
-+import net.minecraft.world.level.chunk.ChunkAccess;
-+import net.minecraft.world.level.chunk.status.ChunkStatus;
-+import java.util.concurrent.CompletableFuture;
-+
-+public class AsyncChunkLoadUtil {
-+
-+    private static final TicketType<Unit> ASYNC_CHUNK_LOAD = TicketType.create("vmp_async_chunk_load", (unit, unit2) -> 0);
-+
-+    private static final AsyncSemaphore SEMAPHORE = new FairAsyncSemaphore(6);
-+
-+    public static CompletableFuture<ChunkResult<ChunkAccess>> scheduleChunkLoad(ServerLevel world, ChunkPos pos) {
-+        return scheduleChunkLoadWithRadius(world, pos, 3);
-+    }
-+
-+    public static CompletableFuture<ChunkResult<ChunkAccess>> scheduleChunkLoadWithRadius(ServerLevel world, ChunkPos pos, int radius) {
-+        return scheduleChunkLoadWithLevel(world, pos, 33 - radius);
-+    }
-+
-+    public static CompletableFuture<ChunkResult<ChunkAccess>> scheduleChunkLoadToStatus(ServerLevel world, ChunkPos pos, ChunkStatus status) {
-+        return scheduleChunkLoadWithLevel(world, pos, ChunkLevel.byStatus(status));
-+    }
-+
-+    public static CompletableFuture<ChunkResult<ChunkAccess>> scheduleChunkLoadWithLevel(ServerLevel world, ChunkPos pos, int level) {
-+        final ServerChunkCache chunkManager = world.getChunkSource();
-+        final DistanceManager ticketManager = (chunkManager).distanceManager;
-+
-+        final CompletableFuture<ChunkResult<ChunkAccess>> future = SEMAPHORE.acquire()
-+            .toCompletableFuture()
-+            .thenComposeAsync(unused -> {
-+                ticketManager.addTicket(ASYNC_CHUNK_LOAD, pos, level, Unit.INSTANCE);
-+                (chunkManager).runDistanceManagerUpdates();
-+                final ChunkHolder chunkHolder = (chunkManager.chunkMap).getUpdatingChunkIfPresent(pos.toLong());
-+                if (chunkHolder == null) {
-+                    throw new IllegalStateException("Chunk not there when requested");
-+                }
-+                final FullChunkStatus levelType = ChunkLevel.fullStatus(level);
-+                return switch (levelType) {
-+                    case INACCESSIBLE -> chunkHolder.scheduleChunkGenerationTask(ChunkLevel.generationStatus(level), world.getChunkSource().chunkMap);
-+                    case FULL -> chunkHolder.getFullChunkFuture().thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
-+                    case BLOCK_TICKING -> chunkHolder.getTickingChunkFuture().thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
-+                    case ENTITY_TICKING -> chunkHolder.getEntityTickingChunkFuture().thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
-+                };
-+            }, world.getServer());
-+        future.whenCompleteAsync((unused, throwable) -> {
-+            SEMAPHORE.release();
-+            if (throwable != null) throwable.printStackTrace();
-+            ticketManager.removeTicket(ASYNC_CHUNK_LOAD, pos, level, Unit.INSTANCE);
-+        }, world.getServer());
-+        return future;
-+    }
-+
-+    private static final ThreadLocal<Boolean> isRespawnChunkLoadFinished = ThreadLocal.withInitial(() -> false);
-+
-+    public static void setIsRespawnChunkLoadFinished(boolean value) {
-+        isRespawnChunkLoadFinished.set(value);
-+    }
-+
-+    public static boolean isRespawnChunkLoadFinished() {
-+        return isRespawnChunkLoadFinished.get();
-+    }
-+
-+}
-diff --git a/src/main/java/net/minecraft/server/ServerFunctionManager.java b/src/main/java/net/minecraft/server/ServerFunctionManager.java
-index 0b348f701b61c7b7ed0190eff8b2d73f3a3d5c74..04da0badcc238827f0eafa5714213dd242b426b5 100644
---- a/src/main/java/net/minecraft/server/ServerFunctionManager.java
-+++ b/src/main/java/net/minecraft/server/ServerFunctionManager.java
-@@ -9,6 +9,7 @@ import java.util.List;
- import java.util.Objects;
- import java.util.Optional;
- import net.minecraft.commands.CommandResultCallback;
-+import net.minecraft.commands.CommandSource;
- import net.minecraft.commands.CommandSourceStack;
- import net.minecraft.commands.FunctionInstantiationException;
- import net.minecraft.commands.execution.ExecutionContext;
-@@ -103,7 +104,7 @@ public class ServerFunctionManager {
-     }
- 
-     public CommandSourceStack getGameLoopSender() {
--        return this.server.createCommandSourceStack().withPermission(2).withSuppressedOutput();
-+        return this.server.createCommandSourceStack().withPermission(2).withSuppressedOutput().withSource(CommandSource.NULL); // Canvas
-     }
- 
-     public Optional<CommandFunction<CommandSourceStack>> get(ResourceLocation id) {
-diff --git a/src/main/java/net/minecraft/server/commands/SpreadPlayersCommand.java b/src/main/java/net/minecraft/server/commands/SpreadPlayersCommand.java
-index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d779999a9df 100644
---- a/src/main/java/net/minecraft/server/commands/SpreadPlayersCommand.java
-+++ b/src/main/java/net/minecraft/server/commands/SpreadPlayersCommand.java
-@@ -11,30 +11,52 @@ import com.mojang.brigadier.builder.RequiredArgumentBuilder;
+diff --git a/net/minecraft/server/commands/SpreadPlayersCommand.java b/net/minecraft/server/commands/SpreadPlayersCommand.java
+index d381800ad054be6b054dcca43fbe80d3f0c0c771..5d327f0d9ee08880246bea09d834832392211ee0 100644
+--- a/net/minecraft/server/commands/SpreadPlayersCommand.java
++++ b/net/minecraft/server/commands/SpreadPlayersCommand.java
+@@ -9,10 +9,20 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
  import com.mojang.brigadier.exceptions.CommandSyntaxException;
  import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
  import com.mojang.brigadier.exceptions.Dynamic4CommandExceptionType;
 +import java.util.ArrayList;
- import java.util.Collection;
- import java.util.Iterator;
 +import java.util.List;
+ import java.util.Collection;
  import java.util.Locale;
  import java.util.Map;
  import java.util.Set;
@@ -143,8 +27,9 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
 +import io.canvasmc.canvas.util.AsyncChunkLoadUtil;
 +import net.minecraft.commands.CommandSource;
  import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
  import net.minecraft.commands.arguments.EntityArgument;
- import net.minecraft.commands.arguments.coordinates.Vec2Argument;
+@@ -20,18 +30,30 @@ import net.minecraft.commands.arguments.coordinates.Vec2Argument;
  import net.minecraft.core.BlockPos;
  import net.minecraft.core.Direction;
  import net.minecraft.network.chat.Component;
@@ -162,7 +47,6 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
 +import net.minecraft.world.level.ChunkPos;
  import net.minecraft.world.level.block.state.BlockState;
  import net.minecraft.world.phys.Vec2;
- import net.minecraft.world.scores.PlayerTeam;
  import net.minecraft.world.scores.Team;
  
  public class SpreadPlayersCommand {
@@ -173,31 +57,31 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
 +        new LinkedBlockingQueue<>(8)
 +    );
 +    // Canvas end
- 
      private static final int MAX_ITERATION_COUNT = 10000;
-     private static final Dynamic4CommandExceptionType ERROR_FAILED_TO_SPREAD_TEAMS = new Dynamic4CommandExceptionType((object, object1, object2, object3) -> {
-@@ -60,6 +82,10 @@ public class SpreadPlayersCommand {
-     }
- 
-     private static int spreadPlayers(CommandSourceStack source, Vec2 center, float spreadDistance, float maxRange, int maxY, boolean respectTeams, Collection<? extends Entity> players) throws CommandSyntaxException {
+     private static final Dynamic4CommandExceptionType ERROR_FAILED_TO_SPREAD_TEAMS = new Dynamic4CommandExceptionType(
+         (teamCount, x, z, suggestedSpread) -> Component.translatableEscape("commands.spreadplayers.failed.teams", teamCount, x, z, suggestedSpread)
+@@ -102,6 +124,10 @@ public class SpreadPlayersCommand {
+     private static int spreadPlayers(
+         CommandSourceStack source, Vec2 center, float spreadDistance, float maxRange, int maxHeight, boolean respectTeams, Collection<? extends Entity> targets
+     ) throws CommandSyntaxException {
 +        // Canvas start
 +        final CommandSource output = source.source;
 +        if (!(output instanceof Player) && !(output instanceof MinecraftServer) && !(output instanceof RconConsoleSource)) {
 +        // Canvas end
-         ServerLevel worldserver = source.getLevel();
-         int j = worldserver.getMinY();
- 
-@@ -81,6 +107,47 @@ public class SpreadPlayersCommand {
-             }, true);
-             return acommandspreadplayers_a.length;
+         ServerLevel level = source.getLevel();
+         int minY = level.getMinY();
+         if (maxHeight < minY) {
+@@ -129,6 +155,47 @@ public class SpreadPlayersCommand {
+             );
+             return positions.length;
          }
 +        // Canvas start
 +        }
 +        int retV = 0;
 +        ServerLevel serverWorld = source.getLevel();
 +        int i = serverWorld.getMinY();
-+        if (maxY < i) {
-+            throw ERROR_INVALID_MAX_HEIGHT.create(maxY, i);
++        if (maxHeight < i) {
++            throw ERROR_INVALID_MAX_HEIGHT.create(maxHeight, i);
 +        } else {
 +            RandomSource random = RandomSource.create();
 +            double d = center.x - maxRange;
@@ -207,7 +91,7 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
 +            SpreadPlayersCommand.Position[] piles = createInitialPositions(random, respectTeams ? getNumberOfTeams(players) : players.size(), d, e, f, g);
 +            EXECUTOR.execute(() -> {
 +                try {
-+                    vmp$spread(center, spreadDistance, serverWorld, random, d, e, f, g, maxY, piles, respectTeams);
++                    vmp$spread(center, spreadDistance, serverWorld, random, d, e, f, g, maxHeight, piles, respectTeams);
 +                } catch (CommandSyntaxException ex) {
 +                    source.getServer().schedule(new TickTask(0, () -> {
 +                        source.sendFailure(ComponentUtils.fromMessage(ex.getRawMessage()));
@@ -218,7 +102,7 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
 +                        t.printStackTrace();
 +                    });
 +                }
-+                double h = vmp$getMinDistance(players, serverWorld, piles, maxY, respectTeams);
++                double h = vmp$getMinDistance(targets, serverWorld, piles, maxHeight, respectTeams);
 +                source.getServer().execute(() -> {
 +                    source.sendSuccess(
 +                        () -> Component.translatable(
@@ -235,8 +119,8 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
      }
  
      private static int getNumberOfTeams(Collection<? extends Entity> entities) {
-@@ -240,12 +307,179 @@ public class SpreadPlayersCommand {
-         return acommandspreadplayers_a;
+@@ -272,6 +339,155 @@ public class SpreadPlayersCommand {
+         return targets.size() < 2 ? 0.0 : d / targets.size();
      }
  
 +    // Canvas start
@@ -388,12 +272,13 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
 +    }
 +
 +    // Canvas end
-     private static class Position {
+     private static SpreadPlayersCommand.Position[] createInitialPositions(RandomSource random, int count, double minX, double minZ, double maxX, double maxZ) {
+         SpreadPlayersCommand.Position[] positions = new SpreadPlayersCommand.Position[count];
  
+@@ -287,7 +503,25 @@ public class SpreadPlayersCommand {
+     static class Position {
          double x;
          double z;
- 
-         Position() {}
 +        // Canvas start
 +
 +        public double getX() {
@@ -411,30 +296,31 @@ index 6f69e74d8662025c4148b36de7a35e789abcd1d2..901b04051b380deade4d0c1aa8d14d77
 +        public void setZ(final double z) {
 +            this.z = z;
 +        }
-+        // Canvas end
  
++        // Canvas end
          double dist(SpreadPlayersCommand.Position other) {
-             double d0 = this.x - other.x;
-diff --git a/src/main/java/net/minecraft/server/level/ChunkMap.java b/src/main/java/net/minecraft/server/level/ChunkMap.java
-index ced18f86ba035a23d5405001354b23afba54f69c..900b46af60dda008849a033bf72d6c2bbe252744 100644
---- a/src/main/java/net/minecraft/server/level/ChunkMap.java
-+++ b/src/main/java/net/minecraft/server/level/ChunkMap.java
-@@ -309,7 +309,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+             double d = this.x - other.x;
+             double d1 = this.z - other.z;
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index 397dc758695386c9bd3c943ed6ffa04937b8380d..8056309b93687b2ff86e22bd78ed1264c0dcea13 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -316,7 +316,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
      }
  
      @Nullable
--    protected ChunkHolder getUpdatingChunkIfPresent(long pos) {
+-    protected ChunkHolder getUpdatingChunkIfPresent(long chunkPos) {
 +    public ChunkHolder getUpdatingChunkIfPresent(long pos) { // Canvas - protected -> public
          // Paper start - rewrite chunk system
-         final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder holder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(pos);
+         final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder holder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
          return holder == null ? null : holder.vanillaChunkHolder;
-diff --git a/src/main/java/net/minecraft/server/level/ServerChunkCache.java b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
-index 621abfb5d9790a823d4580d138b793732b79d597..59f57bfe2eef1254338cb47ab259f09589909e67 100644
---- a/src/main/java/net/minecraft/server/level/ServerChunkCache.java
-+++ b/src/main/java/net/minecraft/server/level/ServerChunkCache.java
-@@ -56,7 +56,7 @@ import org.slf4j.Logger;
- public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemServerChunkCache { // Paper - rewrite chunk system
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index 8b0543417384182482fcf6282340d7e7f559ba5a..861d9440cb01852d8453d5537a7670e06117af5b 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -55,7 +55,7 @@ import org.slf4j.Logger;
  
+ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemServerChunkCache { // Paper - rewrite chunk system
      private static final Logger LOGGER = LogUtils.getLogger();
 -    private final DistanceManager distanceManager;
 +    public final DistanceManager distanceManager; // Canvas - private -> public
