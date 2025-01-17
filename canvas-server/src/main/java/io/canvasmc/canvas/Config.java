@@ -72,6 +72,8 @@ public class Config implements ConfigData {
 	public int skipTicksAdvancements = 3;
 	@Comment("Disables the ticking of a useless secondary poi sensor")
 	public boolean skipUselessSecondaryPoiSensor = true;
+    @Comment("Optimizes piston block entities")
+    public boolean optimizePistonMovingBlockEntity = true;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);

@@ -1,26 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Thu, 9 Jan 2025 18:59:36 -0800
+Date: Fri, 17 Jan 2025 00:24:14 -0800
 Subject: [PATCH] Optimize Moving Block Shapes
 
 
-diff --git a/src/main/java/io/canvasmc/canvas/Config.java b/src/main/java/io/canvasmc/canvas/Config.java
-index 6f0b39fae8ea2d3156c262f73298a6f8e100b51b..65730cb7e2f039c6daf8affb7f935ec2f3245cde 100644
---- a/src/main/java/io/canvasmc/canvas/Config.java
-+++ b/src/main/java/io/canvasmc/canvas/Config.java
-@@ -72,6 +72,8 @@ public class Config implements ConfigData {
- 	public boolean skipUselessSecondaryPoiSensor = true;
- 	@Comment("Enables fluid spread optimizations")
- 	public boolean optimizeFluidSpread = true;
-+	@Comment("Optimizes piston block entities")
-+	public boolean optimizePistonMovingBlockEntity = true;
- 
- 	public static Config init() {
- 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
-diff --git a/src/main/java/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java b/src/main/java/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
-index e1c9a961064887070b29207efd7af47884f8dc29..b39cb71bdf96a06a3cd000fa01f559f996e5a0a4 100644
---- a/src/main/java/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
-+++ b/src/main/java/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
+diff --git a/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java b/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
+index 1e6e940fca9d96ef410c7bf05524bd9b24db4a79..da672dfd6a0e0f097fc99c79aa92fec530d7ef66 100644
+--- a/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
++++ b/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
 @@ -2,6 +2,8 @@ package net.minecraft.world.level.block.piston;
  
  import java.util.Iterator;
@@ -87,47 +74,47 @@ index e1c9a961064887070b29207efd7af47884f8dc29..b39cb71bdf96a06a3cd000fa01f559f9
 +    }
 +    // Canvas end
  
-     public PistonMovingBlockEntity(BlockPos pos, BlockState state) {
-         super(BlockEntityType.PISTON, pos, state);
-@@ -380,10 +434,34 @@ public class PistonMovingBlockEntity extends BlockEntity {
+     public PistonMovingBlockEntity(BlockPos pos, BlockState blockState) {
+         super(BlockEntityType.PISTON, pos, blockState);
+@@ -373,10 +427,34 @@ public class PistonMovingBlockEntity extends BlockEntity {
              }
  
-             float f = this.getExtendedProgress(this.progress);
+             float extendedProgress = this.getExtendedProgress(this.progress);
 +            // Canvas start - optimize piston heads - avoid Shape.or
 +            Supplier<VoxelShape> original = () -> {
-             double d = (double)((float)this.direction.getStepX() * f);
-             double e = (double)((float)this.direction.getStepY() * f);
-             double g = (double)((float)this.direction.getStepZ() * f);
-             return Shapes.or(voxelShape, blockState.getCollisionShape(world, pos).move(d, e, g));
+             double d = this.direction.getStepX() * extendedProgress;
+             double d1 = this.direction.getStepY() * extendedProgress;
+             double d2 = this.direction.getStepZ() * extendedProgress;
+             return Shapes.or(collisionShape, blockState.getCollisionShape(level, pos).move(d, d1, d2));
 +            };
 +            if (!Config.INSTANCE.optimizePistonMovingBlockEntity) {
 +                return original.get();
 +            }
-+            float absOffset = Math.abs(f);
++            float absOffset = Math.abs(extendedProgress);
 +            if (absOffset != 0f && absOffset != 0.5f && absOffset != 1f) {
 +                return original.get();
 +            }
 +
 +            if (this.extending || !this.isSourcePiston || !(this.movedState.getBlock() instanceof PistonBaseBlock)) {
 +                //here voxelShape2.isEmpty() is guaranteed, vanilla code would call union() which calls simplify()
-+                VoxelShape blockShape = blockState.getCollisionShape(world, pos);
++                VoxelShape blockShape = blockState.getCollisionShape(level, pos);
 +
 +                //we cache the simplified shapes, as the simplify() method costs a lot of CPU time and allocates several objects
-+                return getOffsetAndSimplified(blockShape, absOffset, f < 0f ? this.direction.getOpposite() : this.direction);
++                return getOffsetAndSimplified(blockShape, absOffset, extendedProgress < 0f ? this.direction.getOpposite() : this.direction);
 +            } else {
 +                //retracting piston heads have to act like their base as well, as the base block is replaced with the moving block
 +                //f >= 0f is guaranteed (assuming no other mod interferes)
-+                int index = getIndexForMergedShape(f, this.direction);
++                int index = getIndexForMergedShape(extendedProgress, this.direction);
 +                return PISTON_BASE_WITH_MOVING_HEAD_SHAPES[index];
 +            }
 +            // Canvas end
          }
      }
  
-diff --git a/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java b/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java
-index 6182f1d37c7a63479f6c6e7c37a7edc9cffc3071..8dfbd265655041d1b8d733d96ddb2bc4a8016768 100644
---- a/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java
-+++ b/src/main/java/net/minecraft/world/phys/shapes/VoxelShape.java
+diff --git a/net/minecraft/world/phys/shapes/VoxelShape.java b/net/minecraft/world/phys/shapes/VoxelShape.java
+index 2c7e70675b62cb753447d2acebf2f36cdac74973..1479fbbb5a81f8e33e263f9f1604e38943d14896 100644
+--- a/net/minecraft/world/phys/shapes/VoxelShape.java
++++ b/net/minecraft/world/phys/shapes/VoxelShape.java
 @@ -1,6 +1,5 @@
  package net.minecraft.world.phys.shapes;
  
