@@ -47,6 +47,16 @@ public class Config implements ConfigData {
         public int increaseChunkWorkerCountBy = 2;
     }
 
+    // Async Pathfinding
+    @Comment("Async-Pathfinding optimization options")
+    public Pathfinding pathfinding = new Pathfinding();
+    public static class Pathfinding {
+        public boolean enableThreadedPathfinding = true;
+        public boolean useThreadedWorldForScheduling = true;
+        public int maxProcessors = 2;
+        public int keepAlive = 60;
+    }
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
