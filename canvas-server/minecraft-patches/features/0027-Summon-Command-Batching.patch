@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Fri, 17 Jan 2025 16:51:11 -0800
+Subject: [PATCH] Summon Command Batching
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index eccb933d9b0a98a5cc1a131aecb3769196eb5146..5fb0459776b9a67029f470e3a8525478380fa098 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -14,6 +14,7 @@ import com.mojang.jtracy.DiscontinuousFrame;
+ import com.mojang.jtracy.TracyClient;
+ import com.mojang.logging.LogUtils;
+ import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.command.SummonCommandManagement;
+ import io.canvasmc.canvas.server.ThreadedServer;
+ import io.canvasmc.canvas.server.level.TickRateManagerInstance;
+ import io.canvasmc.canvas.server.level.WatchdogWatcher;
+@@ -208,6 +209,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public LevelStorageSource.LevelStorageAccess storageSource;
+     public final PlayerDataStorage playerDataStorage;
+     private final List<Runnable> tickables = Lists.newArrayList();
++    public SummonCommandManagement summonCommandManager = new SummonCommandManagement(); // Canvas
+     private MetricsRecorder metricsRecorder = InactiveMetricsRecorder.INSTANCE;
+     private Consumer<ProfileResults> onMetricsRecordingStopped = results -> this.stopRecordingMetrics();
+     private Consumer<Path> onMetricsRecordingFinished = path -> {};
+@@ -1771,6 +1773,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         if (playerSaveInterval < 0) {
+             playerSaveInterval = autosavePeriod;
+         }
++        this.summonCommandManager.tickBatch(); // Canvas
+         profiler.push("save");
+         final boolean fullSave = autosavePeriod > 0 && this.tickCount % autosavePeriod == 0;
+         try {
+diff --git a/net/minecraft/server/commands/SummonCommand.java b/net/minecraft/server/commands/SummonCommand.java
+index b68c0e617d3593cc9ba999ed25ea2c1b7c762597..33ebd233b722425ac178837662d4e8fce8f653c7 100644
+--- a/net/minecraft/server/commands/SummonCommand.java
++++ b/net/minecraft/server/commands/SummonCommand.java
+@@ -3,6 +3,7 @@ package net.minecraft.server.commands;
+ import com.mojang.brigadier.CommandDispatcher;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
++import io.canvasmc.canvas.Config;
+ import net.minecraft.commands.CommandBuildContext;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+@@ -15,6 +16,7 @@ import net.minecraft.core.Holder;
+ import net.minecraft.core.registries.Registries;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.EntitySpawnReason;
+@@ -41,7 +43,7 @@ public class SummonCommand {
+                                 ResourceArgument.getSummonableEntityType(context1, "entity"),
+                                 context1.getSource().getPosition(),
+                                 new CompoundTag(),
+-                                true
++                                true, true // Canvas
+                             )
+                         )
+                         .then(
+@@ -52,7 +54,7 @@ public class SummonCommand {
+                                         ResourceArgument.getSummonableEntityType(context1, "entity"),
+                                         Vec3Argument.getVec3(context1, "pos"),
+                                         new CompoundTag(),
+-                                        true
++                                        true, true // Canvas
+                                     )
+                                 )
+                                 .then(
+@@ -63,7 +65,7 @@ public class SummonCommand {
+                                                 ResourceArgument.getSummonableEntityType(context1, "entity"),
+                                                 Vec3Argument.getVec3(context1, "pos"),
+                                                 CompoundTagArgument.getCompoundTag(context1, "nbt"),
+-                                                false
++                                                false, true // Canvas
+                                             )
+                                         )
+                                 )
+@@ -102,7 +104,15 @@ public class SummonCommand {
+         }
+     }
+ 
+-    private static int spawnEntity(CommandSourceStack source, Holder.Reference<EntityType<?>> type, Vec3 pos, CompoundTag tag, boolean randomizeProperties) throws CommandSyntaxException {
++    // Canvas start
++    public static int spawnEntity(CommandSourceStack source, Holder.Reference<EntityType<?>> type, Vec3 pos, CompoundTag tag, boolean randomizeProperties, boolean shouldBatch) throws CommandSyntaxException {
++        if (shouldBatch && Config.INSTANCE.batchSummonCommandTasks) {
++            MinecraftServer.getServer().summonCommandManager.batch(
++                source, type, pos, tag, randomizeProperties
++            );
++            return 1;
++        }
++        // Canvas end
+         Entity entity = createEntity(source, type, pos, tag, randomizeProperties);
+         source.sendSuccess(() -> Component.translatable("commands.summon.success", entity.getDisplayName()), true);
+         return 1;

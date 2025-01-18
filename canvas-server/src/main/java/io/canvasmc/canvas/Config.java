@@ -87,6 +87,11 @@ public class Config implements ConfigData {
         public double tntRandomRange = -1;
     }
 
+    @Comment("Amount of entities to summon per tick from the summon command")
+    public int summonCommandBatchCount = 50;
+    @Comment("Batches summon command tasks to spread across multiple ticks, preventing the server from freezing for multiple seconds when processing higher summon counts")
+    public boolean batchSummonCommandTasks = true;
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
