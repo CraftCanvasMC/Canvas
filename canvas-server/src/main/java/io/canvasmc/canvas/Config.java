@@ -79,6 +79,14 @@ public class Config implements ConfigData {
     @Comment("Use faster sin/cos math operations")
     public boolean useCompactSineLUT = true;
 
+    @Comment("TNT-related optimizations")
+    public TNT tnt = new TNT();
+    public static class TNT {
+        public boolean enableFasterTntOptimization = true;
+        public boolean explosionNoBlockDamage = false;
+        public double tntRandomRange = -1;
+    }
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
