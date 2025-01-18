@@ -98,11 +98,6 @@ paperweight {
             patchesDir = file("canvas-api/paper-patches")
             outputDir = file("paper-api")
         }
-        patchRepo("paperApiGenerator") {
-            upstreamPath = "paper-api-generator"
-            patchesDir = file("canvas-api-generator/paper-patches")
-            outputDir = file("paper-api-generator")
-        }
         patchDir("purpurApi") {
             upstreamPath = "purpur-api"
             excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
