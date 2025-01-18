@@ -20,8 +20,6 @@ public class Config implements ConfigData {
     // Threaded Dimensions
     @Comment("Determines if the server should tick the playerlist assigned to each world on their own level threads, or if it should tick on the main thread(globally)")
     public boolean runPlayerListTickOnIndependentLevel = true;
-    @Comment("Determines if the server should schedule auto-saves off-main, and have each level run its autosave on its own thread")
-    public boolean runAutoSaveThreaded = true;
     @Comment("Amount of ticks until the level will resync time with the player")
     public int timeResyncInterval = 20;
     @Comment("Thread priority for level threads, must be a value between 1-10.")
@@ -43,8 +41,8 @@ public class Config implements ConfigData {
         public long chunkDataCacheLimit = 32678L;
         public boolean allowAVX512 = false;
         public boolean nativeAccelerationEnabled = true;
-        @Comment("Increases the default chunk worker count by the provided amount.")
-        public int increaseChunkWorkerCountBy = 2;
+        @Comment("Experimental: Modifies chunk gen worker default algorithm to linearly scale better than Moonrises default.")
+        public boolean useAlternativeAlgorithmForChunkWorkers = false;
     }
 
     // Async Pathfinding
