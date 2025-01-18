@@ -1,4 +1,3 @@
-import io.papermc.paperweight.tasks.CreatePaperclipJar
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import java.nio.file.*
@@ -10,7 +9,8 @@ import org.gradle.api.DefaultTask
 plugins {
     java
     `maven-publish`
-    id("io.papermc.paperweight.patcher") version "1.7.4"
+    id("io.papermc.paperweight.patcher") version "2.0.0-beta.14"
+    // id("canvas.development")
 }
 
 allprojects {
@@ -33,9 +33,19 @@ val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 val mcVersion = "1.21.4"
 
 subprojects {
-    tasks.withType<JavaCompile>().configureEach {
+    apply(plugin = "java-library")
+    apply(plugin = "maven-publish")
+
+    extensions.configure<JavaPluginExtension> {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(22)
+        }
+    }
+
+    tasks.withType<JavaCompile> {
         options.encoding = Charsets.UTF_8.name()
         options.release = 22
+        options.isFork = true
     }
     tasks.withType<Javadoc> {
         options.encoding = Charsets.UTF_8.name()
@@ -59,88 +69,45 @@ subprojects {
         maven("https://maven.shedaniel.me/")
         maven("https://maven.terraformersmc.com/releases/")
     }
+
 }
 
 repositories {
     mavenCentral()
     jcenter()
-    maven(paperMavenPublicUrl) {
-        content {
-            onlyForConfigurations(configurations.paperclip.name)
-        }
-    }
-}
-
-dependencies {
-    remapper("net.fabricmc:tiny-remapper:0.10.3:fat")
-    decompiler("net.minecraftforge:forgeflower:2.0.627.2")
-    paperclip("io.papermc:paperclip:3.0.3")
-    compileOnly(files(libs.javaClass.superclass.protectionDomain.codeSource.location))
+    maven(paperMavenPublicUrl)
 }
 
 paperweight {
-    serverProject = project(":canvas-server")
-
-    remapRepo = paperMavenPublicUrl
-    decompileRepo = paperMavenPublicUrl
-
-    useStandardUpstream("purpur") {
-        url = github("PurpurMC", "Purpur")
+    upstreams.register("purpur") {
+        repo = github("PurpurMC", "Purpur")
         ref = providers.gradleProperty("purpurCommit")
 
-        withStandardPatcher {
-            baseName("Purpur")
-
-            apiPatchDir = layout.projectDirectory.dir("patches/api")
-            apiOutputDir = layout.projectDirectory.dir("Canvas-API")
-
-            serverPatchDir = layout.projectDirectory.dir("patches/server")
-            serverOutputDir = layout.projectDirectory.dir("Canvas-Server")
+        patchFile {
+            path = "purpur-server/build.gradle.kts"
+            outputFile = file("canvas-server/build.gradle.kts")
+            patchFile = file("canvas-server/build.gradle.kts.patch")
         }
-
-        patchTasks.register("generatedApi") {
-            isBareDirectory = true
-            upstreamDirPath = "paper-api-generator/generated"
-            patchDir = layout.projectDirectory.dir("patches/generated-api")
-            outputDir = layout.projectDirectory.dir("paper-api-generator/generated")
+        patchFile {
+            path = "purpur-api/build.gradle.kts"
+            outputFile = file("canvas-api/build.gradle.kts")
+            patchFile = file("canvas-api/build.gradle.kts.patch")
         }
-    }
-}
-
-tasks.generateDevelopmentBundle {
-    apiCoordinates = "io.github.dueris:canvas-api"
-    libraryRepositories = listOf(
-        "https://repo.maven.apache.org/maven2/",
-        paperMavenPublicUrl,
-        "https://repo.purpurmc.org/snapshots",
-    )
-}
-
-tasks.register("printMinecraftVersion") {
-    doLast {
-        println(providers.gradleProperty("mcVersion").get().trim())
-    }
-}
-
-publishing {
-    publications.create<MavenPublication>("devBundle") {
-        artifact(tasks.generateDevelopmentBundle) {
-            groupId = "io.github.dueris"
-            artifactId = "dev-bundle"
+        patchRepo("paperApi") {
+            upstreamPath = "paper-api"
+            patchesDir = file("canvas-api/paper-patches")
+            outputDir = file("paper-api")
         }
-    }
-    repositories {
-        maven {
-            name = "sonatype"
-            if (version.toString().endsWith("SNAPSHOT")) {
-                url = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-            } else {
-                url = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            }
-            credentials {
-                username=System.getenv("OSSRH_USERNAME")
-                password=System.getenv("OSSRH_PASSWORD")
-            }
+        patchRepo("paperApiGenerator") {
+            upstreamPath = "paper-api-generator"
+            patchesDir = file("canvas-api-generator/paper-patches")
+            outputDir = file("paper-api-generator")
+        }
+        patchDir("purpurApi") {
+            upstreamPath = "purpur-api"
+            excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
+            patchesDir = file("canvas-api/purpur-patches")
+            outputDir = file("purpur-api")
         }
     }
 }

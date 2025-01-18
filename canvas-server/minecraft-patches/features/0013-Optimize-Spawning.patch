@@ -1,0 +1,166 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Fri, 17 Jan 2025 00:04:47 -0800
+Subject: [PATCH] Optimize Spawning
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 5f80a2caf5a789cbfaba714b403fbff33f68f3fc..f866fd68ef75dfc1bc66821af565f7f33dc9c2d6 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -18,6 +18,7 @@ import io.canvasmc.canvas.server.ThreadedServer;
+ import io.canvasmc.canvas.server.level.TickRateManagerInstance;
+ import io.canvasmc.canvas.server.level.WatchdogWatcher;
+ import io.papermc.paper.configuration.GlobalConfiguration;
++import io.canvasmc.canvas.util.AsyncProcessor;
+ import it.unimi.dsi.fastutil.longs.LongIterator;
+ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+ import it.unimi.dsi.fastutil.objects.ObjectArraySet;
+@@ -313,6 +314,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public boolean lagging = false; // Purpur - Lagging threshold
+     public static final long SERVER_INIT = System.nanoTime(); // Paper - Lag compensation
+     protected boolean upnp = false; // Purpur - UPnP Port Forwarding
++    public AsyncProcessor mobSpawnExecutor = new AsyncProcessor("mob_spawning"); // Canvas
+ 
+     // Canvas start - Multithreaded Dimension Ticking
+     private volatile boolean isTicking = false;
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index 861d9440cb01852d8453d5537a7670e06117af5b..c71643a9b2f054da94db12a9039348ea4eafd6cb 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -3,8 +3,8 @@ package net.minecraft.server.level;
+ import com.google.common.annotations.VisibleForTesting;
+ import com.mojang.datafixers.DataFixer;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.Config;
+ import io.netty.util.internal.ConcurrentSet;
+-import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+ import java.io.IOException;
+ import java.nio.file.Path;
+ import java.util.ArrayList;
+@@ -182,6 +182,8 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     }
+     // Paper end - chunk tick iteration optimisations
+ 
++    public boolean firstRunSpawnCounts = true; // Canvas
++    public final java.util.concurrent.atomic.AtomicBoolean spawnCountsReady = new java.util.concurrent.atomic.AtomicBoolean(false); // Canvas
+ 
+     public ServerChunkCache(
+         ServerLevel level,
+@@ -532,6 +534,34 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             this.broadcastChangedChunks(profilerFiller);
+             profilerFiller.pop();
+         }
++        // Canvas start
++        if (Config.INSTANCE.enableAsyncSpawning) {
++            for (ServerPlayer player : this.level.players) {
++                for (int ii = 0; ii < ServerPlayer.MOBCATEGORY_TOTAL_ENUMS; ii++) {
++                    player.mobCounts[ii] = 0;
++
++                    int newBackoff = player.mobBackoffCounts[ii] - 1;
++                    if (newBackoff < 0) {
++                        newBackoff = 0;
++                    }
++                    player.mobBackoffCounts[ii] = newBackoff;
++                }
++            }
++            if (firstRunSpawnCounts) {
++                firstRunSpawnCounts = false;
++                spawnCountsReady.set(true);
++            }
++            if (spawnCountsReady.getAndSet(false)) {
++                MinecraftServer.getServer().mobSpawnExecutor.submit(() -> {
++                    int mapped = distanceManager.getNaturalSpawnChunkCount();
++                    try {
++                        lastSpawnState = NaturalSpawner.createState(mapped, new ArrayList<>(level.entityTickList.entities), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), true);
++                    } finally { }
++                    spawnCountsReady.set(true);
++                });
++            }
++        }
++        // Canvas end
+     }
+ 
+     private void broadcastChangedChunks(ProfilerFiller profiler) {
+@@ -578,6 +608,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         // Paper start - Optional per player mob spawns
+         NaturalSpawner.SpawnState spawnState;
+         if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
++            if (!Config.INSTANCE.enableAsyncSpawning) { // Canvas
+             // re-set mob counts
+             for (ServerPlayer player : this.level.players) {
+                 // Paper start - per player mob spawning backoff
+@@ -592,12 +623,16 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+                 }
+                 // Paper end - per player mob spawning backoff
+             }
+-            spawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, null, true);
++            lastSpawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), true); // Canvas
++            } // Canvas
+         } else {
+-            spawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
++            // Canvas start
++            lastSpawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), false); // Canvas
++            spawnCountsReady.set(true);
++            // Canvas end
+         }
+         // Paper end - Optional per player mob spawns
+-        this.lastSpawnState = spawnState;
++        // this.lastSpawnState = spawnercreature_d; // Canvas
+         profiler.popPush("spawnAndTick");
+         boolean _boolean = this.level.getGameRules().getBoolean(GameRules.RULE_DOMOBSPAWNING) && !this.level.players().isEmpty(); // CraftBukkit
+         int _int = this.level.getGameRules().getInt(GameRules.RULE_RANDOMTICKING);
+@@ -612,7 +647,7 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             }
+             // Paper end - PlayerNaturallySpawnCreaturesEvent
+             boolean flag = this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) != 0L && this.level.getLevelData().getGameTime() % this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) == 0L; // CraftBukkit
+-            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(spawnState, this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit
++            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(lastSpawnState, this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit // Canvas
+         } else {
+             filteredSpawningCategories = List.of();
+         }
+@@ -620,8 +655,8 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         for (LevelChunk levelChunk : chunks) {
+             ChunkPos pos = levelChunk.getPos();
+             levelChunk.incrementInhabitedTime(timeInhabited);
+-            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot
+-                NaturalSpawner.spawnForChunk(this.level, levelChunk, spawnState, filteredSpawningCategories);
++            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && (!Config.INSTANCE.enableAsyncSpawning || spawnCountsReady.get()) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot // Canvas
++                NaturalSpawner.spawnForChunk(this.level, levelChunk, lastSpawnState, filteredSpawningCategories); // Canvas
+             }
+ 
+             if (true) { // Paper - rewrite chunk system
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+index 8aeeeffae50b3ec68ab972e793bb5edb4530ca78..c1f3488b86162a428f7a26d672920d7d4c3c658d 100644
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -1,6 +1,7 @@
+ package net.minecraft.world.level;
+ 
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.Config;
+ import it.unimi.dsi.fastutil.objects.Object2IntMap;
+ import it.unimi.dsi.fastutil.objects.Object2IntMaps;
+ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+@@ -165,7 +166,7 @@ public final class NaturalSpawner {
+             // Paper start - Optional per player mob spawns
+             final boolean canSpawn;
+             int maxSpawns = Integer.MAX_VALUE;
+-            if (level.paperConfig().entities.spawning.perPlayerMobSpawns) {
++            if (level.paperConfig().entities.spawning.perPlayerMobSpawns && false) { // Canvas - no? - disable per player mob spawns, these are slow af and restore vanilla spawning.
+                 // Copied from getFilteredSpawningCategories
+                 int limit = mobCategory.getMaxInstancesPerChunk();
+                 SpawnCategory spawnCategory = CraftSpawnCategory.toBukkit(mobCategory);
+@@ -649,6 +650,12 @@ public final class NaturalSpawner {
+         }
+ 
+         boolean canSpawnForCategoryLocal(MobCategory category, ChunkPos chunkPos) {
++            // Canvas start
++            if (this.localMobCapCalculator == null) {
++                LOGGER.warn("Local mob cap calculator was null! Report to Canvas.");
++                return false;
++            }
++            // Canvas end
+             return this.localMobCapCalculator.canSpawn(category, chunkPos);
+         }
+     }

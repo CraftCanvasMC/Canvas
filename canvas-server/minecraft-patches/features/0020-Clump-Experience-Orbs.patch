@@ -1,0 +1,232 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Fri, 17 Jan 2025 15:44:17 -0800
+Subject: [PATCH] Clump Experience Orbs
+
+
+diff --git a/net/minecraft/world/entity/ExperienceOrb.java b/net/minecraft/world/entity/ExperienceOrb.java
+index a43e5190c0f9ae14ccecccd5b58dc0e17f18b0a1..33f4e81b51fc336be1a1927aa887dfd32a0dd7ee 100644
+--- a/net/minecraft/world/entity/ExperienceOrb.java
++++ b/net/minecraft/world/entity/ExperienceOrb.java
+@@ -1,7 +1,16 @@
+ package net.minecraft.world.entity;
+ 
++import java.util.Collections;
++import java.util.HashMap;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Optional;
++import java.util.concurrent.atomic.AtomicInteger;
++import java.util.function.BiFunction;
++import java.util.function.UnaryOperator;
++import java.util.stream.Collectors;
++import java.util.stream.Stream;
++import io.canvasmc.canvas.Config;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.network.protocol.Packet;
+@@ -49,6 +58,10 @@ public class ExperienceOrb extends Entity {
+     @javax.annotation.Nullable
+     public java.util.UUID triggerEntityId;
+     public org.bukkit.entity.ExperienceOrb.SpawnReason spawnReason = org.bukkit.entity.ExperienceOrb.SpawnReason.UNKNOWN;
++    // Canvas start - optimize orbs
++    public Map<Integer, Integer> clumps$clumpedMap;
++    public Optional<EnchantedItemInUse> clumps$currentEntry;
++    // Canvas end
+ 
+     private void loadPaperNBT(CompoundTag tag) {
+         if (!tag.contains("Paper.ExpData", net.minecraft.nbt.Tag.TAG_COMPOUND)) {
+@@ -239,6 +252,28 @@ public class ExperienceOrb extends Entity {
+     }
+ 
+     private static boolean tryMergeToExisting(ServerLevel level, Vec3 pos, int amount) {
++        // Canvas start - optimize orbs
++        if (Config.INSTANCE.clumpOrbs) {
++            AABB aABB = AABB.ofSize(pos, 1.0D, 1.0D, 1.0D);
++            int id = level.getRandom().nextInt(40);
++            List<ExperienceOrb> list = level.getEntities(EntityTypeTest.forClass(ExperienceOrb.class), aABB, (experienceOrbx) -> canMerge(experienceOrbx, id, amount));
++            if(!list.isEmpty()) {
++                ExperienceOrb experienceOrb = list.getFirst();
++                Map<Integer, Integer> clumpedMap = (experienceOrb).clumps$getClumpedMap();
++                (experienceOrb).clumps$setClumpedMap(Stream.of(clumpedMap, Collections.singletonMap(amount, 1))
++                    .flatMap(map -> map.entrySet().stream())
++                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, Integer::sum)));
++                (experienceOrb).count = (clumpedMap.values()
++                    .stream()
++                    .reduce(Integer::sum)
++                    .orElse(1));
++                (experienceOrb).age = (0);
++                return true;
++            } else {
++                return false;
++            }
++        }
++        // Canvas end
+         // Paper - TODO some other event for this kind of merge
+         AABB aabb = AABB.ofSize(pos, 1.0, 1.0, 1.0);
+         int randomInt = level.getRandom().nextInt(40);
+@@ -254,11 +289,11 @@ public class ExperienceOrb extends Entity {
+     }
+ 
+     private boolean canMerge(ExperienceOrb orb) {
+-        return orb != this && canMerge(orb, this.getId(), this.value);
++        return Config.INSTANCE.clumpOrbs ? orb.isAlive() && !this.is(orb) : orb != this && ExperienceOrb.canMerge(orb, this.getId(), this.value); // Canvas - optimize orbs
+     }
+ 
+     private static boolean canMerge(ExperienceOrb orb, int amount, int other) {
+-        return !orb.isRemoved() && (orb.getId() - amount) % 40 == 0 && orb.value == other;
++        return Config.INSTANCE.clumpOrbs ? orb.isAlive() : !orb.isRemoved() && (orb.getId() - amount) % 40 == 0 && orb.value == other; // Canvas - optimize orbs
+     }
+ 
+     private void merge(ExperienceOrb orb) {
+@@ -267,6 +302,18 @@ public class ExperienceOrb extends Entity {
+             return;
+         }
+         // Paper end - call orb merge event
++        // Canvas start - optimize orbs
++        if (Config.INSTANCE.clumpOrbs) {
++            Map<Integer, Integer> otherMap = (orb).clumps$getClumpedMap();
++            this.count = clumps$getClumpedMap().values().stream().reduce(Integer::sum).orElse(1);
++            this.age = Math.min(this.age, (orb).age);
++            clumps$setClumpedMap(Stream.of(clumps$getClumpedMap(), otherMap)
++                .flatMap(map -> map.entrySet().stream())
++                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, Integer::sum)));
++            orb.discard();
++            return;
++        }
++        // Canvas end
+         this.count = this.count + orb.count;
+         this.age = Math.min(this.age, orb.age);
+         orb.discard(EntityRemoveEvent.Cause.MERGE); // CraftBukkit - add Bukkit remove cause
+@@ -308,6 +355,13 @@ public class ExperienceOrb extends Entity {
+         compound.putInt("Value", this.value); // Paper - save as Integer
+         compound.putInt("Count", this.count);
+         this.savePaperNBT(compound); // Paper
++        // Canvas start
++        if(clumps$clumpedMap != null) {
++            CompoundTag map = new CompoundTag();
++            clumps$getClumpedMap().forEach((value, count) -> map.putInt(String.valueOf(value), count));
++            compound.put("clumpedMap", map);
++        }
++        // Canvas end
+     }
+ 
+     @Override
+@@ -317,10 +371,51 @@ public class ExperienceOrb extends Entity {
+         this.value = compound.getInt("Value"); // Paper - load as Integer
+         this.count = Math.max(compound.getInt("Count"), 1);
+         this.loadPaperNBT(compound); // Paper
++        // Canvas start
++        Map<Integer, Integer> map = new HashMap<>();
++        if(compound.contains("clumpedMap")) {
++            CompoundTag clumpedMap = compound.getCompound("clumpedMap");
++            for(String s : clumpedMap.getAllKeys()) {
++                map.put(Integer.parseInt(s), clumpedMap.getInt(s));
++            }
++        } else {
++            map.put(value, count);
++        }
++
++        clumps$setClumpedMap(map);
++        // Canvas end
+     }
+ 
+     @Override
+     public void playerTouch(Player entity) {
++        // Canvas start - optimize orbs
++        if(entity instanceof ServerPlayer && Config.INSTANCE.clumpOrbs) {
++            entity.takeXpDelay = 0;
++            entity.take(this, 1);
++
++            if(this.value != 0 || clumps$resolve()) {
++                AtomicInteger toGive = new AtomicInteger();
++                clumps$getClumpedMap().forEach((value, amount) -> {
++                    int actualValue = value;
++
++                    for(int i = 0; i < amount; i++) {
++                        int leftOver = actualValue;
++                        if(leftOver == actualValue) {
++                            leftOver = this.repairPlayerItems((ServerPlayer) entity, actualValue);
++                        }
++                        if(leftOver > 0) {
++                            toGive.addAndGet(leftOver);
++                        }
++                    }
++                });
++                if(toGive.get() > 0) {
++                    entity.giveExperiencePoints(toGive.get());
++                }
++            }
++            this.discard();
++            return;
++        }
++        // Canvas end
+         if (entity instanceof ServerPlayer serverPlayer) {
+             if (entity.takeXpDelay == 0 && new com.destroystokyo.paper.event.player.PlayerPickupExperienceEvent(serverPlayer.getBukkitEntity(), (org.bukkit.entity.ExperienceOrb) this.getBukkitEntity()).callEvent()) { // Paper - PlayerPickupExperienceEvent
+                 entity.takeXpDelay = CraftEventFactory.callPlayerXpCooldownEvent(entity, this.level().purpurConfig.playerExpPickupDelay, PlayerExpCooldownChangeEvent.ChangeReason.PICKUP_ORB).getNewCooldown(); // CraftBukkit - entityhuman.takeXpDelay = 2; // Purpur - Configurable player pickup exp delay
+@@ -338,10 +433,61 @@ public class ExperienceOrb extends Entity {
+         }
+     }
+ 
+-    private int repairPlayerItems(ServerPlayer player, int value) {
+-        Optional<EnchantedItemInUse> randomItemWith = level().purpurConfig.useBetterMending ? EnchantmentHelper.getMostDamagedItemWith(EnchantmentEffectComponents.REPAIR_WITH_XP, player) : EnchantmentHelper.getRandomItemWith( // Purpur - Add option to mend the most damaged equipment first
+-            EnchantmentEffectComponents.REPAIR_WITH_XP, player, ItemStack::isDamaged
+-        );
++    // Canvas start
++    public Optional<EnchantedItemInUse> clumps$captureCurrentEntry(Optional<EnchantedItemInUse> entry) {
++
++        clumps$currentEntry = entry;
++        return entry;
++    }
++
++    public Map<Integer, Integer> clumps$getClumpedMap() {
++
++        if(clumps$clumpedMap == null) {
++            clumps$clumpedMap = new HashMap<>();
++            clumps$clumpedMap.put(this.value, 1);
++        }
++        return clumps$clumpedMap;
++    }
++
++    public void clumps$setClumpedMap(Map<Integer, Integer> map) {
++
++        clumps$clumpedMap = map;
++        clumps$resolve();
++    }
++
++    public boolean clumps$resolve() {
++
++        value = clumps$getClumpedMap().entrySet()
++            .stream()
++            .map(entry -> entry.getKey() * entry.getValue())
++            .reduce(Integer::sum)
++            .orElse(1);
++        return value > 0;
++    }
++    // Canvas end
++
++    private int repairPlayerItems(ServerPlayer player, int amount) {
++        Optional<EnchantedItemInUse> randomItemWith = clumps$captureCurrentEntry(level().purpurConfig.useBetterMending ? EnchantmentHelper.getMostDamagedItemWith(EnchantmentEffectComponents.REPAIR_WITH_XP, player) : EnchantmentHelper.getRandomItemWith(EnchantmentEffectComponents.REPAIR_WITH_XP, player, ItemStack::isDamaged)); // Purpur - Add option to mend the most damaged equipment first // Canvas - optimize orbs
++
++        // Canvas start - optimize orbs
++        if (Config.INSTANCE.clumpOrbs) {
++            return clumps$currentEntry
++                .map(foundItem -> {
++                    ItemStack itemstack = foundItem.itemStack();
++                    int xpToRepair = EnchantmentHelper.modifyDurabilityToRepairFromXp(player.serverLevel(), itemstack, (int) (amount * 1));
++                    int toRepair = Math.min(xpToRepair, itemstack.getDamageValue());
++                    itemstack.setDamageValue(itemstack.getDamageValue() - toRepair);
++                    if(toRepair > 0) {
++                        int used = amount - toRepair * amount / xpToRepair;
++                        if(used > 0) {
++                            return this.repairPlayerItems(player, used);
++                        }
++                    }
++                    return 0;
++                })
++                .orElse(amount);
++        }
++        // Canvas end
+         if (randomItemWith.isPresent()) {
+             ItemStack itemStack = randomItemWith.get().itemStack();
+             int i = EnchantmentHelper.modifyDurabilityToRepairFromXp(player.serverLevel(), itemStack, value);

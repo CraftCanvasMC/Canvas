@@ -1,0 +1,667 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Fri, 17 Jan 2025 16:24:40 -0800
+Subject: [PATCH] BlockEntity Sleeping
+
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 8ddca228305848e5b3230d08e42d8b49ac1a0898..941b89b72a84858f45f80abf65abc68d4f717f32 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -2623,7 +2623,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         CsvOutput csvOutput = CsvOutput.builder().addColumn("x").addColumn("y").addColumn("z").addColumn("type").build(output);
+ 
+         for (TickingBlockEntity tickingBlockEntity : this.blockEntityTickers) {
+-            BlockPos pos = tickingBlockEntity.getPos();
++            BlockPos pos = getPosOrOrigin(tickingBlockEntity); // Canvas
+             csvOutput.writeRow(pos.getX(), pos.getY(), pos.getZ(), tickingBlockEntity.getType());
+         }
+     }
+@@ -2677,6 +2677,16 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     public ServerLevel getLevel() {
+         return this;
+     }
++    // Canvas start
++
++    private BlockPos getPosOrOrigin(TickingBlockEntity instance) {
++        BlockPos pos = instance.getPos();
++        if (pos == null) {
++            return BlockPos.ZERO;
++        }
++        return pos;
++    }
++    // Canvas end
+ 
+     @VisibleForTesting
+     public String getWatchdogStats() {
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index a670555dde3841e9c57bcf54cb79fe9d9c270867..b7c874cdd54b5c3dffacfcf310f4cf55c5538082 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -1524,7 +1524,7 @@ public abstract class Level extends MinecraftServerWorld implements LevelAccesso
+             // Spigot end
+             if (tickingBlockEntity.isRemoved()) {
+                 toRemove.add(tickingBlockEntity); // Paper - Fix MC-117075; use removeAll
+-            } else if (runsNormally && this.shouldTickBlocksAt(tickingBlockEntity.getPos())) {
++            } else if (runsNormally && this.shouldTickBlockPosFilterNull(this, tickingBlockEntity.getPos())) { // Canvas
+                 tickingBlockEntity.tick();
+                 // Paper start - rewrite chunk system
+                 if ((++tickedEntities & 7) == 0) {
+@@ -1539,6 +1539,15 @@ public abstract class Level extends MinecraftServerWorld implements LevelAccesso
+         profilerFiller.pop();
+         this.spigotConfig.currentPrimedTnt = 0; // Spigot
+     }
++    // Canvas start
++
++    private boolean shouldTickBlockPosFilterNull(Level instance, BlockPos pos) {
++        if (pos == null) {
++            return false;
++        }
++        return instance.shouldTickBlocksAt(pos);
++    }
++    // Canvas end
+ 
+     public <T extends Entity> void guardEntityTick(Consumer<T> consumerEntity, T entity) {
+         try {
+diff --git a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+index 947b2911a71768c43180ca8dcaaacd6ce93b3f55..16e7a402ba39b79541e42b11dccbcbc539d67814 100644
+--- a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+@@ -1,6 +1,7 @@
+ package net.minecraft.world.level.block.entity;
+ 
+ import com.google.common.collect.Lists;
++import io.canvasmc.canvas.entity.SleepingBlockEntity;
+ import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.Reference2IntMap.Entry;
+ import java.util.List;
+@@ -37,9 +38,10 @@ import net.minecraft.world.item.crafting.SingleRecipeInput;
+ import net.minecraft.world.level.block.AbstractFurnaceBlock;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.phys.Vec3;
+ 
+-public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer, RecipeCraftingHolder, StackedContentsCompatible {
++public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer, RecipeCraftingHolder, StackedContentsCompatible, SleepingBlockEntity {
+     protected static final int SLOT_INPUT = 0;
+     protected static final int SLOT_FUEL = 1;
+     protected static final int SLOT_RESULT = 2;
+@@ -101,6 +103,38 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
+     private final RecipeManager.CachedCheck<SingleRecipeInput, ? extends AbstractCookingRecipe> quickCheck;
+     public final RecipeType<? extends AbstractCookingRecipe> recipeType; // Paper - cook speed multiplier API
+     public double cookSpeedMultiplier = 1.0; // Paper - cook speed multiplier API
++    // Canvas start
++    private LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = null;
++    private TickingBlockEntity sleepingTicker = null;
++
++    @Override
++    public LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper() {
++        return tickWrapper;
++    }
++
++    @Override
++    public void lithium$setTickWrapper(LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper) {
++        this.tickWrapper = tickWrapper;
++        this.lithium$setSleepingTicker(null);
++    }
++
++    @Override
++    public TickingBlockEntity lithium$getSleepingTicker() {
++        return sleepingTicker;
++    }
++
++    @Override
++    public void lithium$setSleepingTicker(TickingBlockEntity sleepingTicker) {
++        this.sleepingTicker = sleepingTicker;
++    }
++
++    @Override
++    public void lithium$handleSetChanged() {
++        if (this.isSleeping() && this.level != null && !this.level.isClientSide) {
++            this.wakeUpNow();
++        }
++    }
++    // Canvas end
+ 
+     protected AbstractFurnaceBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState blockState, RecipeType<? extends AbstractCookingRecipe> recipeType) {
+         super(type, pos, blockState);
+@@ -167,6 +201,11 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
+             this.cookSpeedMultiplier = tag.getDouble("Paper.CookSpeedMultiplier");
+         }
+         // Paper end - cook speed multiplier API
++        // Canvas start
++        if (this.isSleeping() && this.level != null && !this.level.isClientSide) {
++            this.wakeUpNow();
++        }
++        // Canvas end
+     }
+ 
+     @Override
+@@ -291,7 +330,16 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
+         }
+ 
+         if (usedLavaFromUnderneath) furnace.items.set(1, ItemStack.EMPTY); // Purpur - Furnace uses lava from underneath
++        furnace.checkSleep(state); // Canvas
++    }
++    // Canvas start
++
++    private void checkSleep(BlockState state) {
++        if (!this.isLit() && this.cookingTimer == 0 && (state.is(Blocks.FURNACE) || state.is(Blocks.BLAST_FURNACE) || state.is(Blocks.SMOKER)) && this.level != null) {
++            this.lithium$startSleeping();
++        }
+     }
++    // Canvas end
+ 
+     private static boolean canBurn(
+         RegistryAccess registryAccess,
+diff --git a/net/minecraft/world/level/block/entity/BlockEntity.java b/net/minecraft/world/level/block/entity/BlockEntity.java
+index 3fd0f42618e5c2c683335d1d3e0bb74c6d32ef66..58bee6c52cccd14fa4b6de2331c838141561a501 100644
+--- a/net/minecraft/world/level/block/entity/BlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BlockEntity.java
+@@ -39,6 +39,11 @@ public abstract class BlockEntity {
+     protected boolean remove;
+     private BlockState blockState;
+     private DataComponentMap components = DataComponentMap.EMPTY;
++    // Canvas start
++
++    public void lithium$handleSetChanged() {
++    }
++    // Canvas end
+ 
+     public BlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState blockState) {
+         this.type = type;
+@@ -217,6 +222,7 @@ public abstract class BlockEntity {
+             if (ignoreBlockEntityUpdates) return; // Paper - Perf: Optimize Hoppers
+             setChanged(this.level, this.worldPosition, this.blockState);
+         }
++        this.lithium$handleSetChanged(); // Canvas
+     }
+ 
+     protected static void setChanged(Level level, BlockPos pos, BlockState state) {
+diff --git a/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java b/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
+index 94f9477e78600eded6eecc4c961576501001d187..0a423f1ba0d38b07aa1fbbf5335f872426a1f7e1 100644
+--- a/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/BrewingStandBlockEntity.java
+@@ -2,6 +2,7 @@ package net.minecraft.world.level.block.entity;
+ 
+ import java.util.Arrays;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.entity.SleepingBlockEntity;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.HolderLookup;
+@@ -16,15 +17,17 @@ import net.minecraft.world.entity.player.Inventory;
+ import net.minecraft.world.inventory.AbstractContainerMenu;
+ import net.minecraft.world.inventory.BrewingStandMenu;
+ import net.minecraft.world.inventory.ContainerData;
++import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.item.Item;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.Items;
+ import net.minecraft.world.item.alchemy.PotionBrewing;
+ import net.minecraft.world.level.Level;
++import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.BrewingStandBlock;
+ import net.minecraft.world.level.block.state.BlockState;
+ 
+-public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
++public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer, SleepingBlockEntity { // Canvas
+     private static final int INGREDIENT_SLOT = 3;
+     private static final int FUEL_SLOT = 4;
+     private static final int[] SLOTS_FOR_UP = new int[]{3};
+@@ -40,6 +43,44 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+     private boolean[] lastPotionCount;
+     private Item ingredient;
+     public int fuel;
++    // Canvas start
++    private LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = null;
++    private TickingBlockEntity sleepingTicker = null;
++
++    @Override
++    public LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper() {
++        return tickWrapper;
++    }
++
++    @Override
++    public void lithium$setTickWrapper(LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper) {
++        this.tickWrapper = tickWrapper;
++        this.lithium$setSleepingTicker(null);
++    }
++
++    @Override
++    public TickingBlockEntity lithium$getSleepingTicker() {
++        return sleepingTicker;
++    }
++
++    @Override
++    public void lithium$setSleepingTicker(TickingBlockEntity sleepingTicker) {
++        this.sleepingTicker = sleepingTicker;
++    }
++
++    private void checkSleep(BlockState state) {
++        if (this.brewTime == 0 && state.is(Blocks.BREWING_STAND) && this.level != null) {
++            this.lithium$startSleeping();
++        }
++    }
++
++    @Override
++    public void lithium$handleSetChanged() {
++        if (this.isSleeping() && this.level != null && !this.level.isClientSide) {
++            this.wakeUpNow();
++        }
++    }
++    // Canvas end
+     protected final ContainerData dataAccess = new ContainerData() {
+         @Override
+         public int get(int index) {
+@@ -128,6 +169,7 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+     }
+ 
+     public static void serverTick(Level level, BlockPos pos, BlockState state, BrewingStandBlockEntity blockEntity) {
++        blockEntity.checkSleep(state); // Canvas
+         ItemStack itemStack = blockEntity.items.get(4);
+         if (blockEntity.fuel <= 0 && itemStack.is(ItemTags.BREWING_FUEL)) {
+             // CraftBukkit start
+@@ -145,6 +187,7 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+                 itemStack.shrink(1);
+             }
+             // CraftBukkit end
++            blockEntity.wakeUpNow(); // Canvas
+             setChanged(level, pos, state);
+         }
+ 
+@@ -160,6 +203,7 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+                 blockEntity.brewTime = 0;
+             }
+ 
++            blockEntity.wakeUpNow(); // Canvas
+             setChanged(level, pos, state);
+         } else if (isBrewable && blockEntity.fuel > 0) {
+             blockEntity.fuel--;
+@@ -172,6 +216,7 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+             blockEntity.brewTime = event.getBrewingTime(); // 400 -> event.getTotalBrewTime() // Paper - use brewing time from event
+             // CraftBukkit end
+             blockEntity.ingredient = itemStack1.getItem();
++            blockEntity.wakeUpNow(); // Canvas
+             setChanged(level, pos, state);
+         }
+ 
+@@ -278,6 +323,11 @@ public class BrewingStandBlockEntity extends BaseContainerBlockEntity implements
+         }
+ 
+         this.fuel = tag.getByte("Fuel");
++        // Canvas start
++        if (this.isSleeping() && this.level != null && !this.level.isClientSide()) {
++            this.wakeUpNow();
++        }
++        // Canvas end
+     }
+ 
+     @Override
+diff --git a/net/minecraft/world/level/block/entity/CampfireBlockEntity.java b/net/minecraft/world/level/block/entity/CampfireBlockEntity.java
+index 2811ecb7624877b6b04896811f1d1626d716dad6..a91ee5ba7c13414620c697a209f34dd4222a2f01 100644
+--- a/net/minecraft/world/level/block/entity/CampfireBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/CampfireBlockEntity.java
+@@ -2,6 +2,7 @@ package net.minecraft.world.level.block.entity;
+ 
+ import java.util.Optional;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.entity.SleepingBlockEntity;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.HolderLookup;
+@@ -28,15 +29,53 @@ import net.minecraft.world.item.crafting.SingleRecipeInput;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.CampfireBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ 
+-public class CampfireBlockEntity extends BlockEntity implements Clearable {
++public class CampfireBlockEntity extends BlockEntity implements Clearable, SleepingBlockEntity { // Canvas
+     private static final int BURN_COOL_SPEED = 2;
+     private static final int NUM_SLOTS = 4;
+     private final NonNullList<ItemStack> items = NonNullList.withSize(4, ItemStack.EMPTY);
+     public final int[] cookingProgress = new int[4];
+     public final int[] cookingTime = new int[4];
+     public final boolean[] stopCooking = new boolean[4]; // Paper - Add more Campfire API
++    // Canvas start
++    private LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = null;
++    private TickingBlockEntity sleepingTicker = null;
++
++    @Override
++    public LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper() {
++        return tickWrapper;
++    }
++
++    @Override
++    public void lithium$setTickWrapper(LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper) {
++        this.tickWrapper = tickWrapper;
++        this.lithium$setSleepingTicker(null);
++    }
++
++    @Override
++    public TickingBlockEntity lithium$getSleepingTicker() {
++        return sleepingTicker;
++    }
++
++    @Override
++    public void lithium$setSleepingTicker(TickingBlockEntity sleepingTicker) {
++        this.sleepingTicker = sleepingTicker;
++    }
++
++    private static void trySleepLit(CampfireBlockEntity campfireBlockEntity, boolean bl) {
++        if (!bl) {
++            campfireBlockEntity.lithium$startSleeping();
++        }
++    }
++
++    private static void trySleepUnlit(CampfireBlockEntity campfire, boolean hadProgress) {
++        if (!hadProgress) {
++            campfire.lithium$startSleeping();
++        }
++    }
++    // Canvas end
+ 
+     public CampfireBlockEntity(BlockPos pos, BlockState blockState) {
+         super(BlockEntityType.CAMPFIRE, pos, blockState);
+@@ -62,8 +101,14 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
+                     SingleRecipeInput singleRecipeInput = new SingleRecipeInput(itemStack);
+                     // Paper start - add recipe to cook events
+                     final var optionalCookingRecipe = check.getRecipeFor(singleRecipeInput, level);
++                    // Canvas start
++                    final boolean finalFlag = flag;
+                     ItemStack itemStack1 = optionalCookingRecipe
+-                        .map(recipe -> recipe.value().assemble(singleRecipeInput, level.registryAccess()))
++                        .map(recipe -> {
++                            trySleepLit(campfire, finalFlag); // Canvas
++                            return recipe.value().assemble(singleRecipeInput, level.registryAccess());
++                        })
++                    // Canvas end
+                         .orElse(itemStack);
+                     // Paper end - add recipe to cook events
+                     if (itemStack1.isItemEnabled(level.enabledFeatures())) {
+@@ -79,6 +124,7 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
+                         );
+ 
+                         if (!blockCookEvent.callEvent()) {
++                            trySleepLit(campfire, flag); // Canvas
+                             return;
+                         }
+ 
+@@ -104,6 +150,7 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
+         if (flag) {
+             setChanged(level, pos, state);
+         }
++        trySleepLit(campfire, flag); // Canvas
+     }
+ 
+     public static void cooldownTick(Level level, BlockPos pos, BlockState state, CampfireBlockEntity blockEntity) {
+@@ -119,6 +166,7 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
+         if (flag) {
+             setChanged(level, pos, state);
+         }
++        trySleepUnlit(blockEntity, flag); // Canvas
+     }
+ 
+     public static void particleTick(Level level, BlockPos pos, BlockState state, CampfireBlockEntity blockEntity) {
+@@ -175,6 +223,7 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
+             System.arraycopy(cookingState, 0, this.stopCooking, 0, Math.min(this.stopCooking.length, abyte.length));
+         }
+         // Paper end - Add more Campfire API
++        this.wakeUpNow(); // Canvas
+     }
+ 
+     @Override
+@@ -224,6 +273,7 @@ public class CampfireBlockEntity extends BlockEntity implements Clearable {
+                 this.cookingTime[i] = event.getTotalCookTime(); // i -> event.getTotalCookTime()
+                 // CraftBukkit end
+                 this.cookingProgress[i] = 0;
++                this.wakeUpNow(); // Canvas
+                 this.items.set(i, stack.consumeAndReturn(1, entity));
+                 level.gameEvent(GameEvent.BLOCK_CHANGE, this.getBlockPos(), GameEvent.Context.of(entity, this.getBlockState()));
+                 this.markUpdated();
+diff --git a/net/minecraft/world/level/block/entity/HopperBlockEntity.java b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+index e58a32593e8b42bfc534d13457240860293dd3f4..33b3016dae2d2ddd9b35684a9edc164e7a43d54e 100644
+--- a/net/minecraft/world/level/block/entity/HopperBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+@@ -3,6 +3,7 @@ package net.minecraft.world.level.block.entity;
+ import java.util.List;
+ import java.util.function.BooleanSupplier;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.entity.SleepingBlockEntity;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.HolderLookup;
+@@ -26,9 +27,10 @@ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.ChestBlock;
+ import net.minecraft.world.level.block.HopperBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.phys.AABB;
+ 
+-public class HopperBlockEntity extends RandomizableContainerBlockEntity implements Hopper {
++public class HopperBlockEntity extends RandomizableContainerBlockEntity implements Hopper, SleepingBlockEntity { // Canvas
+     public static final int MOVE_ITEM_SPEED = 8;
+     public static final int HOPPER_CONTAINER_SIZE = 5;
+     private static final int[][] CACHED_SLOTS = new int[54][];
+@@ -36,6 +38,51 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+     public int cooldownTime = -1;
+     private long tickedGameTime;
+     private Direction facing;
++    // Canvas start
++    private LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = null;
++    private TickingBlockEntity sleepingTicker = null;
++
++    @Override
++    public LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper() {
++        return tickWrapper;
++    }
++
++    @Override
++    public void lithium$setTickWrapper(LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper) {
++        this.tickWrapper = tickWrapper;
++        this.lithium$setSleepingTicker(null);
++    }
++
++    @Override
++    public TickingBlockEntity lithium$getSleepingTicker() {
++        return sleepingTicker;
++    }
++
++    @Override
++    public void lithium$setSleepingTicker(TickingBlockEntity sleepingTicker) {
++        this.sleepingTicker = sleepingTicker;
++    }
++
++    @Override
++    public boolean lithium$startSleeping() {
++        if (this.isSleeping()) {
++            return false;
++        }
++
++        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
++        if (tickWrapper != null) {
++            this.lithium$setSleepingTicker(tickWrapper.ticker);
++            tickWrapper.rebind(SleepingBlockEntity.SLEEPING_BLOCK_ENTITY_TICKER);
++
++            // Set the last tick time to max value, so other hoppers transferring into this hopper will set it to 7gt
++            // cooldown. Then when waking up, we make sure to not tick this hopper in the same gametick.
++            // This makes the observable hopper cooldown not be different from vanilla.
++            this.tickedGameTime = Long.MAX_VALUE;
++            return true;
++        }
++        return false;
++    }
++    // Canvas end
+ 
+     // CraftBukkit start - add fields and methods
+     public List<org.bukkit.entity.HumanEntity> transaction = new java.util.ArrayList<>();
+@@ -160,6 +207,13 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+                 }
+             }
+ 
++            // Canvas start
++            if (!(blockEntity).isOnCooldown() &&
++                !(blockEntity).isSleeping() &&
++                !state.getValue(HopperBlock.ENABLED)) {
++                (blockEntity).lithium$startSleeping();
++            }
++            // Canvas end
+             return false;
+         }
+     }
+@@ -582,6 +636,17 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+     }
+ 
+     public void setCooldown(int cooldownTime) {
++        // Canvas start
++        if (cooldownTime == 7) {
++            if (this.tickedGameTime == Long.MAX_VALUE) {
++                this.sleepOnlyCurrentTick();
++            } else {
++                this.wakeUpNow();
++            }
++        } else if (cooldownTime > 0 && this.sleepingTicker != null) {
++            this.wakeUpNow();
++        }
++        // Canvas end
+         this.cooldownTime = cooldownTime;
+     }
+ 
+diff --git a/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java b/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
+index a2ae4b47d742e7fb9809cfc4575517c06400ec61..5199433d02e3f3f6a29369ea3d84c01975d5b3e7 100644
+--- a/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/ShulkerBoxBlockEntity.java
+@@ -3,6 +3,7 @@ package net.minecraft.world.level.block.entity;
+ import java.util.List;
+ import java.util.stream.IntStream;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.entity.SleepingBlockEntity;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.HolderLookup;
+@@ -27,12 +28,13 @@ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.ShulkerBoxBlock;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.material.PushReaction;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ 
+-public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity implements WorldlyContainer {
++public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity implements WorldlyContainer, SleepingBlockEntity { // Canvas
+     public static final int COLUMNS = 9;
+     public static final int ROWS = 3;
+     public static final int CONTAINER_SIZE = 27;
+@@ -48,6 +50,30 @@ public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity impl
+     private float progressOld;
+     @Nullable
+     private final DyeColor color;
++    // Canvas start
++    private LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = null;
++    private TickingBlockEntity sleepingTicker = null;
++
++    @Override
++    public LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper() {
++        return tickWrapper;
++    }
++
++    @Override
++    public void lithium$setTickWrapper(LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper) {
++        this.tickWrapper = tickWrapper;
++    }
++
++    @Override
++    public TickingBlockEntity lithium$getSleepingTicker() {
++        return sleepingTicker;
++    }
++
++    @Override
++    public void lithium$setSleepingTicker(TickingBlockEntity sleepingTicker) {
++        this.sleepingTicker = sleepingTicker;
++    }
++    // Canvas end
+ 
+     // CraftBukkit start - add fields and methods
+     public List<org.bukkit.entity.HumanEntity> transaction = new java.util.ArrayList<>();
+@@ -129,6 +155,11 @@ public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity impl
+                     doNeighborUpdates(level, pos, state);
+                 }
+         }
++        // Canvas start
++        if (this.animationStatus == ShulkerBoxBlockEntity.AnimationStatus.CLOSED && this.progressOld == 0.0f && this.progress == 0.0f) {
++            this.lithium$startSleeping();
++        }
++        // Canvas end
+     }
+ 
+     public ShulkerBoxBlockEntity.AnimationStatus getAnimationStatus() {
+@@ -169,6 +200,11 @@ public class ShulkerBoxBlockEntity extends RandomizableContainerBlockEntity impl
+ 
+     @Override
+     public boolean triggerEvent(int id, int type) {
++        // Canvas start
++        if (this.sleepingTicker != null) {
++            this.wakeUpNow();
++        }
++        // Canvas end
+         if (id == 1) {
+             this.openCount = type;
+             if (type == 0) {
+diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
+index 9722b079cb71e219cf78b1325253db3a449a450c..7f930c9b684e3e3ddf0a95cd018266c66fba598e 100644
+--- a/net/minecraft/world/level/chunk/LevelChunk.java
++++ b/net/minecraft/world/level/chunk/LevelChunk.java
+@@ -3,6 +3,7 @@ package net.minecraft.world.level.chunk;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Maps;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.entity.SleepingBlockEntity;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+ import java.util.Collections;
+@@ -875,12 +876,22 @@ public class LevelChunk extends ChunkAccess implements ca.spottedleaf.moonrise.p
+                     (pos, ticker1) -> {
+                         TickingBlockEntity tickingBlockEntity = this.createTicker(blockEntity, ticker);
+                         if (ticker1 != null) {
++                            // Canvas start
++                            if (blockEntity instanceof SleepingBlockEntity sleepingBlockEntity) {
++                                sleepingBlockEntity.lithium$setTickWrapper(ticker1);
++                            }
++                            // Canvas end
+                             ticker1.rebind(tickingBlockEntity);
+                             return (LevelChunk.RebindableTickingBlockEntityWrapper)ticker1;
+                         } else if (this.isInLevel()) {
+                             LevelChunk.RebindableTickingBlockEntityWrapper rebindableTickingBlockEntityWrapper = new LevelChunk.RebindableTickingBlockEntityWrapper(
+                                 tickingBlockEntity
+                             );
++                            // Canvas start
++                            if (blockEntity instanceof SleepingBlockEntity sleepingBlockEntity) {
++                                sleepingBlockEntity.lithium$setTickWrapper(rebindableTickingBlockEntityWrapper);
++                            }
++                            // Canvas end
+                             this.level.addBlockEntityTicker(rebindableTickingBlockEntityWrapper);
+                             return rebindableTickingBlockEntityWrapper;
+                         } else {
+@@ -972,14 +983,14 @@ public class LevelChunk extends ChunkAccess implements ca.spottedleaf.moonrise.p
+         void run(LevelChunk chunk);
+     }
+ 
+-    static class RebindableTickingBlockEntityWrapper implements TickingBlockEntity {
+-        private TickingBlockEntity ticker;
++    public static class RebindableTickingBlockEntityWrapper implements TickingBlockEntity { // Canvas - package-private -> public
++        public TickingBlockEntity ticker; // Canvas - private -> public
+ 
+         RebindableTickingBlockEntityWrapper(TickingBlockEntity ticker) {
+             this.ticker = ticker;
+         }
+ 
+-        void rebind(TickingBlockEntity ticker) {
++        public void rebind(TickingBlockEntity ticker) { // Canvas - package-private -> public
+             this.ticker = ticker;
+         }
+ 

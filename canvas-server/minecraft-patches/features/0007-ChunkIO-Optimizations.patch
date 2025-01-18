@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Thu, 16 Jan 2025 21:09:55 -0800
+Subject: [PATCH] ChunkIO Optimizations
+
+
+diff --git a/net/minecraft/world/level/chunk/storage/IOWorker.java b/net/minecraft/world/level/chunk/storage/IOWorker.java
+index 2199a9e2a0141c646d108f2687a27f1d165453c5..af27b363faefff9ec124b149299d2063f635e223 100644
+--- a/net/minecraft/world/level/chunk/storage/IOWorker.java
++++ b/net/minecraft/world/level/chunk/storage/IOWorker.java
+@@ -1,11 +1,14 @@
+ package net.minecraft.world.level.chunk.storage;
+ 
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.Config;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
+ import java.io.IOException;
+ import java.nio.file.Path;
+ import java.util.BitSet;
++import java.util.Iterator;
+ import java.util.LinkedHashMap;
++import java.util.Map;
+ import java.util.Optional;
+ import java.util.SequencedMap;
+ import java.util.Map.Entry;
+@@ -212,7 +215,38 @@ public class IOWorker implements ChunkScanAccess, AutoCloseable {
+         });
+     }
+ 
++    // Canvas start - chunkio optimizations - c2me
++
++    private void checkHardLimit() {
++        if (this.pendingWrites.size() >= Config.INSTANCE.chunkGeneration.chunkDataCacheLimit) {
++            LOGGER.warn("Chunk data cache size exceeded hard limit ({} >= {}), forcing writes to disk (you can increase chunkDataCacheLimit in c2me.toml)", this.pendingWrites.size(), Config.INSTANCE.chunkGeneration.chunkDataCacheLimit);
++            while (this.pendingWrites.size() >= Config.INSTANCE.chunkGeneration.chunkDataCacheSoftLimit * 0.75) { // using chunkDataCacheSoftLimit is intentional
++                writeResult0();
++            }
++        }
++    }
++
++    private void writeResult0() {
++        // TODO [VanillaCopy] writeResult
++        Iterator<Entry<ChunkPos, PendingStore>> iterator = this.pendingWrites.entrySet().iterator();
++        if (iterator.hasNext()) {
++            Map.Entry<ChunkPos, IOWorker.PendingStore> entry = iterator.next();
++            iterator.remove();
++            this.runStore(entry.getKey(), entry.getValue());
++        }
++    }
++
+     private void storePendingChunk() {
++        if (!this.pendingWrites.isEmpty()) {
++            checkHardLimit();
++            if (this.pendingWrites.size() >= Config.INSTANCE.chunkGeneration.chunkDataCacheSoftLimit) {
++                int writeFrequency = Math.min(1, (this.pendingWrites.size() - (int) Config.INSTANCE.chunkGeneration.chunkDataCacheSoftLimit) / 16);
++                for (int i = 0; i < writeFrequency; i++) {
++                    writeResult0();
++                }
++            }
++        }
++    // Canvas end
+         Entry<ChunkPos, IOWorker.PendingStore> entry = this.pendingWrites.pollFirstEntry();
+         if (entry != null) {
+             this.runStore(entry.getKey(), entry.getValue());
+diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+index 80ed0e4b8c867d031413b4140e52af1342fdcb54..cb726083802fbb9e9af480277b9ab578fdf196fa 100644
+--- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
++++ b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
+@@ -244,7 +244,7 @@ public class RegionFileStorage implements AutoCloseable, ca.spottedleaf.moonrise
+ 
+     protected RegionFileStorage(RegionStorageInfo info, Path folder, boolean sync) { // Paper - protected
+         this.folder = folder;
+-        this.sync = sync;
++        this.sync = Boolean.parseBoolean(System.getProperty("com.ishland.c2me.chunkio.syncDiskWrites", String.valueOf(sync))); // Canvas
+         this.info = info;
+         this.isChunkData = isChunkDataFolder(this.folder); // Paper - recalculate region file headers
+     }

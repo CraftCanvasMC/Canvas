@@ -1,0 +1,329 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Thu, 16 Jan 2025 20:39:48 -0800
+Subject: [PATCH] Optimize Commands
+
+
+diff --git a/net/minecraft/server/commands/SpreadPlayersCommand.java b/net/minecraft/server/commands/SpreadPlayersCommand.java
+index d381800ad054be6b054dcca43fbe80d3f0c0c771..5d327f0d9ee08880246bea09d834832392211ee0 100644
+--- a/net/minecraft/server/commands/SpreadPlayersCommand.java
++++ b/net/minecraft/server/commands/SpreadPlayersCommand.java
+@@ -9,10 +9,20 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
+ import com.mojang.brigadier.exceptions.CommandSyntaxException;
+ import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
+ import com.mojang.brigadier.exceptions.Dynamic4CommandExceptionType;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.Collection;
+ import java.util.Locale;
+ import java.util.Map;
+ import java.util.Set;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.LinkedBlockingQueue;
++import java.util.concurrent.ThreadPoolExecutor;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.function.Function;
++import io.canvasmc.canvas.util.AsyncChunkLoadUtil;
++import net.minecraft.commands.CommandSource;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.commands.arguments.EntityArgument;
+@@ -20,18 +30,30 @@ import net.minecraft.commands.arguments.coordinates.Vec2Argument;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.network.chat.ComponentUtils;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.TickTask;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.rcon.RconConsoleSource;
+ import net.minecraft.tags.BlockTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.level.BlockGetter;
++import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.scores.Team;
+ 
+ public class SpreadPlayersCommand {
++    // Canvas start
++    private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
++        1, 1,
++        10L, TimeUnit.SECONDS,
++        new LinkedBlockingQueue<>(8)
++    );
++    // Canvas end
+     private static final int MAX_ITERATION_COUNT = 10000;
+     private static final Dynamic4CommandExceptionType ERROR_FAILED_TO_SPREAD_TEAMS = new Dynamic4CommandExceptionType(
+         (teamCount, x, z, suggestedSpread) -> Component.translatableEscape("commands.spreadplayers.failed.teams", teamCount, x, z, suggestedSpread)
+@@ -102,6 +124,10 @@ public class SpreadPlayersCommand {
+     private static int spreadPlayers(
+         CommandSourceStack source, Vec2 center, float spreadDistance, float maxRange, int maxHeight, boolean respectTeams, Collection<? extends Entity> targets
+     ) throws CommandSyntaxException {
++        // Canvas start
++        final CommandSource output = source.source;
++        if (!(output instanceof Player) && !(output instanceof MinecraftServer) && !(output instanceof RconConsoleSource)) {
++        // Canvas end
+         ServerLevel level = source.getLevel();
+         int minY = level.getMinY();
+         if (maxHeight < minY) {
+@@ -129,6 +155,47 @@ public class SpreadPlayersCommand {
+             );
+             return positions.length;
+         }
++        // Canvas start
++        }
++        int retV = 0;
++        ServerLevel serverWorld = source.getLevel();
++        int i = serverWorld.getMinY();
++        if (maxHeight < i) {
++            throw ERROR_INVALID_MAX_HEIGHT.create(maxHeight, i);
++        } else {
++            RandomSource random = RandomSource.create();
++            double d = center.x - maxRange;
++            double e = center.y - maxRange;
++            double f = center.x + maxRange;
++            double g = center.y + maxRange;
++            SpreadPlayersCommand.Position[] piles = createInitialPositions(random, respectTeams ? getNumberOfTeams(targets) : targets.size(), d, e, f, g);
++            EXECUTOR.execute(() -> {
++                try {
++                    vmp$spread(center, spreadDistance, serverWorld, random, d, e, f, g, maxHeight, piles, respectTeams);
++                } catch (CommandSyntaxException ex) {
++                    source.getServer().schedule(new TickTask(0, () -> {
++                        source.sendFailure(ComponentUtils.fromMessage(ex.getRawMessage()));
++                    }));
++                } catch (Throwable t) {
++                    source.getServer().execute(() -> {
++                        source.sendFailure(Component.literal("An error occurred while spreading players, check console for details"));
++                        t.printStackTrace();
++                    });
++                }
++                double h = vmp$getMinDistance(targets, serverWorld, piles, maxHeight, respectTeams);
++                source.getServer().execute(() -> {
++                    source.sendSuccess(
++                        () -> Component.translatable(
++                            "commands.spreadplayers.success." + (respectTeams ? "teams" : "entities"), piles.length, center.x, center.y, String.format(Locale.ROOT, "%.2f", h)
++                        ),
++                        true
++                    );
++                });
++            });
++            retV = piles.length;
++        }
++        return retV;
++        // Canvas end
+     }
+ 
+     private static int getNumberOfTeams(Collection<? extends Entity> entities) {
+@@ -272,6 +339,155 @@ public class SpreadPlayersCommand {
+         return targets.size() < 2 ? 0.0 : d / targets.size();
+     }
+ 
++    // Canvas start
++    private static void vmp$spread(
++        Vec2 center,
++        double spreadDistance,
++        ServerLevel world,
++        RandomSource random,
++        double minX,
++        double minZ,
++        double maxX,
++        double maxZ,
++        int maxY,
++        SpreadPlayersCommand.Position[] piles,
++        boolean respectTeams
++    ) throws CommandSyntaxException {
++        boolean bl = true;
++        double d = Float.MAX_VALUE;
++
++        int i;
++        for (i = 0; i < 10000 && bl; ++i) {
++            bl = false;
++            d = Float.MAX_VALUE;
++
++            for (int j = 0; j < piles.length; ++j) {
++                SpreadPlayersCommand.Position pile = piles[j];
++                int k = 0;
++                SpreadPlayersCommand.Position pile2 = new SpreadPlayersCommand.Position();
++
++                for (int l = 0; l < piles.length; ++l) {
++                    if (j != l) {
++                        SpreadPlayersCommand.Position pile3 = piles[l];
++                        double e = (pile).dist(pile3);
++                        d = Math.min(e, d);
++                        if (e < spreadDistance) {
++                            ++k;
++                            (pile2).setX((pile2).getX() + ((pile3).getX() - (pile).getX()));
++                            (pile2).setZ((pile2).getZ() + ((pile3).getZ() - (pile).getZ()));
++                        }
++                    }
++                }
++
++                if (k > 0) {
++                    (pile2).setX((pile2).getX() / k);
++                    (pile2).setZ((pile2).getZ() / k);
++                    double f = (pile2).getLength();
++                    if (f > 0.0) {
++                        (pile2).normalize();
++                        pile.moveAway(pile2);
++                    } else {
++                        pile.randomize(random, minX, minZ, maxX, maxZ);
++                    }
++
++                    bl = true;
++                }
++
++                if (pile.clamp(minX, minZ, maxX, maxZ)) {
++                    bl = true;
++                }
++            }
++
++            if (!bl) {
++                List<CompletableFuture<Void>> futures = new ArrayList<>(piles.length);
++                AtomicBoolean result = new AtomicBoolean(false);
++                for (SpreadPlayersCommand.Position pile2 : piles) {
++                    ChunkPos pos = new ChunkPos(BlockPos.containing((pile2).getX(), 0.0, (pile2).getZ()));
++                    final CompletableFuture<Void> future =
++                        CompletableFuture.supplyAsync(() -> AsyncChunkLoadUtil.scheduleChunkLoad(world, pos), world.getServer())
++                            .thenCompose(Function.identity())
++                            .whenCompleteAsync((unused, throwable) -> {
++                                if (!pile2.isSafe(world, maxY)) {
++                                    pile2.randomize(random, minX, minZ, maxX, maxZ);
++                                    result.set(true);
++                                }
++                            }, world.getServer())
++                            .exceptionally(throwable -> null)
++                            .thenRun(() -> {
++                            });
++                    futures.add(future);
++                }
++                CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
++                bl = result.get();
++            }
++        }
++
++        if (d == Float.MAX_VALUE) {
++            d = 0.0;
++        }
++
++        if (i >= 10000) {
++            if (respectTeams) {
++                throw ERROR_FAILED_TO_SPREAD_TEAMS.create(piles.length, center.x, center.y, String.format(Locale.ROOT, "%.2f", d));
++            } else {
++                throw ERROR_FAILED_TO_SPREAD_ENTITIES.create(piles.length, center.x, center.y, String.format(Locale.ROOT, "%.2f", d));
++            }
++        }
++    }
++
++    private static double vmp$getMinDistance(
++        Collection<? extends Entity> entities, ServerLevel world, SpreadPlayersCommand.Position[] piles, int maxY, boolean respectTeams
++    ) {
++        double d = 0.0;
++        int i = 0;
++        Map<Team, SpreadPlayersCommand.Position> map = Maps.newHashMap();
++
++        List<CompletableFuture<Void>> futures = new ArrayList<>(piles.length);
++
++        for (Entity entity : entities) {
++            if (!entity.isAlive()) continue;
++            SpreadPlayersCommand.Position pile;
++            if (respectTeams) {
++                Team abstractTeam = entity instanceof Player ? entity.getTeam() : null;
++                if (!map.containsKey(abstractTeam)) {
++                    map.put(abstractTeam, piles[i++]);
++                }
++
++                pile = map.get(abstractTeam);
++            } else {
++                pile = piles[i++];
++            }
++
++            ChunkPos pos = new ChunkPos(BlockPos.containing((pile).getX(), 0.0, (pile).getZ()));
++            final CompletableFuture<Void> future =
++                CompletableFuture.supplyAsync(() -> AsyncChunkLoadUtil.scheduleChunkLoad(world, pos), world.getServer())
++                    .thenCompose(Function.identity())
++                    .whenCompleteAsync((unused, throwable) -> {
++                        entity.teleportTo(world, Math.floor((pile).getX()) + 0.5, pile.getSpawnY(world, maxY), Math.floor((pile).getZ()) + 0.5, Set.of(), entity.getYRot(), entity.getXRot(), true);
++                    }, world.getServer())
++                    .exceptionally(throwable -> null)
++                    .thenRun(() -> {
++                    });
++            futures.add(future);
++
++            double e = Double.MAX_VALUE;
++
++            for (SpreadPlayersCommand.Position pile2 : piles) {
++                if (pile != pile2) {
++                    double f = (pile).dist(pile2);
++                    e = Math.min(f, e);
++                }
++            }
++
++            d += e;
++        }
++
++        CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).join();
++
++        return entities.size() < 2 ? 0.0 : d / (double) entities.size();
++    }
++
++    // Canvas end
+     private static SpreadPlayersCommand.Position[] createInitialPositions(RandomSource random, int count, double minX, double minZ, double maxX, double maxZ) {
+         SpreadPlayersCommand.Position[] positions = new SpreadPlayersCommand.Position[count];
+ 
+@@ -287,7 +503,25 @@ public class SpreadPlayersCommand {
+     static class Position {
+         double x;
+         double z;
++        // Canvas start
++
++        public double getX() {
++            return x;
++        }
++
++        public double getZ() {
++            return z;
++        }
++
++        public void setX(final double x) {
++            this.x = x;
++        }
++
++        public void setZ(final double z) {
++            this.z = z;
++        }
+ 
++        // Canvas end
+         double dist(SpreadPlayersCommand.Position other) {
+             double d = this.x - other.x;
+             double d1 = this.z - other.z;
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index 397dc758695386c9bd3c943ed6ffa04937b8380d..8056309b93687b2ff86e22bd78ed1264c0dcea13 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -316,7 +316,7 @@ public class ChunkMap extends ChunkStorage implements ChunkHolder.PlayerProvider
+     }
+ 
+     @Nullable
+-    protected ChunkHolder getUpdatingChunkIfPresent(long chunkPos) {
++    public ChunkHolder getUpdatingChunkIfPresent(long chunkPos) { // Canvas - protected -> public
+         // Paper start - rewrite chunk system
+         final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder holder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
+         return holder == null ? null : holder.vanillaChunkHolder;
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index 8b0543417384182482fcf6282340d7e7f559ba5a..861d9440cb01852d8453d5537a7670e06117af5b 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -55,7 +55,7 @@ import org.slf4j.Logger;
+ 
+ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemServerChunkCache { // Paper - rewrite chunk system
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private final DistanceManager distanceManager;
++    public final DistanceManager distanceManager; // Canvas - private -> public
+     private final ServerLevel level;
+     public Thread mainThread; // Canvas - mutable
+     final ThreadedLevelLightEngine lightEngine;
