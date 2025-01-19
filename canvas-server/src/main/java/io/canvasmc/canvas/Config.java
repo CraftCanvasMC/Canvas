@@ -4,17 +4,22 @@ import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.serializer.JanksonConfigSerializer;
 import me.shedaniel.cloth.clothconfig.shadowed.blue.endless.jankson.Comment;
+import net.minecraft.world.entity.ai.goal.Goal;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 @me.shedaniel.autoconfig.annotation.Config(name = "canvas_server")
 public class Config implements ConfigData {
 
 	private static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
+    public static final List<Class<? extends Goal>> COMPILED_DISABLED_GOAL_CLASSES = Collections.synchronizedList(new ArrayList<>());
 	public static Config INSTANCE = new Config();
 
     // Threaded Dimensions
@@ -91,6 +96,8 @@ public class Config implements ConfigData {
     public boolean batchSummonCommandTasks = true;
     @Comment("Ignore \"<player> moved too quickly\" if the server is lagging. Improves general gameplay experience of the player when the server is lagging, as they wont get lagged back")
     public boolean ignoreMovedTooQuicklyWhenLagging = true;
+    @Comment("Disables all types of goals provided here. Must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\"")
+    public List<String> goalsToDisable = new ArrayList<>();
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
@@ -112,6 +119,17 @@ public class Config implements ConfigData {
 			}
 		}
 		io.canvasmc.canvas.entity.tracking.ThreadedTracker.init();
+        for (final String goalClassName : INSTANCE.goalsToDisable) {
+            try {
+                //noinspection unchecked
+                Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalClassName);
+                COMPILED_DISABLED_GOAL_CLASSES.add(clazz);
+                LOGGER.info("Disabling Goal \"{}\"...", clazz.getSimpleName());
+            } catch (ClassNotFoundException e) {
+                LOGGER.error("Unable to locate goal class \"{}\". Unable to disable, skipping.", goalClassName, e);
+                continue;
+            }
+        }
 		return INSTANCE;
 	}
 
