@@ -96,6 +96,8 @@ public class Config implements ConfigData {
     public boolean batchSummonCommandTasks = true;
     @Comment("Ignore \"<player> moved too quickly\" if the server is lagging. Improves general gameplay experience of the player when the server is lagging, as they wont get lagged back")
     public boolean ignoreMovedTooQuicklyWhenLagging = true;
+
+    @IgnoreModifications
     @Comment("Disables all types of goals provided here. Must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\"")
     public List<String> goalsToDisable = new ArrayList<>();
 
@@ -143,6 +145,9 @@ public class Config implements ConfigData {
 
 		for (Field field : fields) {
 			field.setAccessible(true);
+            if (field.isAnnotationPresent(IgnoreModifications.class)) {
+                continue;
+            }
 			try {
 				Object value1 = field.get(obj1);
 				Object value2 = field.get(obj2);
