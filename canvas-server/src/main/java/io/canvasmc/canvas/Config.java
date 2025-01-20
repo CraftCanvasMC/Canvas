@@ -20,7 +20,6 @@ public class Config implements ConfigData {
 
 	private static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
     public static final List<Class<? extends Goal>> COMPILED_DISABLED_GOAL_CLASSES = Collections.synchronizedList(new ArrayList<>());
-    public static int ALTERNATIVE_WORKER_COUNT = -1;
 	public static Config INSTANCE = new Config();
 
     // Threaded Dimensions
