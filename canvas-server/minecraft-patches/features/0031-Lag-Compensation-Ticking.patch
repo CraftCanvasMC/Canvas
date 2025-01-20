@@ -1,0 +1,517 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Mon, 20 Jan 2025 10:53:38 -0800
+Subject: [PATCH] Lag Compensation Ticking
+
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 23f251dc1ec01f1ccd1cf47079ca936a629fd383..28a5ba39caab2518ad46b37c4a7c66bb1e520d21 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -18,6 +18,7 @@ import io.canvasmc.canvas.command.SummonCommandManagement;
+ import io.canvasmc.canvas.server.ThreadedServer;
+ import io.canvasmc.canvas.server.level.TickRateManagerInstance;
+ import io.canvasmc.canvas.server.level.WatchdogWatcher;
++import io.canvasmc.canvas.util.TPSCalculator;
+ import io.papermc.paper.configuration.GlobalConfiguration;
+ import io.canvasmc.canvas.util.AsyncProcessor;
+ import it.unimi.dsi.fastutil.longs.LongIterator;
+@@ -324,6 +325,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+     // Canvas start - Multithreaded Dimension Ticking
+     private volatile boolean isTicking = false;
++    public final TPSCalculator tpsCalculator = new TPSCalculator(); // Lag compensation
+ 
+     public boolean isTicking() {
+         return isTicking;
+@@ -1770,6 +1772,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+         emptyTickSleeping = false; // Canvas
+         this.server.spark.tickStart(); // Paper - spark
++        this.tpsCalculator.doTick();
+         new com.destroystokyo.paper.event.server.ServerTickStartEvent(this.tickCount+1).callEvent(); // Paper - Server Tick Events
+         this.tickCount++;
+         this.tickRateManager.tick();
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 8fc69b9b478ae64b320778a17fff889475d37337..da5774e2308719e502210eee9bd2f9b9e2e564a6 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -8,6 +8,7 @@ import com.mojang.logging.LogUtils;
+ import io.canvasmc.canvas.server.ThreadedServer;
+ import io.canvasmc.canvas.Config;
+ import io.canvasmc.canvas.util.QueuedTaskScheduler;
++import io.canvasmc.canvas.util.TPSCalculator;
+ import io.canvasmc.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
+ import io.netty.util.internal.ConcurrentSet;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+@@ -252,6 +253,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     // Canvas start - Threaded Dimensions
+     private int emptyTicks;
+     private int sendAllPlayerInfoIn;
++    public TPSCalculator tpsCalculator = new TPSCalculator();
+     // Canvas end
+ 
+     public LevelChunk getChunkIfLoaded(int x, int z) {
+@@ -874,6 +876,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         if (this.tickEmptyLevel()) {
+             return;
+         }
++        this.tpsCalculator.doTick();
+         // Mark handling tick AFTER ticking empty level check
+         this.handlingTick = true;
+ 
+@@ -1049,10 +1052,17 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+                     this.setDayTime(this.preciseTime);
+                 } else
+                 // Purpur end - Configurable daylight cycle
+-                this.setDayTime(this.levelData.getDayTime() + 1L);
++                this.setDayTime(lagCompensation(this.levelData.getDayTime()) + 1L); // Canvas
+             }
+         }
+     }
++    // Canvas start
++
++    private long lagCompensation(long original) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.timeAcceleration) return original;
++        return original + this.tpsCalculator.applicableMissedTicks();
++    }
++    // Canvas end
+ 
+     public void setDayTime(long time) {
+         this.serverLevelData.setDayTime(time);
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 7f3102ab1c8564ddbfda69059fe2e84c2db49d59..1e4d3819d6405c6062d132536839ce6474150ed7 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -11,6 +11,7 @@ import com.mojang.datafixers.util.Pair;
+ import com.mojang.logging.LogUtils;
+ import com.mojang.serialization.DataResult;
+ import com.mojang.serialization.Dynamic;
++import io.canvasmc.canvas.Config;
+ import it.unimi.dsi.fastutil.doubles.DoubleDoubleImmutablePair;
+ import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
+ import it.unimi.dsi.fastutil.objects.Reference2ObjectMap;
+@@ -559,6 +560,7 @@ public abstract class LivingEntity extends Entity implements Attackable {
+             }
+         }
+ 
++        lagCompensation(); // Canvas
+         this.tickEffects();
+         this.animStepO = this.animStep;
+         this.yBodyRotO = this.yBodyRot;
+@@ -567,6 +569,17 @@ public abstract class LivingEntity extends Entity implements Attackable {
+         this.xRotO = this.getXRot();
+         profilerFiller.pop();
+     }
++    // Canvas start
++
++    private void lagCompensation() {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.potionEffectAcceleration) return;
++        if (this.level().isClientSide()) return;
++
++        for (int i = 0; i < ((ServerLevel) this.level()).tpsCalculator.applicableMissedTicks(); i++) {
++            tickEffects();
++        }
++    }
++    // Canvas end
+ 
+     @Override
+     protected float getBlockSpeedFactor() {
+diff --git a/net/minecraft/world/entity/PortalProcessor.java b/net/minecraft/world/entity/PortalProcessor.java
+index 88b07fbb96b20124777889830afa480673629d43..dec1969e642bc3d0b83ac7f706ed212293199b60 100644
+--- a/net/minecraft/world/entity/PortalProcessor.java
++++ b/net/minecraft/world/entity/PortalProcessor.java
+@@ -1,6 +1,7 @@
+ package net.minecraft.world.entity;
+ 
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.world.level.block.Portal;
+@@ -24,9 +25,19 @@ public class PortalProcessor {
+             return false;
+         } else {
+             this.insidePortalThisTick = false;
+-            return canChangeDimensions && this.portalTime++ >= this.portal.getPortalTransitionTime(level, entity);
++            return canChangeDimensions && lagCompensation(this.portalTime++, level) >= this.portal.getPortalTransitionTime(level, entity); // Canvas
+         }
+     }
++    // Canvas start
++
++    private int lagCompensation(int original, ServerLevel world) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.portalAcceleration) return original;
++        if (world.isClientSide()) return original;
++
++        portalTime = portalTime + world.tpsCalculator.applicableMissedTicks();
++        return portalTime;
++    }
++    // Canvas end
+ 
+     @Nullable
+     public TeleportTransition getPortalDestination(ServerLevel level, Entity entity) {
+diff --git a/net/minecraft/world/entity/item/ItemEntity.java b/net/minecraft/world/entity/item/ItemEntity.java
+index 771b169fa360411bb313ae04c7dd55836875c611..a7384dae4187ca5cea40277b7cef8a64b3f0c88c 100644
+--- a/net/minecraft/world/entity/item/ItemEntity.java
++++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -3,6 +3,7 @@ package net.minecraft.world.entity.item;
+ import java.util.Objects;
+ import java.util.UUID;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.network.chat.Component;
+@@ -153,8 +154,25 @@ public class ItemEntity extends Entity implements TraceableEntity {
+     }
+     // Paper end - EAR 2
+ 
++    // Canvas start
++    private void lagCompensation() {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.pickupAcceleration) return;
++        if ((this).level().isClientSide()) return;
++
++        if (pickupDelay == 0) return;
++
++        if (pickupDelay - ((ServerLevel) this.level()).tpsCalculator.applicableMissedTicks() <= 0) {
++            pickupDelay = 0;
++            return;
++        }
++
++        pickupDelay = pickupDelay - ((ServerLevel) this.level()).tpsCalculator.applicableMissedTicks();
++    }
++
+     @Override
+     public void tick() {
++        lagCompensation();
++    // Canvas end
+         if (this.getItem().isEmpty()) {
+             this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
+         } else {
+diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
+index 15308ff3ed5835e3b8f41e7ddc2045f424e14660..5d3413a972b655cfb2c36f5539bbb444bb58cb43 100644
+--- a/net/minecraft/world/entity/player/Player.java
++++ b/net/minecraft/world/entity/player/Player.java
+@@ -15,6 +15,7 @@ import java.util.OptionalInt;
+ import java.util.function.Predicate;
+ import javax.annotation.Nonnull;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+@@ -112,7 +113,6 @@ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.scores.PlayerTeam;
+ import net.minecraft.world.scores.Scoreboard;
+-import net.minecraft.world.scores.Team;
+ import org.slf4j.Logger;
+ 
+ public abstract class Player extends LivingEntity {
+@@ -282,6 +282,14 @@ public abstract class Player extends LivingEntity {
+         builder.define(DATA_SHOULDER_LEFT, new CompoundTag());
+         builder.define(DATA_SHOULDER_RIGHT, new CompoundTag());
+     }
++    // Canvas start
++
++    private int lagCompensation(int original) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.sleepingAcceleration) return original;
++        if (this.level().isClientSide) return original;
++        return original + ((ServerLevel) this.level()).tpsCalculator.applicableMissedTicks();
++    }
++    // Canvas end
+ 
+     @Override
+     public void tick() {
+@@ -301,24 +309,26 @@ public abstract class Player extends LivingEntity {
+         }
+ 
+         if (this.isSleeping()) {
+-            this.sleepCounter++;
++            lagCompensation(this.sleepCounter++); // Canvas
+             // Paper start - Add PlayerDeepSleepEvent
+-            if (this.sleepCounter == SLEEP_DURATION) {
++            if (lagCompensation(this.sleepCounter) == SLEEP_DURATION) { // Canvas
+                 if (!new io.papermc.paper.event.player.PlayerDeepSleepEvent((org.bukkit.entity.Player) getBukkitEntity()).callEvent()) {
+                     this.sleepCounter = Integer.MIN_VALUE;
+                 }
+             }
+             // Paper end - Add PlayerDeepSleepEvent
+-            if (this.sleepCounter > 100) {
++            if (lagCompensation(this.sleepCounter) > 100) { // Canvas
+                 this.sleepCounter = 100;
+             }
+ 
+             if (!this.level().isClientSide && this.level().isDay()) {
+                 this.stopSleepInBed(false, true);
+             }
+-        } else if (this.sleepCounter > 0) {
+-            this.sleepCounter++;
+-            if (this.sleepCounter >= 110) {
++        // Canvas start
++        } else if (lagCompensation(this.sleepCounter) > 0) {
++            lagCompensation(this.sleepCounter++);
++            if (lagCompensation(this.sleepCounter) >= 110) {
++        // Canvas end
+                 this.sleepCounter = 0;
+             }
+         }
+diff --git a/net/minecraft/world/item/Item.java b/net/minecraft/world/item/Item.java
+index 6821d39a24ef610ea8b04f6dbeca2cdc0b8e7787..007dcbea703edb67819c40daec0f67f9e9d6ed0c 100644
+--- a/net/minecraft/world/item/Item.java
++++ b/net/minecraft/world/item/Item.java
+@@ -10,6 +10,8 @@ import java.util.Map;
+ import java.util.Objects;
+ import java.util.Optional;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.util.TPSUtil;
+ import net.minecraft.SharedConstants;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+@@ -26,6 +28,7 @@ import net.minecraft.network.chat.Component;
+ import net.minecraft.resources.DependantName;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.resources.ResourceLocation;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.tags.DamageTypeTags;
+@@ -260,8 +263,19 @@ public class Item implements FeatureElement, ItemLike {
+ 
+     public int getUseDuration(ItemStack stack, LivingEntity entity) {
+         Consumable consumable = stack.get(DataComponents.CONSUMABLE);
+-        return consumable != null ? consumable.consumeTicks() : 0;
++    // Canvas start
++        int original = consumable != null ? consumable.consumeTicks() : 0;
++        if (entity.level() instanceof ServerLevel serverLevel) {
++            return lagCompensation(original, serverLevel);
++        }
++        return original;
++    }
++
++    private int lagCompensation(int original, ServerLevel level) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.eatingAcceleration || original == 0) return original;
++        return TPSUtil.tt20(original, true, level);
+     }
++    // Canvas end
+ 
+     public boolean releaseUsing(ItemStack stack, Level level, LivingEntity entity, int timeLeft) {
+         return false;
+diff --git a/net/minecraft/world/level/GameRules.java b/net/minecraft/world/level/GameRules.java
+index b21337d826ad33ce874301b070ad7f5361a2a493..7fb58f26dab6b6926b6db98b272112e7d1e82f19 100644
+--- a/net/minecraft/world/level/GameRules.java
++++ b/net/minecraft/world/level/GameRules.java
+@@ -14,11 +14,14 @@ import com.mojang.serialization.DynamicLike;
+ import java.util.Comparator;
+ import java.util.Map;
+ import java.util.Map.Entry;
++import java.util.concurrent.atomic.AtomicReference;
+ import java.util.function.BiConsumer;
+ import java.util.function.Function;
+ import java.util.function.Supplier;
+ import java.util.stream.Stream;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.util.TPSCalculator;
+ import net.minecraft.commands.CommandSourceStack;
+ import net.minecraft.commands.Commands;
+ import net.minecraft.nbt.CompoundTag;
+@@ -320,8 +323,31 @@ public class GameRules {
+     }
+ 
+     public int getInt(GameRules.Key<GameRules.IntegerValue> key) {
+-        return this.getRule(key).get();
++    // Canvas start
++        return lagCompensation(this.getRule(key).get(), key);
++    }
++
++    private final AtomicReference<ServerLevel> level = new AtomicReference<>();
++
++    private int lagCompensation(int original, GameRules.Key<GameRules.IntegerValue> rule) {
++        ServerLevel level = getOrCacheLevel();
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.randomTickSpeedAcceleration) return original;
++        if (!(rule == GameRules.RULE_RANDOMTICKING)) return original;
++        return (int) (original * TPSCalculator.MAX_TPS / (float) level.tpsCalculator.getMostAccurateTPS());
++    }
++
++    private ServerLevel getOrCacheLevel() {
++        if (level.get() == null) {
++            for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
++                if (level.getGameRules() == this) {
++                    this.level.set(level);
++                    break;
++                }
++            }
++        }
++        return level.get();
+     }
++    // Canvas end
+ 
+     public static class BooleanValue extends GameRules.Value<GameRules.BooleanValue> {
+         private boolean value;
+diff --git a/net/minecraft/world/level/block/state/BlockBehaviour.java b/net/minecraft/world/level/block/state/BlockBehaviour.java
+index b631e35e965b1914cdeeddab8bd6bdbfd2465079..c5a223a76f1978e63373f6c01b9eca653d07e890 100644
+--- a/net/minecraft/world/level/block/state/BlockBehaviour.java
++++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
+@@ -3,6 +3,8 @@ package net.minecraft.world.level.block.state;
+ import com.mojang.serialization.Codec;
+ import com.mojang.serialization.MapCodec;
+ import com.mojang.serialization.codecs.RecordCodecBuilder;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.util.TPSCalculator;
+ import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
+ import java.util.Arrays;
+ import java.util.Collections;
+@@ -27,6 +29,7 @@ import net.minecraft.network.protocol.game.DebugPackets;
+ import net.minecraft.resources.DependantName;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.tags.FluidTags;
+ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.Mth;
+@@ -346,13 +349,21 @@ public abstract class BlockBehaviour implements FeatureElement {
+     protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+     }
+ 
++    // Canvas start
++    private float lagCompensation(float original, Player player) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.blockBreakingAcceleration) return original;
++        if (player.level().isClientSide) return original;
++        return original * TPSCalculator.MAX_TPS / (float) ((ServerLevel) player.level()).tpsCalculator.getMostAccurateTPS();
++    }
++
++    // Canvas end
+     protected float getDestroyProgress(BlockState state, Player player, BlockGetter level, BlockPos pos) {
+         float destroySpeed = state.getDestroySpeed(level, pos);
+         if (destroySpeed == -1.0F) {
+-            return 0.0F;
++            return lagCompensation(0.0F, player); // Canvas
+         } else {
+             int i = player.hasCorrectToolForDrops(state) ? 30 : 100;
+-            return player.getDestroySpeed(state) / destroySpeed / i;
++            return lagCompensation(player.getDestroySpeed(state) / destroySpeed / i, player); // Canvas
+         }
+     }
+ 
+diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
+index 7f930c9b684e3e3ddf0a95cd018266c66fba598e..6d615c24cd6144a27e11c54a35e687e463e9f3c4 100644
+--- a/net/minecraft/world/level/chunk/LevelChunk.java
++++ b/net/minecraft/world/level/chunk/LevelChunk.java
+@@ -3,6 +3,7 @@ package net.minecraft.world.level.chunk;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Maps;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.Config;
+ import io.canvasmc.canvas.entity.SleepingBlockEntity;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+@@ -18,6 +19,7 @@ import net.minecraft.ReportedException;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.HolderLookup;
+ import net.minecraft.core.SectionPos;
++import net.minecraft.core.registries.BuiltInRegistries;
+ import net.minecraft.core.registries.Registries;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.network.FriendlyByteBuf;
+@@ -915,6 +917,19 @@ public class LevelChunk extends ChunkAccess implements ca.spottedleaf.moonrise.p
+             this.blockEntity = blockEntity;
+             this.ticker = ticker;
+         }
++        // Canvas start
++
++        private <T extends BlockEntity> void lagCompensation(Runnable original) {
++            original.run();
++            if (!Config.INSTANCE.lagCompensation.enabled) return;
++            if (!Config.INSTANCE.lagCompensation.blockEntityAcceleration) return;
++            if (LevelChunk.this.level.isClientSide()) return;
++
++            for (int i = 0; i < ((ServerLevel) this.blockEntity.getLevel()).tpsCalculator.applicableMissedTicks(); i++) {
++                original.run();
++            }
++        }
++        // Canvas end
+ 
+         @Override
+         public void tick() {
+@@ -926,7 +941,11 @@ public class LevelChunk extends ChunkAccess implements ca.spottedleaf.moonrise.p
+                         profilerFiller.push(this::getType);
+                         BlockState blockState = LevelChunk.this.getBlockState(blockPos);
+                         if (this.blockEntity.getType().isValid(blockState)) {
+-                            this.ticker.tick(LevelChunk.this.level, this.blockEntity.getBlockPos(), blockState, this.blockEntity);
++                            // Canvas start
++                            lagCompensation(() -> {
++                                this.ticker.tick(LevelChunk.this.level, this.blockEntity.getBlockPos(), blockState, this.blockEntity);
++                            });
++                            // Canvas end
+                             this.loggedInvalidBlockState = false;
+                         // Paper start - Remove the Block Entity if it's invalid
+                         } else {
+diff --git a/net/minecraft/world/level/material/LavaFluid.java b/net/minecraft/world/level/material/LavaFluid.java
+index 85629a43f5469a89dd6078d879f475e8212438ec..73f6cbc48de688cea3f401c50860fd585b33d363 100644
+--- a/net/minecraft/world/level/material/LavaFluid.java
++++ b/net/minecraft/world/level/material/LavaFluid.java
+@@ -2,6 +2,8 @@ package net.minecraft.world.level.material;
+ 
+ import java.util.Optional;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.util.TPSUtil;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.particles.ParticleOptions;
+@@ -177,8 +179,19 @@ public abstract class LavaFluid extends FlowingFluid {
+ 
+     @Override
+     public int getTickDelay(LevelReader level) {
+-        return level.dimensionType().ultraWarm() ? level.getWorldBorder().world.purpurConfig.lavaSpeedNether : level.getWorldBorder().world.purpurConfig.lavaSpeedNotNether; // Purpur - Make lava flow speed configurable
++    // Canvas start
++        int original = level.dimensionType().ultraWarm() ? level.getWorldBorder().world.purpurConfig.lavaSpeedNether : level.getWorldBorder().world.purpurConfig.lavaSpeedNotNether; // Purpur - Make lava flow speed configurable
++        if (level instanceof ServerLevel serverLevel) {
++            return lagCompensation(original, serverLevel);
++        }
++        return original;
++    }
++
++    private int lagCompensation(int original, ServerLevel level) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.fluidAcceleration) return original;
++        return TPSUtil.tt20(original, true, level);
+     }
++    // Canvas end
+ 
+     @Override
+     public int getSpreadDelay(Level level, BlockPos pos, FluidState currentState, FluidState newState) {
+diff --git a/net/minecraft/world/level/material/WaterFluid.java b/net/minecraft/world/level/material/WaterFluid.java
+index 2e4fed7c27910b6c886f710f33b0841c2a175837..354dcad92df7c50c663317a3c9abf4011ced140e 100644
+--- a/net/minecraft/world/level/material/WaterFluid.java
++++ b/net/minecraft/world/level/material/WaterFluid.java
+@@ -2,6 +2,8 @@ package net.minecraft.world.level.material;
+ 
+ import java.util.Optional;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.util.TPSUtil;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.particles.ParticleOptions;
+@@ -115,9 +117,19 @@ public abstract class WaterFluid extends FlowingFluid {
+ 
+     @Override
+     public int getTickDelay(LevelReader level) {
++    // Canvas start
++        if (level instanceof ServerLevel serverLevel) {
++            return lagCompensation(serverLevel);
++        }
+         return 5;
+     }
+ 
++    private int lagCompensation(ServerLevel level) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.fluidAcceleration) return 5;
++        return TPSUtil.tt20(5, true, level);
++    }
++    // Canvas end
++
+     @Override
+     public boolean canBeReplacedWith(FluidState fluidState, BlockGetter blockReader, BlockPos pos, Fluid fluid, Direction direction) {
+         return direction == Direction.DOWN && !fluid.is(FluidTags.WATER);

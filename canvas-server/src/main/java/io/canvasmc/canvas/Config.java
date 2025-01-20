@@ -101,6 +101,25 @@ public class Config implements ConfigData {
     @Comment("Disables all types of goals provided here. Must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\"")
     public List<String> goalsToDisable = new ArrayList<>();
 
+    @Comment("Enable the server watchdog")
+    public boolean enableWatchdog = true;
+
+    @Comment("Lag compensation related configurations. Improves the player experience when TPS is low")
+    public LagCompensation lagCompensation = new LagCompensation();
+    public static class LagCompensation {
+        public boolean enabled = true;
+        public boolean blockEntityAcceleration = false;
+        public boolean blockBreakingAcceleration = true;
+        public boolean eatingAcceleration = true;
+        public boolean potionEffectAcceleration = true;
+        public boolean fluidAcceleration = true;
+        public boolean pickupAcceleration = true;
+        public boolean portalAcceleration = true;
+        public boolean sleepingAcceleration = true;
+        public boolean timeAcceleration = true;
+        public boolean randomTickSpeedAcceleration = true;
+    }
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
