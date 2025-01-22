@@ -26,7 +26,7 @@ public class Config implements ConfigData {
     @Comment("Determines if the server should tick the playerlist assigned to each world on their own level threads, or if it should tick on the main thread(globally)")
     public boolean runPlayerListTickOnIndependentLevel = true;
     @Comment("Amount of ticks until the level will resync time with the player")
-    public int timeResyncInterval = 20;
+    public int timeResyncInterval = 400;
     @Comment("Thread priority for level threads, must be a value between 1-10.")
     public int levelThreadPriority = 9;
     @Comment("In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to schedule to the level thread")
