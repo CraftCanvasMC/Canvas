@@ -4,6 +4,7 @@ import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.serializer.JanksonConfigSerializer;
 import me.shedaniel.cloth.clothconfig.shadowed.blue.endless.jankson.Comment;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.goal.Goal;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -20,6 +21,8 @@ public class Config implements ConfigData {
 
 	private static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
     public static final List<Class<? extends Goal>> COMPILED_DISABLED_GOAL_CLASSES = Collections.synchronizedList(new ArrayList<>());
+    public static final List<ResourceLocation> COMPILED_LOCATIONS = Collections.synchronizedList(new ArrayList<>());
+    public static boolean shouldCheckMasks = false;
 	public static Config INSTANCE = new Config();
 
     // Threaded Dimensions
@@ -120,6 +123,14 @@ public class Config implements ConfigData {
         public boolean randomTickSpeedAcceleration = true;
     }
 
+    @Comment("Allows configuration of how entities are ticked, and if they should be ticked based on the type")
+    public List<EntityMask> entityMasks = new ArrayList<>();
+    public static class EntityMask {
+        public ResourceLocation type;
+        public boolean shouldTick = true;
+        public int tickRate = 1;
+    }
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
@@ -150,6 +161,12 @@ public class Config implements ConfigData {
                 LOGGER.error("Unable to locate goal class \"{}\". Unable to disable, skipping.", goalClassName, e);
                 continue;
             }
+        }
+        for (final EntityMask entityMask : INSTANCE.entityMasks) {
+            if (!shouldCheckMasks) {
+                shouldCheckMasks = true;
+            }
+            COMPILED_LOCATIONS.add(entityMask.type);
         }
 		return INSTANCE;
 	}
