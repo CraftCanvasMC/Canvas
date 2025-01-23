@@ -34,8 +34,6 @@ public class Config implements ConfigData {
     public int levelThreadPriority = 9;
     @Comment("In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to schedule to the level thread")
     public boolean useLevelThreadsAsChunkSourceMain = true;
-    @Comment("Disables leaves from ticking")
-    public boolean disableLeafTicking = true;
     @Comment("Enables each world to have the \"empty server\" logic per world introduced in Minecraft 1.21.4")
     public boolean emptySleepPerWorlds = true;
     @Comment("Enables the \"threadedtick\" command, which is an implementation of the vanilla \"tick\" command for the Canvas threaded context")
