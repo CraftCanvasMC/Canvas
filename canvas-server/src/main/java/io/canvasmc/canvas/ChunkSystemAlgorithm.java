@@ -25,7 +25,7 @@ public enum ChunkSystemAlgorithm {
         final int ioThreads = Math.max(1, configIoThreads);
         return new Pair<>(workerThreads, ioThreads);
     }),
-    c2me((configWorkerThreads, configIoThreads) -> {
+    c2me((_, configIoThreads) -> {
         String expression = """
                 
                     max(
@@ -45,13 +45,13 @@ public enum ChunkSystemAlgorithm {
         int eval = tryEvaluateExpression(expression);
         return new Pair<>(eval, Math.max(1, configIoThreads));
     }),
-    all((configWorkerThreads, configIoThreads) -> {
+    all((_, configIoThreads) -> {
         final int ioThreads = Math.max(1, configIoThreads);
         return new Pair<>(Runtime.getRuntime().availableProcessors(), ioThreads);
     }),
     any((configWorkerThreads, configIoThreads) -> {
         int workerThreads = configWorkerThreads;
-        if (configWorkerThreads > 0) {
+        if (configWorkerThreads <= 0) {
             // y=(-0.0001x^2)+0.8831x-5.1544
             int p = Runtime.getRuntime().availableProcessors();
             workerThreads = (int) Math.round((-0.0001 * Math.pow(p, 2)) + (0.8831 * p) - 5.1544);
