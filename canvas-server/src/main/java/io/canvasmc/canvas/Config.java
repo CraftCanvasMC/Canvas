@@ -129,6 +129,10 @@ public class Config implements ConfigData {
         public int tickRate = 1;
     }
 
+    @Experimental
+    @Comment("Moves entity ticking to their own async scheduler. Benefits SOME servers, not all. Best helps servers where players are primarily in 1 world spread out.")
+    public boolean threadedEntityTicking = false;
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
@@ -187,7 +191,14 @@ public class Config implements ConfigData {
 				Object value2 = field.get(obj2);
 
 				if (!Objects.equals(value1, value2) && !isInnerClassOf(value1.getClass(), parentClass)) {
-					LOGGER.info("Detected modified arg, '{}', was changed to: {}", field.getName(), value2);
+					if (field.isAnnotationPresent(Experimental.class)) {
+                        LOGGER.warn("====== WARNING: EXPERIMENTAL FEATURE ======");
+                        LOGGER.warn("Field '{}' is marked as experimental and its value was changed to: {}", field.getName(), value2);
+                        LOGGER.warn("Proceed with caution as this feature may be unstable or subject to change.");
+                        LOGGER.warn("===========================================");
+                    } else {
+                        LOGGER.info("Detected modified arg, '{}', was changed to: {}", field.getName(), value2);
+                    }
 				}
 
 				if (value1 != null && value2 != null && isInnerClassOf(value1.getClass(), parentClass)) {

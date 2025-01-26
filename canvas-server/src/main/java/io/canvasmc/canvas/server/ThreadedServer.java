@@ -1,6 +1,8 @@
 package io.canvasmc.canvas.server;
 
+import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
 import io.canvasmc.canvas.server.level.LevelThread;
 import java.io.File;
 import java.io.IOException;
@@ -45,6 +47,7 @@ public class ThreadedServer {
     private final MinecraftServer server;
     private long tickSection;
     private boolean started = false;
+    public ThreadedEntityScheduler entityScheduler;
 
     public ThreadedServer(MinecraftServer server) {
         this.server = server;
@@ -72,6 +75,14 @@ public class ThreadedServer {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
+            if (Config.INSTANCE.threadedEntityTicking) {
+                //noinspection resource
+                final ThreadedEntityScheduler entityScheduler = new ThreadedEntityScheduler("EntityScheduler");
+                this.entityScheduler = entityScheduler;
+                TickThread entitySchedulerThread = new TickThread(entityScheduler::spin, "EntityScheduler");
+                entitySchedulerThread.setPriority(Config.INSTANCE.levelThreadPriority); // Keep priority same as level threads to avoid inconsistency
+                entitySchedulerThread.start();
+            }
             this.started = true;
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);

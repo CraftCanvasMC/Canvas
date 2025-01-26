@@ -1,41 +1,40 @@
-package io.canvasmc.canvas.server.level;
+package io.canvasmc.canvas.entity;
 
+import com.destroystokyo.paper.event.server.ServerExceptionEvent;
+import com.destroystokyo.paper.exception.ServerInternalException;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.server.LevelTickProcessor;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.canvasmc.canvas.server.VisibleAfterSpin;
-import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.concurrent.locks.LockSupport;
-import java.util.function.BooleanSupplier;
-import net.minecraft.CrashReport;
-import net.minecraft.ReportType;
+import io.canvasmc.canvas.server.level.WatchdogWatcher;
 import net.minecraft.Util;
-import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.network.protocol.Packet;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerTickRateManager;
 import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.TimeUtil;
 import net.minecraft.util.debugchart.SampleLogger;
 import net.minecraft.util.debugchart.TpsDebugDimensions;
 import net.minecraft.util.thread.ReentrantBlockableEventLoop;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.Entity;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.bukkit.event.entity.EntityRemoveEvent;
 import org.jetbrains.annotations.NotNull;
 import org.spigotmc.WatchdogThread;
+import java.util.Arrays;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.BooleanSupplier;
 
-public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher, TickRateManagerInstance {
-    private static final Logger LOGGER = LogManager.getLogger("MinecraftServerWorld");
+// runs at tick-rate matching the main thread. will not have independent rate, just independent scheduling
+public class ThreadedEntityScheduler extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher {
+    public static final ThreadGroup THREAD_GROUP = new ThreadGroup("entity");
+    private static final Logger LOGGER = LogManager.getLogger("ThreadedEntityScheduler");
     public final double[] recentTps = new double[4];
     public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
     public final MinecraftServer.RollingAverage tps1 = new MinecraftServer.RollingAverage(60);
     public final MinecraftServer.RollingAverage tps5 = new MinecraftServer.RollingAverage(60 * 5);
     public final MinecraftServer.RollingAverage tps15 = new MinecraftServer.RollingAverage(60 * 15);
-    protected final ServerTickRateManager tickRateManager;
+    private final long catchupTime = 0;
     public volatile long lastWatchdogTick;
     public int tickCount;
     public boolean waitingForNextTick;
@@ -55,71 +54,75 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
     private long lastNanoTickTime = 0L;
     private long preTickNanos = 0L;
     private long postTickNanos = 0L;
+    private long lastMidTickExecute;
+    private long lastMidTickExecuteFailure;
     private volatile boolean ticking = false;
 
-    public MinecraftServerWorld(final String name) {
+    public ThreadedEntityScheduler(@NotNull final String name) {
         super(name);
-        this.tickRateManager = new ServerTickRateManager(this);
     }
 
-    @Override
-    public @VisibleAfterSpin @NotNull Thread getRunningThread() {
-        return this.owner;
-    }
+    public void tickEntities() {
+        for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+            for (final Entity entity : level.entityTickList.entities) {
+                if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
+                    int lived = entity.tickCount;
+                    if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
+                        continue;
+                    }
+                }
+                if (!entity.isRemoved()) {
+                    if (!level.tickRateManager().isEntityFrozen(entity)) {
+                        entity.checkDespawn();
+                        Entity vehicle = entity.getVehicle();
+                        if (vehicle != null) {
+                            if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) {
+                                return;
+                            }
 
-    @Override
-    public void managedBlock(@NotNull BooleanSupplier stopCondition) {
-        super.managedBlock(() -> MinecraftServer.throwIfFatalException() && stopCondition.getAsBoolean());
-    }
+                            entity.stopRiding();
+                        }
 
-    public double getNanoSecondsFromLastTick() {
-        return this.lastNanoTickTime;
+                        try {
+                            level.tickNonPassenger(entity);
+                        } catch (Throwable var6) {
+                            final String msg = String.format("Entity threw exception at %s:%s,%s,%s", entity.level().getWorld().getName(), entity.getX(), entity.getY(), entity.getZ());
+                            MinecraftServer.LOGGER.error(msg, var6);
+                            level.getCraftServer().getPluginManager().callEvent(new ServerExceptionEvent(new ServerInternalException(msg, var6)));
+                            entity.discard(EntityRemoveEvent.Cause.DISCARD);
+                        }
+                        level.moonrise$midTickTasks();
+                    }
+                }
+            }
+        }
     }
 
     public void spin() {
         try {
-            if (!(this instanceof ServerLevel serverLevel)) {
-                throw new RuntimeException("MinecraftServerWorld#spin() was called from a non-ServerLevel instance!");
-            }
-            LOGGER.info("[ThreadedServer] Spinning ServerLevel, {}", serverLevel.dimension().location());
-
             this.running = true;
             this.owner = Thread.currentThread();
-            WatchdogThread.tickLevel(serverLevel);
-            if (Config.INSTANCE.useLevelThreadsAsChunkSourceMain) serverLevel.chunkSource.mainThread = this.owner;
+            WatchdogThread.tickEntityThread(this);
             Arrays.fill(this.recentTps, 20);
             this.prepared = true;
 
-            // Block the current thread until the MinecraftServer has started the first tick.
             this.managedBlock(() -> MinecraftServer.getServer().isTicking());
             ticking = true;
 
             tickSection = Util.getNanos();
             nextTickTimeNanos = Util.getNanos();
             while (running) {
-                this.tickSection = blockLevel(tickSection, serverLevel, serverLevel::tick);
+                this.tickSection = blockSchedulerTick(tickSection, this::tickEntities);
             }
         } catch (Throwable throwable) {
             TickLoopConstantsUtils.hardCrashCatch(throwable);
         } finally {
-            LOGGER.info("Successfully terminated level {}", this.level().dimension().location().toString());
+            LOGGER.info("Successfully terminated entity scheduler");
         }
 
     }
 
-    public void stopSpin() {
-        running = false;
-    }
-
-    public long getTickSection() {
-        return tickSection;
-    }
-
-    public int getCurrentTick() {
-        return currentTick;
-    }
-
-    public long blockLevel(long tickSection, final ServerLevel serverLevel, final @NotNull LevelTickProcessor tickProcessor) {
+    public long blockSchedulerTick(long tickSection, final @NotNull Runnable entityTick) {
         long currentTime;
         long i;
 
@@ -135,7 +138,7 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
                 long k = j / i;
 
                 if (MinecraftServer.getServer().server.getWarnOnOverload()) {
-                    MinecraftServer.LOGGER.warn("Can't keep up! Is the level overloaded? Running {}ms or {} ticks behind on level-thread: {}", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k, serverLevel.dimension().location());
+                    MinecraftServer.LOGGER.warn("Can't keep up! Is the entity scheduler overloaded? Running {}ms or {} ticks behind", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k);
                 }
                 this.nextTickTimeNanos += k * i;
                 this.lastOverloadWarningNanos = this.nextTickTimeNanos;
@@ -166,8 +169,8 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
         this.nextTickTimeNanos += i;
 
         this.preTickNanos = Util.getNanos();
-        WatchdogThread.tickLevel(serverLevel);
-        tickProcessor.process(flag ? () -> false : this::haveTime, tickCount);
+        WatchdogThread.tickEntityThread(this);
+        entityTick.run();
 
         this.lastNanoTickTime = Util.getNanos() - preTickNanos;
 
@@ -201,6 +204,25 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
 
     }
 
+    @Override
+    public String getName() {
+        return "EntityScheduler";
+    }
+
+    @Override
+    public @VisibleAfterSpin @NotNull Thread getRunningThread() {
+        return this.owner;
+    }
+
+    @Override
+    public void managedBlock(@NotNull BooleanSupplier stopCondition) {
+        super.managedBlock(() -> MinecraftServer.throwIfFatalException() && stopCondition.getAsBoolean());
+    }
+
+    public double getNanoSecondsFromLastTick() {
+        return this.lastNanoTickTime;
+    }
+
     protected void waitUntilNextTick() {
         this.runAllTasks();
         this.waitingForNextTick = true;
@@ -219,7 +241,7 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
         long i = flag ? Util.getNanos() : 0L;
         long j = this.waitingForNextTick ? this.nextTickTimeNanos - Util.getNanos() : 100000L;
 
-        LockSupport.parkNanos(level(), j);
+        LockSupport.parkNanos("parking entity thread", j);
         if (flag) {
             this.idleTimeNanos += Util.getNanos() - i;
         }
@@ -253,59 +275,10 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
     }
 
     public boolean pollInternal() {
-        if (super.pollTask()) {
-            return true;
-        } else {
-            boolean ret = false;
-            if (tickRateManager().isSprinting() || this.haveTime()) {
-                ServerLevel worldserver = level();
-
-                if (worldserver.getChunkSource().pollTask()) {
-                    ret = true;
-                }
-            }
-
-            return ret;
-        }
+        return super.pollTask();
     }
 
-    public ServerLevel level() {
-        return (ServerLevel) this;
-    }
-
-    @Override
-    public String getName() {
-        return level().dimension().location().getPath();
-    }
-
-    public boolean isTicking() {
-        return ticking;
-    }
-
-    @Override
-    public CommandSourceStack createCommandSourceStack() {
-        return MinecraftServer.getServer().createCommandSourceStack();
-    }
-
-    @Override
-    public void onTickRateChanged() {
-        MinecraftServer.getServer().onTickRateChanged();
-    }
-
-    @Override
-    public void broadcastPacketsToPlayers(final Packet<?> packet) {
-        for (final Player player : this.level().players()) {
-            ((ServerPlayer) player).connection.send(packet);
-        }
-    }
-
-    @Override
-    public void skipTickWait() {
-        this.delayedTasksMaxNextTickTimeNanos = Util.getNanos();
-        this.nextTickTimeNanos = Util.getNanos();
-    }
-
-    public boolean isLevelThread() {
-        return Thread.currentThread() instanceof LevelThread;
+    public ServerTickRateManager tickRateManager() {
+        return MinecraftServer.getServer().tickRateManager();
     }
 }

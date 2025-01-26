@@ -1,0 +1,84 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Sun, 26 Jan 2025 11:45:58 -0800
+Subject: [PATCH] Threaded Entity Scheduling
+
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 64d4b89ee529ec52c57d76394c2c0ed091709ede..dcc9147f357133ef15354ae237f27e1c70c14636 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -215,7 +215,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+     public final net.minecraft.world.level.storage.PrimaryLevelData serverLevelData; // CraftBukkit - type
+     public ItemStack ominousBanner; // Canvas
+     private int lastSpawnChunkRadius;
+-    final EntityTickList entityTickList = new EntityTickList();
++    public final EntityTickList entityTickList = new EntityTickList(); // Canvas
+     // Paper - rewrite chunk system
+     private final GameEventDispatcher gameEventDispatcher;
+     public boolean noSave;
+@@ -985,7 +985,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+             }
+ 
+             io.papermc.paper.entity.activation.ActivationRange.activateEntities(this); // Paper - EAR
+-            // Canvas start
++            /* // Canvas start // - threaded entity ticking
+             for (final Entity entity : this.entityTickList.entities) {
+                 if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
+                     int lived = entity.tickCount;
+@@ -1016,7 +1016,8 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+                             }
+                         }
+                     }
+-            // Canvas
++            */ // Canvas // - threaded entity ticking
++            this.tickEntities(); // Canvas - threaded entity ticking
+             profilerFiller.pop();
+             this.tickBlockEntities();
+         }
+@@ -1034,6 +1035,45 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         this.runAllTasks();
+         // Canvas end
+     }
++    // Canvas start - threaded entity ticking
++
++    public void tickEntities() {
++        if (Config.INSTANCE.threadedEntityTicking) {
++            return;
++        }
++        for (final Entity entity : this.entityTickList.entities) {
++            if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
++                int lived = entity.tickCount;
++                if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
++                    continue;
++                }
++            }
++            if (!entity.isRemoved()) {
++                if (!tickRateManager.isEntityFrozen(entity)) {
++                    entity.checkDespawn();
++                    Entity vehicle = entity.getVehicle();
++                    if (vehicle != null) {
++                        if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) {
++                            return;
++                        }
++
++                        entity.stopRiding();
++                    }
++
++                    try {
++                        this.tickNonPassenger(entity);
++                    } catch (Throwable var6) {
++                        final String msg = String.format("Entity threw exception at %s:%s,%s,%s", entity.level().getWorld().getName(), entity.getX(), entity.getY(), entity.getZ());
++                        MinecraftServer.LOGGER.error(msg, var6);
++                        getCraftServer().getPluginManager().callEvent(new com.destroystokyo.paper.event.server.ServerExceptionEvent(new com.destroystokyo.paper.exception.ServerInternalException(msg, var6)));
++                        entity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DISCARD);
++                    }
++                    this.moonrise$midTickTasks();
++                }
++            }
++        }
++    }
++    // Canvas end
+ 
+     @Override
+     public boolean shouldTickBlocksAt(long chunkPos) {
