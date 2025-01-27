@@ -132,6 +132,8 @@ public class Config implements ConfigData {
     @Experimental
     @Comment("Moves entity ticking to their own async scheduler. Benefits SOME servers, not all. Best helps servers where players are primarily in 1 world spread out.")
     public boolean threadedEntityTicking = false;
+    @Comment("Disables entity pushing, but the player can still be pushed. Immensely optimizes entity performance with lots of crammed entities")
+    public boolean disableEntityPushing = false;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
