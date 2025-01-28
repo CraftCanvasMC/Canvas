@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Mon, 27 Jan 2025 21:39:41 -0800
+Subject: [PATCH] Optimize Fluids
+
+
+diff --git a/net/minecraft/world/level/material/FlowingFluid.java b/net/minecraft/world/level/material/FlowingFluid.java
+index 44bc0823e163bb7edee27889201ec76e93e095cf..e0258bd198802f887573126a4fd60b81a2ab8f25 100644
+--- a/net/minecraft/world/level/material/FlowingFluid.java
++++ b/net/minecraft/world/level/material/FlowingFluid.java
+@@ -6,6 +6,8 @@ import it.unimi.dsi.fastutil.shorts.Short2BooleanMap;
+ import it.unimi.dsi.fastutil.shorts.Short2BooleanOpenHashMap;
+ import it.unimi.dsi.fastutil.shorts.Short2ObjectMap;
+ import it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap;
++import java.util.ArrayDeque;
++import java.util.Deque;
+ import java.util.Map;
+ import java.util.Map.Entry;
+ import net.minecraft.core.BlockPos;
+@@ -341,32 +343,46 @@ public abstract class FlowingFluid extends Fluid {
+     protected void beforeDestroyingBlock(LevelAccessor level, BlockPos pos, BlockState state, BlockPos source) { beforeDestroyingBlock(level, pos, state); } // Paper - Add BlockBreakBlockEvent
+     protected abstract void beforeDestroyingBlock(LevelAccessor level, BlockPos pos, BlockState state);
+ 
++    // Canvas start
+     protected int getSlopeDistance(LevelReader level, BlockPos pos, int depth, Direction direction, BlockState state, FlowingFluid.SpreadContext spreadContext) {
+-        int i = 1000;
++        int slopeFindDistance = this.getSlopeFindDistance(level);
++        int minDistance = slopeFindDistance;
+ 
+-        for (Direction direction1 : Direction.Plane.HORIZONTAL) {
+-            if (direction1 != direction) {
+-                BlockPos blockPos = pos.relative(direction1);
+-                BlockState blockState = spreadContext.getBlockStateIfLoaded(blockPos); // Paper - Prevent chunk loading from fluid flowing
+-                if (blockState == null) continue; // Paper - Prevent chunk loading from fluid flowing
+-                FluidState fluidState = blockState.getFluidState();
+-                if (this.canPassThrough(level, this.getFlowing(), pos, state, direction1, blockPos, blockState, fluidState)) {
+-                    if (spreadContext.isHole(blockPos)) {
+-                        return depth;
++        Deque<Node> stack = new ArrayDeque<>();
++        stack.push(new Node(pos, depth, direction));
++
++        while (!stack.isEmpty()) {
++            Node current = stack.pop();
++            BlockPos currentPos = current.pos;
++            int currentDepth = current.depth;
++            Direction fromDirection = current.direction;
++
++            for (Direction dir : Direction.Plane.HORIZONTAL) {
++                if (dir == fromDirection) continue;
++
++                BlockPos neighborPos = currentPos.relative(dir);
++                BlockState neighborState = spreadContext.getBlockStateIfLoaded(neighborPos);
++                if (neighborState == null) continue; // Prevent chunk loading
++
++                FluidState fluidState = neighborState.getFluidState();
++                if (this.canPassThrough(level, this.getFlowing(), currentPos, state, dir, neighborPos, neighborState, fluidState)) {
++                    if (spreadContext.isHole(neighborPos)) {
++                        return currentDepth;
+                     }
+ 
+-                    if (depth < this.getSlopeFindDistance(level)) {
+-                        int slopeDistance = this.getSlopeDistance(level, blockPos, depth + 1, direction1.getOpposite(), blockState, spreadContext);
+-                        if (slopeDistance < i) {
+-                            i = slopeDistance;
+-                        }
++                    if (currentDepth + 1 < slopeFindDistance && currentDepth + 1 < minDistance) {
++                        stack.push(new Node(neighborPos, currentDepth + 1, dir.getOpposite()));
+                     }
+                 }
+             }
+         }
+ 
+-        return i;
++        return minDistance;
++    }
++
++    private record Node(BlockPos pos, int depth, Direction direction) {
+     }
++    // Canvas end
+ 
+     boolean isWaterHole(BlockGetter level, BlockPos pos, BlockState state, BlockPos belowPos, BlockState belowState) {
+         return canPassThroughWall(Direction.DOWN, level, pos, state, belowPos, belowState)
