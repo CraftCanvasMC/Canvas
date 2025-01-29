@@ -64,11 +64,11 @@ public class ThreadedEntityScheduler extends ReentrantBlockableEventLoop<TickTas
 
     public void tickEntities() {
         for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-            for (final Entity entity : level.entityTickList.entities) {
+            level.entityTickList.forEach((entity) -> {
                 if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
                     int lived = entity.tickCount;
                     if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
-                        continue;
+                        return;
                     }
                 }
                 if (!entity.isRemoved()) {
@@ -94,7 +94,7 @@ public class ThreadedEntityScheduler extends ReentrantBlockableEventLoop<TickTas
                         level.moonrise$midTickTasks();
                     }
                 }
-            }
+            });
         }
     }
 
