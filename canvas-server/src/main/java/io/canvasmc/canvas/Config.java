@@ -134,6 +134,8 @@ public class Config implements ConfigData {
     public boolean threadedEntityTicking = false;
     @Comment("Disables entity pushing, but the player can still be pushed. Immensely optimizes entity performance with lots of crammed entities")
     public boolean disableEntityPushing = false;
+    @Comment("Ignores messages like 'moved too quickly' and 'moved wrongly'")
+    public boolean alwaysAllowWeirdMovement = true;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
