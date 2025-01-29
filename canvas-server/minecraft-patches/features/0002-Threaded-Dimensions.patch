@@ -4,6 +4,52 @@ Date: Wed, 15 Jan 2025 02:24:36 -0800
 Subject: [PATCH] Threaded Dimensions
 
 
+diff --git a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java b/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
+index 1b8193587814225c2ef2c5d9e667436eb50ff6c5..b32e79c2036d307d12a1d7dd7cc44c9bc7aa6437 100644
+--- a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
++++ b/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
+@@ -8,6 +8,8 @@ import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel;
+ import ca.spottedleaf.moonrise.patches.chunk_system.level.chunk.ChunkData;
+ import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants;
+ import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickServerLevel;
++import it.unimi.dsi.fastutil.longs.Long2ReferenceMap;
++import it.unimi.dsi.fastutil.longs.Long2ReferenceMaps;
+ import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
+ import net.minecraft.core.BlockPos;
+@@ -60,11 +62,11 @@ public final class NearbyPlayers {
+ 
+     private final ServerLevel world;
+     private final Reference2ReferenceOpenHashMap<ServerPlayer, TrackedPlayer[]> players = new Reference2ReferenceOpenHashMap<>();
+-    private final Long2ReferenceOpenHashMap<TrackedChunk> byChunk = new Long2ReferenceOpenHashMap<>();
+-    private final Long2ReferenceOpenHashMap<ReferenceList<ServerPlayer>>[] directByChunk = new Long2ReferenceOpenHashMap[TOTAL_MAP_TYPES];
++    private final Long2ReferenceMap<TrackedChunk> byChunk = Long2ReferenceMaps.synchronize(new Long2ReferenceOpenHashMap<>()); // Canvas
++    private final Long2ReferenceMap<ReferenceList<ServerPlayer>>[] directByChunk = new Long2ReferenceMap[TOTAL_MAP_TYPES]; // Canvas
+     {
+         for (int i = 0; i < this.directByChunk.length; ++i) {
+-            this.directByChunk[i] = new Long2ReferenceOpenHashMap<>();
++            this.directByChunk[i] = Long2ReferenceMaps.synchronize(new Long2ReferenceOpenHashMap<>()); // Canvas
+         }
+     }
+ 
+@@ -181,7 +183,7 @@ public final class NearbyPlayers {
+             return this.players[type.ordinal()];
+         }
+ 
+-        public void addPlayer(final ServerPlayer player, final NearbyMapType type) {
++        public synchronized void addPlayer(final ServerPlayer player, final NearbyMapType type) { // Canvas
+             ++this.updateCount;
+ 
+             final int idx = type.ordinal();
+@@ -199,7 +201,7 @@ public final class NearbyPlayers {
+             }
+         }
+ 
+-        public void removePlayer(final ServerPlayer player, final NearbyMapType type) {
++        public synchronized void removePlayer(final ServerPlayer player, final NearbyMapType type) { // Canvas
+             ++this.updateCount;
+ 
+             final int idx = type.ordinal();
 diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
 index d21ce54ebb5724c04eadf56a2cde701d5eeb5db2..d9fad142bded299cb185ddb58adf2438459e65d2 100644
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/ChunkEntitySlices.java
@@ -2023,6 +2069,18 @@ index 3770dc90d9412c6378c0bd57a651b9c3e62b9a72..898d151f14f6fbf9f21d3b999ca2c550
          super.close();
          // Paper - rewrite chunk system
      }
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 9a88ca440fad04b5941cda125c6a39d24adf6d37..504c4aa74a0dcb7bf72e25435545e60d0103c8b0 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -961,6 +961,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             }
+             // CraftBukkit end
+         } catch (Throwable var4) {
++            var4.printStackTrace(); // Canvas - print please.
+             CrashReport crashReport = CrashReport.forThrowable(var4, "Ticking player");
+             CrashReportCategory crashReportCategory = crashReport.addCategory("Player being ticked");
+             this.fillCrashReportCategory(crashReportCategory);
 diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
 index 398c1733824b689520170de0be94006731afa5cd..c887978027371385adea3139865fec30853412fe 100644
 --- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
@@ -2266,7 +2324,7 @@ index 186c1b2e3599770385150eb7acdcd890aa5835eb..bd48888cc3f8ac1443de522564b4f9fb
              }
          } finally {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d9e386446 100644
+index f61c29abf75443b206f37b90950d6c0e14ea59ff..9456280afe3f49c3264557f15c80e40c2cf5da1f 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -6,6 +6,7 @@ import com.google.common.collect.Lists;
@@ -2285,14 +2343,24 @@ index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d
  import java.util.concurrent.atomic.AtomicInteger;
  import java.util.function.BiConsumer;
  import java.util.function.Predicate;
-@@ -307,9 +309,11 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -133,6 +135,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
+ import net.minecraft.world.scores.PlayerTeam;
+ import net.minecraft.world.scores.ScoreHolder;
+ import net.minecraft.world.scores.Team;
++import org.jetbrains.annotations.NotNull;
+ import org.slf4j.Logger;
+ 
+ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess, ScoreHolder, ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity, ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity {  // Paper - rewrite chunk system // Paper - optimise entity tracker
+@@ -306,10 +309,12 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+     private int lastCrystalSoundPlayTick;
      public boolean hasVisualFire;
      @Nullable
-     private BlockState inBlockState = null;
+-    private BlockState inBlockState = null;
 -    private final List<Entity.Movement> movementThisTick = new ArrayList<>();
 -    private final Set<BlockState> blocksInside = new ReferenceArraySet<>();
 -    private final LongSet visitedBlocks = new LongOpenHashSet();
 +    // Canvas start
++    private volatile BlockState inBlockState = null; // volatile
 +    private final List<Entity.Movement> movementThisTick = new CopyOnWriteArrayList<>();
 +    private final Set<BlockState> blocksInside = new ConcurrentSet<>();
 +    private final Set<Long> visitedBlocks = new ConcurrentSet<>();
@@ -2300,7 +2368,7 @@ index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d
      // CraftBukkit start
      public boolean forceDrops;
      public boolean persist = true;
-@@ -1392,8 +1396,14 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -1392,8 +1397,14 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
      }
  
      protected BlockPos getOnPos(float yOffset) {
@@ -2316,7 +2384,7 @@ index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d
              if (!(yOffset > 1.0E-5F)) {
                  return blockPos;
              } else {
-@@ -1405,10 +1415,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -1405,10 +1416,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
                      : blockPos;
              }
          } else {
@@ -2328,7 +2396,7 @@ index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d
          }
      }
  
-@@ -1653,7 +1660,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -1653,7 +1661,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
  
      private void checkInsideBlocks(List<Entity.Movement> movements, Set<BlockState> blocksInside) {
          if (this.isAffectedByBlocks()) {
@@ -2337,7 +2405,7 @@ index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d
  
              for (Entity.Movement movement : movements) {
                  Vec3 vec3 = movement.from();
-@@ -3873,6 +3880,11 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -3873,6 +3881,11 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
      }
  
      private Entity teleportCrossDimension(ServerLevel level, TeleportTransition teleportTransition) {
@@ -2349,20 +2417,7 @@ index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d
          List<Entity> passengers = this.getPassengers();
          List<Entity> list = new ArrayList<>(passengers.size());
          this.ejectPassengers();
-@@ -4741,6 +4753,12 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
-         if (this.inBlockState == null) {
-             this.inBlockState = this.level().getBlockState(this.blockPosition());
-         }
-+        // Canvas start -- why is it still null... - iirc this only happens when the player is in an ungenerated/generating chunk, fallback to air
-+
-+        if (this.inBlockState == null) {
-+            this.inBlockState = Blocks.AIR.defaultBlockState();
-+        }
-+        // Canvas end
- 
-         return this.inBlockState;
-     }
-@@ -4838,6 +4856,18 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -4838,6 +4851,18 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
          this.setPosRaw(x, y, z, false);
      }
      public final void setPosRaw(double x, double y, double z, boolean forceBoundingBoxUpdate) {
@@ -2381,7 +2436,7 @@ index f61c29abf75443b206f37b90950d6c0e14ea59ff..a0fa0f62357f8f04122622e7b6721c1d
          // Paper start - rewrite chunk system
          if (this.updatingSectionStatus) {
              LOGGER.error(
-@@ -4979,7 +5009,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -4979,7 +5004,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
      public final void setRemoved(Entity.RemovalReason removalReason, org.bukkit.event.entity.EntityRemoveEvent.Cause cause) {
          // Paper start - rewrite chunk system
          if (!((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this.level).moonrise$getEntityLookup().canRemoveEntity((Entity)(Object)this)) {
