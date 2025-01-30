@@ -64,37 +64,7 @@ public class ThreadedEntityScheduler extends ReentrantBlockableEventLoop<TickTas
 
     public void tickEntities() {
         for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-            level.entityTickList.forEach((entity) -> {
-                if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
-                    int lived = entity.tickCount;
-                    if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
-                        return;
-                    }
-                }
-                if (!entity.isRemoved()) {
-                    if (!level.tickRateManager().isEntityFrozen(entity)) {
-                        entity.checkDespawn();
-                        Entity vehicle = entity.getVehicle();
-                        if (vehicle != null) {
-                            if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) {
-                                return;
-                            }
-
-                            entity.stopRiding();
-                        }
-
-                        try {
-                            level.tickNonPassenger(entity);
-                        } catch (Throwable var6) {
-                            final String msg = String.format("Entity threw exception at %s:%s,%s,%s", entity.level().getWorld().getName(), entity.getX(), entity.getY(), entity.getZ());
-                            MinecraftServer.LOGGER.error(msg, var6);
-                            level.getCraftServer().getPluginManager().callEvent(new ServerExceptionEvent(new ServerInternalException(msg, var6)));
-                            entity.discard(EntityRemoveEvent.Cause.DISCARD);
-                        }
-                        level.moonrise$midTickTasks();
-                    }
-                }
-            });
+            level.tickEntities(true);
         }
     }
 
