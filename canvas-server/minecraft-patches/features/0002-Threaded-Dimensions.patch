@@ -2860,8 +2860,29 @@ index 028eae2f9a459b60e92f3344091083aa93b54485..9cb81b5c87279cba244ffc53034144ee
          }
      }
  
+diff --git a/net/minecraft/world/ticks/LevelChunkTicks.java b/net/minecraft/world/ticks/LevelChunkTicks.java
+index faf45ac459f7c25309d6ef6dce371d484a0dae7b..a37402fd785902443a227791f6f1d4b4713ed6c3 100644
+--- a/net/minecraft/world/ticks/LevelChunkTicks.java
++++ b/net/minecraft/world/ticks/LevelChunkTicks.java
+@@ -13,6 +13,7 @@ import java.util.function.Function;
+ import java.util.function.Predicate;
+ import java.util.stream.Stream;
+ import javax.annotation.Nullable;
++import it.unimi.dsi.fastutil.objects.ObjectSets;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.nbt.ListTag;
+ import net.minecraft.world.level.ChunkPos;
+@@ -21,7 +22,7 @@ public class LevelChunkTicks<T> implements SerializableTickContainer<T>, TickCon
+     private final Queue<ScheduledTick<T>> tickQueue = new PriorityQueue<>(ScheduledTick.DRAIN_ORDER);
+     @Nullable
+     private List<SavedTick<T>> pendingTicks;
+-    private final Set<ScheduledTick<?>> ticksPerPosition = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
++    private final Set<ScheduledTick<?>> ticksPerPosition = ObjectSets.synchronize(new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH)); // Canvas
+     @Nullable
+     private BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> onTickAdded;
+ 
 diff --git a/net/minecraft/world/ticks/LevelTicks.java b/net/minecraft/world/ticks/LevelTicks.java
-index 66abc2e7adee60fa98eed1ba36e018814fd02cad..1f05dfd778ea8247b02654598a1313f67267c6fc 100644
+index 66abc2e7adee60fa98eed1ba36e018814fd02cad..2126898b4654995be09428a2e38fa9bf071c11bb 100644
 --- a/net/minecraft/world/ticks/LevelTicks.java
 +++ b/net/minecraft/world/ticks/LevelTicks.java
 @@ -1,5 +1,6 @@
@@ -2871,15 +2892,16 @@ index 66abc2e7adee60fa98eed1ba36e018814fd02cad..1f05dfd778ea8247b02654598a1313f6
  import it.unimi.dsi.fastutil.longs.Long2LongMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMaps;
  import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
-@@ -16,6 +17,7 @@ import java.util.LongSummaryStatistics;
+@@ -16,6 +17,8 @@ import java.util.LongSummaryStatistics;
  import java.util.PriorityQueue;
  import java.util.Queue;
  import java.util.Set;
 +import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.concurrent.atomic.AtomicInteger;
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -33,10 +35,10 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+@@ -33,10 +36,11 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
          .compare(levelChunkTicks.peek(), levelChunkTicks1.peek());
      private final LongPredicate tickCheck;
      private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = new Long2ObjectOpenHashMap<>();
@@ -2888,8 +2910,45 @@ index 66abc2e7adee60fa98eed1ba36e018814fd02cad..1f05dfd778ea8247b02654598a1313f6
      private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
 -    private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
 -    private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
-+    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedQueue<>();
++    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedQueue<>(); // Canvas
++    private final AtomicInteger toRunThisTickCount = new AtomicInteger(0); // Canvas
 +    private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>(); // Canvas
      private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (levelChunkTicks, scheduledTick) -> {
          if (scheduledTick.equals(levelChunkTicks.peek())) {
+@@ -84,7 +88,7 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+         profilerFiller.push("collect");
+         this.collectTicks(gameTime, maxAllowedTicks, profilerFiller);
+         profilerFiller.popPush("run");
+-        profilerFiller.incrementCounter("ticksToRun", this.toRunThisTick.size());
++        profilerFiller.incrementCounter("ticksToRun", this.toRunThisTickCount.get()); // Canvas
+         this.runCollectedTicks(ticker);
+         profilerFiller.popPush("cleanup");
+         this.cleanupAfterTick();
+@@ -172,15 +176,17 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+ 
+     private void scheduleForThisTick(ScheduledTick<T> tick) {
+         this.toRunThisTick.add(tick);
++        this.toRunThisTickCount.incrementAndGet(); // Canvas
+     }
+ 
+     private boolean canScheduleMoreTicks(int maxAllowedTicks) {
+-        return this.toRunThisTick.size() < maxAllowedTicks;
++        return this.toRunThisTickCount.get() < maxAllowedTicks; // Canvas
+     }
+ 
+     private void runCollectedTicks(BiConsumer<BlockPos, T> ticker) {
+         while (!this.toRunThisTick.isEmpty()) {
+             ScheduledTick<T> scheduledTick = this.toRunThisTick.poll();
++            this.toRunThisTickCount.decrementAndGet(); // Canvas
+             if (!this.toRunThisTickSet.isEmpty()) {
+                 this.toRunThisTickSet.remove(scheduledTick);
+             }
+@@ -192,6 +198,7 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+ 
+     private void cleanupAfterTick() {
+         this.toRunThisTick.clear();
++        this.toRunThisTickCount.set(0); // Canvas
+         this.containersToTick.clear();
+         this.alreadyRunThisTick.clear();
+         this.toRunThisTickSet.clear();
