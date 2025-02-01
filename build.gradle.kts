@@ -117,7 +117,7 @@ tasks.register("buildPublisherJar") {
         val outputDir = outputJar.parentFile
 
         if (outputJar.exists()) {
-            val newJarName = "canvas-build$$buildNumber.jar"
+            val newJarName = "canvas-build.$buildNumber.jar"
             val newJarFile = File(outputDir, newJarName)
 
             outputDir.listFiles()
