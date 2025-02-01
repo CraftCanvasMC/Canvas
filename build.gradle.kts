@@ -105,3 +105,25 @@ paperweight {
         }
     }
 }
+
+tasks.register("buildPublisherJar") {
+    dependsOn(":canvas-server:createMojmapPaperclipJar")
+    doLast {
+        val buildNumber = System.getenv("BUILD_NUMBER") ?: "local"
+        val jarDir = layout.buildDirectory.dir("libs").get().asFile
+
+        val paperclipJarTask = project("canvas-server").tasks.getByName("createMojmapPaperclipJar")
+        val outputJar = paperclipJarTask.outputs.files.singleFile
+
+        if (outputJar.exists()) {
+            val newJarName = "canvas-paperclip-$buildNumber.jar"
+            val newJarFile = File(jarDir, newJarName)
+
+            jarDir.listFiles()
+                ?.filter { it.name.startsWith("canvas-paperclip-") && it.name.endsWith(".jar") }
+                ?.forEach { it.delete() }
+
+            outputJar.renameTo(newJarFile)
+        }
+    }
+}
