@@ -121,7 +121,7 @@ tasks.register("buildPublisherJar") {
             val newJarFile = File(outputDir, newJarName)
 
             outputDir.listFiles()
-                ?.filter { it.name.startsWith("canvas-build$") && it.name.endsWith(".jar") }
+                ?.filter { it.name.startsWith("canvas-build.") && it.name.endsWith(".jar") }
                 ?.forEach { it.delete() }
             outputJar.renameTo(newJarFile)
             println("Renamed ${outputJar.name} to $newJarName in ${outputDir.absolutePath}")
