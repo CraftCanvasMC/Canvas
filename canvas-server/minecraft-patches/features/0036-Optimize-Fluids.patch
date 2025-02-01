@@ -4,11 +4,23 @@ Date: Mon, 27 Jan 2025 21:39:41 -0800
 Subject: [PATCH] Optimize Fluids
 
 
+diff --git a/net/minecraft/world/level/block/LiquidBlock.java b/net/minecraft/world/level/block/LiquidBlock.java
+index 47a7ce88bf4d26408545dcc061aa763311af0dc9..32cb324b2280ae73f05ebdeef6500903f0e06605 100644
+--- a/net/minecraft/world/level/block/LiquidBlock.java
++++ b/net/minecraft/world/level/block/LiquidBlock.java
+@@ -193,6 +193,7 @@ public class LiquidBlock extends Block implements BucketPickup {
+                     Block block = level.getFluidState(pos).isSource() ? Blocks.OBSIDIAN : Blocks.COBBLESTONE;
+                     // CraftBukkit start
+                     if (org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(level, pos, block.defaultBlockState())) {
++                        level.setBlock(pos, block.defaultBlockState(), 3); // Canvas
+                         this.fizz(level, pos);
+                     }
+                     // CraftBukkit end
 diff --git a/net/minecraft/world/level/material/FlowingFluid.java b/net/minecraft/world/level/material/FlowingFluid.java
-index 44bc0823e163bb7edee27889201ec76e93e095cf..e0258bd198802f887573126a4fd60b81a2ab8f25 100644
+index 44bc0823e163bb7edee27889201ec76e93e095cf..f5734d3014e13133273c11e32180bdd4c60e091c 100644
 --- a/net/minecraft/world/level/material/FlowingFluid.java
 +++ b/net/minecraft/world/level/material/FlowingFluid.java
-@@ -6,6 +6,8 @@ import it.unimi.dsi.fastutil.shorts.Short2BooleanMap;
+@@ -6,12 +6,15 @@ import it.unimi.dsi.fastutil.shorts.Short2BooleanMap;
  import it.unimi.dsi.fastutil.shorts.Short2BooleanOpenHashMap;
  import it.unimi.dsi.fastutil.shorts.Short2ObjectMap;
  import it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap;
@@ -17,7 +29,70 @@ index 44bc0823e163bb7edee27889201ec76e93e095cf..e0258bd198802f887573126a4fd60b81
  import java.util.Map;
  import java.util.Map.Entry;
  import net.minecraft.core.BlockPos;
-@@ -341,32 +343,46 @@ public abstract class FlowingFluid extends Fluid {
+ import net.minecraft.core.Direction;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.BlockTags;
++import net.minecraft.tags.FluidTags;
+ import net.minecraft.world.level.BlockGetter;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelAccessor;
+@@ -20,6 +23,7 @@ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.DoorBlock;
+ import net.minecraft.world.level.block.IceBlock;
++import net.minecraft.world.level.block.LiquidBlock;
+ import net.minecraft.world.level.block.LiquidBlockContainer;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.block.state.StateDefinition;
+@@ -199,6 +203,7 @@ public abstract class FlowingFluid extends Fluid {
+                 BlockPos blockPos = pos.relative(direction);
+                 final BlockState blockStateIfLoaded = level.getBlockStateIfLoaded(blockPos); // Paper - Prevent chunk loading from fluid flowing
+                 if (blockStateIfLoaded == null) continue; // Paper - Prevent chunk loading from fluid flowing
++                if (!shouldSpreadLiquid(level, blockPos, blockStateIfLoaded)) continue; // Canvas - ensure lava interactions are ticked
+                 // CraftBukkit start
+                 org.bukkit.block.Block source = org.bukkit.craftbukkit.block.CraftBlock.at(level, pos);
+                 org.bukkit.event.block.BlockFromToEvent event = new org.bukkit.event.block.BlockFromToEvent(source, org.bukkit.craftbukkit.block.CraftBlock.notchToBlockFace(direction));
+@@ -213,6 +218,39 @@ public abstract class FlowingFluid extends Fluid {
+         }
+     }
+ 
++    // Canvas start
++    private boolean shouldSpreadLiquid(Level level, BlockPos pos, BlockState state) {
++        if (state.is(Blocks.LAVA)) {
++            boolean isSoulSoil = level.getBlockState(pos.below()).is(Blocks.SOUL_SOIL);
++
++            for (Direction direction : LiquidBlock.POSSIBLE_FLOW_DIRECTIONS) {
++                BlockPos blockPos = pos.relative(direction.getOpposite());
++                if (level.getFluidState(blockPos).is(FluidTags.WATER)) {
++                    Block block = level.getFluidState(pos).isSource() ? Blocks.OBSIDIAN : Blocks.COBBLESTONE;
++                    if (org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(level, pos, block.defaultBlockState())) {
++                        this.fizz(level, pos);
++                        level.setBlock(pos, block.defaultBlockState(), 3);
++                    }
++                    return false;
++                }
++
++                if (isSoulSoil && level.getBlockState(blockPos).is(Blocks.BLUE_ICE)) {
++                    if (org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(level, pos, Blocks.BASALT.defaultBlockState())) {
++                        this.fizz(level, pos);
++                    }
++                    return false;
++                }
++            }
++        }
++
++        return true;
++    }
++
++    private void fizz(LevelAccessor level, BlockPos pos) {
++        level.levelEvent(1501, pos, 0);
++    }
++
++    // Canvas end
+     protected FluidState getNewLiquid(ServerLevel level, BlockPos pos, BlockState state) {
+         int i = 0;
+         int i1 = 0;
+@@ -341,32 +379,46 @@ public abstract class FlowingFluid extends Fluid {
      protected void beforeDestroyingBlock(LevelAccessor level, BlockPos pos, BlockState state, BlockPos source) { beforeDestroyingBlock(level, pos, state); } // Paper - Add BlockBreakBlockEvent
      protected abstract void beforeDestroyingBlock(LevelAccessor level, BlockPos pos, BlockState state);
  
@@ -80,3 +155,15 @@ index 44bc0823e163bb7edee27889201ec76e93e095cf..e0258bd198802f887573126a4fd60b81
  
      boolean isWaterHole(BlockGetter level, BlockPos pos, BlockState state, BlockPos belowPos, BlockState belowState) {
          return canPassThroughWall(Direction.DOWN, level, pos, state, belowPos, belowState)
+diff --git a/net/minecraft/world/level/material/LavaFluid.java b/net/minecraft/world/level/material/LavaFluid.java
+index 73f6cbc48de688cea3f401c50860fd585b33d363..0283a08cc35f33d3889838b571f387b23506b8f4 100644
+--- a/net/minecraft/world/level/material/LavaFluid.java
++++ b/net/minecraft/world/level/material/LavaFluid.java
+@@ -237,6 +237,7 @@ public abstract class LavaFluid extends FlowingFluid {
+                     // CraftBukkit end
+                 }
+ 
++                level.setBlock(pos, Blocks.STONE.defaultBlockState(), 3); // Canvas - ensure block is placed
+                 this.fizz(level, pos);
+                 return;
+             }
