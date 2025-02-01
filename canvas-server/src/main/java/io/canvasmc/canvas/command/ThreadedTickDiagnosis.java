@@ -30,17 +30,17 @@ import org.spigotmc.SpigotConfig;
 
 import static java.lang.String.valueOf;
 import static net.kyori.adventure.text.Component.text;
-import static net.kyori.adventure.text.format.NamedTextColor.BLUE;
-import static net.kyori.adventure.text.format.NamedTextColor.DARK_AQUA;
 import static net.kyori.adventure.text.format.NamedTextColor.GREEN;
 import static net.kyori.adventure.text.format.TextColor.color;
 
 public class ThreadedTickDiagnosis {
-    private static final List<String> TPS_OPTIONS = Arrays.asList("tps5", "tps10", "tps60");
-    public static int HEADER = 0x5FC3DD;
-    public static int VALUE = 0x96D6F0;
     public static final int BASE_COLOR = 0x4EA2ED;
+    public static final int LABEL_COLOR = 0x4EA2ED;
+    public static final int VALUE_COLOR = 0x2F8FE9;
+    public static int HEADER_COLOR = 0x5FC3DD;
+    public static int VALUE = 0x96D6F0;
     static final TextComponent BASE = text("").color(color(BASE_COLOR));
+    private static final List<String> TPS_OPTIONS = Arrays.asList("tps5", "tps10", "tps60");
 
     public static @NotNull Double simplifyNumber(@NotNull Float num) {
         DecimalFormat df = new DecimalFormat("###.##");
@@ -54,8 +54,8 @@ public class ThreadedTickDiagnosis {
         float median;
 
         List<Double> tpsValues = MinecraftServer.getThreadedServer().getThreadedWorlds().stream()
-            .map(level -> level.recentTps[1])
-            .sorted().toList();
+                                                .map(level -> level.recentTps[1])
+                                                .sorted().toList();
 
         if (!tpsValues.isEmpty()) {
             min = tpsValues.getFirst().floatValue();
@@ -69,26 +69,27 @@ public class ThreadedTickDiagnosis {
 
         sendCollective((l) -> {
             breaking(l, (list) -> {
-                list.add(BASE.append(text("Server Status Report").color(color(HEADER))));
+                list.add(BASE.append(text("Server Status Report").color(color(HEADER_COLOR))));
 
-                list.add(reportLine(" Online Players: ", valueOf(server.getOnlinePlayers().size()), 0x4EA2ED, 0x2F8FE9));
-                list.add(reportLine(" Lowest Thread TPS: ", createColoredComponent(simplifyNumber(min).toString(), min, 20F), 0x4EA2ED));
-                list.add(reportLine(" Median Thread TPS: ", createColoredComponent(simplifyNumber(median).toString(), median, 20F), 0x4EA2ED));
-                list.add(reportLine(" Highest Thread TPS: ", createColoredComponent(simplifyNumber(max).toString(), max, 20F), 0x4EA2ED));
-                list.add(reportLine(" MinecraftServer MSPT: ", MSPTCommand.getColor(MinecraftServer.getServer().tickTimes5s.getAverage()), 0x4EA2ED));
+                list.add(reportLine(" Online Players: ", valueOf(server.getOnlinePlayers().size()), LABEL_COLOR, VALUE_COLOR));
+                list.add(reportLine(" Lowest Thread TPS: ", createColoredComponent(simplifyNumber(min).toString(), min, 20F), LABEL_COLOR));
+                list.add(reportLine(" Median Thread TPS: ", createColoredComponent(simplifyNumber(median).toString(), median, 20F), LABEL_COLOR));
+                list.add(reportLine(" Highest Thread TPS: ", createColoredComponent(simplifyNumber(max).toString(), max, 20F), LABEL_COLOR));
+                list.add(reportLine(" MinecraftServer MSPT: ", MSPTCommand.getColor(MinecraftServer.getServer().tickTimes5s.getAverage()), LABEL_COLOR));
             }, (list) -> {
-                list.add(BASE.append(text("Thread Analysis").color(color(HEADER))));
-                list.add(reportLine(" Netty Version: ", valueOf(Version.identify().get("netty-common")), 0x4EA2ED, 0x2F8FE9));
-                list.add(reportLine(" MAX Available threads: ", valueOf(Runtime.getRuntime().availableProcessors()), 0x4EA2ED, 0x2F8FE9));
-                list.add(reportLine(" Current Available threads: ", valueOf(Runtime.getRuntime().availableProcessors() - usingThreads()), 0x4EA2ED, 0x2F8FE9));
+                list.add(BASE.append(text("Thread Analysis").color(color(HEADER_COLOR))));
+                list.add(reportLine(" Netty Version: ", valueOf(Version.identify().get("netty-common")), LABEL_COLOR, VALUE_COLOR));
+                list.add(reportLine(" MAX Available threads: ", valueOf(Runtime.getRuntime().availableProcessors()), LABEL_COLOR, VALUE_COLOR));
+                list.add(reportLine(" Current Available threads: ", valueOf(Runtime.getRuntime()
+                                                                                   .availableProcessors() - usingThreads()), LABEL_COLOR, VALUE_COLOR));
 
-                list.add(BASE.append(text("Util ThreadCount:").color(color(HEADER))));
-                list.add(subReportLine("NettyIO: ", valueOf(SpigotConfig.getInt("settings.netty-threads", 4)), 0x2F8FE9, VALUE));
-                list.add(subReportLine("Moonrise Workers: ", valueOf(MoonriseCommon.WORKER_POOL.getCoreThreads().length), 0x2F8FE9, VALUE));
+                list.add(BASE.append(text("Util ThreadCount:").color(color(HEADER_COLOR))));
+                list.add(subReportLine("NettyIO: ", valueOf(SpigotConfig.getInt("settings.netty-threads", 4)), VALUE_COLOR, VALUE));
+                list.add(subReportLine("Moonrise Workers: ", valueOf(MoonriseCommon.WORKER_POOL.getCoreThreads().length), VALUE_COLOR, VALUE));
             }, (list) -> {
                 MinecraftServer.getThreadedServer().getThreadedWorlds().forEach(level -> doLevel(list, level, BASE));
             }, (list) -> {
-                list.add(BASE.append(text("Chunk Analysis").color(color(HEADER))));
+                list.add(BASE.append(text("Chunk Analysis").color(color(HEADER_COLOR))));
                 chunkInfo(list);
             });
 
@@ -148,7 +149,7 @@ public class ThreadedTickDiagnosis {
             int blockTicking = 0;
             int entityTicking = 0;
 
-            for (final NewChunkHolder holder : ((ChunkSystemServerLevel)world).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolders()) {
+            for (final NewChunkHolder holder : ((ChunkSystemServerLevel) world).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolders()) {
                 final NewChunkHolder.ChunkCompletion completion = holder.getLastChunkCompletion();
                 final ChunkAccess chunk = completion == null ? null : completion.chunk();
 
@@ -194,7 +195,8 @@ public class ThreadedTickDiagnosis {
             ).build());
         }
         if (worlds.size() > 1) {
-            list.add(text("  ").toBuilder().append(text("Chunks in ", color(0x4EA2ED)), text("all listed worlds", GREEN), text(":", NamedTextColor.AQUA)).build());
+            list.add(text("  ").toBuilder().append(text("Chunks in ", color(0x4EA2ED)), text("all listed worlds", GREEN), text(":", NamedTextColor.AQUA))
+                               .build());
             list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(
                 text("Total: ", color(0x4EA2ED)), text(accumulatedTotal),
                 text(" Inactive: ", color(0x4EA2ED)), text(accumulatedInactive),
@@ -215,7 +217,7 @@ public class ThreadedTickDiagnosis {
 
     private static @NotNull TextComponent reportLine(String label, String value, int labelColor, int valueColor) {
         return (text(label).color(color(labelColor))
-            .append(text(value).color(color(valueColor))));
+                           .append(text(value).color(color(valueColor))));
     }
 
     private static @NotNull TextComponent reportLine(String label, Component value, int labelColor) {
@@ -224,15 +226,15 @@ public class ThreadedTickDiagnosis {
 
     private static @NotNull TextComponent subReportLine(String label, String value, int labelColor, int valueColor) {
         return (text("   " + label).color(color(labelColor))
-            .append(text(value).color(color(valueColor))));
+                                   .append(text(value).color(color(valueColor))));
     }
 
     public static int usingThreads() {
         ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
         return (int) java.util.Arrays.stream(threadMXBean.getAllThreadIds())
-            .mapToObj(threadMXBean::getThreadInfo)
-            .filter(threadInfo -> threadInfo != null && threadInfo.getThreadState() == Thread.State.RUNNABLE)
-            .count();
+                                     .mapToObj(threadMXBean::getThreadInfo)
+                                     .filter(threadInfo -> threadInfo != null && threadInfo.getThreadState() == Thread.State.RUNNABLE)
+                                     .count();
     }
 
     public static @NotNull Component createColoredUtilComponent(String text, float value) {
