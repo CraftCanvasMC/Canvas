@@ -108,22 +108,23 @@ paperweight {
 
 tasks.register("buildPublisherJar") {
     dependsOn(":canvas-server:createMojmapPaperclipJar")
+
     doLast {
         val buildNumber = System.getenv("BUILD_NUMBER") ?: "local"
-        val jarDir = layout.buildDirectory.dir("libs").get().asFile
 
-        val paperclipJarTask = project("canvas-server").tasks.getByName("createMojmapPaperclipJar")
+        val paperclipJarTask = project(":canvas-server").tasks.getByName("createMojmapPaperclipJar")
         val outputJar = paperclipJarTask.outputs.files.singleFile
+        val outputDir = outputJar.parentFile
 
         if (outputJar.exists()) {
-            val newJarName = "canvas-paperclip-$buildNumber.jar"
-            val newJarFile = File(jarDir, newJarName)
+            val newJarName = "canvas-build$$buildNumber.jar"
+            val newJarFile = File(outputDir, newJarName)
 
-            jarDir.listFiles()
-                ?.filter { it.name.startsWith("canvas-paperclip-") && it.name.endsWith(".jar") }
+            outputDir.listFiles()
+                ?.filter { it.name.startsWith("canvas-build$") && it.name.endsWith(".jar") }
                 ?.forEach { it.delete() }
-
             outputJar.renameTo(newJarFile)
+            println("Renamed ${outputJar.name} to $newJarName in ${outputDir.absolutePath}")
         }
     }
 }
