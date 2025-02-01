@@ -1,10 +1,5 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
-import java.nio.file.*
-import java.util.*
-import java.nio.file.Path
-import java.nio.file.StandardCopyOption
-import org.gradle.api.DefaultTask
 
 plugins {
     java
