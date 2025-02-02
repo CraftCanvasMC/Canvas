@@ -146,6 +146,10 @@ public class Config implements ConfigData {
     public boolean disableDisconnectSpam = false;
     @Comment("Defines a percentage of which the server will apply to the velocity applied to item entities dropped on death. 0 means it has no velocity, 1 is default.")
     public double itemEntitySpreadFactor = 1;
+    @Comment("Disables saving snowball entities. This patches certain lag machines.")
+    public boolean disableSnowballSaving = false;
+    @Comment("Disables saving firework entities. This patches certain lag machines.")
+    public boolean disableFireworkSaving = false;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
