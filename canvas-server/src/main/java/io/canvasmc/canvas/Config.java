@@ -1,9 +1,8 @@
 package io.canvasmc.canvas;
 
+import io.canvasmc.canvas.config.*;
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
-import me.shedaniel.autoconfig.serializer.JanksonConfigSerializer;
-import me.shedaniel.cloth.clothconfig.shadowed.blue.endless.jankson.Comment;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.goal.Goal;
 import org.apache.logging.log4j.LogManager;
@@ -19,7 +18,7 @@ import java.util.Objects;
 @me.shedaniel.autoconfig.annotation.Config(name = "canvas_server")
 public class Config implements ConfigData {
 
-	private static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
+	public static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
     public static final List<Class<? extends Goal>> COMPILED_DISABLED_GOAL_CLASSES = Collections.synchronizedList(new ArrayList<>());
     public static final List<ResourceLocation> COMPILED_LOCATIONS = Collections.synchronizedList(new ArrayList<>());
     public static boolean shouldCheckMasks = false;
@@ -204,7 +203,7 @@ public class Config implements ConfigData {
     }
 
 	public static Config init() {
-		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
+		AutoConfig.register(Config.class, YamlConfigSerializerWithComments::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
 		Config defaulted = new Config();
 
