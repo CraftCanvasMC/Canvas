@@ -151,6 +151,42 @@ public class Config implements ConfigData {
     @Comment("Disables saving firework entities. This patches certain lag machines.")
     public boolean disableFireworkSaving = false;
 
+    public VirtualThreads virtualThreads = new VirtualThreads();
+    public static class VirtualThreads {
+        @Comment("Enables use of Java 21+ virtual threads")
+        public boolean enabled = false;
+        @Comment("Uses virtual threads for the Bukkit scheduler.")
+        public boolean bukkitScheduler = false;
+        @Comment("Uses virtual threads for the Chat scheduler.")
+        public boolean chatScheduler = false;
+        @Comment("Uses virtual threads for the Authenticator scheduler.")
+        public boolean authenticatorScheduler = false;
+        @Comment("Uses virtual threads for the Tab Complete scheduler.")
+        public boolean tabCompleteScheduler = false;
+        @Comment("Uses virtual threads for the MCUtil async executor.")
+        public boolean asyncExecutor = false;
+
+        public boolean shouldReplaceAuthenticator() {
+            return enabled && authenticatorScheduler;
+        }
+
+        public boolean shouldReplaceChatExecutor() {
+            return enabled && chatScheduler;
+        }
+
+        public boolean shouldReplaceTabCompleteExecutor() {
+            return enabled && tabCompleteScheduler;
+        }
+
+        public boolean shouldReplaceBukkitScheduler() {
+            return enabled && bukkitScheduler;
+        }
+
+        public boolean shouldReplaceAsyncExecutor() {
+            return enabled && asyncExecutor;
+        }
+    }
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
