@@ -142,6 +142,8 @@ public class Config implements ConfigData {
     public boolean disableEntityPushing = false;
     @Comment("Ignores messages like 'moved too quickly' and 'moved wrongly'")
     public boolean alwaysAllowWeirdMovement = true;
+    @Comment("Prevents players being disconnected by disconnect.spam")
+    public boolean disableDisconnectSpam = false;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
