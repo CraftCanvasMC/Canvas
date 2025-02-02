@@ -123,3 +123,7 @@ tasks.register("buildPublisherJar") {
         }
     }
 }
+
+tasks.register("fixupMinecraftFilePatches") {
+    dependsOn(":canvas-server:fixupMinecraftSourcePatches")
+}
