@@ -187,6 +187,22 @@ public class Config implements ConfigData {
         }
     }
 
+    public NoChatReports noChatReports = new NoChatReports();
+    public static class NoChatReports {
+        @Comment("Enables no chat reports, like the fabric mod.")
+        public boolean enable = false;
+        @Comment("True if server should include extra query data to help clients know that your server is secure.")
+        public boolean addQueryData = true;
+        @Comment("True if server should convert all player messages to system messages.")
+        public boolean convertToGameMessage = true;
+        @Comment("Enables debug logging for this feature.")
+        public boolean debugLog = false;
+        @Comment("Requires the No Chat Reports mod for the client to join")
+        public boolean demandOnClient = false;
+        @Comment("The message that will disconnect the client if they dont have the mod. 'demandOnClient' must be true to take effect")
+        public String disconnectDemandOnClientMessage = "You do not have No Chat Reports, and this server is configured to require it on client!";
+    }
+
 	public static Config init() {
 		AutoConfig.register(Config.class, JanksonConfigSerializer::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
