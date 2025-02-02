@@ -1,0 +1,105 @@
+--- a/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
++++ b/net/minecraft/world/level/block/piston/PistonMovingBlockEntity.java
+@@ -2,6 +_,8 @@
+ 
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.function.Supplier;
++import io.canvasmc.canvas.Config;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.HolderGetter;
+@@ -43,6 +_,58 @@
+     private float progressO;
+     private long lastTicked;
+     private int deathTicks;
++    // Canvas start
++    private static final VoxelShape[] PISTON_BASE_WITH_MOVING_HEAD_SHAPES = precomputePistonBaseWithMovingHeadShapes();
++
++    private static VoxelShape getOffsetAndSimplified(VoxelShape blockShape, float offset, Direction direction) {
++        VoxelShape offsetSimplifiedShape = (blockShape).getOffsetSimplifiedShape(offset, direction);
++        if (offsetSimplifiedShape == null) {
++            //create the offset shape and store it for later use
++            offsetSimplifiedShape = blockShape.move(direction.getStepX() * offset, direction.getStepY() * offset, direction.getStepZ() * offset).optimize();
++            (blockShape).setShape(offset, direction, offsetSimplifiedShape);
++        }
++        return offsetSimplifiedShape;
++    }
++
++    private static VoxelShape[] precomputePistonBaseWithMovingHeadShapes() {
++        float[] offsets = {0f, 0.5f, 1f};
++        Direction[] directions = Direction.values();
++
++        VoxelShape[] mergedShapes = new VoxelShape[offsets.length * directions.length];
++
++        for (Direction facing : directions) {
++            VoxelShape baseShape = Blocks.PISTON.defaultBlockState().setValue(PistonBaseBlock.EXTENDED, true)
++                .setValue(PistonBaseBlock.FACING, facing).getCollisionShape(null, null);
++            for (float offset : offsets) {
++                //this cache is only required for the merged piston head + base shape.
++                //this shape is only used when !this.extending
++                //here: isShort = this.extending != 1.0F - this.progress < 0.25F can be simplified to:
++                //isShort = f < 0.25F , because f = getAmountExtended(this.progress) can be simplified to f == 1.0F - this.progress
++                //therefore isShort is dependent on the offset:
++                boolean isShort = offset < 0.25f;
++
++                VoxelShape headShape = (Blocks.PISTON_HEAD.defaultBlockState().setValue(PistonHeadBlock.FACING, facing))
++                    .setValue(PistonHeadBlock.SHORT, isShort).getCollisionShape(null, null);
++
++                VoxelShape offsetHead = headShape.move(facing.getStepX() * offset,
++                    facing.getStepY() * offset,
++                    facing.getStepZ() * offset);
++                mergedShapes[getIndexForMergedShape(offset, facing)] = Shapes.or(baseShape, offsetHead);
++            }
++
++        }
++
++        return mergedShapes;
++    }
++
++    private static int getIndexForMergedShape(float offset, Direction direction) {
++        if (offset != 0f && offset != 0.5f && offset != 1f) {
++            return -1;
++        }
++        //shape of offset 0 is still dependent on the direction, due to piston head and base being directional blocks
++        return (int) (2 * offset) + (3 * direction.get3DDataValue());
++    }
++    // Canvas end
+ 
+     public PistonMovingBlockEntity(BlockPos pos, BlockState blockState) {
+         super(BlockEntityType.PISTON, pos, blockState);
+@@ -373,10 +_,34 @@
+             }
+ 
+             float extendedProgress = this.getExtendedProgress(this.progress);
++            // Canvas start - optimize piston heads - avoid Shape.or
++            Supplier<VoxelShape> original = () -> {
+             double d = this.direction.getStepX() * extendedProgress;
+             double d1 = this.direction.getStepY() * extendedProgress;
+             double d2 = this.direction.getStepZ() * extendedProgress;
+             return Shapes.or(collisionShape, blockState.getCollisionShape(level, pos).move(d, d1, d2));
++            };
++            if (!Config.INSTANCE.optimizePistonMovingBlockEntity) {
++                return original.get();
++            }
++            float absOffset = Math.abs(extendedProgress);
++            if (absOffset != 0f && absOffset != 0.5f && absOffset != 1f) {
++                return original.get();
++            }
++
++            if (this.extending || !this.isSourcePiston || !(this.movedState.getBlock() instanceof PistonBaseBlock)) {
++                //here voxelShape2.isEmpty() is guaranteed, vanilla code would call union() which calls simplify()
++                VoxelShape blockShape = blockState.getCollisionShape(level, pos);
++
++                //we cache the simplified shapes, as the simplify() method costs a lot of CPU time and allocates several objects
++                return getOffsetAndSimplified(blockShape, absOffset, extendedProgress < 0f ? this.direction.getOpposite() : this.direction);
++            } else {
++                //retracting piston heads have to act like their base as well, as the base block is replaced with the moving block
++                //f >= 0f is guaranteed (assuming no other mod interferes)
++                int index = getIndexForMergedShape(extendedProgress, this.direction);
++                return PISTON_BASE_WITH_MOVING_HEAD_SHAPES[index];
++            }
++            // Canvas end
+         }
+     }
+ 

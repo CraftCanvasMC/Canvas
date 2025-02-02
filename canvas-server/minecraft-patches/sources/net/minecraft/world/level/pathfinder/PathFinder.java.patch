@@ -1,0 +1,104 @@
+--- a/net/minecraft/world/level/pathfinder/PathFinder.java
++++ b/net/minecraft/world/level/pathfinder/PathFinder.java
+@@ -25,11 +_,19 @@
+     public final NodeEvaluator nodeEvaluator;
+     private static final boolean DEBUG = false;
+     private final BinaryHeap openSet = new BinaryHeap();
++    private final @Nullable io.canvasmc.canvas.entity.pathfinding.NodeEvaluatorGenerator nodeEvaluatorGenerator; // Canvas - we use this later to generate an evaluator
+ 
+-    public PathFinder(NodeEvaluator nodeEvaluator, int maxVisitedNodes) {
++    // Canvas start - support nodeEvaluatorgenerators
++    public PathFinder(NodeEvaluator nodeEvaluator, int maxVisitedNodes, @Nullable io.canvasmc.canvas.entity.pathfinding.NodeEvaluatorGenerator nodeEvaluatorGenerator) { // Canvas - add nodeEvaluatorGenerator
+         this.nodeEvaluator = nodeEvaluator;
+         this.maxVisitedNodes = maxVisitedNodes;
+-    }
++        this.nodeEvaluatorGenerator = nodeEvaluatorGenerator;
++    }
++
++    public PathFinder(NodeEvaluator nodeEvaluator, int maxVisitedNodes) {
++        this(nodeEvaluator, maxVisitedNodes, null);
++    }
++    // Canvas end - support nodeEvaluatorgenerators
+ 
+     public void setMaxVisitedNodes(int maxVisitedNodes) {
+         this.maxVisitedNodes = maxVisitedNodes;
+@@ -37,26 +_,63 @@
+ 
+     @Nullable
+     public Path findPath(PathNavigationRegion region, Mob mob, Set<BlockPos> targetPositions, float maxRange, int accuracy, float searchDepthMultiplier) {
+-        this.openSet.clear();
+-        this.nodeEvaluator.prepare(region, mob);
+-        Node start = this.nodeEvaluator.getStart();
++        // Canvas start - use a generated evaluator if we have one otherwise run sync
++        if (!io.canvasmc.canvas.Config.INSTANCE.pathfinding.enableThreadedPathfinding)
++            this.openSet.clear(); // it's always cleared in processPath
++        NodeEvaluator nodeEvaluator = this.nodeEvaluatorGenerator == null
++                ? this.nodeEvaluator
++                : io.canvasmc.canvas.entity.pathfinding.NodeEvaluatorCache.takeNodeEvaluator(this.nodeEvaluatorGenerator, this.nodeEvaluator);
++        nodeEvaluator.prepare(region, mob);
++        Node start = nodeEvaluator.getStart();
++        // Canvas end - use a generated evaluator if we have one otherwise run sync
+         if (start == null) {
++            io.canvasmc.canvas.entity.pathfinding.NodeEvaluatorCache.removeNodeEvaluator(nodeEvaluator); // Canvas - handle nodeEvaluatorGenerator
+             return null;
+         } else {
+             // Paper start - Perf: remove streams and optimize collection
+             List<Map.Entry<Target, BlockPos>> map = Lists.newArrayList();
+             for (BlockPos pos : targetPositions) {
+-                map.add(new java.util.AbstractMap.SimpleEntry<>(this.nodeEvaluator.getTarget(pos.getX(), pos.getY(), pos.getZ()), pos));
++                map.add(new java.util.AbstractMap.SimpleEntry<>(nodeEvaluator.getTarget(pos.getX(), pos.getY(), pos.getZ()), pos)); // Canvas - handle nodeEvaluatorGenerator
+             }
+             // Paper end - Perf: remove streams and optimize collection
+-            Path path = this.findPath(start, map, maxRange, accuracy, searchDepthMultiplier);
+-            this.nodeEvaluator.done();
+-            return path;
++            // Canvas start - async path processing
++            if (this.nodeEvaluatorGenerator == null) {
++                // run sync :(
++                io.canvasmc.canvas.entity.pathfinding.NodeEvaluatorCache.removeNodeEvaluator(nodeEvaluator);
++                return this.findPath(start, map, maxRange, accuracy, searchDepthMultiplier);
++            }
++
++            return new io.canvasmc.canvas.entity.pathfinding.AsyncPath(Lists.newArrayList(), targetPositions, () -> {
++                try {
++                    return this.processPath(nodeEvaluator, start, map, maxRange, accuracy, searchDepthMultiplier);
++                } catch (Exception e) {
++                    e.printStackTrace();
++                    return null;
++                } finally {
++                    nodeEvaluator.done();
++                    io.canvasmc.canvas.entity.pathfinding.NodeEvaluatorCache.returnNodeEvaluator(nodeEvaluator);
++                }
++            });
++            // Canvas end - async path processing
+         }
+     }
+ 
+     @Nullable
+     private Path findPath(Node node, List<Map.Entry<Target, BlockPos>> positions, float maxRange, int accuracy, float searchDepthMultiplier) { // Paper - optimize collection
++        // Canvas start - split pathfinding into the original sync method for compat and processing for delaying
++        try {
++            return this.processPath(this.nodeEvaluator, node, positions, maxRange, accuracy, searchDepthMultiplier);
++        } catch (Exception e) {
++            e.printStackTrace();
++            return null;
++        } finally {
++            this.nodeEvaluator.done();
++        }
++    }
++
++    private synchronized @org.jetbrains.annotations.NotNull Path processPath(NodeEvaluator nodeEvaluator, Node node, List<Map.Entry<Target, BlockPos>> positions, float maxRange, int accuracy, float searchDepthMultiplier) { // sync to only use the caching functions in this class on a single thread
++        org.apache.commons.lang3.Validate.isTrue(!positions.isEmpty()); // ensure that we have at least one position, which means we'll always return a path
++        // Canvas end - split pathfinding into the original sync method for compat and processing for delaying
+         ProfilerFiller profilerFiller = Profiler.get();
+         profilerFiller.push("find_path");
+         profilerFiller.markForCharting(MetricCategory.PATH_FINDING);
+@@ -95,7 +_,7 @@
+             }
+ 
+             if (!(node1.distanceTo(node) >= maxRange)) {
+-                int neighbors = this.nodeEvaluator.getNeighbors(this.neighbors, node1);
++                int neighbors = nodeEvaluator.getNeighbors(this.neighbors, node1); // Canvas - use provided nodeEvaluator
+ 
+                 for (int i2 = 0; i2 < neighbors; i2++) {
+                     Node node2 = this.neighbors[i2];

@@ -1,0 +1,713 @@
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -13,6 +_,14 @@
+ import com.mojang.jtracy.DiscontinuousFrame;
+ import com.mojang.jtracy.TracyClient;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.command.SummonCommandManagement;
++import io.canvasmc.canvas.server.ThreadedServer;
++import io.canvasmc.canvas.server.level.TickRateManagerInstance;
++import io.canvasmc.canvas.server.level.WatchdogWatcher;
++import io.canvasmc.canvas.util.TPSCalculator;
++import io.papermc.paper.configuration.GlobalConfiguration;
++import io.canvasmc.canvas.util.AsyncProcessor;
+ import it.unimi.dsi.fastutil.longs.LongIterator;
+ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+ import it.unimi.dsi.fastutil.objects.ObjectArraySet;
+@@ -41,8 +_,12 @@
+ import java.util.UUID;
+ import java.util.Map.Entry;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.Executor;
++import java.util.concurrent.Executors;
+ import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.TimeoutException;
+ import java.util.concurrent.atomic.AtomicReference;
+ import java.util.concurrent.locks.LockSupport;
+ import java.util.function.BooleanSupplier;
+@@ -73,6 +_,7 @@
+ import net.minecraft.network.chat.ChatDecorator;
+ import net.minecraft.network.chat.ChatType;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.network.protocol.Packet;
+ import net.minecraft.network.protocol.PacketType;
+ import net.minecraft.network.protocol.game.ClientboundChangeDifficultyPacket;
+ import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
+@@ -171,18 +_,20 @@
+ import net.minecraft.world.level.storage.WorldData;
+ import net.minecraft.world.phys.Vec2;
+ import net.minecraft.world.phys.Vec3;
++import org.bukkit.event.player.PlayerRespawnEvent;
+ import org.slf4j.Logger;
+ 
+-public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer { // Paper - rewrite chunk system
++public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer, WatchdogWatcher, TickRateManagerInstance { // Paper - rewrite chunk system // Canvas - Threaded Dimensions
+     private static MinecraftServer SERVER; // Paper
++    private static ThreadedServer THREADED_SERVER; // Canvas
+     public static final Logger LOGGER = LogUtils.getLogger();
+     public static final net.kyori.adventure.text.logger.slf4j.ComponentLogger COMPONENT_LOGGER = net.kyori.adventure.text.logger.slf4j.ComponentLogger.logger(LOGGER.getName()); // Paper
+     public static final String VANILLA_BRAND = "vanilla";
+     private static final float AVERAGE_TICK_TIME_SMOOTHING = 0.8F;
+     private static final int TICK_STATS_SPAN = 100;
+-    private static final long OVERLOADED_THRESHOLD_NANOS = 30L * TimeUtil.NANOSECONDS_PER_SECOND / 20L; // CraftBukkit
++    public static final long OVERLOADED_THRESHOLD_NANOS = 30L * TimeUtil.NANOSECONDS_PER_SECOND / 20L; // CraftBukkit // Canvas - private -> public
+     private static final int OVERLOADED_TICKS_THRESHOLD = 20;
+-    private static final long OVERLOADED_WARNING_INTERVAL_NANOS = 10L * TimeUtil.NANOSECONDS_PER_SECOND;
++    public static final long OVERLOADED_WARNING_INTERVAL_NANOS = 10L * TimeUtil.NANOSECONDS_PER_SECOND; // Canvas - private -> public
+     private static final int OVERLOADED_TICKS_WARNING_INTERVAL = 100;
+     private static final long STATUS_EXPIRE_TIME_NANOS = 5L * TimeUtil.NANOSECONDS_PER_SECOND;
+     private static final long PREPARE_LEVELS_DEFAULT_DELAY_NANOS = 10L * TimeUtil.NANOSECONDS_PER_MILLISECOND;
+@@ -199,6 +_,7 @@
+     public LevelStorageSource.LevelStorageAccess storageSource;
+     public final PlayerDataStorage playerDataStorage;
+     private final List<Runnable> tickables = Lists.newArrayList();
++    public SummonCommandManagement summonCommandManager = new SummonCommandManagement(); // Canvas
+     private MetricsRecorder metricsRecorder = InactiveMetricsRecorder.INSTANCE;
+     private Consumer<ProfileResults> onMetricsRecordingStopped = results -> this.stopRecordingMetrics();
+     private Consumer<Path> onMetricsRecordingFinished = path -> {};
+@@ -209,19 +_,19 @@
+     private ServerConnectionListener connection;
+     public final ChunkProgressListenerFactory progressListenerFactory;
+     @Nullable
+-    private ServerStatus status;
++    public ServerStatus status; // Canvas - private -> public
+     @Nullable
+-    private ServerStatus.Favicon statusIcon;
++    public ServerStatus.Favicon statusIcon; // Canvas - private -> public
+     private final RandomSource random = RandomSource.create();
+     public final DataFixer fixerUpper;
+     private String localIp;
+     private int port = -1;
+     private final LayeredRegistryAccess<RegistryLayer> registries;
+-    private Map<ResourceKey<Level>, ServerLevel> levels = Maps.newLinkedHashMap();
++    public Map<ResourceKey<Level>, ServerLevel> levels = Maps.newLinkedHashMap(); // Canvas - private -> public
+     private PlayerList playerList;
+     private volatile boolean running = true;
+     private volatile boolean isRestarting = false; // Paper - flag to signify we're attempting to restart
+-    private boolean stopped;
++    public boolean stopped; // Canvas - private -> public
+     private int tickCount;
+     private int ticksUntilAutosave = 6000;
+     protected final Proxy proxy;
+@@ -245,14 +_,14 @@
+     private boolean isDemo;
+     private volatile boolean isReady;
+     private long lastOverloadWarningNanos;
+-    protected final Services services;
++    public final Services services; // Canvas - protected -> public
+     private long lastServerStatus;
+     public final Thread serverThread;
+     private long lastTickNanos = Util.getNanos();
+     private long taskExecutionStartNanos = Util.getNanos();
+     private long idleTimeNanos;
+-    private long nextTickTimeNanos = Util.getNanos();
+-    private boolean waitingForNextTick = false;
++    public long nextTickTimeNanos; // Canvas - private -> public
++    public boolean waitingForNextTick; // Canvas - private -> public
+     private long delayedTasksMaxNextTickTimeNanos;
+     private boolean mayHaveDelayedTasks;
+     private final PackRepository packRepository;
+@@ -293,8 +_,8 @@
+     // Spigot start
+     public static final int TPS = 20;
+     public static final int TICK_TIME = 1000000000 / MinecraftServer.TPS;
+-    private static final int SAMPLE_INTERVAL = 20; // Paper - improve server tick loop
+-    @Deprecated(forRemoval = true) // Paper
++    public static final int SAMPLE_INTERVAL = 20; // Paper - improve server tick loop // Canvas - private -> public
++    // @Deprecated(forRemoval = true) // Paper // Canvas - nah
+     public final double[] recentTps = new double[4]; // Purpur - Add 5 second tps average in /tps
+     // Spigot end
+     public volatile boolean hasFullyShutdown; // Paper - Improved watchdog support
+@@ -302,15 +_,36 @@
+     public volatile Thread shutdownThread; // Paper - Improved watchdog support
+     public final io.papermc.paper.configuration.PaperConfigurations paperConfigurations; // Paper - add paper configuration files
+     public boolean isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
+-    private final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping
++    public final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping // Canvas - private -> public
+     public boolean lagging = false; // Purpur - Lagging threshold
+     public static final long SERVER_INIT = System.nanoTime(); // Paper - Lag compensation
+     protected boolean upnp = false; // Purpur - UPnP Port Forwarding
+-
++    public AsyncProcessor mobSpawnExecutor = new AsyncProcessor("mob_spawning"); // Canvas
++
++    // Canvas start - Multithreaded Dimension Ticking
++    private volatile boolean isTicking = false;
++    public final TPSCalculator tpsCalculator = new TPSCalculator(); // Lag compensation
++
++    public boolean isTicking() {
++        return isTicking;
++    }
++
++    @Override
++    public void broadcastPacketsToPlayers(final Packet<?> packet) {
++        this.playerList.broadcastAll(packet);
++    }
++
++    // Canvas end
+     public static <S extends MinecraftServer> S spin(Function<Thread, S> threadFunction) {
+         ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry.init(); // Paper - rewrite data converter system
+         AtomicReference<S> atomicReference = new AtomicReference<>();
+-        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> atomicReference.get().runServer(), "Server thread");
++        // Canvas start - Threaded Dimensions
++        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> {
++            ((MinecraftServer) atomicReference.get()).runServer();
++            THREADED_SERVER = new ThreadedServer(atomicReference.get());
++            THREADED_SERVER.spin();
++        }, "Server thread");
++        // Canvas end
+         thread.setUncaughtExceptionHandler((thread1, exception) -> LOGGER.error("Uncaught exception in server thread", exception));
+         thread.setPriority(Thread.NORM_PRIORITY+2); // Paper - Perf: Boost priority
+         if (Runtime.getRuntime().availableProcessors() > 4) {
+@@ -324,16 +_,16 @@
+     }
+ 
+     // Paper start - rewrite chunk system
+-    private volatile Throwable chunkSystemCrash;
++    private volatile @Nullable Throwable chunkSystemCrash; // Canvas - nullable
+ 
+     @Override
+     public final void moonrise$setChunkSystemCrash(final Throwable throwable) {
+         this.chunkSystemCrash = throwable;
+     }
+ 
+-    private static final long CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME = 25L * 1000L; // 25us
+-    private static final long MAX_CHUNK_EXEC_TIME = 1000L; // 1us
+-    private static final long TASK_EXECUTION_FAILURE_BACKOFF = 5L * 1000L; // 5us
++    public static final long CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME = 25L * 1000L; // 25us // Canvas - private -> public
++    public static final long MAX_CHUNK_EXEC_TIME = 1000L; // 1us // Canvas - private -> public
++    public static final long TASK_EXECUTION_FAILURE_BACKOFF = 5L * 1000L; // 5us // Canvas - private -> public
+ 
+     private long lastMidTickExecute;
+     private long lastMidTickExecuteFailure;
+@@ -480,7 +_,7 @@
+         dataStorage.computeIfAbsent(this.getScoreboard().dataFactory(), "scoreboard");
+     }
+ 
+-    protected abstract boolean initServer() throws IOException;
++    public abstract boolean initServer() throws IOException; // Canvas - protected -> public
+ 
+     protected void loadLevel(String levelId) { // CraftBukkit
+         if (!JvmProfiler.INSTANCE.isRunning()) {
+@@ -876,6 +_,7 @@
+             // CraftBukkit start
+             // this.nextTickTimeNanos = Util.getNanos() + PREPARE_LEVELS_DEFAULT_DELAY_NANOS;
+             this.executeModerately();
++            break; // Canvas
+         }
+ 
+         // this.nextTickTimeNanos = Util.getNanos() + PREPARE_LEVELS_DEFAULT_DELAY_NANOS;
+@@ -978,7 +_,7 @@
+     }
+ 
+     // CraftBukkit start
+-    private boolean hasStopped = false;
++    public boolean hasStopped = false; // Canvas - private -> public
+     private boolean hasLoggedStop = false; // Paper - Debugging
+     private final Object stopLock = new Object();
+     public final boolean hasStopped() {
+@@ -994,6 +_,13 @@
+             if (this.hasStopped) return;
+             this.hasStopped = true;
+         }
++        // Canvas start - respawn all players that are dead
++        for (ServerPlayer player : this.playerList.players) {
++            if (player.isDeadOrDying() || (player.isRemoved() && player.getRemovalReason() == net.minecraft.world.entity.Entity.RemovalReason.KILLED)) {
++                this.playerList.respawn(player, false, net.minecraft.world.entity.Entity.RemovalReason.KILLED, PlayerRespawnEvent.RespawnReason.DEATH);
++            }
++        }
++        // Canvas end
+         if (!hasLoggedStop && isDebugging()) io.papermc.paper.util.TraceUtil.dumpTraceForThread("Server stopped"); // Paper - Debugging
+         shutdownThread = Thread.currentThread(); // Paper - Improved watchdog support
+         org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
+@@ -1002,7 +_,36 @@
+             this.cancelRecordingMetrics();
+         }
+ 
+-        LOGGER.info("Stopping server");
++        // Canvas start
++        ThreadedServer.LOGGER.info("Halting level-threads");
++        long startNanos = Util.getNanos();
++        Thread currentThread = Thread.currentThread();
++        for (final ServerLevel level : this.getAllLevels()) {
++            if (level.running) {
++                level.stopSpin();
++                if (currentThread.equals(level.getRunningThread())) {
++                    continue;
++                }
++                try {
++                    CompletableFuture<Void> killThreadFuture = CompletableFuture.runAsync(() -> {
++                        try {
++                            level.getRunningThread().join();
++                        } catch (Throwable e) {
++                            throw new RuntimeException("Server encountered an unexpected exception when waiting for level thread to terminate!", e);
++                        }
++                    });
++                    killThreadFuture.get(30, TimeUnit.SECONDS);
++                } catch (TimeoutException timeoutException) {
++                    LOGGER.error("Timed out waiting for level {} to terminate, force-killing.", level.dimension().location());
++                    level.getRunningThread().interrupt();
++                } catch (InterruptedException | ExecutionException e) {
++                    throw new RuntimeException(e);
++                }
++            }
++        }
++        long nanoTickTime = Util.getNanos() - startNanos;
++        ThreadedServer.LOGGER.info("Successfully halted levels in {}ms", (nanoTickTime / 1_000_000));
++        // Canvas end
+         Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
+         // Purpur start - UPnP Port Forwarding
+         if (upnp) {
+@@ -1139,7 +_,7 @@
+         private final java.math.BigDecimal[] samples;
+         private final long[] times;
+ 
+-        RollingAverage(int size) {
++        public RollingAverage(int size) { // Canvas - public
+             this.size = size;
+             this.time = size * SEC_IN_NANO;
+             this.total = dec(TPS).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
+@@ -1170,10 +_,12 @@
+             return total.divide(dec(time), 30, java.math.RoundingMode.HALF_UP).doubleValue();
+         }
+     }
+-    private static final java.math.BigDecimal TPS_BASE = new java.math.BigDecimal(1E9).multiply(new java.math.BigDecimal(SAMPLE_INTERVAL));
++    public static final java.math.BigDecimal TPS_BASE = new java.math.BigDecimal(1E9).multiply(new java.math.BigDecimal(SAMPLE_INTERVAL)); // Canvas - private -> public
+     // Paper end
+ 
++    @Deprecated(forRemoval = true) // Canvas - Multithreaded Dimension Ticking - mark deprecated because we dont even use this anymore
+     protected void runServer() {
++        if (true) return; // Canvas - nope!
+         try {
+             if (!this.initServer()) {
+                 throw new IllegalStateException("Failed to initialize server");
+@@ -1349,6 +_,121 @@
+             }
+         }
+     }
++    // Canvas start - Multithreaded Dimension Ticking
++
++    public long tick(long tickSection) {
++        if (!isTicking) {
++            // Mark ticking to unlock level threads, to allow them to begin runtime.
++            isTicking = true;
++        }
++        long currentTime;
++        long i;
++
++        if (!this.isPaused() && this.tickRateManager.isSprinting() && this.tickRateManager.checkShouldSprintThisTick()) {
++            i = 0L;
++            this.nextTickTimeNanos = Util.getNanos();
++            this.lastOverloadWarningNanos = this.nextTickTimeNanos;
++        } else {
++            i = this.tickRateManager.nanosecondsPerTick();
++            long j = Util.getNanos() - this.nextTickTimeNanos;
++
++            if (j > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * i && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * i) {
++                long k = j / i;
++
++                if (this.server.getWarnOnOverload()) {
++                    MinecraftServer.LOGGER.warn("Can't keep up! Is the server overloaded? Running {}ms or {} ticks behind", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k);
++                }
++                this.nextTickTimeNanos += k * i;
++                this.lastOverloadWarningNanos = this.nextTickTimeNanos;
++            }
++        }
++
++        currentTime = Util.getNanos();
++        if (++MinecraftServer.currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
++            final long diff = currentTime - tickSection;
++            final java.math.BigDecimal currentTps = TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
++            tps5s.add(currentTps, diff);
++            tps1.add(currentTps, diff);
++            tps5.add(currentTps, diff);
++            tps15.add(currentTps, diff);
++
++            this.recentTps[0] = tps5s.getAverage();
++            this.recentTps[1] = tps1.getAverage();
++            this.recentTps[2] = tps5.getAverage();
++            this.recentTps[3] = tps15.getAverage();
++            lagging = recentTps[0] < org.purpurmc.purpur.PurpurConfig.laggingThreshold;
++            tickSection = currentTime;
++        }
++
++        boolean flag = i == 0L;
++
++        if (this.debugCommandProfilerDelayStart) {
++            this.debugCommandProfilerDelayStart = false;
++            this.debugCommandProfiler = new TimeProfiler(Util.getNanos(), this.tickCount);
++        }
++
++        lastTick = currentTime;
++        this.nextTickTimeNanos += i;
++
++        try {
++            Profiler.Scope profiler_a = Profiler.use(this.createProfiler());
++
++            try {
++                ProfilerFiller gameprofilerfiller = Profiler.get();
++
++                gameprofilerfiller.push("tick");
++                this.tickFrame.start();
++                // We update it through here so that we can easily access this var throughout the lifecycle
++                ThreadedServer.SHOULD_KEEP_TICKING = flag ? () -> false : this::haveTime;
++                this.tickServer(ThreadedServer.SHOULD_KEEP_TICKING);
++
++                final Throwable crash = this.chunkSystemCrash;
++                if (crash != null) {
++                    this.chunkSystemCrash = null;
++                    throw new RuntimeException("Chunk system crash propagated to tick()", crash);
++                }
++
++                this.tickFrame.end();
++                gameprofilerfiller.popPush("nextTickWait");
++                this.mayHaveDelayedTasks = true;
++                this.delayedTasksMaxNextTickTimeNanos = Math.max(Util.getNanos() + i, this.nextTickTimeNanos);
++                if (!org.purpurmc.purpur.PurpurConfig.tpsCatchup) {
++                    this.nextTickTimeNanos = currentTime + i;
++                    this.delayedTasksMaxNextTickTimeNanos = nextTickTimeNanos;
++                }
++                this.startMeasuringTaskExecutionTime();
++                this.waitUntilNextTick();
++                this.finishMeasuringTaskExecutionTime();
++                if (flag) {
++                    this.tickRateManager.endTickWork();
++                }
++
++                gameprofilerfiller.pop();
++                this.logFullTickTime();
++            } catch (Throwable throwable) {
++                if (profiler_a != null) {
++                    try {
++                        profiler_a.close();
++                    } catch (Throwable throwable1) {
++                        throwable.addSuppressed(throwable1);
++                    }
++                }
++
++                throw throwable;
++            }
++
++            if (profiler_a != null) {
++                profiler_a.close();
++            }
++        } finally {
++            this.endMetricsRecordingTick();
++        }
++
++        this.isReady = true;
++        JvmProfiler.INSTANCE.onServerTick(this.smoothedTickTimeMillis);
++        return tickSection;
++    }
++    // Canvas end
+ 
+     private void logFullTickTime() {
+         long nanos = Util.getNanos();
+@@ -1374,7 +_,7 @@
+         }
+     }
+ 
+-    private static CrashReport constructOrExtractCrashReport(Throwable cause) {
++    public static CrashReport constructOrExtractCrashReport(Throwable cause) { // Canvas - private -> public
+         ReportedException reportedException = null;
+ 
+         for (Throwable throwable = cause; throwable != null; throwable = throwable.getCause()) {
+@@ -1474,7 +_,7 @@
+         if (super.pollTask()) {
+             this.moonrise$executeMidTickTasks(); // Paper - rewrite chunk system
+             return true;
+-        } else {
++        } else if (!getThreadedServer().hasStarted()) { // Canvas
+             boolean ret = false; // Paper - force execution of all worlds, do not just bias the first
+             if (this.tickRateManager.isSprinting() || this.haveTime()) {
+                 for (ServerLevel serverLevel : this.getAllLevels()) {
+@@ -1486,6 +_,7 @@
+ 
+             return ret; // Paper - force execution of all worlds, do not just bias the first
+         }
++        return false; // Canvas
+     }
+ 
+     @Override
+@@ -1494,7 +_,7 @@
+         super.doRunTask(task);
+     }
+ 
+-    private Optional<ServerStatus.Favicon> loadStatusIcon() {
++    public Optional<ServerStatus.Favicon> loadStatusIcon() { // Canvas - private -> public
+         Optional<Path> optional = Optional.of(this.getFile("server-icon.png"))
+             .filter(path -> Files.isRegularFile(path))
+             .or(() -> this.storageSource.getIconFile().filter(path -> Files.isRegularFile(path)));
+@@ -1531,6 +_,14 @@
+         return false;
+     }
+ 
++    // Canvas start
++    private boolean emptyTickSleeping = false;
++
++    public boolean isEmptyTickSkipping() {
++        return emptyTickSleeping;
++    }
++
++    // Canvas end
+     public void tickServer(BooleanSupplier hasTimeLeft) {
+         org.spigotmc.WatchdogThread.tick(); // Spigot
+         long nanos = Util.getNanos();
+@@ -1556,19 +_,24 @@
+                 while ((task = this.processQueue.poll()) != null) {
+                     task.run();
+                 }
+-                for (final ServerLevel level : this.levels.values()) {
++                // Canvas start - Multithreaded Dimension Ticking
++                // We tick the chunk source on the levels respective thread
++                /* for (final ServerLevel level : this.levels.values()) {
+                     // process unloads
+                     level.getChunkSource().tick(() -> true, false);
+-                }
++                } */ // Canvas end
+                 // Paper end - avoid issues with certain tasks not processing during sleep
+                 this.server.spark.executeMainThreadTasks(); // Paper - spark
+                 this.tickConnection();
+                 this.server.spark.tickEnd(((double)(System.nanoTime() - lastTick) / 1000000D)); // Paper - spark
++                emptyTickSleeping = true; // Canvas
+                 return;
+             }
+         }
+ 
++        emptyTickSleeping = false; // Canvas
+         this.server.spark.tickStart(); // Paper - spark
++        this.tpsCalculator.doTick();
+         new com.destroystokyo.paper.event.server.ServerTickStartEvent(this.tickCount+1).callEvent(); // Paper - Server Tick Events
+         this.tickCount++;
+         this.tickRateManager.tick();
+@@ -1585,6 +_,7 @@
+         if (playerSaveInterval < 0) {
+             playerSaveInterval = autosavePeriod;
+         }
++        this.summonCommandManager.tickBatch(); // Canvas
+         profiler.push("save");
+         final boolean fullSave = autosavePeriod > 0 && this.tickCount % autosavePeriod == 0;
+         try {
+@@ -1664,11 +_,11 @@
+         }
+     }
+ 
+-    protected abstract SampleLogger getTickTimeLogger();
++    public abstract SampleLogger getTickTimeLogger(); // Canvas - protected -> public
+ 
+     public abstract boolean isTickTimeLoggingEnabled();
+ 
+-    private ServerStatus buildServerStatus() {
++    public ServerStatus buildServerStatus() { // Canvas - private -> public
+         ServerStatus.Players players = this.buildPlayerStatus();
+         return new ServerStatus(
+             io.papermc.paper.adventure.PaperAdventure.asVanilla(this.motd), // Paper - Adventure
+@@ -1701,11 +_,21 @@
+ 
+     protected void tickChildren(BooleanSupplier hasTimeLeft) {
+         ProfilerFiller profilerFiller = Profiler.get();
+-        this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing());
++        // Canvas start
++        // this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing());
++        for (final ServerPlayer player : this.playerList.players) {
++            if (player.connection.connection.getHoldingLevel() == null
++                /*holding level is null, meaning they havent been moved
++                    to a level thread yet, so we handle on main*/) {
++                player.connection.suspendFlushing();
++            }
++        }
++// Canvas end
+         this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
+         // Paper start - Folia scheduler API
+         ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler) org.bukkit.Bukkit.getGlobalRegionScheduler()).tick();
+-        getAllLevels().forEach(level -> {
++        // Canvas start - move to level threads
++        /* getAllLevels().forEach(level -> {
+             for (final net.minecraft.world.entity.Entity entity : level.getEntities().getAll()) {
+                 if (entity.isRemoved()) {
+                     continue;
+@@ -1715,7 +_,8 @@
+                     bukkit.taskScheduler.executeTick();
+                 }
+             }
+-        });
++        }); */
++        // Canvas end
+         // Paper end - Folia scheduler API
+         io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.CALLBACK_MANAGER.handleQueue(this.tickCount); // Paper
+         profilerFiller.push("commandFunctions");
+@@ -1730,7 +_,8 @@
+ 
+         // Send time updates to everyone, it will get the right time from the world the player is in.
+         // Paper start - Perf: Optimize time updates
+-        for (final ServerLevel level : this.getAllLevels()) {
++        // Canvas start - Multithreaded Dimension Ticking - moved to ServerLevel
++        /* for (final ServerLevel level : this.getAllLevels()) {
+             final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
+             final long dayTime = level.getDayTime();
+             long worldTime = level.getGameTime();
+@@ -1747,9 +_,9 @@
+                 entityplayer.connection.send(packet); // Add support for per player time
+                 // Paper end - Perf: Optimize time updates
+             }
+-        }
++        } */ // Canvas end
+ 
+-        this.isIteratingOverLevels = true; // Paper - Throw exception on world create while being ticked
++        /* this.isIteratingOverLevels = true; // Paper - Throw exception on world create while being ticked // Canvas start - Multithreaded Dimension Ticking
+         for (ServerLevel serverLevel : this.getAllLevels()) {
+             serverLevel.hasPhysicsEvent = org.bukkit.event.block.BlockPhysicsEvent.getHandlerList().getRegisteredListeners().length > 0; // Paper - BlockPhysicsEvent
+             serverLevel.hasEntityMoveEvent = io.papermc.paper.event.entity.EntityMoveEvent.getHandlerList().getRegisteredListeners().length > 0; // Paper - Add EntityMoveEvent
+@@ -1763,7 +_,7 @@
+                 this.synchronizeTime(serverLevel);
+                 profilerFiller.pop();
+             }
+-            // CraftBukkit end */
++            // CraftBukkit end // Canvas - compile error with craftbukkit comment
+ 
+             profilerFiller.push("tick");
+ 
+@@ -1779,7 +_,7 @@
+             profilerFiller.pop();
+             serverLevel.explosionDensityCache.clear(); // Paper - Optimize explosions
+         }
+-        this.isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
++        this.isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked */ // Canvas end
+ 
+         profilerFiller.popPush("connection");
+         this.tickConnection();
+@@ -1797,9 +_,15 @@
+ 
+         profilerFiller.popPush("send chunks");
+ 
+-        for (ServerPlayer serverPlayer : this.playerList.getPlayers()) {
+-            serverPlayer.connection.chunkSender.sendNextChunks(serverPlayer);
+-            serverPlayer.connection.resumeFlushing();
++        for (final ServerPlayer serverPlayer : this.playerList.players) {
++            // Canvas start
++            if (serverPlayer.connection.connection.getHoldingLevel() == null
++                /*holding level is null, meaning they havent been moved
++                    to a level thread yet, so we handle on main*/) {
++                serverPlayer.connection.chunkSender.sendNextChunks(serverPlayer);
++                serverPlayer.connection.resumeFlushing();
++            }
++            // Canvas end
+         }
+ 
+         profilerFiller.pop();
+@@ -1810,6 +_,12 @@
+     }
+ 
+     private void synchronizeTime(ServerLevel level) {
++        // Canvas start - not all worlds have the same time anymore due to tick isolation
++        if (true) {
++            level.syncTimeToPlayers();
++            return;
++        }
++        // Canvas end
+         this.playerList
+             .broadcastAll(
+                 new ClientboundSetTimePacket(level.getGameTime(), level.getDayTime(), level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT)),
+@@ -1822,7 +_,7 @@
+         profilerFiller.push("timeSync");
+ 
+         for (ServerLevel serverLevel : this.getAllLevels()) {
+-            this.synchronizeTime(serverLevel);
++            serverLevel.syncTimeToPlayers(); // Canvas
+         }
+ 
+         profilerFiller.pop();
+@@ -1863,6 +_,7 @@
+         Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
+         newLevels.put(level.dimension(), level);
+         this.levels = Collections.unmodifiableMap(newLevels);
++        getThreadedServer().loadLevel(level); // Canvas - add level to threaded context
+     }
+ 
+     public void removeLevel(ServerLevel level) {
+@@ -1870,6 +_,7 @@
+         Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
+         newLevels.remove(level.dimension());
+         this.levels = Collections.unmodifiableMap(newLevels);
++        getThreadedServer().stopLevel(level); // Canvas - remove level from threaded context
+     }
+     // CraftBukkit end
+ 
+@@ -2200,6 +_,13 @@
+     public Thread getRunningThread() {
+         return this.serverThread;
+     }
++    // Canvas start - Threaded Dimensions - Improve Watchdog
++
++    @Override
++    public String getName() {
++        return "server";
++    }
++    // Canvas end
+ 
+     public int getCompressionThreshold() {
+         return 256;
+@@ -2303,6 +_,7 @@
+         if (this.isSameThread()) {
+             this.managedBlock(completableFuture::isDone);
+         }
++        // Canvas end
+ 
+         return completableFuture;
+     }
+@@ -2497,7 +_,17 @@
+         return this.smoothedTickTimeMillis;
+     }
+ 
++    // Canvas start
++
++    @Override
++    public void skipTickWait() {
++        this.delayedTasksMaxNextTickTimeNanos = Util.getNanos();
++        this.nextTickTimeNanos = Util.getNanos();
++    }
++
++    @Override
+     public ServerTickRateManager tickRateManager() {
++    // Canvas end
+         return this.tickRateManager;
+     }
+ 
+@@ -2638,6 +_,12 @@
+     public static MinecraftServer getServer() {
+         return SERVER; // Paper
+     }
++    // Canvas start
++
++    public static ThreadedServer getThreadedServer() {
++        return THREADED_SERVER;
++    }
++    // Canvas end
+ 
+     @Deprecated
+     public static RegistryAccess getDefaultRegistryAccess() {
+@@ -2776,7 +_,12 @@
+         }
+     }
+ 
+-    public final java.util.concurrent.ExecutorService chatExecutor = java.util.concurrent.Executors.newCachedThreadPool(
++    // Canvas start - virtual threads
++    public final java.util.concurrent.ExecutorService chatExecutor =
++        Config.INSTANCE.virtualThreads.shouldReplaceChatExecutor() ?
++            Executors.newVirtualThreadPerTaskExecutor() :
++            java.util.concurrent.Executors.newCachedThreadPool(
++    // Canvas end
+         new com.google.common.util.concurrent.ThreadFactoryBuilder().setDaemon(true).setNameFormat("Async Chat Thread - #%d").setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(net.minecraft.server.MinecraftServer.LOGGER)).build()); // Paper
+     public final ChatDecorator improvedChatDecorator = new io.papermc.paper.adventure.ImprovedChatDecorator(this); // Paper - adventure
+ 
+@@ -2852,7 +_,7 @@
+         return ServerLinks.EMPTY;
+     }
+ 
+-    protected int pauseWhileEmptySeconds() {
++    public int pauseWhileEmptySeconds() { // Canvas - protected -> public
+         return 0;
+     }
+ 

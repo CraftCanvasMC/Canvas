@@ -1,0 +1,132 @@
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -6,12 +_,13 @@
+ import java.util.Collection;
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.concurrent.atomic.AtomicReference;
+ import java.util.function.Consumer;
+ import java.util.function.Predicate;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.server.level.MinecraftServerWorld;
+ import net.minecraft.CrashReport;
+ import net.minecraft.CrashReportCategory;
+-import net.minecraft.ReportedException;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.Holder;
+@@ -24,14 +_,13 @@
+ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.resources.ResourceLocation;
+-import io.papermc.paper.util.MCUtil;
+ import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.ServerTickRateManager;
+ import net.minecraft.server.level.FullChunkStatus;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+-import net.minecraft.util.AbortableIterationConsumer;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+@@ -103,7 +_,7 @@
+ import org.bukkit.event.block.BlockPhysicsEvent;
+ // CraftBukkit end
+ 
+-public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel, ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemEntityGetter { // Paper - rewrite chunk system // Paper - optimise collisions
++public abstract class Level extends MinecraftServerWorld implements LevelAccessor, AutoCloseable, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel, ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemEntityGetter { // Paper - rewrite chunk system // Paper - optimise collisions // Canvas - Multithreaded Dimension Ticking
+     public static final Codec<ResourceKey<Level>> RESOURCE_KEY_CODEC = ResourceKey.codec(Registries.DIMENSION);
+     public static final ResourceKey<Level> OVERWORLD = ResourceKey.create(Registries.DIMENSION, ResourceLocation.withDefaultNamespace("overworld"));
+     public static final ResourceKey<Level> NETHER = ResourceKey.create(Registries.DIMENSION, ResourceLocation.withDefaultNamespace("the_nether"));
+@@ -152,7 +_,7 @@
+     public boolean isBlockPlaceCancelled = false; // Paper - prevent calling cleanup logic when undoing a block place upon a cancelled BlockPlaceEvent
+     public Map<BlockPos, org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates = new java.util.LinkedHashMap<>(); // Paper
+     public Map<BlockPos, BlockEntity> capturedTileEntities = new java.util.LinkedHashMap<>(); // Paper - Retain block place order when capturing blockstates
+-    public List<net.minecraft.world.entity.item.ItemEntity> captureDrops;
++    public final java.util.concurrent.atomic.AtomicReference<List<net.minecraft.world.entity.item.ItemEntity>> captureDrops = new AtomicReference<>(); // Canvas
+     public final it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<SpawnCategory> ticksPerSpawnCategory = new it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<>();
+     // Paper start
+     public int wakeupInactiveRemainingAnimals;
+@@ -886,6 +_,7 @@
+         io.papermc.paper.configuration.WorldConfiguration> paperWorldConfigCreator, // Paper - create paper world config
+         java.util.concurrent.Executor executor // Paper - Anti-Xray
+     ) {
++        super(dimension.location().toString()); // Canvas
+         // Paper start - getblock optimisations - cache world height/sections
+         final DimensionType dimType = dimensionTypeRegistration.value();
+         this.minY = dimType.minY();
+@@ -1144,6 +_,12 @@
+ 
+     @Override
+     public boolean setBlock(BlockPos pos, BlockState state, int flags, int recursionLeft) {
++        // Canvas start
++        if (!this.level().isLevelThread()) { // only run set blocks on level threads
++            this.level().scheduleOnMain(() -> setBlock(pos, state, flags, recursionLeft));
++            return true;
++        }
++        // Canvas end
+         // CraftBukkit start - tree generation
+         if (this.captureTreeGeneration) {
+             // Paper start - Protect Bedrock and End Portal/Frames from being destroyed
+@@ -1503,7 +_,7 @@
+         (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
+     }
+ 
+-    protected void tickBlockEntities() {
++    public void tickBlockEntities() { // Canvas - protected -> public
+         ProfilerFiller profilerFiller = Profiler.get();
+         profilerFiller.push("blockEntities");
+         this.tickingBlockEntities = true;
+@@ -1524,7 +_,7 @@
+             // Spigot end
+             if (tickingBlockEntity.isRemoved()) {
+                 toRemove.add(tickingBlockEntity); // Paper - Fix MC-117075; use removeAll
+-            } else if (runsNormally && this.shouldTickBlocksAt(tickingBlockEntity.getPos())) {
++            } else if (runsNormally && this.shouldTickBlockPosFilterNull(this, tickingBlockEntity.getPos())) { // Canvas
+                 tickingBlockEntity.tick();
+                 // Paper start - rewrite chunk system
+                 if ((++tickedEntities & 7) == 0) {
+@@ -1539,6 +_,15 @@
+         profilerFiller.pop();
+         this.spigotConfig.currentPrimedTnt = 0; // Spigot
+     }
++    // Canvas start
++
++    private boolean shouldTickBlockPosFilterNull(Level instance, BlockPos pos) {
++        if (pos == null) {
++            return false;
++        }
++        return instance.shouldTickBlocksAt(pos);
++    }
++    // Canvas end
+ 
+     public <T extends Entity> void guardEntityTick(Consumer<T> consumerEntity, T entity) {
+         try {
+@@ -1783,8 +_,14 @@
+     }
+ 
+     @Override
+-    public void close() throws IOException {
+-        this.getChunkSource().close();
++    // Canvas start - Multithreaded Dimension Ticking
++    public void close() {
++        try {
++            this.getChunkSource().close();
++        } catch (IOException e) {
++            throw new RuntimeException(e);
++        }
++    // Canvas end
+     }
+ 
+     @Nullable
+@@ -1950,7 +_,7 @@
+         return this.levelData;
+     }
+ 
+-    public abstract TickRateManager tickRateManager();
++    public abstract ServerTickRateManager tickRateManager(); // Canvas
+ 
+     public float getThunderLevel(float partialTick) {
+         return Mth.lerp(partialTick, this.oThunderLevel, this.thunderLevel) * this.getRainLevel(partialTick);

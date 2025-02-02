@@ -1,0 +1,68 @@
+--- a/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
++++ b/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
+@@ -94,21 +_,54 @@
+                                 }
+                             }
+                             // Paper end - optimise POI access
+-                            Path path = findPathToPois(mob, set);
+-                            if (path != null && path.canReach()) {
+-                                BlockPos target = path.getTarget();
+-                                poiManager.getType(target).ifPresent(holder -> {
+-                                    poiManager.take(acquirablePois, (holder1, blockPos) -> blockPos.equals(target), target, 1);
+-                                    memoryAccessor.set(GlobalPos.of(level.dimension(), target));
+-                                    entityEventId.ifPresent(id -> level.broadcastEntityEvent(mob, id));
+-                                    map.clear();
+-                                    DebugPackets.sendPoiTicketCountPacket(level, target);
++                            // Canvas start - Async path processing
++                            if (io.canvasmc.canvas.Config.INSTANCE.pathfinding.enableThreadedPathfinding) {
++                                // await on path async
++                                Path possiblePath = findPathToPois(mob, set);
++
++                                // wait on the path to be processed
++                                io.canvasmc.canvas.entity.pathfinding.AsyncPathProcessor.awaitProcessing(possiblePath, level, path -> {
++                                    // read canReach check
++                                    if (path == null || !path.canReach()) {
++                                        for (Pair<Holder<PoiType>, BlockPos> pair : set) {
++                                            map.computeIfAbsent(
++                                                    pair.getSecond().asLong(),
++                                                    m -> new JitteredLinearRetry(mob.level().random, time)
++                                            );
++                                        }
++                                        return;
++                                    }
++                                    BlockPos blockPos = path.getTarget();
++                                    poiManager.getType(blockPos).ifPresent(poiType -> {
++                                        poiManager.take(acquirablePois,
++                                                (holder, blockPos2) -> blockPos2.equals(blockPos),
++                                                blockPos,
++                                                1
++                                        );
++                                        memoryAccessor.set(GlobalPos.of(level.dimension(), blockPos));
++                                        entityEventId.ifPresent(status -> level.broadcastEntityEvent(mob, status));
++                                        map.clear();
++                                        DebugPackets.sendPoiTicketCountPacket(level, blockPos);
++                                    });
+                                 });
+                             } else {
+-                                for (Pair<Holder<PoiType>, BlockPos> pair : set) {
+-                                    map.computeIfAbsent(pair.getSecond().asLong(), l -> new AcquirePoi.JitteredLinearRetry(level.random, time));
++                                Path path = findPathToPois(mob, set);
++                                if (path != null && path.canReach()) {
++                                    BlockPos target = path.getTarget();
++                                    poiManager.getType(target).ifPresent(holder -> {
++                                        poiManager.take(acquirablePois, (holder1, blockPos) -> blockPos.equals(target), target, 1);
++                                        memoryAccessor.set(GlobalPos.of(level.dimension(), target));
++                                        entityEventId.ifPresent(id -> level.broadcastEntityEvent(mob, id));
++                                        map.clear();
++                                        DebugPackets.sendPoiTicketCountPacket(level, target);
++                                    });
++                                } else {
++                                    for (Pair<Holder<PoiType>, BlockPos> pair : set) {
++                                        map.computeIfAbsent(pair.getSecond().asLong(), l -> new AcquirePoi.JitteredLinearRetry(level.random, time));
++                                    }
+                                 }
+                             }
++                            // Canvas end - Async path processing
+ 
+                             return true;
+                         }

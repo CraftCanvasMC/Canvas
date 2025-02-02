@@ -1,0 +1,185 @@
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -6,6 +_,8 @@
+ import com.google.common.collect.Sets;
+ import com.google.common.collect.ImmutableList.Builder;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.Config;
++import io.netty.util.internal.ConcurrentSet;
+ import it.unimi.dsi.fastutil.floats.FloatArraySet;
+ import it.unimi.dsi.fastutil.floats.FloatArrays;
+ import it.unimi.dsi.fastutil.floats.FloatSet;
+@@ -23,6 +_,7 @@
+ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
++import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.atomic.AtomicInteger;
+ import java.util.function.BiConsumer;
+ import java.util.function.Predicate;
+@@ -44,6 +_,7 @@
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.core.particles.BlockParticleOption;
+ import net.minecraft.core.particles.ParticleTypes;
++import net.minecraft.core.registries.BuiltInRegistries;
+ import net.minecraft.nbt.CompoundTag;
+ import net.minecraft.nbt.DoubleTag;
+ import net.minecraft.nbt.FloatTag;
+@@ -133,6 +_,7 @@
+ import net.minecraft.world.scores.PlayerTeam;
+ import net.minecraft.world.scores.ScoreHolder;
+ import net.minecraft.world.scores.Team;
++import org.jetbrains.annotations.NotNull;
+ import org.slf4j.Logger;
+ 
+ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess, ScoreHolder, ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity, ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity {  // Paper - rewrite chunk system // Paper - optimise entity tracker
+@@ -306,10 +_,12 @@
+     private int lastCrystalSoundPlayTick;
+     public boolean hasVisualFire;
+     @Nullable
+-    private BlockState inBlockState = null;
+-    private final List<Entity.Movement> movementThisTick = new ArrayList<>();
+-    private final Set<BlockState> blocksInside = new ReferenceArraySet<>();
+-    private final LongSet visitedBlocks = new LongOpenHashSet();
++    // Canvas start
++    private volatile BlockState inBlockState = null; // volatile
++    private final List<Entity.Movement> movementThisTick = new CopyOnWriteArrayList<>();
++    private final Set<BlockState> blocksInside = new ConcurrentSet<>();
++    private final Set<Long> visitedBlocks = new ConcurrentSet<>();
++    // Canvas end
+     // CraftBukkit start
+     public boolean forceDrops;
+     public boolean persist = true;
+@@ -344,6 +_,31 @@
+     public boolean isTemporarilyActive;
+     public long activatedImmunityTick = Integer.MIN_VALUE;
+     public @Nullable Boolean immuneToFire = null; // Purpur - Fire immune API
++    // Canvas start
++
++    public ResourceLocation getTypeLocation() {
++        EntityType<?> entityType = this.getType();
++        if (entityType.isCachedResource()) {
++            return entityType.cachedLocation();
++        }
++        entityType.cacheResource(BuiltInRegistries.ENTITY_TYPE.getKey(entityType));
++        return entityType.cachedLocation();
++    }
++
++    public Config.EntityMask getMask() {
++        EntityType<?> entityType = this.getType();
++        if (entityType.isCachedMask()) {
++            return entityType.getMask();
++        }
++        for (final Config.EntityMask entityMask : Config.INSTANCE.entityMasks) {
++            if (entityMask.type.equals(getTypeLocation())) {
++                entityType.cacheMask(entityMask);
++                break;
++            }
++        }
++        return entityType.getMask();
++    }
++    // Canvas end
+ 
+     public void inactiveTick() {
+     }
+@@ -1392,8 +_,14 @@
+     }
+ 
+     protected BlockPos getOnPos(float yOffset) {
++        // Canvas start
++        int i = Mth.floor(this.position.x);
++        int j = Mth.floor(this.position.y - (double) yOffset);
++        int k = Mth.floor(this.position.z);
++        BlockPos fallback = new BlockPos(i, j, k);
++        // Canvas end
+         if (this.mainSupportingBlockPos.isPresent() && this.level().getChunkIfLoadedImmediately(this.mainSupportingBlockPos.get()) != null) { // Paper - ensure no loads
+-            BlockPos blockPos = this.mainSupportingBlockPos.get();
++            BlockPos blockPos = this.mainSupportingBlockPos.orElse(fallback); // Canvas - fallback
+             if (!(yOffset > 1.0E-5F)) {
+                 return blockPos;
+             } else {
+@@ -1405,10 +_,7 @@
+                     : blockPos;
+             }
+         } else {
+-            int floor = Mth.floor(this.position.x);
+-            int floor1 = Mth.floor(this.position.y - yOffset);
+-            int floor2 = Mth.floor(this.position.z);
+-            return new BlockPos(floor, floor1, floor2);
++            return fallback; // Canvas - fallback
+         }
+     }
+ 
+@@ -1653,7 +_,8 @@
+ 
+     private void checkInsideBlocks(List<Entity.Movement> movements, Set<BlockState> blocksInside) {
+         if (this.isAffectedByBlocks()) {
+-            LongSet set = this.visitedBlocks;
++            level.scheduleOnMain(() -> { // Canvas
++            Set<Long> set = this.visitedBlocks; // Canvas
+ 
+             for (Entity.Movement movement : movements) {
+                 Vec3 vec3 = movement.from();
+@@ -1691,6 +_,7 @@
+             }
+ 
+             set.clear();
++            }); // Canvas
+         }
+     }
+ 
+@@ -3873,6 +_,11 @@
+     }
+ 
+     private Entity teleportCrossDimension(ServerLevel level, TeleportTransition teleportTransition) {
++        // Canvas start
++        if (this instanceof ServerPlayer player) {
++            player.serverLevel().notifyNewConnection(player.connection.connection);
++        }
++        // Canvas end
+         List<Entity> passengers = this.getPassengers();
+         List<Entity> list = new ArrayList<>(passengers.size());
+         this.ejectPassengers();
+@@ -4737,12 +_,12 @@
+         return this.blockPosition;
+     }
+ 
+-    public BlockState getInBlockState() {
++    public synchronized BlockState getInBlockState() { // Canvas
+         if (this.inBlockState == null) {
+             this.inBlockState = this.level().getBlockState(this.blockPosition());
+         }
+ 
+-        return this.inBlockState;
++        return this.inBlockState == null ? Blocks.AIR.defaultBlockState() : this.inBlockState; // Canvas - ensure not null
+     }
+ 
+     public ChunkPos chunkPosition() {
+@@ -4838,6 +_,18 @@
+         this.setPosRaw(x, y, z, false);
+     }
+     public final void setPosRaw(double x, double y, double z, boolean forceBoundingBoxUpdate) {
++        // Canvas start - ensure section status is caught
++        if (this.updatingSectionStatus) {
++            final double fx = x;
++            final double fy = y;
++            final double fz = z;
++            ((ServerLevel)this.level()).chunkSource.mainThreadProcessor.schedule(() -> {
++                this.setPosRaw(fx, fy, fz, forceBoundingBoxUpdate);
++            });
++            return;
++        }
++        // Canvas end
++        // Paper end - Block invalid positions and bounding box
+         // Paper start - rewrite chunk system
+         if (this.updatingSectionStatus) {
+             LOGGER.error(
+@@ -4979,7 +_,7 @@
+     public final void setRemoved(Entity.RemovalReason removalReason, org.bukkit.event.entity.EntityRemoveEvent.Cause cause) {
+         // Paper start - rewrite chunk system
+         if (!((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this.level).moonrise$getEntityLookup().canRemoveEntity((Entity)(Object)this)) {
+-            LOGGER.warn("Entity " + this + " is currently prevented from being removed from the world since it is processing section status updates", new Throwable());
++            // LOGGER.warn("Entity " + this + " is currently prevented from being removed from the world since it is processing section status updates", new Throwable()); // Canvas
+             return;
+         }
+         // Paper end - rewrite chunk system

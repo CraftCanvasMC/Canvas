@@ -1,0 +1,139 @@
+--- a/net/minecraft/world/level/material/FlowingFluid.java
++++ b/net/minecraft/world/level/material/FlowingFluid.java
+@@ -6,12 +_,15 @@
+ import it.unimi.dsi.fastutil.shorts.Short2BooleanOpenHashMap;
+ import it.unimi.dsi.fastutil.shorts.Short2ObjectMap;
+ import it.unimi.dsi.fastutil.shorts.Short2ObjectOpenHashMap;
++import java.util.ArrayDeque;
++import java.util.Deque;
+ import java.util.Map;
+ import java.util.Map.Entry;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.BlockTags;
++import net.minecraft.tags.FluidTags;
+ import net.minecraft.world.level.BlockGetter;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.LevelAccessor;
+@@ -20,6 +_,7 @@
+ import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.level.block.DoorBlock;
+ import net.minecraft.world.level.block.IceBlock;
++import net.minecraft.world.level.block.LiquidBlock;
+ import net.minecraft.world.level.block.LiquidBlockContainer;
+ import net.minecraft.world.level.block.state.BlockState;
+ import net.minecraft.world.level.block.state.StateDefinition;
+@@ -199,6 +_,7 @@
+                 BlockPos blockPos = pos.relative(direction);
+                 final BlockState blockStateIfLoaded = level.getBlockStateIfLoaded(blockPos); // Paper - Prevent chunk loading from fluid flowing
+                 if (blockStateIfLoaded == null) continue; // Paper - Prevent chunk loading from fluid flowing
++                if (!shouldSpreadLiquid(level, blockPos, blockStateIfLoaded)) continue; // Canvas - ensure lava interactions are ticked
+                 // CraftBukkit start
+                 org.bukkit.block.Block source = org.bukkit.craftbukkit.block.CraftBlock.at(level, pos);
+                 org.bukkit.event.block.BlockFromToEvent event = new org.bukkit.event.block.BlockFromToEvent(source, org.bukkit.craftbukkit.block.CraftBlock.notchToBlockFace(direction));
+@@ -213,6 +_,39 @@
+         }
+     }
+ 
++    // Canvas start
++    private boolean shouldSpreadLiquid(Level level, BlockPos pos, BlockState state) {
++        if (state.is(Blocks.LAVA)) {
++            boolean isSoulSoil = level.getBlockState(pos.below()).is(Blocks.SOUL_SOIL);
++
++            for (Direction direction : LiquidBlock.POSSIBLE_FLOW_DIRECTIONS) {
++                BlockPos blockPos = pos.relative(direction.getOpposite());
++                if (level.getFluidState(blockPos).is(FluidTags.WATER)) {
++                    Block block = level.getFluidState(pos).isSource() ? Blocks.OBSIDIAN : Blocks.COBBLESTONE;
++                    if (org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(level, pos, block.defaultBlockState())) {
++                        this.fizz(level, pos);
++                        level.setBlock(pos, block.defaultBlockState(), 3);
++                    }
++                    return false;
++                }
++
++                if (isSoulSoil && level.getBlockState(blockPos).is(Blocks.BLUE_ICE)) {
++                    if (org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(level, pos, Blocks.BASALT.defaultBlockState())) {
++                        this.fizz(level, pos);
++                    }
++                    return false;
++                }
++            }
++        }
++
++        return true;
++    }
++
++    private void fizz(LevelAccessor level, BlockPos pos) {
++        level.levelEvent(1501, pos, 0);
++    }
++
++    // Canvas end
+     protected FluidState getNewLiquid(ServerLevel level, BlockPos pos, BlockState state) {
+         int i = 0;
+         int i1 = 0;
+@@ -341,32 +_,46 @@
+     protected void beforeDestroyingBlock(LevelAccessor level, BlockPos pos, BlockState state, BlockPos source) { beforeDestroyingBlock(level, pos, state); } // Paper - Add BlockBreakBlockEvent
+     protected abstract void beforeDestroyingBlock(LevelAccessor level, BlockPos pos, BlockState state);
+ 
++    // Canvas start
+     protected int getSlopeDistance(LevelReader level, BlockPos pos, int depth, Direction direction, BlockState state, FlowingFluid.SpreadContext spreadContext) {
+-        int i = 1000;
+-
+-        for (Direction direction1 : Direction.Plane.HORIZONTAL) {
+-            if (direction1 != direction) {
+-                BlockPos blockPos = pos.relative(direction1);
+-                BlockState blockState = spreadContext.getBlockStateIfLoaded(blockPos); // Paper - Prevent chunk loading from fluid flowing
+-                if (blockState == null) continue; // Paper - Prevent chunk loading from fluid flowing
+-                FluidState fluidState = blockState.getFluidState();
+-                if (this.canPassThrough(level, this.getFlowing(), pos, state, direction1, blockPos, blockState, fluidState)) {
+-                    if (spreadContext.isHole(blockPos)) {
+-                        return depth;
++        int slopeFindDistance = this.getSlopeFindDistance(level);
++        int minDistance = slopeFindDistance;
++
++        Deque<Node> stack = new ArrayDeque<>();
++        stack.push(new Node(pos, depth, direction));
++
++        while (!stack.isEmpty()) {
++            Node current = stack.pop();
++            BlockPos currentPos = current.pos;
++            int currentDepth = current.depth;
++            Direction fromDirection = current.direction;
++
++            for (Direction dir : Direction.Plane.HORIZONTAL) {
++                if (dir == fromDirection) continue;
++
++                BlockPos neighborPos = currentPos.relative(dir);
++                BlockState neighborState = spreadContext.getBlockStateIfLoaded(neighborPos);
++                if (neighborState == null) continue; // Prevent chunk loading
++
++                FluidState fluidState = neighborState.getFluidState();
++                if (this.canPassThrough(level, this.getFlowing(), currentPos, state, dir, neighborPos, neighborState, fluidState)) {
++                    if (spreadContext.isHole(neighborPos)) {
++                        return currentDepth;
+                     }
+ 
+-                    if (depth < this.getSlopeFindDistance(level)) {
+-                        int slopeDistance = this.getSlopeDistance(level, blockPos, depth + 1, direction1.getOpposite(), blockState, spreadContext);
+-                        if (slopeDistance < i) {
+-                            i = slopeDistance;
+-                        }
++                    if (currentDepth + 1 < slopeFindDistance && currentDepth + 1 < minDistance) {
++                        stack.push(new Node(neighborPos, currentDepth + 1, dir.getOpposite()));
+                     }
+                 }
+             }
+         }
+ 
+-        return i;
+-    }
++        return minDistance;
++    }
++
++    private record Node(BlockPos pos, int depth, Direction direction) {
++    }
++    // Canvas end
+ 
+     boolean isWaterHole(BlockGetter level, BlockPos pos, BlockState state, BlockPos belowPos, BlockState belowState) {
+         return canPassThroughWall(Direction.DOWN, level, pos, state, belowPos, belowState)

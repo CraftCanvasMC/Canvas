@@ -1,0 +1,654 @@
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -5,6 +_,12 @@
+ import com.mojang.datafixers.DataFixer;
+ import com.mojang.datafixers.util.Pair;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.server.ThreadedServer;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.util.QueuedTaskScheduler;
++import io.canvasmc.canvas.util.TPSCalculator;
++import io.canvasmc.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
++import io.netty.util.internal.ConcurrentSet;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.LongSet;
+@@ -18,16 +_,26 @@
+ import java.io.Writer;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
++import java.io.File;
+ import java.util.ArrayList;
++import java.util.Arrays;
++import java.util.EnumSet;
++import java.util.Iterator;
++import java.util.LinkedList;
+ import java.util.Collection;
++import java.util.Collections;
+ import java.util.Comparator;
+ import java.util.List;
+ import java.util.Locale;
+ import java.util.Objects;
+ import java.util.Optional;
++import java.util.Queue;
+ import java.util.Set;
+ import java.util.UUID;
++import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.Executor;
++import java.util.concurrent.atomic.AtomicBoolean;
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Function;
+ import java.util.function.Predicate;
+@@ -35,20 +_,27 @@
+ import java.util.stream.Stream;
+ import javax.annotation.Nonnull;
+ import javax.annotation.Nullable;
++import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+ import net.minecraft.CrashReport;
+ import net.minecraft.CrashReportCategory;
+ import net.minecraft.ReportType;
++import net.minecraft.ReportedException;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.HolderSet;
++import net.minecraft.core.RegistryAccess;
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.core.particles.ParticleOptions;
+ import net.minecraft.core.registries.BuiltInRegistries;
+ import net.minecraft.core.registries.Registries;
++import net.minecraft.network.Connection;
++import net.minecraft.network.PacketSendListener;
+ import net.minecraft.network.chat.Component;
++import net.minecraft.network.chat.MutableComponent;
+ import net.minecraft.network.protocol.Packet;
++import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+ import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
+ import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
+ import net.minecraft.network.protocol.game.ClientboundDamageEventPacket;
+@@ -57,7 +_,9 @@
+ import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
+ import net.minecraft.network.protocol.game.ClientboundLevelEventPacket;
+ import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
++import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
+ import net.minecraft.network.protocol.game.ClientboundSetDefaultSpawnPositionPacket;
++import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
+ import net.minecraft.network.protocol.game.ClientboundSoundEntityPacket;
+ import net.minecraft.network.protocol.game.ClientboundSoundPacket;
+ import net.minecraft.network.protocol.game.DebugPackets;
+@@ -65,7 +_,10 @@
+ import net.minecraft.resources.ResourceLocation;
+ import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.ServerScoreboard;
++import net.minecraft.server.ServerTickRateManager;
++import net.minecraft.server.dedicated.DedicatedServer;
+ import net.minecraft.server.level.progress.ChunkProgressListener;
++import net.minecraft.server.network.ServerConnectionListener;
+ import net.minecraft.server.players.SleepStatus;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundSource;
+@@ -79,6 +_,7 @@
+ import net.minecraft.util.datafix.DataFixTypes;
+ import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.ProfilerFiller;
++import net.minecraft.util.thread.BlockableEventLoop;
+ import net.minecraft.util.valueproviders.IntProvider;
+ import net.minecraft.util.valueproviders.UniformInt;
+ import net.minecraft.world.DifficultyInstance;
+@@ -105,6 +_,7 @@
+ import net.minecraft.world.entity.raid.Raid;
+ import net.minecraft.world.entity.raid.Raids;
+ import net.minecraft.world.flag.FeatureFlagSet;
++import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.alchemy.PotionBrewing;
+ import net.minecraft.world.item.crafting.RecipeManager;
+ import net.minecraft.world.level.BlockEventData;
+@@ -179,12 +_,13 @@
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private static final int EMPTY_TIME_NO_TICK = 300;
+     private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
+-    final List<ServerPlayer> players = Lists.newArrayList();
++    final List<ServerPlayer> players = Lists.newCopyOnWriteArrayList(); // Canvas
+     public final ServerChunkCache chunkSource;
+     private final MinecraftServer server;
+     public final net.minecraft.world.level.storage.PrimaryLevelData serverLevelData; // CraftBukkit - type
++    public ItemStack ominousBanner; // Canvas
+     private int lastSpawnChunkRadius;
+-    final EntityTickList entityTickList = new EntityTickList();
++    public final EntityTickList entityTickList = new EntityTickList(); // Canvas
+     // Paper - rewrite chunk system
+     private final GameEventDispatcher gameEventDispatcher;
+     public boolean noSave;
+@@ -194,22 +_,23 @@
+     private final LevelTicks<Block> blockTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
+     private final LevelTicks<Fluid> fluidTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
+     private final PathTypeCache pathTypesByPosCache = new PathTypeCache();
+-    final Set<Mob> navigatingMobs = new ObjectOpenHashSet<>();
+-    volatile boolean isUpdatingNavigations;
++    final Set<Mob> navigatingMobs = new ConcurrentSet<>(); // Canvas
++    final AtomicBoolean isUpdatingNavigations = new AtomicBoolean(false); // Canvas
+     protected final Raids raids;
+-    private final ObjectLinkedOpenHashSet<BlockEventData> blockEvents = new ObjectLinkedOpenHashSet<>();
+-    private final List<BlockEventData> blockEventsToReschedule = new ArrayList<>(64);
++    private final List<BlockEventData> blockEvents = new CopyOnWriteArrayList<>(); // Canvas
++    private final Queue<BlockEventData> blockEventsToReschedule = new ConcurrentLinkedQueue<>(); // Canvas
+     private boolean handlingTick;
+     private final List<CustomSpawner> customSpawners;
+     @Nullable
+     private EndDragonFight dragonFight;
+-    final Int2ObjectMap<EnderDragonPart> dragonParts = new Int2ObjectOpenHashMap<>();
++    final Int2ObjectMap<EnderDragonPart> dragonParts = new Int2ObjectConcurrentHashMap<>(); // Canvas
+     private final StructureManager structureManager;
+     private final StructureCheck structureCheck;
+     private final boolean tickTime;
+     private double preciseTime; // Purpur - Configurable daylight cycle
+     private boolean forceTime; // Purpur - Configurable daylight cycle
+     private final RandomSequences randomSequences;
++    public final QueuedTaskScheduler taskScheduler = new QueuedTaskScheduler(); // Canvas
+ 
+     // CraftBukkit start
+     public final LevelStorageSource.LevelStorageAccess levelStorageAccess;
+@@ -218,6 +_,11 @@
+     public boolean hasEntityMoveEvent; // Paper - Add EntityMoveEvent
+     private final alternate.current.wire.WireHandler wireHandler = new alternate.current.wire.WireHandler(this); // Paper - optimize redstone (Alternate Current)
+     public boolean hasRidableMoveEvent = false; // Purpur - Ridables
++    // Canvas start - Threaded Dimensions
++    private int emptyTicks;
++    private int sendAllPlayerInfoIn;
++    public TPSCalculator tpsCalculator = new TPSCalculator();
++    // Canvas end
+ 
+     public LevelChunk getChunkIfLoaded(int x, int z) {
+         return this.chunkSource.getChunkAtIfLoadedImmediately(x, z); // Paper - Use getChunkIfLoadedImmediately
+@@ -702,6 +_,7 @@
+         // Paper end - rewrite chunk system
+         this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
+         this.preciseTime = this.serverLevelData.getDayTime(); // Purpur - Configurable daylight cycle
++        this.ominousBanner = Objects.requireNonNullElse(this.registryAccess(), RegistryAccess.EMPTY).lookup(Registries.BANNER_PATTERN).map(Raid::getOminousBannerInstance).orElse(null); // Canvas
+     }
+ 
+     // Paper start
+@@ -733,8 +_,137 @@
+     public StructureManager structureManager() {
+         return this.structureManager;
+     }
+-
+-    public void tick(BooleanSupplier hasTimeLeft) {
++    // Canvas start - Multithreaded Dimension Ticking
++    private final List<Connection> activeConnections = new ObjectArrayList<>();
++    private final Object lock = new Object();
++
++    public void notifyNewConnection(Connection connection) {
++        synchronized (lock) {
++            activeConnections.add(connection);
++        }
++    }
++    public void removeConnection(Connection connection) {
++        synchronized (lock)  {
++            activeConnections.remove(connection);
++        }
++    }
++
++    private boolean tickEmptyLevel() {
++        if (this.server.isEmptyTickSkipping()) {
++            return true;
++        }
++        int serverEmptySecondsLimit = this.server.pauseWhileEmptySeconds() * 20;
++        if (serverEmptySecondsLimit > 0 && Config.INSTANCE.emptySleepPerWorlds) {
++            if (this.players.isEmpty() && !this.tickRateManager.isSprinting() && this.server.pluginsBlockingSleep.isEmpty()) {
++                ++this.emptyTicks;
++            } else {
++                this.emptyTicks = 0;
++            }
++
++            if (this.emptyTicks >= serverEmptySecondsLimit) {
++                if (this.emptyTicks == serverEmptySecondsLimit) {
++                    MinecraftServer.LOGGER.info("Level empty for {} seconds, pausing", this.server.pauseWhileEmptySeconds());
++                }
++                return true;
++            }
++        }
++        return false;
++    }
++
++    protected void tickConnection() {
++        for (ServerPlayer player : this.players) {
++            player.connection.suspendFlushing();
++        }
++        Iterator<Connection> iterator = this.activeConnections.iterator();
++        while (iterator.hasNext()) {
++            Connection networkmanager = iterator.next();
++
++            if (!networkmanager.isConnecting()) {
++                if (networkmanager.isConnected()) {
++                    try {
++                        networkmanager.tick();
++                    } catch (Exception exception) {
++                        if (networkmanager.isMemoryConnection()) {
++                            throw new ReportedException(CrashReport.forThrowable(exception, "Ticking memory connection"));
++                        }
++
++                        LOGGER.warn("Failed to handle packet for {}", networkmanager.getLoggableAddress(this.server.logIPs()), exception);
++                        MutableComponent ichatmutablecomponent = Component.literal("Internal server error");
++
++                        networkmanager.send(new ClientboundDisconnectPacket(ichatmutablecomponent), PacketSendListener.thenRun(() -> {
++                            networkmanager.disconnect(ichatmutablecomponent);
++                        }));
++                        networkmanager.setReadOnly();
++                    }
++                } else {
++                    if (networkmanager.preparing) continue;
++                    iterator.remove();
++                    networkmanager.handleDisconnection();
++                }
++            }
++        }
++    }
++
++    public void syncTimeToPlayers() {
++        ClientboundSetTimePacket timePacket = new ClientboundSetTimePacket(getGameTime(), getDayTime(), getGameRules().getBoolean(GameRules.RULE_DAYLIGHT));
++        for (final ServerPlayer player : this.players) {
++            if (player.level() == this) {
++                player.connection.send(timePacket);
++            }
++        }
++    }
++
++    public void squeezeTasks() {
++        // this.runAllTasks();
++    }
++
++    public void tickPlayerList() {
++        if (!Config.INSTANCE.runPlayerListTickOnIndependentLevel) return;
++        if (++this.sendAllPlayerInfoIn > 600) {
++            for (int i = 0; i < this.players.size(); ++i) {
++                final ServerPlayer target = this.players.get(i);
++
++                target.connection.send(new ClientboundPlayerInfoUpdatePacket(EnumSet.of(ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY), this.getServer().getPlayerList().
++                    players.stream().filter(input -> target.getBukkitEntity().canSee(input.getBukkitEntity())).collect(Collectors.toList())));
++            }
++            this.sendAllPlayerInfoIn = 0;
++        }
++
++    }
++
++    public void tick(BooleanSupplier hasTimeLeft, int tickCount) {
++        this.tickRateManager.tick();
++        this.tickConnection();
++
++        if (this.tickEmptyLevel()) {
++            return;
++        }
++        this.tpsCalculator.doTick();
++        // Mark handling tick AFTER ticking empty level check
++        this.handlingTick = true;
++
++        for (final Entity entity : this.getEntities().getAll()) {
++            if (entity.isRemoved()) {
++                continue;
++            }
++            final org.bukkit.craftbukkit.entity.CraftEntity bukkit = entity.getBukkitEntityRaw();
++            if (bukkit != null) {
++                bukkit.taskScheduler.executeTick();
++            }
++        }
++        chunkSource.tick(() -> true, false);
++
++        if (this.tickCount % Config.INSTANCE.timeResyncInterval == 0) {
++            // Resync time every configurable amount of ticks
++            syncTimeToPlayers();
++        }
++
++        hasPhysicsEvent = org.bukkit.event.block.BlockPhysicsEvent.getHandlerList().getRegisteredListeners().length > 0;
++        hasEntityMoveEvent = io.papermc.paper.event.entity.EntityMoveEvent.getHandlerList().getRegisteredListeners().length > 0;
++        // net.minecraft.world.level.block.entity.HopperBlockEntity.skipHopperEvents = paperConfig().hopper.disableMoveEvent || org.bukkit.event.inventory.InventoryMoveItemEvent.getHandlerList().getRegisteredListeners().length == 0;
++        updateLagCompensationTick();
++        hasRidableMoveEvent = org.purpurmc.purpur.event.entity.RidableMoveEvent.getHandlerList().getRegisteredListeners().length > 0;
++    // Canvas end
+         ProfilerFiller profilerFiller = Profiler.get();
+         this.handlingTick = true;
+         TickRateManager tickRateManager = this.tickRateManager();
+@@ -778,6 +_,7 @@
+             this.tickTime();
+         }
+ 
++        this.squeezeTasks(); // Canvas
+         profilerFiller.push("tickPending");
+         if (!this.isDebug() && runsNormally) {
+             long l = this.getGameTime();
+@@ -795,6 +_,7 @@
+ 
+         profilerFiller.popPush("chunkSource");
+         this.getChunkSource().tick(hasTimeLeft, true);
++        this.squeezeTasks(); // Canvas
+         profilerFiller.popPush("blockEvents");
+         if (runsNormally) {
+             this.runBlockEvents();
+@@ -816,9 +_,15 @@
+             }
+ 
+             io.papermc.paper.entity.activation.ActivationRange.activateEntities(this); // Paper - EAR
+-            this.entityTickList
+-                .forEach(
+-                    entity -> {
++            /* // Canvas start // - threaded entity ticking
++            for (final Entity entity : this.entityTickList.entities) {
++                if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
++                    int lived = entity.tickCount;
++                    if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
++                        continue;
++                    }
++                }
++            // Canvas end
+                         if (!entity.isRemoved()) {
+                             if (!tickRateManager.isEntityFrozen(entity)) {
+                                 profilerFiller.push("checkDespawn");
+@@ -841,7 +_,8 @@
+                             }
+                         }
+                     }
+-                );
++            */ // Canvas // - threaded entity ticking
++            this.tickEntities(false); // Canvas - threaded entity ticking
+             profilerFiller.pop();
+             this.tickBlockEntities();
+         }
+@@ -849,7 +_,55 @@
+         profilerFiller.push("entityManagement");
+         // Paper - rewrite chunk system
+         profilerFiller.pop();
+-    }
++        // Canvas start - Threaded Dimensions
++        tickPlayerList();
++        for (ServerPlayer player : this.players) {
++            player.connection.chunkSender.sendNextChunks(player);
++            player.connection.resumeFlushing();
++        }
++        explosionDensityCache.clear();
++        this.runAllTasks();
++        // Canvas end
++    }
++    // Canvas start - threaded entity ticking
++
++    public void tickEntities(boolean isThreaded) {
++        if (Config.INSTANCE.threadedEntityTicking && !isThreaded) {
++            return;
++        }
++        this.entityTickList.forEach((entity) -> {
++            if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
++                int lived = entity.tickCount;
++                if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
++                    return;
++                }
++            }
++            if (!entity.isRemoved()) {
++                if (!tickRateManager.isEntityFrozen(entity)) {
++                    entity.checkDespawn();
++                    Entity vehicle = entity.getVehicle();
++                    if (vehicle != null) {
++                        if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) {
++                            return;
++                        }
++
++                        entity.stopRiding();
++                    }
++
++                    try {
++                        this.tickNonPassenger(entity);
++                    } catch (Throwable var6) {
++                        final String msg = String.format("Entity threw exception at %s:%s,%s,%s", entity.level().getWorld().getName(), entity.getX(), entity.getY(), entity.getZ());
++                        MinecraftServer.LOGGER.error(msg, var6);
++                        getCraftServer().getPluginManager().callEvent(new com.destroystokyo.paper.event.server.ServerExceptionEvent(new com.destroystokyo.paper.exception.ServerInternalException(msg, var6)));
++                        entity.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DISCARD);
++                    }
++                    this.moonrise$midTickTasks();
++                }
++            }
++        });
++    }
++    // Canvas end
+ 
+     @Override
+     public boolean shouldTickBlocksAt(long chunkPos) {
+@@ -874,10 +_,17 @@
+                     this.setDayTime(this.preciseTime);
+                 } else
+                 // Purpur end - Configurable daylight cycle
+-                this.setDayTime(this.levelData.getDayTime() + 1L);
++                this.setDayTime(lagCompensation(this.levelData.getDayTime()) + 1L); // Canvas
+             }
+         }
+     }
++    // Canvas start
++
++    private long lagCompensation(long original) {
++        if (!Config.INSTANCE.lagCompensation.enabled || !Config.INSTANCE.lagCompensation.timeAcceleration) return original;
++        return original + this.tpsCalculator.applicableMissedTicks();
++    }
++    // Canvas end
+ 
+     public void setDayTime(long time) {
+         this.serverLevelData.setDayTime(time);
+@@ -1254,6 +_,7 @@
+                 player.updateWeather(this.oRainLevel, this.rainLevel, this.oThunderLevel, this.thunderLevel);
+             }
+         }
++        // Canvas end
+         // CraftBukkit end
+     }
+ 
+@@ -1483,6 +_,7 @@
+ 
+             return AbortableIterationConsumer.Continuation.CONTINUE;
+         });
++        this.syncTimeToPlayers(); // Canvas - ensure time resync
+     }
+ 
+     public List<? extends EnderDragon> getDragons() {
+@@ -1589,8 +_,8 @@
+         } else {
+             if (entity instanceof net.minecraft.world.entity.item.ItemEntity itemEntity && itemEntity.getItem().isEmpty()) return false; // Paper - Prevent empty items from being added
+             // Paper start - capture all item additions to the world
+-            if (captureDrops != null && entity instanceof net.minecraft.world.entity.item.ItemEntity) {
+-                captureDrops.add((net.minecraft.world.entity.item.ItemEntity) entity);
++            if (captureDrops.get() != null && entity instanceof net.minecraft.world.entity.item.ItemEntity) { // Canvas
++                captureDrops.get().add((net.minecraft.world.entity.item.ItemEntity) entity); // Canvas
+                 return true;
+             }
+             // Paper end - capture all item additions to the world
+@@ -1762,10 +_,36 @@
+         // Paper end - Prevent GameEvents being fired from unloaded chunks
+         this.gameEventDispatcher.post(gameEvent, pos, context);
+     }
++    // Canvas start
++    private final Set<PathNavigation> activeNavigations = new ConcurrentSet<>();
++
++    private Iterator<Mob> getActiveListeners(Set<Mob> set) {
++        return Collections.emptyIterator();
++    }
++
++    public void lithium$setNavigationActive(Mob mobEntity) {
++        Set<PathNavigation> activeNavigations = (this).activeNavigations;
++        activeNavigations.add((mobEntity).lithium$getRegisteredNavigation());
++    }
++
++    public void lithium$setNavigationInactive(Mob mobEntity) {
++        Set<PathNavigation> activeNavigations = (this).activeNavigations;
++        activeNavigations.remove((mobEntity).lithium$getRegisteredNavigation());
++    }
++
++    private void updateActiveListeners(BlockPos pos, List<PathNavigation> list) {
++        Set<PathNavigation> activeNavigations = (this).activeNavigations;
++        for (PathNavigation entityNavigation : activeNavigations) {
++            if (entityNavigation.shouldRecomputePath(pos)) {
++                list.add(entityNavigation);
++            }
++        }
++    }
++    // Canvas end
+ 
+     @Override
+     public void sendBlockUpdated(BlockPos pos, BlockState oldState, BlockState newState, int flags) {
+-        if (this.isUpdatingNavigations) {
++        if (this.isUpdatingNavigations.get() && false) { // Canvas
+             String string = "recursive call to sendBlockUpdated";
+             Util.logAndPauseIfInIde("recursive call to sendBlockUpdated", new IllegalStateException("recursive call to sendBlockUpdated"));
+         }
+@@ -1779,7 +_,13 @@
+             List<PathNavigation> list = new ObjectArrayList<>();
+ 
+             try { // Paper - catch CME see below why
+-            for (Mob mob : this.navigatingMobs) {
++                // Canvas start
++                Iterator<Mob> iterator = getActiveListeners(this.navigatingMobs);
++                updateActiveListeners(pos, list);
++
++                while (iterator.hasNext()) {
++                    Mob mob = iterator.next();
++                // Canvas end
+                 PathNavigation navigation = mob.getNavigation();
+                 if (navigation.shouldRecomputePath(pos)) {
+                     list.add(navigation);
+@@ -1796,13 +_,13 @@
+             // Paper end - catch CME see below why
+ 
+             try {
+-                this.isUpdatingNavigations = true;
++                this.isUpdatingNavigations.set(true); // Canvas
+ 
+                 for (PathNavigation pathNavigation : list) {
+                     pathNavigation.recomputePath();
+                 }
+             } finally {
+-                this.isUpdatingNavigations = false;
++                this.isUpdatingNavigations.set(false); // Canvas
+             }
+         }
+         } // Paper - option to disable pathfinding updates
+@@ -2157,8 +_,8 @@
+     }
+ 
+     @Override
+-    public TickRateManager tickRateManager() {
+-        return this.server.tickRateManager();
++    public ServerTickRateManager tickRateManager() { // Canvas
++        return this.tickRateManager; // Canvas
+     }
+ 
+     @Override
+@@ -2418,7 +_,7 @@
+         CsvOutput csvOutput = CsvOutput.builder().addColumn("x").addColumn("y").addColumn("z").addColumn("type").build(output);
+ 
+         for (TickingBlockEntity tickingBlockEntity : this.blockEntityTickers) {
+-            BlockPos pos = tickingBlockEntity.getPos();
++            BlockPos pos = getPosOrOrigin(tickingBlockEntity); // Canvas
+             csvOutput.writeRow(pos.getX(), pos.getY(), pos.getZ(), tickingBlockEntity.getType());
+         }
+     }
+@@ -2472,6 +_,16 @@
+     public ServerLevel getLevel() {
+         return this;
+     }
++    // Canvas start
++
++    private BlockPos getPosOrOrigin(TickingBlockEntity instance) {
++        BlockPos pos = instance.getPos();
++        if (pos == null) {
++            return BlockPos.ZERO;
++        }
++        return pos;
++    }
++    // Canvas end
+ 
+     @VisibleForTesting
+     public String getWatchdogStats() {
+@@ -2538,7 +_,7 @@
+     }
+ 
+     public void onStructureStartsAvailable(ChunkAccess chunk) {
+-        this.server.execute(() -> this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts()));
++        ((BlockableEventLoop<?>) (MinecraftServer.getThreadedServer().hasStarted() ? this : this.server)).execute(() -> this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts()));
+     }
+ 
+     public PathTypeCache getPathTypeCache() {
+@@ -2546,7 +_,7 @@
+     }
+ 
+     @Override
+-    public void close() throws IOException {
++    public void close() { // Canvas
+         super.close();
+         // Paper - rewrite chunk system
+     }
+@@ -2657,6 +_,35 @@
+     // Paper end - optimize redstone (Alternate Current)
+ 
+     final class EntityCallbacks implements LevelCallback<Entity> {
++        // Canvas start
++        private ServerLevel outer;
++
++        EntityCallbacks() {
++            this.outer = ServerLevel.this;
++        }
++
++        private boolean startListeningOnEntityLoad(Set<Mob> set, Object mobEntityObj) {
++            Mob mobEntity = (Mob) mobEntityObj;
++            PathNavigation navigation = mobEntity.getNavigation();
++            (mobEntity).lithium$setRegisteredToWorld(navigation);
++            if (navigation.getPath() != null) {
++                (this.outer).lithium$setNavigationActive(mobEntity);
++            }
++            return set.add(mobEntity);
++        }
++
++        private boolean stopListeningOnEntityUnload(Set<Mob> set, Object mobEntityObj) {
++            Mob mobEntity = (Mob) mobEntityObj;
++            if ((mobEntity).lithium$isRegisteredToWorld()) {
++                PathNavigation registeredNavigation = ((Mob) mobEntity).lithium$getRegisteredNavigation();
++                if (registeredNavigation.getPath() != null) {
++                    (this.outer).lithium$setNavigationInactive(mobEntity);
++                }
++                (mobEntity).lithium$setRegisteredToWorld(null);
++            }
++            return set.remove(mobEntity);
++        }
++        // Canvas end
+         @Override
+         public void onCreated(Entity entity) {
+         }
+@@ -2693,14 +_,14 @@
+             }
+ 
+             if (entity instanceof Mob mob) {
+-                if (false && ServerLevel.this.isUpdatingNavigations) { // Paper - Remove unnecessary onTrackingStart during navigation warning
++                if (false && ServerLevel.this.isUpdatingNavigations.get()) { // Paper - Remove unnecessary onTrackingStart during navigation warning // Canvas
+                     String string = "onTrackingStart called during navigation iteration";
+                     Util.logAndPauseIfInIde(
+                         "onTrackingStart called during navigation iteration", new IllegalStateException("onTrackingStart called during navigation iteration")
+                     );
+                 }
+ 
+-                ServerLevel.this.navigatingMobs.add(mob);
++                startListeningOnEntityLoad(this.outer.navigatingMobs, mob); // Canvas
+             }
+ 
+             if (entity instanceof EnderDragon enderDragon) {
+@@ -2763,14 +_,14 @@
+             }
+ 
+             if (entity instanceof Mob mob) {
+-                if (false && ServerLevel.this.isUpdatingNavigations) { // Paper - Remove unnecessary onTrackingStart during navigation warning
++                if (false && ServerLevel.this.isUpdatingNavigations.get()) { // Paper - Remove unnecessary onTrackingStart during navigation warning // Canvas
+                     String string = "onTrackingStart called during navigation iteration";
+                     Util.logAndPauseIfInIde(
+                         "onTrackingStart called during navigation iteration", new IllegalStateException("onTrackingStart called during navigation iteration")
+                     );
+                 }
+ 
+-                ServerLevel.this.navigatingMobs.remove(mob);
++                stopListeningOnEntityUnload(this.outer.navigatingMobs, mob); // Canvas
+             }
+ 
+             if (entity instanceof EnderDragon enderDragon) {

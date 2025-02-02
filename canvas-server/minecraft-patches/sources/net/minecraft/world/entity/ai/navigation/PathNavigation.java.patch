@@ -1,0 +1,155 @@
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -8,6 +_,7 @@
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Vec3i;
+ import net.minecraft.network.protocol.game.DebugPackets;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.BlockTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.profiling.Profiler;
+@@ -100,6 +_,13 @@
+             if (this.targetPos != null) {
+                 this.path = null;
+                 this.path = this.createPath(this.targetPos, this.reachRange);
++                if ((this.mob).lithium$isRegisteredToWorld()) {
++                    if (this.path == null) {
++                        ((ServerLevel) this.level).lithium$setNavigationInactive(this.mob);
++                    } else {
++                        ((ServerLevel) this.level).lithium$setNavigationActive(this.mob);
++                    }
++                }
+                 this.timeLastRecompute = this.level.getGameTime();
+                 this.hasDelayedRecomputation = false;
+             }
+@@ -169,6 +_,10 @@
+             return null;
+         } else if (!this.canUpdatePath()) {
+             return null;
++            // Canvas start - catch early if it's still processing these positions let it keep processing
++        } else if (this.path instanceof io.canvasmc.canvas.entity.pathfinding.AsyncPath asyncPath && !asyncPath.isProcessed() && asyncPath.hasSameProcessingPositions(targets)) {
++            return this.path;
++            // Canvas end - catch early if it's still processing these positions let it keep processing
+         } else if (this.path != null && !this.path.isDone() && targets.contains(this.targetPos)) {
+             return this.path;
+         } else {
+@@ -195,12 +_,30 @@
+             int i = (int)(followRange + regionOffset);
+             PathNavigationRegion pathNavigationRegion = new PathNavigationRegion(this.level, blockPos.offset(-i, -i, -i), blockPos.offset(i, i, i));
+             Path path = this.pathFinder.findPath(pathNavigationRegion, this.mob, targets, followRange, accuracy, this.maxVisitedNodesMultiplier);
+-            profilerFiller.pop();
+-            if (path != null && path.getTarget() != null) {
+-                this.targetPos = path.getTarget();
+-                this.reachRange = accuracy;
+-                this.resetStuckTimeout();
++            // Canvas start - async path processing
++            if (io.canvasmc.canvas.Config.INSTANCE.pathfinding.enableThreadedPathfinding) {
++                // assign early a target position. most calls will only have 1 position
++                if (!targets.isEmpty()) this.targetPos = targets.iterator().next();
++
++                io.canvasmc.canvas.entity.pathfinding.AsyncPathProcessor.awaitProcessing(path, this.mob.level(), processedPath -> {
++                    // check that processing didn't take so long that we calculated a new path
++                    if (processedPath != this.path) return;
++
++                    if (processedPath != null && processedPath.getTarget() != null) {
++                        this.targetPos = processedPath.getTarget();
++                        this.reachRange = accuracy;
++                        this.resetStuckTimeout();
++                    }
++                });
++            } else {
++                profilerFiller.pop();
++                if (path != null && path.getTarget() != null) {
++                    this.targetPos = path.getTarget();
++                    this.reachRange = accuracy;
++                    this.resetStuckTimeout();
++                }
+             }
++            // Canvas end - async path processing
+ 
+             return path;
+         }
+@@ -242,6 +_,7 @@
+     public boolean moveTo(@Nullable Path pathentity, double speed) {
+         if (pathentity == null) {
+             this.path = null;
++            updateListeningState2(path, speed); // Canvas
+             return false;
+         } else {
+             if (!pathentity.sameAs(this.path)) {
+@@ -249,21 +_,36 @@
+             }
+ 
+             if (this.isDone()) {
++                updateListeningState2(path, speed); // Canvas
+                 return false;
+             } else {
+-                this.trimPath();
+-                if (this.path.getNodeCount() <= 0) {
++                if (path.isProcessed()) this.trimPath(); // Canvas - only trim if processed
++                if (path.isProcessed() && this.path.getNodeCount() <= 0) { // Canvas - only check node count if processed
++                    updateListeningState2(path, speed); // Canvas
+                     return false;
+                 } else {
+                     this.speedModifier = speed;
+                     Vec3 tempMobPos = this.getTempMobPos();
+                     this.lastStuckCheck = this.tick;
+                     this.lastStuckCheckPos = tempMobPos;
++                    updateListeningState2(path, speed); // Canvas
+                     return true;
+                 }
+             }
+         }
+     }
++    // Canvas start
++
++    private void updateListeningState2(Path path, double speed) {
++        if ((this.mob).lithium$isRegisteredToWorld()) {
++            if (this.path == null) {
++                ((ServerLevel) this.level).lithium$setNavigationInactive(this.mob);
++            } else {
++                ((ServerLevel) this.level).lithium$setNavigationActive(this.mob);
++            }
++        }
++    }
++    // Canvas end
+ 
+     @Nullable
+     public Path getPath() {
+@@ -275,6 +_,7 @@
+         if (this.hasDelayedRecomputation) {
+             this.recomputePath();
+         }
++        if (this.path != null && !this.path.isProcessed()) return; // Canvas - skip pathfinding if we're still processing
+ 
+         if (!this.isDone()) {
+             if (this.canUpdatePath()) {
+@@ -304,6 +_,7 @@
+     }
+ 
+     protected void followThePath() {
++        if (!this.path.isProcessed()) return; // Canvas - skip if not processed
+         Vec3 tempMobPos = this.getTempMobPos();
+         this.maxDistanceToWaypoint = this.mob.getBbWidth() > 0.75F ? this.mob.getBbWidth() / 2.0F : 0.75F - this.mob.getBbWidth() / 2.0F;
+         Vec3i nextNodePos = this.path.getNextNodePos();
+@@ -402,6 +_,11 @@
+ 
+     public void stop() {
+         this.path = null;
++        // Canvas start
++        if ((this.mob).lithium$isRegisteredToWorld()) {
++            ((ServerLevel) this.level).lithium$setNavigationInactive(this.mob);
++        }
++        // Canvas end
+     }
+ 
+     protected abstract Vec3 getTempMobPos();
+@@ -460,7 +_,7 @@
+     public boolean shouldRecomputePath(BlockPos pos) {
+         if (this.hasDelayedRecomputation) {
+             return false;
+-        } else if (this.path != null && !this.path.isDone() && this.path.getNodeCount() != 0) {
++        } else if (this.path != null && this.path.isProcessed() && !this.path.isDone() && this.path.getNodeCount() != 0) { // Canvas - Skip if not processed
+             Node endNode = this.path.getEndNode();
+             Vec3 vec3 = new Vec3((endNode.x + this.mob.getX()) / 2.0, (endNode.y + this.mob.getY()) / 2.0, (endNode.z + this.mob.getZ()) / 2.0);
+             return pos.closerToCenterThan(vec3, this.path.getNodeCount() - this.path.getNextNodeIndex());

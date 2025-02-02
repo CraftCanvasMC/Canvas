@@ -1,0 +1,91 @@
+--- a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
++++ b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
+@@ -1,9 +_,11 @@
+ package net.minecraft.world.level.redstone;
+ 
+ import com.mojang.logging.LogUtils;
+-import java.util.ArrayDeque;
+ import java.util.ArrayList;
++import java.util.Deque;
+ import java.util.List;
++import java.util.concurrent.ConcurrentLinkedDeque;
++import java.util.concurrent.atomic.AtomicInteger;
+ import javax.annotation.Nullable;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+@@ -17,7 +_,7 @@
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private final Level level;
+     private final int maxChainedNeighborUpdates;
+-    private final ArrayDeque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>();
++    private final Deque<NeighborUpdates> stack = new ConcurrentLinkedDeque<>(); // Canvas - fix CME/NPE
+     private final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
+     private int count = 0;
+ 
+@@ -67,8 +_,10 @@
+ 
+     private void runUpdates() {
+         try {
++            synchronized (this.stack) { // Canvas
+             while (!this.stack.isEmpty() || !this.addedThisLayer.isEmpty()) {
+                 for (int i = this.addedThisLayer.size() - 1; i >= 0; i--) {
++                    if (this.addedThisLayer.get(i) == null) continue; // Canvas
+                     this.stack.push(this.addedThisLayer.get(i));
+                 }
+ 
+@@ -81,7 +_,7 @@
+                         break;
+                     }
+                 }
+-            }
++            }} // Canvas
+         } finally {
+             this.stack.clear();
+             this.addedThisLayer.clear();
+@@ -105,21 +_,27 @@
+         private Orientation orientation;
+         @Nullable
+         private final Direction skipDirection;
+-        private int idx = 0;
++        private final AtomicInteger idx = new AtomicInteger(); // Canvas - atomic index
+ 
+         MultiNeighborUpdate(BlockPos sourcePos, Block sourceBlock, @Nullable Orientation orientation, @Nullable Direction skipDirection) {
+             this.sourcePos = sourcePos;
+             this.sourceBlock = sourceBlock;
+             this.orientation = orientation;
+             this.skipDirection = skipDirection;
+-            if (NeighborUpdater.UPDATE_ORDER[this.idx] == skipDirection) {
+-                this.idx++;
++            if (NeighborUpdater.UPDATE_ORDER[this.idx.get()] == skipDirection) { // Canvas - atomic index
++                this.idx.getAndIncrement(); // Canvas - atomic index
+             }
+         }
+ 
+         @Override
+         public boolean runNext(Level level) {
+-            Direction direction = NeighborUpdater.UPDATE_ORDER[this.idx++];
++            // Canvas start
++            int index = this.idx.getAndIncrement();
++            if (index >= NeighborUpdater.UPDATE_ORDER.length) {
++                return false;
++            }
++            Direction direction = NeighborUpdater.UPDATE_ORDER[index];
++            // Canvas end
+             BlockPos blockPos = this.sourcePos.relative(direction);
+             BlockState blockState = level.getBlockState(blockPos);
+             Orientation orientation = null;
+@@ -134,11 +_,11 @@
+             }
+ 
+             NeighborUpdater.executeUpdate(level, blockState, blockPos, this.sourceBlock, orientation, false, this.sourcePos); // Paper - Add source block to BlockPhysicsEvent
+-            if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
+-                this.idx++;
++            if (this.idx.get() < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx.get()] == this.skipDirection) { // Canvas - atomic index
++                this.idx.getAndIncrement(); // Canvas - atomic index
+             }
+ 
+-            return this.idx < NeighborUpdater.UPDATE_ORDER.length;
++            return this.idx.get() < NeighborUpdater.UPDATE_ORDER.length; // Canvas - atomic index
+         }
+     }
+ 

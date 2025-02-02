@@ -1,0 +1,164 @@
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -3,12 +_,17 @@
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.Lists;
++import com.google.common.collect.Sets;
+ import com.google.common.collect.Queues;
+ import com.google.common.collect.ImmutableList.Builder;
++import com.google.common.util.concurrent.ThreadFactoryBuilder;
+ import com.mojang.datafixers.DataFixer;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.entity.tracking.ThreadedTracker;
++import io.canvasmc.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
++import io.canvasmc.canvas.util.fastutil.Long2ByteConcurrentHashMap;
++import io.netty.util.internal.ConcurrentSet;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.Long2ByteMap;
+ import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.Long2LongMap;
+@@ -23,19 +_,25 @@
+ import java.nio.file.Path;
+ import java.util.ArrayList;
+ import java.util.HashMap;
++import java.util.Iterator;
+ import java.util.List;
+-import java.util.Locale;
+ import java.util.Map;
+ import java.util.Objects;
+ import java.util.Optional;
+-import java.util.Queue;
+ import java.util.Set;
+ import java.util.concurrent.CancellationException;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.CompletionException;
++import java.util.concurrent.ConcurrentHashMap;
+ import java.util.concurrent.CompletionStage;
++import java.util.concurrent.CopyOnWriteArrayList;
+ import java.util.concurrent.Executor;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.LinkedBlockingQueue;
++import java.util.concurrent.ThreadPoolExecutor;
++import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicInteger;
++import java.util.function.BiFunction;
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Consumer;
+ import java.util.function.IntConsumer;
+@@ -120,7 +_,7 @@
+     private final ChunkGeneratorStructureState chunkGeneratorState;
+     private final Supplier<DimensionDataStorage> overworldDataStorage;
+     private final PoiManager poiManager;
+-    public final LongSet toDrop = new LongOpenHashSet();
++    public final ConcurrentSet<Long> toDrop = new ConcurrentSet<>(); // Canvas
+     private boolean modified;
+     // Paper - rewrite chunk system
+     public final ChunkProgressListener progressListener;
+@@ -129,8 +_,10 @@
+     public final AtomicInteger tickingGenerated = new AtomicInteger();  // Paper - public
+     private final String storageName;
+     private final PlayerMap playerMap = new PlayerMap();
+-    public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap = new Int2ObjectOpenHashMap<>();
+-    private final Long2ByteMap chunkTypeCache = new Long2ByteOpenHashMap();
++    // Canvas start
++    public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap = new Int2ObjectConcurrentHashMap<>();
++    private final Long2ByteMap chunkTypeCache = new Long2ByteConcurrentHashMap();
++    // Canvas end
+     // Paper - rewrite chunk system
+     public int serverViewDistance;
+     public final WorldGenContext worldGenContext; // Paper - public
+@@ -212,7 +_,7 @@
+         ConsecutiveExecutor consecutiveExecutor = new ConsecutiveExecutor(dispatcher, "worldgen");
+         this.progressListener = progressListener;
+         this.chunkStatusListener = chunkStatusListener;
+-        ConsecutiveExecutor consecutiveExecutor1 = new ConsecutiveExecutor(dispatcher, "light");
++        ConsecutiveExecutor consecutiveExecutor1 = onLightExecutorInit(ConsecutiveExecutor::new);
+         // Paper - rewrite chunk system
+         this.lightEngine = new ThreadedLevelLightEngine(
+             lightChunk, this, this.level.dimensionType().hasSkyLight(), consecutiveExecutor1, null // Paper - rewrite chunk system
+@@ -231,6 +_,19 @@
+         this.setServerViewDistance(viewDistance);
+         this.worldGenContext = new WorldGenContext(level, generator, structureManager, this.lightEngine, null, this::setChunkUnsaved); // Paper - rewrite chunk system
+     }
++    // Canvas start
++    private ExecutorService lightThread = null;
++
++    private ConsecutiveExecutor onLightExecutorInit(BiFunction<Executor, String, ConsecutiveExecutor> original) {
++        lightThread = new ThreadPoolExecutor(
++            1, 1,
++            0, TimeUnit.SECONDS,
++            new LinkedBlockingQueue<>(),
++            new ThreadFactoryBuilder().setPriority(Thread.NORM_PRIORITY - 1).setDaemon(true).setNameFormat(String.format("%s - Light", level.dimension().location().toDebugFileName())).build()
++        );
++        return original.apply(lightThread, "light");
++    }
++    // Canvas end
+ 
+     private void setChunkUnsaved(ChunkPos chunkPos) {
+         // Paper - rewrite chunk system
+@@ -310,7 +_,7 @@
+     }
+ 
+     @Nullable
+-    protected ChunkHolder getUpdatingChunkIfPresent(long chunkPos) {
++    public ChunkHolder getUpdatingChunkIfPresent(long chunkPos) { // Canvas - protected -> public
+         // Paper start - rewrite chunk system
+         final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder holder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
+         return holder == null ? null : holder.vanillaChunkHolder;
+@@ -938,19 +_,27 @@
+ 
+     // Paper start - optimise entity tracker
+     private void newTrackerTick() {
++        // Canvas start - threaded tracker
++        if (true) {
++            ThreadedTracker.INSTANCE.tick(level);
++            return;
++        }
++        // Canvas end
+         final ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup entityLookup = (ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup)((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getEntityLookup();;
+ 
+         final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.world.entity.Entity> trackerEntities = entityLookup.trackerEntities;
+         final Entity[] trackerEntitiesRaw = trackerEntities.getRawDataUnchecked();
+         for (int i = 0, len = trackerEntities.size(); i < len; ++i) {
+             final Entity entity = trackerEntitiesRaw[i];
++            if (entity == null) continue; // Canvas - NPE
+             final ChunkMap.TrackedEntity tracker = ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$getTrackedEntity();
+             if (tracker == null) {
+                 continue;
+             }
+-            ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkData().nearbyPlayers);
++            ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity cse =  ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity); ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(cse.moonrise$getChunkData() == null ? null : cse.moonrise$getChunkData().nearbyPlayers);
++            @Nullable FullChunkStatus chunkStatus = ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus(); // Canvas
+             if (((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$hasPlayers()
+-                || ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus().isOrAfter(FullChunkStatus.ENTITY_TICKING)) {
++                || (chunkStatus != null && chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) { // Canvas
+                 tracker.serverEntity.sendChanges();
+             }
+         }
+@@ -1080,7 +_,7 @@
+         final Entity entity;
+         private final int range;
+         SectionPos lastSectionPos;
+-        public final Set<ServerPlayerConnection> seenBy = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(); // Paper - Perf: optimise map impl
++        public final Set<ServerPlayerConnection> seenBy = Sets.newConcurrentHashSet(); // Paper - Perf: optimise map impl // Canvas - threaded tracker, and make this concurrent-compatible for threaded dimensions
+ 
+         // Paper start - optimise entity tracker
+         private long lastChunkUpdate = -1L;
+@@ -1108,10 +_,13 @@
+ 
+             final ServerPlayer[] playersRaw = players.getRawDataUnchecked();
+ 
+-            for (int i = 0, len = players.size(); i < len; ++i) {
+-                final ServerPlayer player = playersRaw[i];
++            // Canvas start
++            CopyOnWriteArrayList<ServerPlayer> safePlayers = new CopyOnWriteArrayList<>(players.getRawDataUnchecked());
++            for (ServerPlayer player : safePlayers) {
++                if (player == null) continue;
+                 this.updatePlayer(player);
+             }
++            // Canvas end
+ 
+             if (lastChunkUpdate != currChunkUpdate || lastTrackedChunk != chunk) {
+                 // need to purge any players possible not in the chunk list

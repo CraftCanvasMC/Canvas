@@ -1,0 +1,125 @@
+--- a/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/list/ReferenceList.java
+@@ -1,17 +_,20 @@
+ package ca.spottedleaf.moonrise.common.list;
+ 
++import it.unimi.dsi.fastutil.objects.Reference2IntMap;
++import it.unimi.dsi.fastutil.objects.Reference2IntMaps;
+ import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
+ import java.util.Arrays;
+ import java.util.Iterator;
+ import java.util.NoSuchElementException;
++import java.util.concurrent.atomic.AtomicInteger;
+ 
+ public final class ReferenceList<E> implements Iterable<E> {
+ 
+     private static final Object[] EMPTY_LIST = new Object[0];
+ 
+-    private final Reference2IntOpenHashMap<E> referenceToIndex;
++    private final Reference2IntMap<E> referenceToIndex; // Canvas
+     private E[] references;
+-    private int count;
++    private final AtomicInteger count = new AtomicInteger(); // Canvas - atomic
+ 
+     public ReferenceList() {
+         this((E[])EMPTY_LIST);
+@@ -19,22 +_,22 @@
+ 
+     public ReferenceList(final E[] referenceArray) {
+         this.references = referenceArray;
+-        this.referenceToIndex = new Reference2IntOpenHashMap<>(2, 0.8f);
++        this.referenceToIndex = Reference2IntMaps.synchronize(new Reference2IntOpenHashMap<>(2, 0.8f)); // Canvas
+         this.referenceToIndex.defaultReturnValue(Integer.MIN_VALUE);
+     }
+ 
+     private ReferenceList(final E[] references, final int count, final Reference2IntOpenHashMap<E> referenceToIndex) {
+         this.references = references;
+-        this.count = count;
++        this.count.set(count); // Canvas - atomic
+         this.referenceToIndex = referenceToIndex;
+     }
+ 
+     public ReferenceList<E> copy() {
+-        return new ReferenceList<>(this.references.clone(), this.count, this.referenceToIndex.clone());
++        return new ReferenceList<>(this.references.clone(), this.count.get(), new Reference2IntOpenHashMap<>(this.referenceToIndex)); // Canvas // - atomic
+     }
+ 
+     public int size() {
+-        return this.count;
++        return this.count.get(); // Canvas - atomic
+     }
+ 
+     public boolean contains(final E obj) {
+@@ -48,7 +_,13 @@
+         }
+ 
+         // move the object at the end to this index
+-        final int endIndex = --this.count;
++        // Canvas start - convert count to atomic, set count to 0 if endIndex < 0
++        int endIndex = this.count.decrementAndGet();
++        if(endIndex < 0) {
++            this.count.set(0);
++            endIndex = 0;
++        }
++        // Canvas end
+         final E end = (E)this.references[endIndex];
+         if (index != endIndex) {
+             // not empty after this call
+@@ -61,7 +_,7 @@
+     }
+ 
+     public boolean add(final E obj) {
+-        final int count = this.count;
++        final int count = this.count.get(); // Canvas - atomic
+         final int currIndex = this.referenceToIndex.putIfAbsent(obj, count);
+ 
+         if (currIndex != Integer.MIN_VALUE) {
+@@ -76,13 +_,13 @@
+         }
+ 
+         list[count] = obj;
+-        this.count = count + 1;
++        this.count.set(count + 1); // Canvas - atomic
+ 
+         return true;
+     }
+ 
+     public E getChecked(final int index) {
+-        if (index < 0 || index >= this.count) {
++        if (index < 0 || index >= this.count.get()) { // Canvas - atomic
+             throw new IndexOutOfBoundsException("Index: " + index + " is out of bounds, size: " + this.count);
+         }
+         return this.references[index];
+@@ -96,14 +_,14 @@
+         return this.references;
+     }
+ 
+-    public E[] getRawDataUnchecked() {
++    public synchronized E[] getRawDataUnchecked() { // Canvas - synchronized
+         return this.references;
+     }
+ 
+     public void clear() {
+         this.referenceToIndex.clear();
+-        Arrays.fill(this.references, 0, this.count, null);
+-        this.count = 0;
++        Arrays.fill(this.references, 0, this.count.get(), null); // Canvas - atomic
++        this.count.set(0); // Canvas - atomic
+     }
+ 
+     @Override
+@@ -114,12 +_,12 @@
+ 
+             @Override
+             public boolean hasNext() {
+-                return this.current < ReferenceList.this.count;
++                return this.current < ReferenceList.this.count.get(); // Canvas - atomic
+             }
+ 
+             @Override
+             public E next() {
+-                if (this.current >= ReferenceList.this.count) {
++                if (this.current >= ReferenceList.this.count.get()) { // Canvas - atomic
+                     throw new NoSuchElementException();
+                 }
+                 return this.lastRet = ReferenceList.this.references[this.current++];

@@ -1,0 +1,143 @@
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -8,6 +_,7 @@
+ import com.mojang.brigadier.StringReader;
+ import com.mojang.brigadier.suggestion.Suggestions;
+ import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.Config;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
+ import it.unimi.dsi.fastutil.ints.Int2ObjectMap.Entry;
+ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+@@ -22,6 +_,7 @@
+ import java.util.Set;
+ import java.util.concurrent.CancellationException;
+ import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.Executors;
+ import java.util.function.BiFunction;
+ import java.util.function.Consumer;
+ import java.util.stream.Collectors;
+@@ -130,6 +_,7 @@
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.resources.ResourceLocation;
+ import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.RunningOnDifferentThreadException;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.util.FutureChain;
+@@ -572,7 +_,7 @@
+                     return;
+                 }
+                 // Paper end - Prevent moving into unloaded chunks
+-                if (d7 - d6 > Math.max(100.0, Math.pow((double) (org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed), 2)) && !this.isSingleplayerOwner()) {
++                if (!Config.INSTANCE.alwaysAllowWeirdMovement && (d7 - d6 > Math.max(100.0, Math.pow((double) (org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed), 2)) && !this.isSingleplayerOwner())) { // Canvas
+                     // CraftBukkit end
+                     LOGGER.warn(
+                         "{} (vehicle of {}) moved too quickly! {},{},{}", rootVehicle.getName().getString(), this.player.getName().getString(), d3, d4, d5
+@@ -602,7 +_,7 @@
+                 d5 = d2 - rootVehicle.getZ();
+                 d7 = d3 * d3 + d4 * d4 + d5 * d5;
+                 boolean flag2 = false;
+-                if (d7 > org.spigotmc.SpigotConfig.movedWronglyThreshold) { // Spigot
++                if (!Config.INSTANCE.alwaysAllowWeirdMovement && (d7 > org.spigotmc.SpigotConfig.movedWronglyThreshold)) { // Spigot // Canvas
+                     flag2 = true; // Paper - diff on change, this should be moved wrongly
+                     LOGGER.warn("{} (vehicle of {}) moved wrongly! {}", rootVehicle.getName().getString(), this.player.getName().getString(), Math.sqrt(d7));
+                 }
+@@ -800,7 +_,12 @@
+     }
+ 
+     // Paper start - AsyncTabCompleteEvent
+-    private static final java.util.concurrent.ExecutorService TAB_COMPLETE_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(4,
++    // Canvas start
++    private static final java.util.concurrent.ExecutorService TAB_COMPLETE_EXECUTOR =
++        Config.INSTANCE.virtualThreads.shouldReplaceTabCompleteExecutor() ?
++            Executors.newVirtualThreadPerTaskExecutor() :
++            java.util.concurrent.Executors.newFixedThreadPool(4,
++    // Canvas end
+         new com.google.common.util.concurrent.ThreadFactoryBuilder().setDaemon(true).setNameFormat("Async Tab Complete Thread - #%d").setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(MinecraftServer.LOGGER)).build());
+     // Paper end - AsyncTabCompleteEvent
+ 
+@@ -808,7 +_,7 @@
+     public void handleCustomCommandSuggestions(ServerboundCommandSuggestionPacket packet) {
+         // PacketUtils.ensureRunningOnSameThread(packet, this, this.player.serverLevel()); // Paper - AsyncTabCompleteEvent; run this async
+         // CraftBukkit start
+-        if (!this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.getGameProfile()) && !this.server.isSingleplayerOwner(this.player.getGameProfile())) { // Paper - configurable tab spam limits
++        if (!this.tabSpamThrottler.isIncrementAndUnderThreshold() && !this.server.getPlayerList().isOp(this.player.getGameProfile()) && !this.server.isSingleplayerOwner(this.player.getGameProfile()) && !Config.INSTANCE.disableDisconnectSpam) { // Paper - configurable tab spam limits // Canvas
+             this.disconnectAsync(Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - Kick event cause // Paper - add proper async disconnect
+             return;
+         }
+@@ -820,7 +_,7 @@
+         // Paper end - Don't suggest if tab-complete is disabled
+         // Paper start
+         final int index;
+-        if (packet.getCommand().length() > 64 && ((index = packet.getCommand().indexOf(' ')) == -1 || index >= 64)) {
++        if (packet.getCommand().length() > 64 && ((index = packet.getCommand().indexOf(' ')) == -1 || index >= 64) && !Config.INSTANCE.disableDisconnectSpam) { // Canvas
+             this.disconnectAsync(Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - add proper async disconnect
+             return;
+         }
+@@ -880,6 +_,7 @@
+         ParseResults<CommandSourceStack> parseResults = this.server.getCommands().getDispatcher().parse(stringReader, this.player.createCommandSourceStack());
+         // Paper start - Handle non-recoverable exceptions
+         if (!parseResults.getExceptions().isEmpty()
++            && !Config.INSTANCE.disableDisconnectSpam // Canvas
+             && parseResults.getExceptions().values().stream().anyMatch(e -> e instanceof io.papermc.paper.brigadier.TagParseCommandSyntaxException)) {
+             this.disconnect(Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM);
+             return;
+@@ -1444,6 +_,7 @@
+                                 if (this.shouldCheckPlayerMovement(isFallFlying)) {
+                                     float f2 = isFallFlying ? 300.0F : 100.0F;
+                                     if (d7 - d6 > Math.max(f2, Mth.square(org.spigotmc.SpigotConfig.movedTooQuicklyMultiplier * (float) i * speed))) {
++                                        if (!Config.INSTANCE.alwaysAllowWeirdMovement && !(Config.INSTANCE.ignoreMovedTooQuicklyWhenLagging && player.serverLevel().lagging)) { // Canvas
+                                         // CraftBukkit end
+                                         // Paper start - Add fail move event
+                                         io.papermc.paper.event.player.PlayerFailMoveEvent event = fireFailMove(io.papermc.paper.event.player.PlayerFailMoveEvent.FailReason.MOVED_TOO_QUICKLY,
+@@ -1455,6 +_,7 @@
+                                             this.teleport(this.player.getX(), this.player.getY(), this.player.getZ(), this.player.getYRot(), this.player.getXRot());
+                                             return;
+                                         }
++                                        } // Canvas
+                                         // Paper end - Add fail move event
+                                     }
+                                 }
+@@ -1516,6 +_,7 @@
+                             d7 = d3 * d3 + d4 * d4 + d5 * d5;
+                             boolean movedWrongly = false; // Paper - Add fail move event; rename
+                             if (!this.player.isChangingDimension()
++                                && !Config.INSTANCE.alwaysAllowWeirdMovement // Canvas
+                                 && d7 > org.spigotmc.SpigotConfig.movedWronglyThreshold // Spigot
+                                 && !this.player.isSleeping()
+                                 && !this.player.gameMode.isCreative()
+@@ -1849,7 +_,16 @@
+ 
+     @Override
+     public void handlePlayerAction(ServerboundPlayerActionPacket packet) {
+-        PacketUtils.ensureRunningOnSameThread(packet, this, this.player.serverLevel());
++        // Canvas start - rubberbanding fix
++        try {
++            PacketUtils.ensureRunningOnSameThread(packet, this, this.player.serverLevel());
++        } catch (RunningOnDifferentThreadException e) {
++            if (packet.getAction() == ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK) {
++                this.player.connection.send(new ClientboundBlockUpdatePacket(packet.getPos(), Blocks.AIR.defaultBlockState()));
++            }
++            throw e;
++        }
++        // Canvas end
+         if (this.player.isImmobile()) return; // CraftBukkit
+         if (this.player.hasClientLoaded()) {
+             BlockPos pos = packet.getPos();
+@@ -2588,6 +_,7 @@
+         // this.chatSpamThrottler.increment();
+         if (!this.chatSpamThrottler.isIncrementAndUnderThreshold()
+             // CraftBukkit end
++            && !Config.INSTANCE.disableDisconnectSpam // Canvas
+             && !this.server.getPlayerList().isOp(this.player.getGameProfile())
+             && !this.server.isSingleplayerOwner(this.player.getGameProfile())) {
+             this.disconnectAsync(Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - kick event cause & add proper async disconnect
+@@ -3364,7 +_,7 @@
+     public void handlePlaceRecipe(ServerboundPlaceRecipePacket packet) {
+         // Paper start - auto recipe limit
+         if (!org.bukkit.Bukkit.isPrimaryThread()) {
+-            if (!this.recipeSpamPackets.isIncrementAndUnderThreshold()) {
++            if (!this.recipeSpamPackets.isIncrementAndUnderThreshold() && !Config.INSTANCE.disableDisconnectSpam) { // Canvas
+                 this.disconnectAsync(net.minecraft.network.chat.Component.translatable("disconnect.spam"), org.bukkit.event.player.PlayerKickEvent.Cause.SPAM); // Paper - kick event cause // Paper - add proper async disconnect
+                 return;
+             }

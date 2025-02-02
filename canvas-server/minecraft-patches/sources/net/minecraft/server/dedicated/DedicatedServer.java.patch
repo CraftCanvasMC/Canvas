@@ -1,0 +1,73 @@
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -1,6 +_,5 @@
+ package net.minecraft.server.dedicated;
+ 
+-import com.google.common.collect.Lists;
+ import com.mojang.authlib.GameProfile;
+ import com.mojang.datafixers.DataFixer;
+ import com.mojang.logging.LogUtils;
+@@ -11,14 +_,16 @@
+ import java.net.InetAddress;
+ import java.net.Proxy;
+ import java.net.URI;
+-import java.nio.charset.StandardCharsets;
+ import java.nio.file.Files;
+ import java.nio.file.Path;
+-import java.util.Collections;
+ import java.util.List;
+ import java.util.Locale;
+ import java.util.Optional;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.locks.LockSupport;
+ import javax.annotation.Nullable;
++
++import io.canvasmc.canvas.server.ThreadedServer;
+ import net.minecraft.DefaultUncaughtExceptionHandler;
+ import net.minecraft.DefaultUncaughtExceptionHandlerWithName;
+ import net.minecraft.SharedConstants;
+@@ -45,6 +_,7 @@
+ import net.minecraft.server.rcon.thread.QueryThreadGs4;
+ import net.minecraft.server.rcon.thread.RconThread;
+ import net.minecraft.util.Mth;
++import net.minecraft.util.TimeUtil;
+ import net.minecraft.util.debugchart.DebugSampleSubscriptionTracker;
+ import net.minecraft.util.debugchart.RemoteDebugSampleType;
+ import net.minecraft.util.debugchart.RemoteSampleLogger;
+@@ -232,6 +_,7 @@
+         org.spigotmc.WatchdogThread.doStart(org.spigotmc.SpigotConfig.timeoutTime, org.spigotmc.SpigotConfig.restartOnCrash); // Paper - start watchdog thread
+         thread.start(); // Paper - Enhance console tab completions for brigadier commands; start console thread after MinecraftServer.console & PaperConfig are initialized
+         io.papermc.paper.command.PaperCommands.registerCommands(this); // Paper - setup /paper command
++        io.canvasmc.canvas.command.CanvasCommands.registerCommands(this); // Canvas - register commands
+         this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
+         com.destroystokyo.paper.Metrics.PaperMetrics.startMetrics(); // Paper - start metrics
+         // Purpur start - Purpur config files
+@@ -363,6 +_,28 @@
+             GameProfileCache.setUsesAuthentication(this.usesAuthentication());
+             LOGGER.info("Preparing level \"{}\"", this.getLevelIdName());
+             this.loadLevel(this.storageSource.getLevelId()); // CraftBukkit
++            // Canvas start - prepare the level for threaded context
++            for (final ServerLevel level : this.levels.values()) {
++                ThreadedServer.SPINNER.apply(level);
++            }
++
++            CompletableFuture<Void> preparedContextFuture = CompletableFuture.allOf(
++                this.levels.values().stream()
++                    .map(value -> CompletableFuture.runAsync(() -> {
++                        while (!value.prepared) {
++                            // Park for 1 millisecond to wait for prepared level threaded context
++                            LockSupport.parkNanos("waiting for prepared context", TimeUtil.NANOSECONDS_PER_MILLISECOND);
++                        }
++                    }))
++                    .toArray(CompletableFuture[]::new)
++            );
++
++            try {
++                preparedContextFuture.get();
++            } catch (Throwable e) {
++                throw new RuntimeException("An unexpected error occurred when waiting for levels to prepare threaded context", e);
++            }
++            // Canvas end
+             long l = Util.getNanos() - nanos;
+             String string = String.format(Locale.ROOT, "%.3fs", l / 1.0E9);
+             LOGGER.info("Done preparing level \"{}\" ({})", this.getLevelIdName(), string); // Paper - Improve startup message, add total time
