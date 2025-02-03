@@ -204,6 +204,8 @@ public class Config implements ConfigData {
 
     @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
     public boolean chainEndCrystalExplosions = false;
+    @Comment("Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more")
+    public boolean mc258859 = false;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, YamlConfigSerializerWithComments::new);
