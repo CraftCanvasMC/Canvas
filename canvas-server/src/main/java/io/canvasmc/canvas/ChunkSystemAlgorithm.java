@@ -4,11 +4,13 @@ import ca.spottedleaf.moonrise.common.PlatformHooks;
 import io.netty.util.internal.PlatformDependent;
 import net.objecthunter.exp4j.ExpressionBuilder;
 import net.objecthunter.exp4j.function.Function;
+import org.jetbrains.annotations.NotNull;
 import oshi.util.tuples.Pair;
+import java.util.Locale;
 import java.util.function.BiFunction;
 
 public enum ChunkSystemAlgorithm {
-    moonrise((configWorkerThreads, configIoThreads) -> {
+    MOONRISE((configWorkerThreads, configIoThreads) -> {
         int defaultWorkerThreads = Runtime.getRuntime().availableProcessors() / 2;
         if (defaultWorkerThreads <= 4) {
             defaultWorkerThreads = defaultWorkerThreads <= 3 ? 1 : 2;
@@ -25,7 +27,7 @@ public enum ChunkSystemAlgorithm {
         final int ioThreads = Math.max(1, configIoThreads);
         return new Pair<>(workerThreads, ioThreads);
     }),
-    c2me((_, configIoThreads) -> {
+    C2ME((_, configIoThreads) -> {
         String expression = """
                 
                     max(
@@ -45,11 +47,11 @@ public enum ChunkSystemAlgorithm {
         int eval = tryEvaluateExpression(expression);
         return new Pair<>(eval, Math.max(1, configIoThreads));
     }),
-    all((_, configIoThreads) -> {
+    ALL((_, configIoThreads) -> {
         final int ioThreads = Math.max(1, configIoThreads);
         return new Pair<>(Runtime.getRuntime().availableProcessors(), ioThreads);
     }),
-    any((configWorkerThreads, configIoThreads) -> {
+    ANY((configWorkerThreads, configIoThreads) -> {
         int workerThreads = configWorkerThreads;
         if (configWorkerThreads <= 0) {
             // y=(-0.0001x^2)+0.8831x-5.1544
@@ -95,6 +97,11 @@ public enum ChunkSystemAlgorithm {
 
     ChunkSystemAlgorithm(BiFunction<Integer, Integer, Pair<Integer, Integer>> eval) {
         this.eval = eval;
+    }
+
+    public static ChunkSystemAlgorithm fromRaw(@NotNull String raw) {
+        String capital = raw.toUpperCase(Locale.ROOT);
+        return valueOf(capital);
     }
 
     public int evalWorkers(final int configWorkerThreads, final int configIoThreads) {

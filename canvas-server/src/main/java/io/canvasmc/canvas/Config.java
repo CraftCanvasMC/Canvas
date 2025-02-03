@@ -53,7 +53,7 @@ public class Config implements ConfigData {
         public boolean allowAVX512 = false;
         public boolean nativeAccelerationEnabled = true;
         @Comment("Modifies what algorithm the chunk system will use to define thread counts. values: MOONRISE, C2ME, ANY, ALL")
-        public ChunkSystemAlgorithm chunkWorkerAlgorithm = ChunkSystemAlgorithm.moonrise;
+        public String chunkWorkerAlgorithm = "MOONRISE";
     }
 
     // Async Pathfinding
