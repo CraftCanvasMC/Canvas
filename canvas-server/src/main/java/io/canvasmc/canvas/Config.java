@@ -202,6 +202,9 @@ public class Config implements ConfigData {
         public String disconnectDemandOnClientMessage = "You do not have No Chat Reports, and this server is configured to require it on client!";
     }
 
+    @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
+    public boolean chainEndCrystalExplosions = false;
+
 	public static Config init() {
 		AutoConfig.register(Config.class, YamlConfigSerializerWithComments::new);
 		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();

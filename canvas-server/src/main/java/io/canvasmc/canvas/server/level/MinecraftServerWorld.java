@@ -6,6 +6,7 @@ import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.canvasmc.canvas.server.VisibleAfterSpin;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 import net.minecraft.CrashReport;
@@ -35,6 +36,8 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
     public final MinecraftServer.RollingAverage tps1 = new MinecraftServer.RollingAverage(60);
     public final MinecraftServer.RollingAverage tps5 = new MinecraftServer.RollingAverage(60 * 5);
     public final MinecraftServer.RollingAverage tps15 = new MinecraftServer.RollingAverage(60 * 15);
+    protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPost = new ConcurrentLinkedQueue<>();
+    protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPre = new ConcurrentLinkedQueue<>();
     protected final ServerTickRateManager tickRateManager;
     public volatile long lastWatchdogTick;
     public int tickCount;
@@ -307,5 +310,13 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
 
     public boolean isLevelThread() {
         return Thread.currentThread() instanceof LevelThread;
+    }
+
+	public void scheduleForPostNextTick(Runnable run) {
+        queuedForNextTickPost.add(run);
+	}
+
+    public void scheduleForPreNextTick(Runnable run) {
+        queuedForNextTickPre.add(run);
     }
 }
