@@ -9,7 +9,7 @@ import java.util.Map;
 import org.jetbrains.annotations.NotNull;
 
 public class ConfigurationUtils {
-    protected static final Map<String, String> COMMENTS = new LinkedHashMap<>();
+    protected static final Map<String, Comment> COMMENTS = new LinkedHashMap<>();
 
     public static void extractKeys(Class<?> clazz) {
         extractKeys(clazz, "");
@@ -24,7 +24,7 @@ public class ConfigurationUtils {
 
                 if (field.isAnnotationPresent(Comment.class)) {
                     Comment comment = field.getAnnotation(Comment.class);
-                    COMMENTS.put(keyName, comment.value());
+                    COMMENTS.put(keyName, comment);
                 }
 
                 if (field.getType().getEnclosingClass() == clazz) {

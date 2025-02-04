@@ -32,7 +32,7 @@ public class YamlConfigSerializerWithComments<T extends ConfigData> implements C
         this(definition, configClass, new Yaml());
     }
 
-    public static @NotNull String applyComments(@NotNull String yamlContent, @NotNull Map<String, String> comments) {
+    public static @NotNull String applyComments(@NotNull String yamlContent, @NotNull Map<String, Comment> comments) {
         String[] lines = yamlContent.split("\n", 2);
         String yamlBody = lines.length > 1 ? lines[1] : "";
 
@@ -52,7 +52,7 @@ public class YamlConfigSerializerWithComments<T extends ConfigData> implements C
     }
 
     @SuppressWarnings("unchecked")
-    private static @NotNull Map<String, Object> sort(@NotNull Map<String, String> comments, Map<String, Object> data) {
+    private static @NotNull Map<String, Object> sort(@NotNull Map<String, Comment> comments, Map<String, Object> data) {
         Map<String, Object> rebuiltData = new LinkedHashMap<>();
 
         for (final String fullKey : comments.keySet()) {
@@ -81,7 +81,7 @@ public class YamlConfigSerializerWithComments<T extends ConfigData> implements C
     }
 
     @SuppressWarnings("unchecked")
-    private static void writeYaml(StringWriter writer, @NotNull Map<String, Object> data, Map<String, String> comments, Yaml yaml, int indentLevel, String parentKey) {
+    private static void writeYaml(StringWriter writer, @NotNull Map<String, Object> data, Map<String, Comment> comments, Yaml yaml, int indentLevel, String parentKey) {
         String indent = "   ".repeat(indentLevel);
 
         for (Map.Entry<String, Object> entry : data.entrySet()) {
@@ -89,9 +89,20 @@ public class YamlConfigSerializerWithComments<T extends ConfigData> implements C
             Object value = entry.getValue();
             String fullKey = parentKey.isEmpty() ? key : parentKey + "." + key;
 
-            String comment = comments.get(fullKey);
+            Comment comment = comments.get(fullKey);
             if (comment != null) {
-                writer.append(indent).append("## ").append(comment).append("\n");
+                if (comment.breakLineBefore()) {
+                    writer.append("\n");
+                }
+                for (final String val : comment.value()) {
+                    writer.append(indent);
+                    if (val.equalsIgnoreCase("{line_break}")) {
+                        writer.append("## ");
+                    } else {
+                        writer.append("## ").append(val);
+                    }
+                    writer.append("\n");
+                }
             }
 
             if (value instanceof Map) {

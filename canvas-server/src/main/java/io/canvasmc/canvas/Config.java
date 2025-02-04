@@ -107,7 +107,6 @@ public class Config implements ConfigData {
     @Comment("Ignore \"<player> moved too quickly\" if the server is lagging. Improves general gameplay experience of the player when the server is lagging, as they wont get lagged back")
     public boolean ignoreMovedTooQuicklyWhenLagging = true;
 
-    @IgnoreModifications
     @Comment("Disables all types of goals provided here. Must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\"")
     public List<String> goalsToDisable = new ArrayList<>();
 
@@ -210,16 +209,18 @@ public class Config implements ConfigData {
     public boolean chainEndCrystalExplosions = false;
     @Comment("Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more")
     public boolean mc258859 = false;
-    @Comment("Whether to use an alternative strategy to make structure layouts generate slightly even faster than\n" +
-             "## the default optimization this mod has for template pool weights. This alternative strategy works by\n" +
-             "## changing the list of pieces that structures collect from the template pool to not have duplicate entries.\n" +
-             "## \n" +
-             "## This will not break the structure generation, but it will make the structure layout different than\n" +
-             "## if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large\n" +
-             "## modpacks where many structure mods are using very high weight values in their template pools.\n" +
-             "## \n" +
-             "## Pros: Get a bit more performance from high weight Template Pool Structures.\n" +
-             "## Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)")
+    @Comment(value =
+        {"Whether to use an alternative strategy to make structure layouts generate slightly even faster than",
+        "the default optimization this mod has for template pool weights. This alternative strategy works by",
+        "changing the list of pieces that structures collect from the template pool to not have duplicate entries.",
+        "{line_break}",
+        "This will not break the structure generation, but it will make the structure layout different than",
+        "if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large",
+        "modpacks where many structure mods are using very high weight values in their template pools.",
+        "{line_break}",
+        "Pros: Get a bit more performance from high weight Template Pool Structures.",
+        "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"},
+        breakLineBefore = true)
     public boolean deduplicateShuffledTemplatePoolElementList = false;
     @Comment("Enables a port of the mod StructureLayoutOptimizer, which optimizes general Jigsaw structure generation")
     public boolean enableStructureLayoutOptimizer = true;
@@ -233,7 +234,7 @@ public class Config implements ConfigData {
 			throw new NullPointerException("Defaulted config or registered config was null!");
 		}
 
-		detectModifications(defaulted, INSTANCE, Config.class);
+		detectModifications(defaulted, INSTANCE, Config.class, "");
 		System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
 		boolean configured = INSTANCE.chunkGeneration.nativeAccelerationEnabled;
 		if (configured) {
@@ -264,7 +265,7 @@ public class Config implements ConfigData {
 		return INSTANCE;
 	}
 
-	private static void detectModifications(Object obj1, Object obj2, Class<?> parentClass) {
+	private static void detectModifications(Object obj1, Object obj2, Class<?> parentClass, String prefix) {
 		if (obj1 == null || obj2 == null) {
 			throw new NullPointerException("One of the objects to compare is null!");
 		}
@@ -274,26 +275,19 @@ public class Config implements ConfigData {
 
 		for (Field field : fields) {
 			field.setAccessible(true);
-            if (field.isAnnotationPresent(IgnoreModifications.class)) {
-                continue;
-            }
 			try {
 				Object value1 = field.get(obj1);
 				Object value2 = field.get(obj2);
 
-				if (!Objects.equals(value1, value2) && !isInnerClassOf(value1.getClass(), parentClass)) {
-					if (field.isAnnotationPresent(Experimental.class)) {
-                        LOGGER.warn("====== WARNING: EXPERIMENTAL FEATURE ======");
-                        LOGGER.warn("Field '{}' is marked as experimental and its value was changed to: {}", field.getName(), value2);
-                        LOGGER.warn("Proceed with caution as this feature may be unstable or subject to change.");
-                        LOGGER.warn("===========================================");
-                    } else {
-                        LOGGER.info("Detected modified arg, '{}', was changed to: {}", field.getName(), value2);
-                    }
+				if (!Objects.equals(value1, value2) && !isInnerClassOf(value1.getClass(), parentClass) && field.isAnnotationPresent(Experimental.class)) {
+                    LOGGER.warn("====== WARNING: EXPERIMENTAL FEATURE ======");
+                    LOGGER.warn("Field '{}' is marked as experimental and its value was changed to: {}", field.getName(), value2);
+                    LOGGER.warn("Proceed with caution as this feature may be unstable or subject to change.");
+                    LOGGER.warn("===========================================");
 				}
 
 				if (value1 != null && value2 != null && isInnerClassOf(value1.getClass(), parentClass)) {
-					detectModifications(value1, value2, value1.getClass());
+					detectModifications(value1, value2, value1.getClass(), field.getName() + ".");
 				}
 			} catch (IllegalAccessException e) {
 				LOGGER.error("Cannot access field: {}", field.getName());
