@@ -51,6 +51,7 @@ public class Config implements ConfigData {
     // Chunk Generation
     @Comment("Chunk-Gen related config options")
     public ChunkGeneration chunkGeneration = new ChunkGeneration();
+
     public static class ChunkGeneration {
         public long chunkDataCacheSoftLimit = 8192L;
         public long chunkDataCacheLimit = 32678L;
@@ -228,6 +229,8 @@ public class Config implements ConfigData {
     public boolean deduplicateShuffledTemplatePoolElementList = false;
     @Comment("Enables a port of the mod StructureLayoutOptimizer, which optimizes general Jigsaw structure generation")
     public boolean enableStructureLayoutOptimizer = true;
+    @Comment("The value of which Minecraft will cap out the neighbor updates for that tick. Set to '-1' to disable the limit")
+    public int maxChainedNeighborUpdates = 1_000_000;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(me.shedaniel.autoconfig.annotation.Config config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
