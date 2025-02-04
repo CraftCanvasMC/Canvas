@@ -242,7 +242,6 @@ public class Config implements ConfigData {
             Arrays.stream(comment.value()).forEach(val -> yamlWriter.append(indent).append("## ").append(val).append("\n"));
         });
         serializer.registerPostSerializeAction((context) -> {
-            ConfigurationUtils.hookToSpark(context.configPath());
             INSTANCE = context.configuration();
 
             System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");

@@ -4,12 +4,14 @@ import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
 import io.canvasmc.canvas.server.level.LevelThread;
+import io.netty.util.internal.ConcurrentSet;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
@@ -28,6 +30,7 @@ public class ThreadedServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
     public static final long MAX_NANOSECONDS_FOR_TICK_FRAME = 50_000_000;
     public static final ThreadGroup SERVER_THREAD_GROUP = new ThreadGroup("ServerThreadGroup");
+    private static final Set<Long> LEVEL_THREAD_IDS = new ConcurrentSet<>();
     public static BooleanSupplier SHOULD_KEEP_TICKING;
     public static Function<ServerLevel, Thread> SPINNER = (level) -> {
         try {
@@ -35,6 +38,7 @@ public class ThreadedServer {
                 throw new WrongThreadException("Unable to spin level off-main");
             }
             LevelThread dedicated = new LevelThread(SERVER_THREAD_GROUP, level::spin, "levelThread:" + level.getName(), level);
+            LEVEL_THREAD_IDS.add(dedicated.threadId());
             dedicated.setPriority(Config.INSTANCE.levelThreadPriority);
             dedicated.setUncaughtExceptionHandler((thread, throwable) -> LOGGER.error("Uncaught exception in level thread, {}", ((LevelThread) thread).getLevel().getName(), throwable));
             dedicated.start();
@@ -45,12 +49,20 @@ public class ThreadedServer {
     };
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final MinecraftServer server;
+    public ThreadedEntityScheduler entityScheduler;
     private long tickSection;
     private boolean started = false;
-    public ThreadedEntityScheduler entityScheduler;
 
     public ThreadedServer(MinecraftServer server) {
         this.server = server;
+    }
+
+    public static boolean isLevelThread(long id) {
+        return LEVEL_THREAD_IDS.contains(id);
+    }
+
+    public static Long @NotNull [] getLevelIds() {
+        return LEVEL_THREAD_IDS.toArray(new Long[0]);
     }
 
     public List<ServerLevel> getThreadedWorlds() {
@@ -80,6 +92,7 @@ public class ThreadedServer {
                 final ThreadedEntityScheduler entityScheduler = new ThreadedEntityScheduler("EntityScheduler");
                 this.entityScheduler = entityScheduler;
                 TickThread entitySchedulerThread = new TickThread(entityScheduler::spin, "EntityScheduler");
+                LEVEL_THREAD_IDS.add(entitySchedulerThread.threadId());
                 entitySchedulerThread.setPriority(Config.INSTANCE.levelThreadPriority); // Keep priority same as level threads to avoid inconsistency
                 entitySchedulerThread.start();
             }
