@@ -94,6 +94,10 @@ public class Config implements ConfigData {
         public boolean enableFasterTntOptimization = true;
         public boolean explosionNoBlockDamage = false;
         public double tntRandomRange = -1;
+        @Comment("Enables 'merge tnt logic', which makes it so that nearby tnt are merged together, increasing the power of 1 tnt explosion and reducing the amount of explosions. Helpful for anarchy servers")
+        public boolean mergeTntLogic = false;
+        @Comment("Max TNT primed for merging logic to start. Requires 'mergeTntLogic' to be enabled")
+        public int maxTntPrimedForMerge = 100;
     }
 
     @Comment("Amount of entities to summon per tick from the summon command")
