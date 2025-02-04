@@ -9,6 +9,10 @@ public class DistanceUtils {
     public static int resolveViewDistance(ServerLevel world) {
         WorldSpecificViewDistancePersistentState state = WorldSpecificViewDistancePersistentState.getFrom(world);
         GlobalDistanceComponent globalDist = WorldSpecificViewDistanceComponents.GLOBAL_DISTANCES.get(world.getServer().getWorldData());
+        if (globalDist == null) {
+            WorldSpecificViewDistanceComponents.GLOBAL_DISTANCES.put(world.getServer().getWorldData(), new GlobalDistanceComponent());
+            return resolveViewDistance(world);
+        }
 
         int viewDistance = state.getLocalViewDistance();
 
@@ -26,6 +30,10 @@ public class DistanceUtils {
     public static int resolveSimulationDistance(ServerLevel world) {
         WorldSpecificViewDistancePersistentState state = WorldSpecificViewDistancePersistentState.getFrom(world);
         GlobalDistanceComponent globalDist = WorldSpecificViewDistanceComponents.GLOBAL_DISTANCES.get(world.getServer().getWorldData());
+        if (globalDist == null) {
+            WorldSpecificViewDistanceComponents.GLOBAL_DISTANCES.put(world.getServer().getWorldData(), new GlobalDistanceComponent());
+            return resolveSimulationDistance(world);
+        }
 
         int simDistance = state.getLocalSimulationDistance();
 
