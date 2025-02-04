@@ -210,6 +210,19 @@ public class Config implements ConfigData {
     public boolean chainEndCrystalExplosions = false;
     @Comment("Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more")
     public boolean mc258859 = false;
+    @Comment("Whether to use an alternative strategy to make structure layouts generate slightly even faster than\n" +
+             "## the default optimization this mod has for template pool weights. This alternative strategy works by\n" +
+             "## changing the list of pieces that structures collect from the template pool to not have duplicate entries.\n" +
+             "## \n" +
+             "## This will not break the structure generation, but it will make the structure layout different than\n" +
+             "## if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large\n" +
+             "## modpacks where many structure mods are using very high weight values in their template pools.\n" +
+             "## \n" +
+             "## Pros: Get a bit more performance from high weight Template Pool Structures.\n" +
+             "## Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)")
+    public boolean deduplicateShuffledTemplatePoolElementList = false;
+    @Comment("Enables a port of the mod StructureLayoutOptimizer, which optimizes general Jigsaw structure generation")
+    public boolean enableStructureLayoutOptimizer = true;
 
 	public static Config init() {
 		AutoConfig.register(Config.class, YamlConfigSerializerWithComments::new);

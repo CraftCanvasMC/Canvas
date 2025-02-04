@@ -1,0 +1,203 @@
+--- a/net/minecraft/world/level/levelgen/structure/pools/JigsawPlacement.java
++++ b/net/minecraft/world/level/levelgen/structure/pools/JigsawPlacement.java
+@@ -2,8 +_,16 @@
+ 
+ import com.google.common.collect.Lists;
+ import com.mojang.logging.LogUtils;
++import java.util.ArrayList;
++import java.util.LinkedHashSet;
+ import java.util.List;
+ import java.util.Optional;
++import java.util.function.Supplier;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.util.structure.BoxOctree;
++import io.canvasmc.canvas.util.structure.GeneralUtils;
++import io.canvasmc.canvas.util.structure.TrojanArrayList;
++import io.canvasmc.canvas.util.structure.TrojanVoxelShape;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.Holder;
+@@ -287,6 +_,108 @@
+             this.pieces = pieces;
+             this.random = random;
+         }
++        // Canvas start - StructureLayoutOptimizer
++
++        private boolean structureLayoutOptimizer$optimizeJigsawConnecting(StructureTemplate.JigsawBlockInfo jigsaw1, StructureTemplate.JigsawBlockInfo jigsaw2) {
++            if (!Config.INSTANCE.enableStructureLayoutOptimizer) {
++                return JigsawBlock.canAttach(jigsaw1, jigsaw2);
++            }
++            return GeneralUtils.canJigsawsAttach(jigsaw1, jigsaw2);
++        }
++
++        private void structureLayoutOptimizer$replaceVoxelShape3(MutableObject<VoxelShape> instance, BoundingBox pieceBounds) {
++            TrojanVoxelShape trojanVoxelShape = new TrojanVoxelShape(new BoxOctree(AABB.of(pieceBounds)));
++            instance.setValue(trojanVoxelShape);
++        }
++
++        private void structureLayoutOptimizer$replaceVoxelShape4(MutableObject<VoxelShape> instance, BoundingBox pieceBounds) {
++            if (instance.getValue() instanceof TrojanVoxelShape trojanVoxelShape) {
++                trojanVoxelShape.boxOctree.addBox(AABB.of(pieceBounds));
++            }
++        }
++
++        private List<StructurePoolElement> structureLayoutOptimizer$removeDuplicateTemplatePoolElementLists(StructureTemplatePool instance, RandomSource random) {
++            if (!Config.INSTANCE.enableStructureLayoutOptimizer || !Config.INSTANCE.deduplicateShuffledTemplatePoolElementList) {
++                return instance.getShuffledTemplates(random);
++            }
++
++            // Linked hashset keeps order of elements.
++            LinkedHashSet<StructurePoolElement> uniquePieces = new LinkedHashSet<>((instance).rawTemplates.size());
++
++            // Don't use addAll. Want to keep it simple in case of inefficiency in collection's addAll.
++            // Set will ignore duplicates after first appearance of an element.
++            for (StructurePoolElement piece : instance.getShuffledTemplates(random)) {
++                //noinspection UseBulkOperation
++                uniquePieces.add(piece);
++            }
++
++            // Move the elements from set to the list in the same order.
++            int uniquePiecesFound = uniquePieces.size();
++            List<StructurePoolElement> deduplicatedListOfPieces = new ArrayList<>(uniquePiecesFound);
++            for (int i = 0; i < uniquePiecesFound; i++) {
++                deduplicatedListOfPieces.add(uniquePieces.removeFirst());
++            }
++
++            return deduplicatedListOfPieces;
++        }
++
++        private ArrayList<StructurePoolElement> structureLayoutOptimizer$skipDuplicateTemplatePoolElementLists1() {
++            // Swap with trojan list, so we can record what pieces we visited
++            return Config.INSTANCE.deduplicateShuffledTemplatePoolElementList ? Lists.newArrayList() : new TrojanArrayList<>();
++        }
++
++        private List structureLayoutOptimizer$skipBlockedJigsaws(
++            List original,
++            boolean useExpansionHack,
++            MutableObject<VoxelShape> voxelShapeMutableObject,
++            StructurePoolElement structurePoolElement,
++            StructureTemplate.StructureBlockInfo parentJigsawBlockInfo,
++            BlockPos parentTargetPosition)
++        {
++            if (!Config.INSTANCE.enableStructureLayoutOptimizer) {
++                return original;
++            }
++            if (voxelShapeMutableObject.getValue() instanceof TrojanVoxelShape trojanVoxelShape) {
++                // If rigid and target position is already an invalid spot, do not run rest of logic.
++                StructureTemplatePool.Projection candidatePlacementBehavior = structurePoolElement.getProjection();
++                boolean isCandidateRigid = candidatePlacementBehavior == StructureTemplatePool.Projection.RIGID;
++                if (isCandidateRigid && (!trojanVoxelShape.boxOctree.boundaryContains(parentTargetPosition) || trojanVoxelShape.boxOctree.withinAnyBox(parentTargetPosition))) {
++                    return new ArrayList<>();
++                }
++            }
++            return original;
++        }
++
++        private List<Rotation> structureLayoutOptimizer$skipDuplicateTemplatePoolElementLists2(List<Rotation> original,
++                                                                                               List<StructurePoolElement> list,
++                                                                                               StructurePoolElement structurepoolelement1)
++        {
++            if (!Config.INSTANCE.enableStructureLayoutOptimizer) {
++                return original;
++            }
++            if (!Config.INSTANCE.deduplicateShuffledTemplatePoolElementList && list instanceof TrojanArrayList<StructurePoolElement> trojanArrayList) {
++                // Do not run this piece's logic since we already checked its 4 rotations in the past.
++                if (trojanArrayList.elementsAlreadyParsed.contains(structurepoolelement1)) {
++
++                    // Prime the random with the random calls we would've skipped.
++                    // Maintains vanilla compat.
++                    for (Rotation rotation1 : original) {
++                        structurepoolelement1.getShuffledJigsawBlocks(this.structureTemplateManager, BlockPos.ZERO, rotation1, this.random);
++                    }
++
++                    // Short circuit the Rotation loop
++                    return new ArrayList<>();
++                }
++                // Record piece as it will go through the 4 rotation checks for spawning.
++                else {
++                    trojanArrayList.elementsAlreadyParsed.add(structurepoolelement1);
++                }
++            }
++
++            // Allow the vanilla code to run normally.
++            return original;
++        }
++        // Canvas end
+ 
+         void tryPlacingChildren(
+             PoolElementStructurePiece piece,
+@@ -339,15 +_,15 @@
+                             if (isInside) {
+                                 mutableObject1 = mutableObject;
+                                 if (mutableObject.getValue() == null) {
+-                                    mutableObject.setValue(Shapes.create(AABB.of(boundingBox)));
++                                     mutableObject.setValue(Shapes.create(AABB.of(boundingBox)));
+                                 }
+                             } else {
+                                 mutableObject1 = free;
+                             }
+ 
+-                            List<StructurePoolElement> list = Lists.newArrayList();
++                            List<StructurePoolElement> list = structureLayoutOptimizer$skipDuplicateTemplatePoolElementLists1(); // Canvas - StructureLayoutOptimizer
+                             if (depth != this.maxDepth) {
+-                                list.addAll(holder.value().getShuffledTemplates(this.random));
++                                list.addAll(structureLayoutOptimizer$removeDuplicateTemplatePoolElementLists(holder.value(), this.random)); // Canvas - StructureLayoutOptimizer
+                             }
+ 
+                             list.addAll(fallback.value().getShuffledTemplates(this.random));
+@@ -358,10 +_,14 @@
+                                     break;
+                                 }
+ 
+-                                for (Rotation rotation1 : Rotation.getShuffled(this.random)) {
+-                                    List<StructureTemplate.JigsawBlockInfo> shuffledJigsawBlocks = structurePoolElement.getShuffledJigsawBlocks(
++                                // Canvas start - StructureLayoutOptimizer
++                                for (Rotation rotation1 : structureLayoutOptimizer$skipDuplicateTemplatePoolElementLists2(Rotation.getShuffled(this.random), list, structurePoolElement)) {
++                                    List<StructureTemplate.JigsawBlockInfo> shuffledJigsawBlocks = structureLayoutOptimizer$skipBlockedJigsaws(
++                                        structurePoolElement.getShuffledJigsawBlocks(
+                                         this.structureTemplateManager, BlockPos.ZERO, rotation1, this.random
++                                        ), useExpansionHack, mutableObject1, structurePoolElement, structureBlockInfo, blockPos1
+                                     );
++                                // Canvas end
+                                     BoundingBox boundingBox1 = structurePoolElement.getBoundingBox(this.structureTemplateManager, BlockPos.ZERO, rotation1);
+                                     int i2;
+                                     if (useExpansionHack && boundingBox1.getYSpan() <= 16) {
+@@ -394,7 +_,7 @@
+                                     }
+ 
+                                     for (StructureTemplate.JigsawBlockInfo jigsawBlockInfo1 : shuffledJigsawBlocks) {
+-                                        if (JigsawBlock.canAttach(jigsawBlockInfo, jigsawBlockInfo1)) {
++                                        if (structureLayoutOptimizer$optimizeJigsawConnecting(jigsawBlockInfo, jigsawBlockInfo1)) { // Canvas - StructureLayoutOptimizer
+                                             BlockPos blockPos2 = jigsawBlockInfo1.info().pos();
+                                             BlockPos blockPos3 = blockPos1.subtract(blockPos2);
+                                             BoundingBox boundingBox2 = structurePoolElement.getBoundingBox(this.structureTemplateManager, blockPos3, rotation1);
+@@ -423,9 +_,26 @@
+                                                 boundingBox3.encapsulate(new BlockPos(boundingBox3.minX(), boundingBox3.minY() + max, boundingBox3.minZ()));
+                                             }
+ 
+-                                            if (!Shapes.joinIsNotEmpty(
+-                                                mutableObject1.getValue(), Shapes.create(AABB.of(boundingBox3).deflate(0.25)), BooleanOp.ONLY_SECOND
+-                                            )) {
++                                            // Canvas start
++                                            boolean internal$joinIsNotEmpty;
++                                            VoxelShape parentBounds = mutableObject1.getValue();
++                                            Supplier<Boolean> original = () -> Shapes.joinIsNotEmpty(
++                                                parentBounds, Shapes.create(AABB.of(boundingBox3).deflate(0.25)), BooleanOp.ONLY_SECOND
++                                            );
++                                            if (Config.INSTANCE.enableStructureLayoutOptimizer) {
++                                                if (parentBounds instanceof TrojanVoxelShape trojanVoxelShape) {
++                                                    AABB pieceAABB = AABB.of(boundingBox3).deflate(0.25D);
++
++                                                    // Have to inverse because of an ! outside our wrap
++                                                    internal$joinIsNotEmpty = !trojanVoxelShape.boxOctree.withinBoundsButNotIntersectingChildren(pieceAABB);
++                                                } else {
++                                                    internal$joinIsNotEmpty = original.get();
++                                                }
++                                            } else {
++                                                internal$joinIsNotEmpty = original.get();
++                                            }
++                                            if (!internal$joinIsNotEmpty) {
++                                            // Canvas end
+                                                 mutableObject1.setValue(
+                                                     Shapes.joinUnoptimized(
+                                                         mutableObject1.getValue(), Shapes.create(AABB.of(boundingBox3)), BooleanOp.ONLY_FIRST
