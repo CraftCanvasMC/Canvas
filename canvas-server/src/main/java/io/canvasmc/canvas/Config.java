@@ -231,6 +231,10 @@ public class Config implements ConfigData {
     public boolean enableStructureLayoutOptimizer = true;
     @Comment("The value of which Minecraft will cap out the neighbor updates for that tick. Set to '-1' to disable the limit")
     public int maxChainedNeighborUpdates = 1_000_000;
+    @Comment("Disables fluid ticking on chunk generation")
+    public boolean disableFluidTickingInPostProcessGenerationStep = false;
+    @Comment("Disables leaf block decay")
+    public boolean disableLeafDecay = false;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(me.shedaniel.autoconfig.annotation.Config config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
