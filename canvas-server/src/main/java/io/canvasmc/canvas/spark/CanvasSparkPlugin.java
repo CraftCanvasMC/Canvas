@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
+import io.canvasmc.canvas.Config;
 import me.lucko.spark.api.Spark;
 import me.lucko.spark.paper.PaperClassSourceLookup;
 import me.lucko.spark.paper.PaperCommandSender;
@@ -58,7 +59,7 @@ public class CanvasSparkPlugin implements PaperSparkModule, SparkPlugin {
     }
 
     public static @NotNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
-        return new CanvasSparkPlugin(server, logger, scheduler, classLookup);
+        return Config.INSTANCE.replaceSparkModule ? new CanvasSparkPlugin(server, logger, scheduler, classLookup) : PaperSparkModule.create(compatibility, server, logger, scheduler, classLookup);
     }
 
     public void enable() {

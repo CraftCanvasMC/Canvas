@@ -235,6 +235,19 @@ public class Config implements ConfigData {
     public boolean disableFluidTickingInPostProcessGenerationStep = false;
     @Comment("Disables leaf block decay")
     public boolean disableLeafDecay = false;
+    @Comment("Replaces papers version of the spark-paper module with our own")
+    public boolean replaceSparkModule = true;
+
+    @Comment("Related configuration options to chunk sending optimizations")
+    public ChunkSending chunkSending = new ChunkSending();
+    public static class ChunkSending {
+        @Comment("Runs chunk sending off-level/main")
+        public boolean asyncChunkSending = false;
+        @Comment("Amount of threads to use for async chunk sending. This does nothing when 'useVirtualThreadExecutorForChunkSenders' is enabled")
+        public int asyncChunkSendingThreadCount = 1;
+        @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
+        public boolean useVirtualThreadExecutorForChunkSenders = false;
+    }
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(me.shedaniel.autoconfig.annotation.Config config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
