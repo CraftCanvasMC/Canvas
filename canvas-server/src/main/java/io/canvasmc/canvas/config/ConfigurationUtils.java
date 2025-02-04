@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.config;
 
+import io.canvasmc.canvas.config.annotation.Comment;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import org.jetbrains.annotations.NotNull;
 
 public class ConfigurationUtils {
     protected static final Map<String, Comment> COMMENTS = new LinkedHashMap<>();
+    protected static final Map<String, Field> FIELD_MAP = new LinkedHashMap<>();
 
     public static void extractKeys(Class<?> clazz) {
         extractKeys(clazz, "");
@@ -27,6 +29,7 @@ public class ConfigurationUtils {
                     COMMENTS.put(keyName, comment);
                 }
 
+                FIELD_MAP.put(keyName, field);
                 if (field.getType().getEnclosingClass() == clazz) {
                     keys.addAll(extractKeys(field.getType(), keyName));
                 }
@@ -36,7 +39,6 @@ public class ConfigurationUtils {
     }
 
     public static void hookToSpark(@NotNull Path configPath) {
-        // "spark.serverconfigs.extra"
         String name = configPath.toFile().getName();
         System.setProperty("spark.serverconfigs.extra", name);
     }

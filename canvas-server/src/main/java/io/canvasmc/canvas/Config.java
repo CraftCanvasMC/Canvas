@@ -1,28 +1,32 @@
 package io.canvasmc.canvas;
 
-import io.canvasmc.canvas.config.*;
+import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
+import io.canvasmc.canvas.config.ConfigurationUtils;
+import io.canvasmc.canvas.config.annotation.Comment;
+import io.canvasmc.canvas.config.annotation.Experimental;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
+import me.shedaniel.autoconfig.serializer.ConfigSerializer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.goal.Goal;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-
 @me.shedaniel.autoconfig.annotation.Config(name = "canvas_server")
 public class Config implements ConfigData {
 
-	public static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
+    public static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
     public static final List<Class<? extends Goal>> COMPILED_DISABLED_GOAL_CLASSES = Collections.synchronizedList(new ArrayList<>());
     public static final List<ResourceLocation> COMPILED_LOCATIONS = Collections.synchronizedList(new ArrayList<>());
     public static boolean shouldCheckMasks = false;
-	public static Config INSTANCE = new Config();
+    public static Config INSTANCE = new Config();
 
     // Threaded Dimensions
     @Comment("Determines if the server should tick the playerlist assigned to each world on their own level threads, or if it should tick on the main thread(globally)")
@@ -211,91 +215,68 @@ public class Config implements ConfigData {
     public boolean mc258859 = false;
     @Comment(value =
         {"Whether to use an alternative strategy to make structure layouts generate slightly even faster than",
-        "the default optimization this mod has for template pool weights. This alternative strategy works by",
-        "changing the list of pieces that structures collect from the template pool to not have duplicate entries.",
-        "{line_break}",
-        "This will not break the structure generation, but it will make the structure layout different than",
-        "if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large",
-        "modpacks where many structure mods are using very high weight values in their template pools.",
-        "{line_break}",
-        "Pros: Get a bit more performance from high weight Template Pool Structures.",
-        "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"},
+            "the default optimization this mod has for template pool weights. This alternative strategy works by",
+            "changing the list of pieces that structures collect from the template pool to not have duplicate entries.",
+            "{line_break}",
+            "This will not break the structure generation, but it will make the structure layout different than",
+            "if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large",
+            "modpacks where many structure mods are using very high weight values in their template pools.",
+            "{line_break}",
+            "Pros: Get a bit more performance from high weight Template Pool Structures.",
+            "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"},
         breakLineBefore = true)
     public boolean deduplicateShuffledTemplatePoolElementList = false;
     @Comment("Enables a port of the mod StructureLayoutOptimizer, which optimizes general Jigsaw structure generation")
     public boolean enableStructureLayoutOptimizer = true;
 
-	public static Config init() {
-		AutoConfig.register(Config.class, YamlConfigSerializerWithComments::new);
-		INSTANCE = AutoConfig.getConfigHolder(Config.class).getConfig();
-		Config defaulted = new Config();
-
-		if (defaulted == null || INSTANCE == null) {
-			throw new NullPointerException("Defaulted config or registered config was null!");
-		}
-
-		detectModifications(defaulted, INSTANCE, Config.class, "");
-		System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
-		boolean configured = INSTANCE.chunkGeneration.nativeAccelerationEnabled;
-		if (configured) {
-			try {
-				Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
-			} catch (Throwable t) {
-				t.printStackTrace();
-			}
-		}
-		io.canvasmc.canvas.entity.tracking.ThreadedTracker.init();
-        for (final String goalClassName : INSTANCE.goalsToDisable) {
-            try {
-                //noinspection unchecked
-                Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalClassName);
-                COMPILED_DISABLED_GOAL_CLASSES.add(clazz);
-                LOGGER.info("Disabling Goal \"{}\"...", clazz.getSimpleName());
-            } catch (ClassNotFoundException e) {
-                LOGGER.error("Unable to locate goal class \"{}\". Unable to disable, skipping.", goalClassName, e);
-                continue;
+    private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(me.shedaniel.autoconfig.annotation.Config config, Class<T> configClass) {
+        AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
+        ConfigurationUtils.extractKeys(serializer.getConfigClass());
+        serializer.registerAnnotationHandler(Comment.class, (yamlWriter, indent, _, _, comment) -> {
+            if (comment.breakLineBefore()) {
+                yamlWriter.append("\n");
             }
-        }
-        for (final EntityMask entityMask : INSTANCE.entityMasks) {
-            if (!shouldCheckMasks) {
-                shouldCheckMasks = true;
+            Arrays.stream(comment.value()).forEach(val -> yamlWriter.append(indent).append("## ").append(val).append("\n"));
+        });
+        serializer.registerPostSerializeAction((context) -> {
+            ConfigurationUtils.hookToSpark(context.configPath());
+            INSTANCE = context.configuration();
+
+            System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
+            boolean configured = INSTANCE.chunkGeneration.nativeAccelerationEnabled;
+            if (configured) {
+                try {
+                    Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                }
             }
-            COMPILED_LOCATIONS.add(entityMask.type);
-        }
-		return INSTANCE;
-	}
+            io.canvasmc.canvas.entity.tracking.ThreadedTracker.init();
+            for (final String goalClassName : INSTANCE.goalsToDisable) {
+                try {
+                    //noinspection unchecked
+                    Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalClassName);
+                    COMPILED_DISABLED_GOAL_CLASSES.add(clazz);
+                    LOGGER.info("Disabling Goal \"{}\"...", clazz.getSimpleName());
+                } catch (ClassNotFoundException e) {
+                    LOGGER.error("Unable to locate goal class \"{}\". Unable to disable, skipping.", goalClassName, e);
+                    continue;
+                }
+            }
+            for (final EntityMask entityMask : INSTANCE.entityMasks) {
+                if (!shouldCheckMasks) {
+                    shouldCheckMasks = true;
+                }
+                COMPILED_LOCATIONS.add(entityMask.type);
+            }
+        });
 
-	private static void detectModifications(Object obj1, Object obj2, Class<?> parentClass, String prefix) {
-		if (obj1 == null || obj2 == null) {
-			throw new NullPointerException("One of the objects to compare is null!");
-		}
+        return serializer;
+    }
 
-		Class<?> clazz = obj1.getClass();
-		Field[] fields = clazz.getDeclaredFields();
+    public static Config init() {
+        AutoConfig.register(Config.class, Config::buildSerializer);
+        return INSTANCE;
+    }
 
-		for (Field field : fields) {
-			field.setAccessible(true);
-			try {
-				Object value1 = field.get(obj1);
-				Object value2 = field.get(obj2);
-
-				if (!Objects.equals(value1, value2) && !isInnerClassOf(value1.getClass(), parentClass) && field.isAnnotationPresent(Experimental.class)) {
-                    LOGGER.warn("====== WARNING: EXPERIMENTAL FEATURE ======");
-                    LOGGER.warn("Field '{}' is marked as experimental and its value was changed to: {}", field.getName(), value2);
-                    LOGGER.warn("Proceed with caution as this feature may be unstable or subject to change.");
-                    LOGGER.warn("===========================================");
-				}
-
-				if (value1 != null && value2 != null && isInnerClassOf(value1.getClass(), parentClass)) {
-					detectModifications(value1, value2, value1.getClass(), field.getName() + ".");
-				}
-			} catch (IllegalAccessException e) {
-				LOGGER.error("Cannot access field: {}", field.getName());
-			}
-		}
-	}
-
-	private static boolean isInnerClassOf(@NotNull Class<?> clazz, Class<?> parentClass) {
-		return clazz.getEnclosingClass() != null && clazz.getEnclosingClass().equals(parentClass);
-	}
 }
