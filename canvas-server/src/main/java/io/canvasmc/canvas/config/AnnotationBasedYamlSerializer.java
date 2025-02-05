@@ -99,10 +99,14 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
             Object value = entry.getValue();
             String fullKey = parentKey.isEmpty() ? key : parentKey + "." + key;
 
+            if (value == null) {
+                continue;
+            }
+
             this.annotationContextProviderRegistry.forEach((annotationClass, contextProvider) -> {
                 Field keyField = fields.get(fullKey);
                 if (keyField == null) {
-                    throw new RuntimeException("Unable to find Field from key, '" + fullKey + "'!");
+                    return;
                 }
                 if (keyField.isAnnotationPresent(annotationClass)) {
                     contextProvider.apply(writer, indent, fullKey, keyField, keyField.getAnnotation(annotationClass));
@@ -112,6 +116,21 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
             if (value instanceof Map) {
                 writer.append(indent).append(key).append(":\n");
                 writeYaml(writer, (Map<String, Object>) value, fields, indentLevel + 1, fullKey);
+            } else if (value instanceof List<?> list) {
+                writer.append(indent).append(key).append(":");
+                if (!list.isEmpty()) {
+                    writer.append("\n");
+                    for (Object item : list) {
+                        if (item instanceof Map<?, ?> itemMap) {
+                            writer.append(indent).append("   -\n");
+                            writeYaml(writer, (Map<String, Object>) itemMap, fields, indentLevel + 2, fullKey);
+                        } else {
+                            writer.append(indent).append("   - ").append(item.toString()).append("\n");
+                        }
+                    }
+                } else {
+                    writer.append(" []\n");
+                }
             } else {
                 writer.append(indent).append(key).append(": ").append(value.toString()).append("\n");
             }

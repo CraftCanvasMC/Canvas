@@ -1,11 +1,10 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -5,6 +_,14 @@
+@@ -5,29 +_,40 @@
  import com.mojang.datafixers.DataFixer;
  import com.mojang.datafixers.util.Pair;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.entity.tnt.TNTMergeManager;
-+import io.canvasmc.canvas.server.ThreadedServer;
 +import io.canvasmc.canvas.Config;
 +import io.canvasmc.canvas.server.level.distance.command.DistanceUtils;
 +import io.canvasmc.canvas.util.QueuedTaskScheduler;
@@ -13,18 +12,21 @@
 +import io.canvasmc.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
 +import io.netty.util.internal.ConcurrentSet;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
- import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
  import it.unimi.dsi.fastutil.longs.LongSet;
-@@ -18,16 +_,26 @@
+ import it.unimi.dsi.fastutil.longs.LongSets;
+ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+-import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
+-import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+ import it.unimi.dsi.fastutil.objects.Object2IntMap.Entry;
+ import java.io.IOException;
  import java.io.Writer;
  import java.nio.file.Files;
  import java.nio.file.Path;
-+import java.io.File;
  import java.util.ArrayList;
-+import java.util.Arrays;
 +import java.util.EnumSet;
 +import java.util.Iterator;
-+import java.util.LinkedList;
  import java.util.Collection;
 +import java.util.Collections;
  import java.util.Comparator;
@@ -42,11 +44,7 @@
  import java.util.function.BooleanSupplier;
  import java.util.function.Function;
  import java.util.function.Predicate;
-@@ -35,20 +_,27 @@
- import java.util.stream.Stream;
- import javax.annotation.Nonnull;
- import javax.annotation.Nullable;
-+import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+@@ -38,26 +_,33 @@
  import net.minecraft.CrashReport;
  import net.minecraft.CrashReportCategory;
  import net.minecraft.ReportType;
@@ -70,8 +68,9 @@
  import net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket;
  import net.minecraft.network.protocol.game.ClientboundBlockEventPacket;
  import net.minecraft.network.protocol.game.ClientboundDamageEventPacket;
-@@ -57,7 +_,9 @@
- import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
+ import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
+ import net.minecraft.network.protocol.game.ClientboundExplodePacket;
+-import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
  import net.minecraft.network.protocol.game.ClientboundLevelEventPacket;
  import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
 +import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket;
@@ -80,19 +79,19 @@
  import net.minecraft.network.protocol.game.ClientboundSoundEntityPacket;
  import net.minecraft.network.protocol.game.ClientboundSoundPacket;
  import net.minecraft.network.protocol.game.DebugPackets;
-@@ -65,7 +_,10 @@
+@@ -65,6 +_,7 @@
  import net.minecraft.resources.ResourceLocation;
  import net.minecraft.server.MinecraftServer;
  import net.minecraft.server.ServerScoreboard;
 +import net.minecraft.server.ServerTickRateManager;
-+import net.minecraft.server.dedicated.DedicatedServer;
  import net.minecraft.server.level.progress.ChunkProgressListener;
-+import net.minecraft.server.network.ServerConnectionListener;
  import net.minecraft.server.players.SleepStatus;
  import net.minecraft.sounds.SoundEvent;
- import net.minecraft.sounds.SoundSource;
-@@ -79,6 +_,7 @@
- import net.minecraft.util.datafix.DataFixTypes;
+@@ -76,9 +_,9 @@
+ import net.minecraft.util.ProgressListener;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.Unit;
+-import net.minecraft.util.datafix.DataFixTypes;
  import net.minecraft.util.profiling.Profiler;
  import net.minecraft.util.profiling.ProfilerFiller;
 +import net.minecraft.util.thread.BlockableEventLoop;
@@ -107,6 +106,33 @@
  import net.minecraft.world.item.alchemy.PotionBrewing;
  import net.minecraft.world.item.crafting.RecipeManager;
  import net.minecraft.world.level.BlockEventData;
+@@ -130,18 +_,14 @@
+ import net.minecraft.world.level.chunk.ChunkGenerator;
+ import net.minecraft.world.level.chunk.LevelChunk;
+ import net.minecraft.world.level.chunk.LevelChunkSection;
+-import net.minecraft.world.level.chunk.storage.EntityStorage;
+ import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+-import net.minecraft.world.level.chunk.storage.SimpleRegionStorage;
+ import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
+ import net.minecraft.world.level.dimension.LevelStem;
+ import net.minecraft.world.level.dimension.end.EndDragonFight;
+-import net.minecraft.world.level.entity.EntityPersistentStorage;
+ import net.minecraft.world.level.entity.EntityTickList;
+ import net.minecraft.world.level.entity.EntityTypeTest;
+ import net.minecraft.world.level.entity.LevelCallback;
+ import net.minecraft.world.level.entity.LevelEntityGetter;
+-import net.minecraft.world.level.entity.PersistentEntitySectionManager;
+ import net.minecraft.world.level.gameevent.DynamicGameEventListener;
+ import net.minecraft.world.level.gameevent.GameEvent;
+ import net.minecraft.world.level.gameevent.GameEventDispatcher;
+@@ -161,7 +_,6 @@
+ import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
+ import net.minecraft.world.level.storage.DimensionDataStorage;
+ import net.minecraft.world.level.storage.LevelStorageSource;
+-import net.minecraft.world.level.storage.ServerLevelData;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ import net.minecraft.world.phys.shapes.BooleanOp;
 @@ -179,12 +_,13 @@
      private static final Logger LOGGER = LogUtils.getLogger();
      private static final int EMPTY_TIME_NO_TICK = 300;
@@ -371,7 +397,7 @@
              profilerFiller.pop();
              this.tickBlockEntities();
          }
-@@ -849,7 +_,60 @@
+@@ -849,7 +_,61 @@
          profilerFiller.push("entityManagement");
          // Paper - rewrite chunk system
          profilerFiller.pop();
@@ -398,9 +424,10 @@
 +            return;
 +        }
 +        this.entityTickList.forEach((entity) -> {
-+            if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
++            if (Config.CHECK_ENTITY_MASKS && Config.COMPILED_ENTITY_MASK_LOCATIONS.contains(entity.getTypeLocation())) {
 +                int lived = entity.tickCount;
 +                if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
++                    entity.tickCount++; // Increment this still, since if we don't, this entity will never tick again(if its run on delay)
 +                    return;
 +                }
 +            }

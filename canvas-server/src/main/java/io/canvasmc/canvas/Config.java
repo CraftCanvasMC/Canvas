@@ -4,12 +4,12 @@ import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
 import io.canvasmc.canvas.config.ConfigurationUtils;
 import io.canvasmc.canvas.config.annotation.Comment;
 import io.canvasmc.canvas.config.annotation.Experimental;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.serializer.ConfigSerializer;
@@ -23,9 +23,9 @@ import org.jetbrains.annotations.NotNull;
 public class Config implements ConfigData {
 
     public static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
-    public static final List<Class<? extends Goal>> COMPILED_DISABLED_GOAL_CLASSES = Collections.synchronizedList(new ArrayList<>());
-    public static final List<ResourceLocation> COMPILED_LOCATIONS = Collections.synchronizedList(new ArrayList<>());
-    public static boolean shouldCheckMasks = false;
+    public static final Map<Class<? extends Goal>, GoalMask> COMPILED_GOAL_MASKS = new ConcurrentHashMap<>();
+    public static final List<ResourceLocation> COMPILED_ENTITY_MASK_LOCATIONS = Collections.synchronizedList(new ArrayList<>());
+    public static boolean CHECK_ENTITY_MASKS = false;
     public static Config INSTANCE = new Config();
 
     // Threaded Dimensions
@@ -112,8 +112,13 @@ public class Config implements ConfigData {
     @Comment("Ignore \"<player> moved too quickly\" if the server is lagging. Improves general gameplay experience of the player when the server is lagging, as they wont get lagged back")
     public boolean ignoreMovedTooQuicklyWhenLagging = true;
 
-    @Comment("Disables all types of goals provided here. Must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\"")
-    public List<String> goalsToDisable = new ArrayList<>();
+    @Comment("Masks for goals. Allows disabling and adding delays to the tick rate of the goal. The 'goalClass' must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\"")
+    public List<GoalMask> entityGoalMasks = new ArrayList<>();
+    public static class GoalMask {
+        public String goalClass;
+        public boolean disableGoal = false;
+        public int goalTickDelay = 0;
+    }
 
     @Comment("Enable the server watchdog")
     public boolean enableWatchdog = true;
@@ -137,7 +142,7 @@ public class Config implements ConfigData {
     @Comment("Allows configuration of how entities are ticked, and if they should be ticked based on the type")
     public List<EntityMask> entityMasks = new ArrayList<>();
     public static class EntityMask {
-        public ResourceLocation type;
+        public String type;
         public boolean shouldTick = true;
         public int tickRate = 1;
     }
@@ -271,22 +276,24 @@ public class Config implements ConfigData {
                 }
             }
             io.canvasmc.canvas.entity.tracking.ThreadedTracker.init();
-            for (final String goalClassName : INSTANCE.goalsToDisable) {
+            for (final GoalMask goalMask : INSTANCE.entityGoalMasks) {
                 try {
                     //noinspection unchecked
-                    Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalClassName);
-                    COMPILED_DISABLED_GOAL_CLASSES.add(clazz);
-                    LOGGER.info("Disabling Goal \"{}\"...", clazz.getSimpleName());
+                    Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalMask.goalClass);
+                    COMPILED_GOAL_MASKS.put(clazz, goalMask);
+                    LOGGER.info("Enabling Goal Mask for \"{}\"...", clazz.getSimpleName());
                 } catch (ClassNotFoundException e) {
-                    LOGGER.error("Unable to locate goal class \"{}\". Unable to disable, skipping.", goalClassName, e);
+                    LOGGER.error("Unable to locate goal class \"{}\", skipping.", goalMask, e);
                     continue;
                 }
             }
             for (final EntityMask entityMask : INSTANCE.entityMasks) {
-                if (!shouldCheckMasks) {
-                    shouldCheckMasks = true;
+                if (!CHECK_ENTITY_MASKS) {
+                    LOGGER.warn("An EntityMask was registered, please be very careful with this, as it can make the movement of entities a lot more choppy(if using delays)");
+                    CHECK_ENTITY_MASKS = true;
                 }
-                COMPILED_LOCATIONS.add(entityMask.type);
+                LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
+                COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
             }
         });
 
