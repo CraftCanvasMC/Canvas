@@ -26,6 +26,7 @@ import org.jetbrains.annotations.NotNull;
 @SuppressWarnings({"unchecked", "rawtypes"})
 public class AnnotationBasedYamlSerializer<T extends ConfigData> implements ConfigSerializer<T> {
     private final Map<Class<? extends Annotation>, AnnotationContextProvider> annotationContextProviderRegistry = new HashMap<>();
+    private final Map<Class<? extends Annotation>, AnnotationValidationProvider> annotationValidationProviderRegistry = new HashMap<>();
     private final List<Consumer<PostSerializeContext<T>>> postConsumerContexts = new ArrayList<>();
     private final Config definition;
     private final Class<T> configClass;
@@ -52,6 +53,19 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
             throw new IllegalArgumentException("Class must be an annotation");
         }
         annotationContextProviderRegistry.put(annotation, contextProvider);
+    }
+
+    /**
+     * Registers a validation handler, which acts as a post-processor after writing to disk to validate entries provided by the configuration
+     *
+     * @param annotation         the class of the annotation you are registering
+     * @param validationProvider the validation provider of the annotation you are registering
+     */
+    public <A extends Annotation> void registerAnnotationValidator(@NotNull Class<A> annotation, AnnotationValidationProvider<A> validationProvider) {
+        if (!annotation.isAnnotation()) {
+            throw new IllegalArgumentException("Class must be an annotation");
+        }
+        annotationValidationProviderRegistry.put(annotation, validationProvider);
     }
 
     /**
@@ -89,6 +103,33 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
             }
         }
         return rebuiltData;
+    }
+
+    private void forEach(@NotNull Map<String, Object> data, Map<String, Field> fields, String parentKey, TriConsumer<String, Field, Object> consumer) {
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            String fullKey = parentKey.isEmpty() ? key : parentKey + "." + key;
+
+            switch (value) {
+                case null -> {
+                }
+                case Map _ -> forEach((Map<String, Object>) value, fields, fullKey, consumer);
+                case List<?> list -> {
+                    if (!list.isEmpty()) {
+                        for (Object item : list) {
+                            if (item instanceof Map<?, ?> itemMap) {
+                                forEach((Map<String, Object>) itemMap, fields, fullKey, consumer);
+                            } else {
+                                consumer.accept(fullKey, fields.get(fullKey), item);
+                            }
+                        }
+                    }
+                }
+                default -> consumer.accept(fullKey, fields.get(fullKey), value);
+            }
+
+        }
     }
 
     private void writeYaml(StringWriter writer, @NotNull Map<String, Object> data, Map<String, Field> fields, int indentLevel, String parentKey) {
@@ -147,28 +188,50 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
 
         try {
             Files.createDirectories(configPath.getParent());
-            String yamlContent = this.yaml.dump(config);
+            // Build yaml content
             Map<String, Field> keyToField = ConfigurationUtils.FIELD_MAP;
-            String[] lines = yamlContent.split("\n", 2);
-            String body = lines.length > 1 ? lines[1] : "";
+            Map<String, Object> data = buildYamlData(config);
 
-            Yaml yaml = new Yaml(new Constructor());
-            Map<String, Object> data = yaml.load(new StringReader(body));
-
+            // Reorder data based on keyset
             Map<String, Object> reorderedData = sortByKeys(keyToField.keySet(), data);
 
             StringWriter yamlWriter = new StringWriter();
             DumperOptions options = new DumperOptions();
             options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
 
+            // Write annotation handlers to yaml
             writeYaml(yamlWriter, reorderedData, keyToField, 0, "");
 
+            // Write to disk
             Files.writeString(configPath, yamlWriter.toString());
-            PostSerializeContext context = new PostSerializeContext<>(configPath, config, createDefault(), yamlWriter.toString());
+            T deserialized = deserialize();
+            // Validate entries
+            data = buildYamlData(deserialized);
+            forEach(data, keyToField, "", (key, field, value) -> {
+                this.annotationValidationProviderRegistry.forEach((annotation, validator) -> {
+                    if (field.isAnnotationPresent(annotation)) {
+                        try {
+                            validator.validate(key, field, field.getAnnotation(annotation), value);
+                        } catch (ValidationException exception) {
+                            throw new RuntimeException("Field " + key + " did not pass validation of " + annotation.getSimpleName() + " for reason of '" + exception.getMessage() + "'");
+                        }
+                    }
+                });
+            });
+            PostSerializeContext context = new PostSerializeContext<>(configPath, deserialized, createDefault(), yamlWriter.toString());
             postConsumerContexts.forEach(consumer -> consumer.accept(context));
         } catch (IOException e) {
             throw new ConfigSerializer.SerializationException(e);
         }
+    }
+
+    private Map<String, Object> buildYamlData(T config) {
+        String yamlContent = this.yaml.dump(config);
+        String[] lines = yamlContent.split("\n", 2);
+        String body = lines.length > 1 ? lines[1] : "";
+
+        Yaml yaml = new Yaml(new Constructor());
+        return yaml.load(new StringReader(body));
     }
 
     @Override

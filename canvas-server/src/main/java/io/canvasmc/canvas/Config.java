@@ -2,14 +2,22 @@ package io.canvasmc.canvas;
 
 import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
 import io.canvasmc.canvas.config.ConfigurationUtils;
+import io.canvasmc.canvas.config.ValidationException;
 import io.canvasmc.canvas.config.annotation.Comment;
+import io.canvasmc.canvas.config.annotation.EnumValue;
 import io.canvasmc.canvas.config.annotation.Experimental;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import io.canvasmc.canvas.config.annotation.numeric.NegativeNumericValue;
+import io.canvasmc.canvas.config.annotation.numeric.NonNegativeNumericValue;
+import io.canvasmc.canvas.config.annotation.numeric.NonPositiveNumericValue;
+import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
+import io.canvasmc.canvas.config.annotation.numeric.Range;
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.serializer.ConfigSerializer;
@@ -33,6 +41,7 @@ public class Config implements ConfigData {
     public boolean runPlayerListTickOnIndependentLevel = true;
     @Comment("Amount of ticks until the level will resync time with the player")
     public int timeResyncInterval = 400;
+    @Range(from = 1, to = 10, inclusive = true)
     @Comment("Thread priority for level threads, must be a value between 1-10.")
     public int levelThreadPriority = 9;
     @Comment("In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to schedule to the level thread")
@@ -57,6 +66,7 @@ public class Config implements ConfigData {
         public long chunkDataCacheLimit = 32678L;
         public boolean allowAVX512 = false;
         public boolean nativeAccelerationEnabled = true;
+        @EnumValue(enumValue = ChunkSystemAlgorithm.class)
         @Comment("Modifies what algorithm the chunk system will use to define thread counts. values: MOONRISE, C2ME, ANY, ALL")
         public String chunkWorkerAlgorithm = "MOONRISE";
     }
@@ -248,6 +258,7 @@ public class Config implements ConfigData {
     public static class ChunkSending {
         @Comment("Runs chunk sending off-level/main")
         public boolean asyncChunkSending = false;
+        @Range(from = 1, to = Integer.MAX_VALUE, inclusive = true)
         @Comment("Amount of threads to use for async chunk sending. This does nothing when 'useVirtualThreadExecutorForChunkSenders' is enabled")
         public int asyncChunkSendingThreadCount = 1;
         @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
@@ -263,6 +274,83 @@ public class Config implements ConfigData {
             }
             Arrays.stream(comment.value()).forEach(val -> yamlWriter.append(indent).append("## ").append(val).append("\n"));
         });
+        serializer.registerAnnotationValidator(Range.class, (key, _, range, value) -> {
+            if (value instanceof Number number) {
+                float floatValue = number.floatValue();
+                int from = range.from();
+                int to = range.to();
+                if (!(range.inclusive() ? (floatValue >= from && floatValue <= to) : floatValue > from && floatValue < to)) {
+                    throw new io.canvasmc.canvas.config.ValidationException("Number for key, '" + key + "' was out of bounds! Value must be between " + from + " and " + to);
+                }
+                return true;
+            } else {
+                throw new io.canvasmc.canvas.config.ValidationException("Range validation was applied to a non-numeric object.");
+            }
+        });
+        serializer.registerAnnotationValidator(EnumValue.class, (_, _, enumValue, value) -> {
+            @SuppressWarnings("rawtypes") Class<? extends Enum> enumClass = enumValue.enumValue();
+
+            if (!enumClass.isEnum()) {
+                throw new io.canvasmc.canvas.config.ValidationException("EnumValue annotation applied to a non-enum type.");
+            }
+
+            Object[] enumConstants = enumClass.getEnumConstants();
+
+            if (value instanceof String str) {
+                String normalized = str.trim().toUpperCase(Locale.ROOT);
+                for (Object constant : enumConstants) {
+                    if (((Enum<?>) constant).name().equalsIgnoreCase(normalized)) {
+                        return true;
+                    }
+                }
+            } else if (value instanceof Enum<?> enumInstance) {
+                if (enumClass.isInstance(enumInstance)) {
+                    return true;
+                }
+            }
+
+            throw new io.canvasmc.canvas.config.ValidationException("Invalid enum value: " + value);
+        });
+        serializer.registerAnnotationValidator(NegativeNumericValue.class, (_, _, _, value) -> {
+            if (value instanceof Number number) {
+                if (!(number.floatValue() < 0)) {
+                    throw new io.canvasmc.canvas.config.ValidationException("Value must be a negative value");
+                }
+                return true;
+            }
+            throw new io.canvasmc.canvas.config.ValidationException("NegativeNumericValue validation applied to a non-numeric object.");
+        });
+
+        serializer.registerAnnotationValidator(NonNegativeNumericValue.class, (_, _, _, value) -> {
+            if (value instanceof Number number) {
+                if (!(number.floatValue() >= 0)) {
+                    throw new io.canvasmc.canvas.config.ValidationException("Value must be a non-negative value");
+                }
+                return true;
+            }
+            throw new io.canvasmc.canvas.config.ValidationException("NonNegativeNumericValue validation applied to a non-numeric object.");
+        });
+
+        serializer.registerAnnotationValidator(NonPositiveNumericValue.class, (_, _, _, value) -> {
+            if (value instanceof Number number) {
+                if (!(number.floatValue() <= 0)) {
+                    throw new io.canvasmc.canvas.config.ValidationException("Value must be a non-positive value");
+                }
+                return true;
+            }
+            throw new io.canvasmc.canvas.config.ValidationException("NonPositiveNumericValue validation applied to a non-numeric object.");
+        });
+
+        serializer.registerAnnotationValidator(PositiveNumericValue.class, (_, _, _, value) -> {
+            if (value instanceof Number number) {
+                if (!(number.floatValue() > 0)) {
+                    throw new io.canvasmc.canvas.config.ValidationException("Value must be a positive value");
+                }
+                return true;
+            }
+            throw new io.canvasmc.canvas.config.ValidationException("PositiveNumericValue validation applied to a non-numeric object.");
+        });
+
         serializer.registerPostSerializeAction((context) -> {
             INSTANCE = context.configuration();
 
