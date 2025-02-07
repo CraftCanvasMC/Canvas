@@ -4,6 +4,7 @@ import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
 import io.canvasmc.canvas.server.level.LevelThread;
+import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import io.netty.util.internal.ConcurrentSet;
 import java.io.File;
 import java.io.IOException;
@@ -95,6 +96,9 @@ public class ThreadedServer {
                 LEVEL_THREAD_IDS.add(entitySchedulerThread.threadId());
                 entitySchedulerThread.setPriority(Config.INSTANCE.levelThreadPriority); // Keep priority same as level threads to avoid inconsistency
                 entitySchedulerThread.start();
+            }
+            if (Config.INSTANCE.asyncPlayerJoining) {
+                PlayerJoinThread.getInstance().start();
             }
             this.started = true;
             this.server.nextTickTimeNanos = Util.getNanos();

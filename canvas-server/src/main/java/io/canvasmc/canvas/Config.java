@@ -18,6 +18,7 @@ import io.canvasmc.canvas.config.annotation.numeric.NonNegativeNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.NonPositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.Range;
+import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.serializer.ConfigSerializer;
@@ -265,6 +266,9 @@ public class Config implements ConfigData {
         public boolean useVirtualThreadExecutorForChunkSenders = false;
     }
 
+    @Comment("Moves player joining to an isolated queue-thread, severely reducing lag when players are joining, due to blocking tasks now being handled off any tickloops")
+    public boolean asyncPlayerJoining = false;
+
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(me.shedaniel.autoconfig.annotation.Config config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
         ConfigurationUtils.extractKeys(serializer.getConfigClass());
@@ -382,6 +386,10 @@ public class Config implements ConfigData {
                 }
                 LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
                 COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
+            }
+
+            if (context.configuration().asyncPlayerJoining) {
+                new PlayerJoinThread("AsyncPlayerJoinThread");
             }
         });
 
