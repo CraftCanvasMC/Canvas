@@ -108,4 +108,8 @@ public enum ChunkSystemAlgorithm {
     public int evalIO(final int configWorkerThreads, final int configIoThreads) {
         return eval.apply(configWorkerThreads, configIoThreads).getB();
     }
+
+    public @NotNull String asDebugString() {
+        return this + "(" + evalWorkers(-1, -1) + ")";
+    }
 }

@@ -1,5 +1,7 @@
 package io.canvasmc.canvas.config;
 
+import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.DumperOptions;
+import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.Yaml;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
@@ -14,31 +16,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
-import me.shedaniel.autoconfig.ConfigData;
-import me.shedaniel.autoconfig.annotation.Config;
-import me.shedaniel.autoconfig.serializer.ConfigSerializer;
-import me.shedaniel.autoconfig.util.Utils;
-import me.shedaniel.cloth.clothconfig.shadowed.org.yaml.snakeyaml.DumperOptions;
-import me.shedaniel.cloth.clothconfig.shadowed.org.yaml.snakeyaml.Yaml;
-import me.shedaniel.cloth.clothconfig.shadowed.org.yaml.snakeyaml.constructor.Constructor;
 import org.jetbrains.annotations.NotNull;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
-public class AnnotationBasedYamlSerializer<T extends ConfigData> implements ConfigSerializer<T> {
+public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
     private final Map<Class<? extends Annotation>, AnnotationContextProvider> annotationContextProviderRegistry = new HashMap<>();
     private final Map<Class<? extends Annotation>, AnnotationValidationProvider> annotationValidationProviderRegistry = new HashMap<>();
     private final List<Consumer<PostSerializeContext<T>>> postConsumerContexts = new ArrayList<>();
-    private final Config definition;
+    private final Configuration definition;
     private final Class<T> configClass;
     private final Yaml yaml;
 
-    public AnnotationBasedYamlSerializer(Config definition, @NotNull Class<T> configClass, Yaml yaml) {
+    public AnnotationBasedYamlSerializer(Configuration definition, @NotNull Class<T> configClass, Yaml yaml) {
         this.definition = definition;
         this.configClass = configClass;
         this.yaml = yaml;
     }
 
-    public AnnotationBasedYamlSerializer(Config definition, Class<T> configClass) {
+    public AnnotationBasedYamlSerializer(Configuration definition, Class<T> configClass) {
         this(definition, configClass, new Yaml());
     }
 
@@ -179,7 +174,7 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
     }
 
     private @NotNull Path getConfigPath() {
-        return Utils.getConfigFolder().resolve(this.definition.name() + ".yml");
+        return getConfigFolder().resolve(this.definition.value() + ".yml");
     }
 
     @Override
@@ -230,7 +225,7 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
         String[] lines = yamlContent.split("\n", 2);
         String body = lines.length > 1 ? lines[1] : "";
 
-        Yaml yaml = new Yaml(new Constructor());
+        Yaml yaml = new Yaml();
         return yaml.load(new StringReader(body));
     }
 
@@ -251,14 +246,18 @@ public class AnnotationBasedYamlSerializer<T extends ConfigData> implements Conf
 
     @Override
     public T createDefault() {
-        return Utils.constructUnsafely(this.configClass);
+        return constructUnsafely(this.configClass);
     }
 
     public Class<?> getConfigClass() {
         return configClass;
     }
 
-    public record PostSerializeContext<A extends ConfigData>(Path configPath, A configuration, A defaultConfiguration, String contents) {
+    public Yaml getYaml() {
+        return yaml;
+    }
+
+    public record PostSerializeContext<A>(Path configPath, A configuration, A defaultConfiguration, String contents) {
 
     }
 }

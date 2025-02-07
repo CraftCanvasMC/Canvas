@@ -1,8 +1,9 @@
 package io.canvasmc.canvas;
 
 import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
+import io.canvasmc.canvas.config.ConfigSerializer;
+import io.canvasmc.canvas.config.Configuration;
 import io.canvasmc.canvas.config.ConfigurationUtils;
-import io.canvasmc.canvas.config.ValidationException;
 import io.canvasmc.canvas.config.annotation.Comment;
 import io.canvasmc.canvas.config.annotation.EnumValue;
 import io.canvasmc.canvas.config.annotation.Experimental;
@@ -18,18 +19,16 @@ import io.canvasmc.canvas.config.annotation.numeric.NonNegativeNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.NonPositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.Range;
+import io.canvasmc.canvas.config.internal.ConfigurationManager;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
-import me.shedaniel.autoconfig.AutoConfig;
-import me.shedaniel.autoconfig.ConfigData;
-import me.shedaniel.autoconfig.serializer.ConfigSerializer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.goal.Goal;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 
-@me.shedaniel.autoconfig.annotation.Config(name = "canvas_server")
-public class Config implements ConfigData {
+@Configuration("canvas_server")
+public class Config {
 
     public static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
     public static final Map<Class<? extends Goal>, GoalMask> COMPILED_GOAL_MASKS = new ConcurrentHashMap<>();
@@ -237,11 +236,11 @@ public class Config implements ConfigData {
         {"Whether to use an alternative strategy to make structure layouts generate slightly even faster than",
             "the default optimization this mod has for template pool weights. This alternative strategy works by",
             "changing the list of pieces that structures collect from the template pool to not have duplicate entries.",
-            "{line_break}",
+            "",
             "This will not break the structure generation, but it will make the structure layout different than",
             "if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large",
             "modpacks where many structure mods are using very high weight values in their template pools.",
-            "{line_break}",
+            "",
             "Pros: Get a bit more performance from high weight Template Pool Structures.",
             "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"},
         breakLineBefore = true)
@@ -272,7 +271,7 @@ public class Config implements ConfigData {
     @Comment("Moves player joining to an isolated queue-thread, severely reducing lag when players are joining, due to blocking tasks now being handled off any tickloops")
     public boolean asyncPlayerJoining = false;
 
-    private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(me.shedaniel.autoconfig.annotation.Config config, Class<T> configClass) {
+    private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
         ConfigurationUtils.extractKeys(serializer.getConfigClass());
         serializer.registerAnnotationHandler(Comment.class, (yamlWriter, indent, _, _, comment) -> {
@@ -392,6 +391,7 @@ public class Config implements ConfigData {
             }
 
             if (context.configuration().asyncPlayerJoining) {
+                //noinspection resource
                 new PlayerJoinThread("AsyncPlayerJoinThread");
             }
         });
@@ -400,7 +400,7 @@ public class Config implements ConfigData {
     }
 
     public static Config init() {
-        AutoConfig.register(Config.class, Config::buildSerializer);
+        ConfigurationManager.register(Config.class, Config::buildSerializer);
         return INSTANCE;
     }
 
