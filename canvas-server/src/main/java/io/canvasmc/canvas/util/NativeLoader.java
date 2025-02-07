@@ -40,7 +40,7 @@ public class NativeLoader {
                         ValueLayout.JAVA_INT,
                         ValueLayout.JAVA_BOOLEAN
                     )
-                ).invokeExact(Boolean.getBoolean("com.ishland.c2me.opts.natives_math.duringGameInit") ? Config.INSTANCE.chunkGeneration.allowAVX512 : true);
+                ).invokeExact(Config.INSTANCE.chunkGeneration.allowAVX512);
                 ISATarget target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];
                 while (!target.isNativelySupported()) target = (ISATarget) ISATarget.getInstance().getEnumConstants()[target.ordinal() - 1];
                 currentMachineTarget = target;
