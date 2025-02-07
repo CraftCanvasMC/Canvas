@@ -66,6 +66,9 @@ public class Config implements ConfigData {
         public long chunkDataCacheSoftLimit = 8192L;
         public long chunkDataCacheLimit = 32678L;
         public boolean allowAVX512 = false;
+        @Range(from = -1, to = 9, inclusive = true)
+        @Comment("Overrides the ISA target located by the native loader, which allows forcing AVX512(must be a value between 6-9 for AVX512 support). Value must be between 1-9(inclusive), -1 to disable override")
+        public int isaTargetLevelOverride = -1;
         public boolean nativeAccelerationEnabled = true;
         @EnumValue(enumValue = ChunkSystemAlgorithm.class)
         @Comment("Modifies what algorithm the chunk system will use to define thread counts. values: MOONRISE, C2ME, ANY, ALL")

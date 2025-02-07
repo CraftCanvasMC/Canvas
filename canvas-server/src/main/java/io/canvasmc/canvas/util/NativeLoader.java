@@ -2,6 +2,9 @@ package io.canvasmc.canvas.util;
 
 import io.canvasmc.canvas.Config;
 import io.netty.util.internal.SystemPropertyUtil;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,8 +44,15 @@ public class NativeLoader {
                         ValueLayout.JAVA_BOOLEAN
                     )
                 ).invokeExact(Config.INSTANCE.chunkGeneration.allowAVX512);
-                ISATarget target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];
-                while (!target.isNativelySupported()) target = (ISATarget) ISATarget.getInstance().getEnumConstants()[target.ordinal() - 1];
+                ISATarget target;
+                if (Config.INSTANCE.chunkGeneration.isaTargetLevelOverride != -1) {
+                    // Use override set by configuration
+                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[Config.INSTANCE.chunkGeneration.isaTargetLevelOverride];
+                } else {
+                    // Override not set, use normal
+                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];
+                    while (!target.isNativelySupported()) target = (ISATarget) ISATarget.getInstance().getEnumConstants()[target.ordinal() - 1];
+                }
                 currentMachineTarget = target;
                 LOGGER.info("Detected maximum supported ISA target: {}", currentMachineTarget);
             } catch (Throwable e) {
@@ -51,7 +61,8 @@ public class NativeLoader {
         }
     }
 
-    public static String getAvailabilityString() {
+    @Contract(pure = true)
+    public static @NotNull String getAvailabilityString() {
         if (lookup != null) {
             return String.format("Available, with ISA target %s", currentMachineTarget);
         } else {
@@ -59,7 +70,7 @@ public class NativeLoader {
         }
     }
 
-    private static SymbolLookup load0(String libName) {
+    private static @Nullable SymbolLookup load0(String libName) {
         // load from resources
         try (final InputStream in = NativeLoader.class.getClassLoader().getResourceAsStream(libName)) {
             if (in == null) {
@@ -81,11 +92,11 @@ public class NativeLoader {
         }
     }
 
-    private static String normalize(String value) {
+    private static @NotNull String normalize(@NotNull String value) {
         return value.toLowerCase(Locale.US).replaceAll("[^a-z0-9]+", "");
     }
 
-    private static String normalizeArch(String value) {
+    private static @NotNull String normalizeArch(String value) {
         value = normalize(value);
         if (value.matches("^(x8664|amd64|ia32e|em64t|x64)$")) {
             return "x86_64";
@@ -130,7 +141,7 @@ public class NativeLoader {
         return "unknown";
     }
 
-    private static String normalizeOs(String value) {
+    private static @NotNull String normalizeOs(String value) {
         value = normalize(value);
         if (value.startsWith("aix")) {
             return "aix";
