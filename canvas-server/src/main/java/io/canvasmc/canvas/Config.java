@@ -56,6 +56,8 @@ public class Config {
     public boolean canOpenAnyDoorWithHand = false;
     @Comment("Ensure correct doors. Schedules an extra update on the next tick to ensure the door doesnt get glitched when a Villager and Player both interact with it at the same time")
     public boolean ensureCorrectDoors = false;
+    @Comment("When enabled, makes it not force a sync load on every entity movement, improving performance with high playercounts moving around the world")
+    public boolean dontLoadChunksForNoReasonWhenRunningEntityMove = true;
 
     // Chunk Generation
     @Comment("Chunk-Gen related config options")
