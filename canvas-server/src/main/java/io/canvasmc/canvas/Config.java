@@ -320,6 +320,8 @@ public class Config {
     public boolean disableInventoryChangeCriterionTrigger = false;
     @Comment("Caches the command block parse results, significantly reducing performance impacts from command blocks(given parsing is often times half the command blocks tick time)")
     public boolean cacheCommandBlockParseResults = false;
+    @Comment("Enables the development GUI tick graph rendering(another window of the Minecraft Server GUI), disabled by '--nogui' arg")
+    public boolean enableDevelopmentTickGuiGraph = false;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);

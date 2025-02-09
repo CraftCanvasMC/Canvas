@@ -3,6 +3,7 @@ package io.canvasmc.canvas.entity;
 import com.destroystokyo.paper.event.server.ServerExceptionEvent;
 import com.destroystokyo.paper.exception.ServerInternalException;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.canvasmc.canvas.server.VisibleAfterSpin;
 import io.canvasmc.canvas.server.level.WatchdogWatcher;
@@ -26,7 +27,7 @@ import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 
 // runs at tick-rate matching the main thread. will not have independent rate, just independent scheduling
-public class ThreadedEntityScheduler extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher {
+public class ThreadedEntityScheduler extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher, AverageTickTimeAccessor {
     public static final ThreadGroup THREAD_GROUP = new ThreadGroup("entity");
     private static final Logger LOGGER = LogManager.getLogger("ThreadedEntityScheduler");
     public final double[] recentTps = new double[4];
@@ -172,6 +173,11 @@ public class ThreadedEntityScheduler extends ReentrantBlockableEventLoop<TickTas
             samplelogger.logPartialSample(this.idleTimeNanos, TpsDebugDimensions.IDLE.ordinal());
         }
 
+    }
+
+    @Override
+    public double getAverageTickTime() {
+        return (double) this.lastNanoTickTime / 1_000_000;
     }
 
     @Override

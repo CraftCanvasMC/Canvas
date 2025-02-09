@@ -2,6 +2,7 @@ package io.canvasmc.canvas.server.level;
 
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
+import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 import io.canvasmc.canvas.server.LevelTickProcessor;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.canvasmc.canvas.server.VisibleAfterSpin;
@@ -31,7 +32,7 @@ import org.bukkit.World;
 import org.jetbrains.annotations.NotNull;
 import org.spigotmc.WatchdogThread;
 
-public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher, TickRateManagerInstance, LevelAccess {
+public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher, TickRateManagerInstance, LevelAccess, AverageTickTimeAccessor {
     private static final Logger LOGGER = LogManager.getLogger("MinecraftServerWorld");
     public final double[] recentTps = new double[4];
     public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
@@ -333,5 +334,10 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
     @Override
     public void scheduleForPreNextTick(Runnable run) {
         queuedForNextTickPre.add(run);
+    }
+
+    @Override
+    public double getAverageTickTime() {
+        return getNanoSecondsFromLastTick() / 1_000_000;
     }
 }

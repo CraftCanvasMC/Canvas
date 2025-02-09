@@ -7,10 +7,12 @@ import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
 import io.canvasmc.canvas.server.level.LevelThread;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
+import io.canvasmc.canvas.server.render.TickTimesGraphDisplay;
 import io.netty.util.internal.ConcurrentSet;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -126,6 +128,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
             if (Config.INSTANCE.asyncPlayerJoining) {
                 PlayerJoinThread.getInstance().start();
             }
+            if (Config.INSTANCE.enableDevelopmentTickGuiGraph) TickTimesGraphDisplay.showFrameFor((DedicatedServer) this.server, getTickTimeAccessors());
             this.started = true;
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
@@ -219,5 +222,14 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public Collection<ServerLevel> getAllLevels() {
         return MinecraftServer.getServer().levels.values();
+    }
+
+    public List<AverageTickTimeAccessor> getTickTimeAccessors() {
+        List<AverageTickTimeAccessor> accessors = new ArrayList<>(getThreadedWorlds());
+        accessors.add(MinecraftServer.getServer());
+        if (Config.INSTANCE.threadedEntityTicking) {
+            accessors.add(entityScheduler);
+        }
+        return accessors;
     }
 }
