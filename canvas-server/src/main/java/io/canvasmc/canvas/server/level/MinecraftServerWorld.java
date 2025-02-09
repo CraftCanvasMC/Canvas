@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.server.level;
 
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.server.LevelTickProcessor;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.canvasmc.canvas.server.VisibleAfterSpin;
@@ -26,10 +27,11 @@ import net.minecraft.util.thread.ReentrantBlockableEventLoop;
 import net.minecraft.world.entity.player.Player;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.bukkit.World;
 import org.jetbrains.annotations.NotNull;
 import org.spigotmc.WatchdogThread;
 
-public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher, TickRateManagerInstance {
+public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<TickTask> implements WatchdogWatcher, TickRateManagerInstance, LevelAccess {
     private static final Logger LOGGER = LogManager.getLogger("MinecraftServerWorld");
     public final double[] recentTps = new double[4];
     public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
@@ -281,6 +283,17 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
         return level().dimension().location().getPath();
     }
 
+    @Override
+    public World getWorld() {
+        return this.level().getWorld();
+    }
+
+    @Override
+    public void scheduleOnThread(final Runnable runnable) {
+        this.scheduleOnMain(runnable);
+    }
+
+    @Override
     public boolean isTicking() {
         return ticking;
     }
@@ -312,10 +325,12 @@ public abstract class MinecraftServerWorld extends ReentrantBlockableEventLoop<T
         return Thread.currentThread() instanceof LevelThread;
     }
 
+    @Override
 	public void scheduleForPostNextTick(Runnable run) {
         queuedForNextTickPost.add(run);
 	}
 
+    @Override
     public void scheduleForPreNextTick(Runnable run) {
         queuedForNextTickPre.add(run);
     }

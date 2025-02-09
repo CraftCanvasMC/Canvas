@@ -2,6 +2,8 @@ package io.canvasmc.canvas.server;
 
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.LevelAccess;
+import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
 import io.canvasmc.canvas.server.level.LevelThread;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
@@ -16,18 +18,23 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
+import org.bukkit.World;
+import org.bukkit.craftbukkit.CraftWorld;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Unmodifiable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ThreadedServer {
+public class ThreadedServer implements ThreadedBukkitServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
     public static final long MAX_NANOSECONDS_FOR_TICK_FRAME = 50_000_000;
     public static final ThreadGroup SERVER_THREAD_GROUP = new ThreadGroup("ServerThreadGroup");
@@ -58,12 +65,33 @@ public class ThreadedServer {
         this.server = server;
     }
 
-    public static boolean isLevelThread(long id) {
+    public static Long @NotNull [] getLevelIds() {
+        return LEVEL_THREAD_IDS.toArray(new Long[0]);
+    }
+
+    @Override
+    public boolean isLevelThread(long id) {
         return LEVEL_THREAD_IDS.contains(id);
     }
 
-    public static Long @NotNull [] getLevelIds() {
-        return LEVEL_THREAD_IDS.toArray(new Long[0]);
+    @Override
+    public boolean isLevelThread(final Thread thread) {
+        return thread instanceof LevelThread;
+    }
+
+    @Override
+    public @Unmodifiable List<World> getWorlds() {
+        return this.levels.stream().map(Level::getWorld).collect(Collectors.toUnmodifiableList());
+    }
+
+    @Override
+    public LevelAccess getLevelAccess(final World world) {
+        return ((CraftWorld) world).getHandle();
+    }
+
+    @Override
+    public void scheduleOnMain(final Runnable runnable) {
+        this.server.scheduleOnMain(runnable);
     }
 
     public List<ServerLevel> getThreadedWorlds() {
@@ -84,6 +112,7 @@ public class ThreadedServer {
 
     public void spin() {
         try {
+            ThreadedBukkitServer.setInstance(this);
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");
             }

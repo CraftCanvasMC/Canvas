@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.spark;
 
+import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.server.ThreadedServer;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
@@ -22,7 +23,7 @@ public final class LevelThreadDumper implements ThreadDumper {
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
-        return mainThreadId == threadId || ThreadedServer.isLevelThread(threadId);
+        return mainThreadId == threadId || ThreadedBukkitServer.getInstance().isLevelThread(threadId);
     }
 
     @Override
