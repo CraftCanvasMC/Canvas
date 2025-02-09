@@ -83,7 +83,9 @@ public class Config {
     public static class Pathfinding {
         public boolean enableThreadedPathfinding = true;
         public boolean useThreadedWorldForScheduling = true;
+        @PositiveNumericValue
         public int maxProcessors = 2;
+        @PositiveNumericValue
         public int keepAlive = 60;
     }
 
@@ -92,7 +94,9 @@ public class Config {
 	public EntityTracking entityTracking = new EntityTracking();
 	public static class EntityTracking {
 		public boolean enableThreadedTracking = true;
+        @PositiveNumericValue
 		public int maxProcessors = 1;
+        @PositiveNumericValue
 		public int keepAlive = 60;
 	}
 
@@ -264,7 +268,7 @@ public class Config {
     public static class ChunkSending {
         @Comment("Runs chunk sending off-level/main")
         public boolean asyncChunkSending = false;
-        @Range(from = 1, to = Integer.MAX_VALUE, inclusive = true)
+        @PositiveNumericValue
         @Comment("Amount of threads to use for async chunk sending. This does nothing when 'useVirtualThreadExecutorForChunkSenders' is enabled")
         public int asyncChunkSendingThreadCount = 1;
         @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
@@ -277,16 +281,19 @@ public class Config {
     @Comment("Allows configurability of the distance of which certain objects need to be from a player to tick, like chunks, block entities, etc. This can cause major behavior changes.")
     public TickDistanceMaps tickDistanceMaps = new TickDistanceMaps();
     public static class TickDistanceMaps {
+        @NonNegativeNumericValue
         @Comment("Controls the radius for chunk ticking, allowing configurability of random tick distances, block tick distances, and chunk tick distances")
         public int chunkTickingRadius = 5;
         @Comment("Enables the override that applies the 'chunkTickingRadius'")
         public boolean enableChunkDistanceMapOverride = false;
         @Comment("Enables the chunk ticking of spawn chunks")
         public boolean includeSpawnChunks = true;
+        @NonNegativeNumericValue
         @Comment("Controls the distance defined in the nearby player updates for 'TICK_VIEW_DISTANCE', affects per-player mob spawning")
         public int nearbyPlayersTickDistance = 4;
         @Comment("Enables the override that applies the `nearbyPlayersTickDistance`")
         public boolean enableNearbyPlayersTickViewDistanceOverride = false;
+        @NonNegativeNumericValue
         @Comment("Controls the distance defined in the nearby player updates for `SPAWN_RANGE`, affects the local mob cap")
         public int playerSpawnTrackingRange = ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE; // 8
         @Comment("Enables the override that applies 'playerSpawnTrackingRange'")
