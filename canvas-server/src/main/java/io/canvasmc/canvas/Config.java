@@ -309,7 +309,7 @@ public class Config {
     public int ticksBetweenRaidTicking = -1;
     @Comment("Configure the amount of ticks between purging stale tickets")
     public int ticksBetweenPurgeStaleTickets = -1;
-    @Comment("Disables the inventory change criterion trigger. Advancements will not work! 'skipTicksAdvancements' will not work either.")
+    @Comment("Disables the inventory change criterion trigger. Some advancements will not work! 'skipTicksAdvancements' will not work either.")
     public boolean disableInventoryChangeCriterionTrigger = false;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
