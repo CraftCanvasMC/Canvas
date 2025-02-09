@@ -318,6 +318,8 @@ public class Config {
     public int ticksBetweenPurgeStaleTickets = -1;
     @Comment("Disables the inventory change criterion trigger. Some advancements will not work! 'skipTicksAdvancements' will not work either.")
     public boolean disableInventoryChangeCriterionTrigger = false;
+    @Comment("Caches the command block parse results, significantly reducing performance impacts from command blocks(given parsing is often times half the command blocks tick time)")
+    public boolean cacheCommandBlockParseResults = false;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
