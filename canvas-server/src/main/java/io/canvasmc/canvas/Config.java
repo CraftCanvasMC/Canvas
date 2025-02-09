@@ -322,6 +322,8 @@ public class Config {
     public boolean cacheCommandBlockParseResults = false;
     @Comment("Enables the development GUI tick graph rendering(another window of the Minecraft Server GUI), disabled by '--nogui' arg")
     public boolean enableDevelopmentTickGuiGraph = false;
+    @Comment("Disables being disconnected from 'multiplayer.disconnect.invalid_player_movement', and just silently declines the packet handling.")
+    public boolean gracefulTeleportHandling = true;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
