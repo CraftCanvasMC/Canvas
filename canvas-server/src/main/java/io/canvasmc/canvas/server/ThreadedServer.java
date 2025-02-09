@@ -42,9 +42,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public static BooleanSupplier SHOULD_KEEP_TICKING;
     public static Function<ServerLevel, Thread> SPINNER = (level) -> {
         try {
-            if (!Thread.currentThread().equals(MinecraftServer.getServer().getRunningThread())) {
-                throw new WrongThreadException("Unable to spin level off-main");
-            }
             LevelThread dedicated = new LevelThread(SERVER_THREAD_GROUP, level::spin, "levelThread:" + level.getName(), level);
             LEVEL_THREAD_IDS.add(dedicated.threadId());
             dedicated.setPriority(Config.INSTANCE.levelThreadPriority);
