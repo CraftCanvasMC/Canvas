@@ -207,7 +207,7 @@
      }
  
      // Paper start
-@@ -733,8 +_,142 @@
+@@ -733,8 +_,144 @@
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -216,6 +216,8 @@
 +    // Canvas start - Multithreaded Dimension Ticking
 +    private final List<Connection> activeConnections = new ObjectArrayList<>();
 +    private final Object lock = new Object();
++    private int ticksSinceLastBlockEventsTickCall = 0;
++    private int ticksSinceLastRaidTickCall = 0;
 +
 +    public void notifyNewConnection(Connection connection) {
 +        synchronized (lock) {
@@ -352,7 +354,7 @@
          ProfilerFiller profilerFiller = Profiler.get();
          this.handlingTick = true;
          TickRateManager tickRateManager = this.tickRateManager();
-@@ -778,6 +_,7 @@
+@@ -778,26 +_,46 @@
              this.tickTime();
          }
  
@@ -360,14 +362,45 @@
          profilerFiller.push("tickPending");
          if (!this.isDebug() && runsNormally) {
              long l = this.getGameTime();
-@@ -795,6 +_,7 @@
++            // Canvas start
++            if (this.blockTicks.ticksSinceLastBlockTickCall++ > Config.INSTANCE.ticksBetweenBlockTicking) {
+             profilerFiller.push("blockTicks");
+             this.blockTicks.tick(l, paperConfig().environment.maxBlockTicks, this::tickBlock); // Paper - configurable max block ticks
++                this.blockTicks.ticksSinceLastBlockTickCall = 0;
++            }
++            if (this.fluidTicks.ticksSinceLastFluidTickCall++ > Config.INSTANCE.ticksBetweenFluidTicking) {
+             profilerFiller.popPush("fluidTicks");
+             this.fluidTicks.tick(l, paperConfig().environment.maxFluidTicks, this::tickFluid); // Paper - configurable max fluid ticks
++                this.fluidTicks.ticksSinceLastFluidTickCall = 0;
++            }
++            // Canvas end
+             profilerFiller.pop();
+         }
+ 
+         profilerFiller.popPush("raid");
+         if (runsNormally) {
++            // Canvas start
++            if (this.ticksSinceLastRaidTickCall++ > Config.INSTANCE.ticksBetweenRaidTicking) {
+             this.raids.tick();
++                this.ticksSinceLastRaidTickCall = 0;
++            }
++            // Canvas end
+         }
  
          profilerFiller.popPush("chunkSource");
          this.getChunkSource().tick(hasTimeLeft, true);
 +        this.squeezeTasks(); // Canvas
          profilerFiller.popPush("blockEvents");
          if (runsNormally) {
++            // Canvas start
++            if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
              this.runBlockEvents();
++                this.ticksSinceLastBlockEventsTickCall = 0;
++            }
++            // Canvas end
+         }
+ 
+         this.handlingTick = false;
 @@ -816,9 +_,15 @@
              }
  
@@ -479,14 +512,43 @@
  
      public void setDayTime(long time) {
          this.serverLevelData.setDayTime(time);
-@@ -1254,6 +_,7 @@
-                 player.updateWeather(this.oRainLevel, this.rainLevel, this.oThunderLevel, this.thunderLevel);
+@@ -1006,15 +_,23 @@
+         profilerFiller.popPush("iceandsnow");
+ 
+         if (!this.paperConfig().environment.disableIceAndSnow) { // Paper - Option to disable ice and snow
++            // Canvas start - precipitation intervals
++            if (chunk.ticksSinceLastPrecipitationCall++ > Config.INSTANCE.ticksBetweenPrecipitationUpdates) {
++                chunk.ticksSinceLastPrecipitationCall = 0;
++            // Canvas end
+         for (int i = 0; i < randomTickSpeed; i++) {
+             if (simpleRandom.nextInt(48) == 0) {  // Paper - optimise random ticking
+                 this.tickPrecipitation(this.getBlockRandomPos(minBlockX, 0, minBlockZ, 15));
              }
          }
++            } // Canvas
+         } // Paper - Option to disable ice and snow
+ 
+         profilerFiller.popPush("tickBlocks");
+-        if (randomTickSpeed > 0) {
++        // Canvas start - random tick intervals
++        if (chunk.ticksSinceLastRandomTickCall++ > Config.INSTANCE.ticksBetweenRandomTickUpdates && randomTickSpeed > 0) {
++            chunk.ticksSinceLastRandomTickCall = 0;
 +        // Canvas end
-         // CraftBukkit end
+             this.optimiseRandomTick(chunk, randomTickSpeed); // Paper - optimise random ticking
+         }
+ 
+@@ -1150,6 +_,11 @@
      }
  
+     private void advanceWeatherCycle() {
++        // Canvas start
++        if (Config.INSTANCE.disableWeatherCycle) {
++            return;
++        }
++        // Canvas end
+         boolean isRaining = this.isRaining();
+         if (this.dimensionType().hasSkyLight()) {
+             if (this.getGameRules().getBoolean(GameRules.RULE_WEATHER_CYCLE)) {
 @@ -1483,6 +_,7 @@
  
              return AbortableIterationConsumer.Continuation.CONTINUE;

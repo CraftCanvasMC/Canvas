@@ -41,7 +41,7 @@ public class Config {
     @Comment("Determines if the server should tick the playerlist assigned to each world on their own level threads, or if it should tick on the main thread(globally)")
     public boolean runPlayerListTickOnIndependentLevel = true;
     @Comment("Amount of ticks until the level will resync time with the player")
-    public int timeResyncInterval = 400;
+    public int timeResyncInterval = 2400;
     @Range(from = 1, to = 10, inclusive = true)
     @Comment("Thread priority for level threads, must be a value between 1-10.")
     public int levelThreadPriority = 9;
@@ -292,6 +292,25 @@ public class Config {
         @Comment("Enables the override that applies 'playerSpawnTrackingRange'")
         public boolean enableNearbyPlayersSpawnRangeOverride = false;
     }
+
+    @Comment("Disables the world weather cycle")
+    public boolean disableWeatherCycle = false;
+    @Comment("Configure the amount of ticks between updating chunk precipitation")
+    public int ticksBetweenPrecipitationUpdates = -1;
+    @Comment("Configure the amount of ticks between ticking random tick updates")
+    public int ticksBetweenRandomTickUpdates = -1;
+    @Comment("Configure the amount of ticks between fluid ticks")
+    public int ticksBetweenFluidTicking = -1;
+    @Comment("Configure the amount of ticks between block ticks")
+    public int ticksBetweenBlockTicking = -1;
+    @Comment("Configure the amount of ticks between block events")
+    public int ticksBetweenBlockEvents = -1;
+    @Comment("Configure the amount of ticks between ticking raids")
+    public int ticksBetweenRaidTicking = -1;
+    @Comment("Configure the amount of ticks between purging stale tickets")
+    public int ticksBetweenPurgeStaleTickets = -1;
+    @Comment("Disables the inventory change criterion trigger. Advancements will not work! 'skipTicksAdvancements' will not work either.")
+    public boolean disableInventoryChangeCriterionTrigger = false;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
