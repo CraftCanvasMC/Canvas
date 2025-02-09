@@ -1,5 +1,6 @@
 package io.canvasmc.canvas;
 
+import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants;
 import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
 import io.canvasmc.canvas.config.ConfigSerializer;
 import io.canvasmc.canvas.config.Configuration;
@@ -272,6 +273,25 @@ public class Config {
 
     @Comment("Moves player joining to an isolated queue-thread, severely reducing lag when players are joining, due to blocking tasks now being handled off any tickloops")
     public boolean asyncPlayerJoining = false;
+
+    @Comment("Allows configurability of the distance of which certain objects need to be from a player to tick, like chunks, block entities, etc. This can cause major behavior changes.")
+    public TickDistanceMaps tickDistanceMaps = new TickDistanceMaps();
+    public static class TickDistanceMaps {
+        @Comment("Controls the radius for chunk ticking, allowing configurability of random tick distances, block tick distances, and chunk tick distances")
+        public int chunkTickingRadius = 5;
+        @Comment("Enables the override that applies the 'chunkTickingRadius'")
+        public boolean enableChunkDistanceMapOverride = false;
+        @Comment("Enables the chunk ticking of spawn chunks")
+        public boolean includeSpawnChunks = true;
+        @Comment("Controls the distance defined in the nearby player updates for 'TICK_VIEW_DISTANCE', affects per-player mob spawning")
+        public int nearbyPlayersTickDistance = 4;
+        @Comment("Enables the override that applies the `nearbyPlayersTickDistance`")
+        public boolean enableNearbyPlayersTickViewDistanceOverride = false;
+        @Comment("Controls the distance defined in the nearby player updates for `SPAWN_RANGE`, affects the local mob cap")
+        public int playerSpawnTrackingRange = ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE; // 8
+        @Comment("Enables the override that applies 'playerSpawnTrackingRange'")
+        public boolean enableNearbyPlayersSpawnRangeOverride = false;
+    }
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);

@@ -1,15 +1,28 @@
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
-@@ -3,7 +_,8 @@
+@@ -1,9 +_,12 @@
+ package net.minecraft.server.level;
+ 
++import ca.spottedleaf.moonrise.common.misc.NearbyPlayers;
  import com.google.common.annotations.VisibleForTesting;
  import com.mojang.datafixers.DataFixer;
  import com.mojang.logging.LogUtils;
 -import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
 +import io.netty.util.internal.ConcurrentSet;
  import java.io.IOException;
  import java.nio.file.Path;
  import java.util.ArrayList;
+@@ -17,6 +_,8 @@
+ import java.util.function.Consumer;
+ import java.util.function.Supplier;
+ import javax.annotation.Nullable;
++import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
++import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+ import net.minecraft.FileUtil;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
 @@ -54,9 +_,9 @@
  
  public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemServerChunkCache { // Paper - rewrite chunk system
@@ -22,11 +35,13 @@
      final ThreadedLevelLightEngine lightEngine;
      public final ServerChunkCache.MainThreadExecutor mainThreadProcessor;
      public final ChunkMap chunkMap;
-@@ -69,7 +_,7 @@
+@@ -68,8 +_,8 @@
+     private final long[] lastChunkPos = new long[4];
      private final ChunkStatus[] lastChunkStatus = new ChunkStatus[4];
      private final ChunkAccess[] lastChunk = new ChunkAccess[4];
-     private final List<LevelChunk> tickingChunks = new ArrayList<>();
+-    private final List<LevelChunk> tickingChunks = new ArrayList<>();
 -    private final Set<ChunkHolder> chunkHoldersToBroadcast = new ReferenceOpenHashSet<>();
++    private final List<LevelChunk> tickingChunks = new ObjectArrayList<>(); // Canvas - fastutil
 +    private final Set<ChunkHolder> chunkHoldersToBroadcast = new ConcurrentSet<>(); // Canvas
      @Nullable
      @VisibleForDebug
@@ -96,7 +111,83 @@
      }
  
      private void broadcastChangedChunks(ProfilerFiller profiler) {
-@@ -557,6 +_,7 @@
+@@ -544,19 +_,83 @@
+         this.chunkHoldersToBroadcast.clear();
+         profiler.pop();
+     }
++    // Canvas start - tick distance maps
++    public volatile int lastTickingChunksCount = 0;
+ 
+     private void collectTickingChunks(List<LevelChunk> output) {
++        if (Config.INSTANCE.tickDistanceMaps.enableChunkDistanceMapOverride) {
++            int radius = Config.INSTANCE.tickDistanceMaps.chunkTickingRadius;
++            int maxRadius = WorldSpecificViewDistancePersistentState.getFrom(level).getLocalViewDistance();
++            radius = Math.min(radius, maxRadius == 0 ? this.level.getServer().getPlayerList().getViewDistance() : maxRadius);
++            LongOpenHashSet processedChunks = new LongOpenHashSet();
++            int count = 0;
++
++            // spawn chunks
++            if (Config.INSTANCE.tickDistanceMaps.includeSpawnChunks) {
++                for (int x = -radius; x <= radius; x++) {
++                    for (int z = -radius; z <= radius; z++) {
++                        long chunkPos = ChunkPos.asLong(x, z);
++                        if (processedChunks.add(chunkPos)) {
++                            ChunkHolder holder = chunkMap.getVisibleChunkIfPresent(chunkPos);
++                            LevelChunk chunk = (holder == null) ? null : holder.getFullChunkNow();
++                            if (chunk != null) {
++                                count++;
++                                output.add(chunk);
++                            }
++                        }
++                    }
++                }
++            }
++
++            for (ServerPlayer player : chunkMap.level.players()) {
++                ChunkPos playerChunk = player.chunkPosition();
++
++                if (radius <= 1) {
++                    long pos = playerChunk.toLong();
++                    if (processedChunks.add(pos)) { // dont duplicate
++                        ChunkHolder holder = chunkMap.getVisibleChunkIfPresent(pos);
++                        LevelChunk chunk = (holder == null) ? null : holder.getFullChunkNow();
++                        if (chunk != null) {
++                            count++;
++                            output.add(chunk);
++                        }
++                    }
++                } else {
++                    int px = playerChunk.x;
++                    int pz = playerChunk.z;
++
++                    for (int dx = -radius; dx <= radius; dx++) {
++                        for (int dz = -radius; dz <= radius; dz++) {
++                            long chunkPos = ChunkPos.asLong(px + dx, pz + dz);
++                            if (processedChunks.add(chunkPos)) { // dont duplicate
++                                ChunkHolder holder = chunkMap.getVisibleChunkIfPresent(chunkPos);
++                                LevelChunk chunk = (holder == null) ? null : holder.getFullChunkNow();
++                                if (chunk != null) {
++                                    count++;
++                                    output.add(chunk);
++                                }
++                            }
++                        }
++                    }
++                }
++            }
++            lastTickingChunksCount = count;
++            return;
++        }
++    // Canvas end
+         // Paper start - chunk tick iteration optimisation
+         final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerChunkCache.ChunkAndHolder> tickingChunks =
+             ((ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickServerLevel)this.level).moonrise$getPlayerTickingChunks();
+ 
+         final ServerChunkCache.ChunkAndHolder[] raw = tickingChunks.getRawDataUnchecked();
+         final int size = tickingChunks.size();
++        this.lastTickingChunksCount = size; // Canvas
+ 
+         final ChunkMap chunkMap = this.chunkMap;
  
          for (int i = 0; i < size; ++i) {
              final ServerChunkCache.ChunkAndHolder chunkAndHolder = raw[i];

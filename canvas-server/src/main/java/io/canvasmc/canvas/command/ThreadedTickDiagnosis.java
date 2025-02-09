@@ -139,6 +139,7 @@ public class ThreadedTickDiagnosis {
         int accumulatedBorder = 0;
         int accumulatedTicking = 0;
         int accumulatedEntityTicking = 0;
+        int accumulatedChunkTicking = 0;
 
         for (final World bukkitWorld : worlds) {
             final ServerLevel world = ((CraftWorld) bukkitWorld).getHandle();
@@ -184,6 +185,7 @@ public class ThreadedTickDiagnosis {
             accumulatedBorder += full;
             accumulatedTicking += blockTicking;
             accumulatedEntityTicking += entityTicking;
+            accumulatedChunkTicking += world.chunkSource.lastTickingChunksCount;
 
             list.add(text("  ").toBuilder().append(text("Chunks in ", color(0x4EA2ED)), text(bukkitWorld.getName(), GREEN), text(":")).build());
             list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(
@@ -191,7 +193,8 @@ public class ThreadedTickDiagnosis {
                 text(" Inactive: ", color(0x4EA2ED)), text(inactive),
                 text(" Full: ", color(0x4EA2ED)), text(full),
                 text(" Block Ticking: ", color(0x4EA2ED)), text(blockTicking),
-                text(" Entity Ticking: ", color(0x4EA2ED)), text(entityTicking)
+                text(" Entity Ticking: ", color(0x4EA2ED)), text(entityTicking),
+                text(" Chunk Ticking: ", color(0x4EA2ED)), text(world.chunkSource.lastTickingChunksCount)
             ).build());
         }
         if (worlds.size() > 1) {
@@ -202,7 +205,8 @@ public class ThreadedTickDiagnosis {
                 text(" Inactive: ", color(0x4EA2ED)), text(accumulatedInactive),
                 text(" Full: ", color(0x4EA2ED)), text(accumulatedBorder),
                 text(" Block Ticking: ", color(0x4EA2ED)), text(accumulatedTicking),
-                text(" Entity Ticking: ", color(0x4EA2ED)), text(accumulatedEntityTicking)
+                text(" Entity Ticking: ", color(0x4EA2ED)), text(accumulatedEntityTicking),
+                text(" Chunk Ticking: ", color(0x4EA2ED)), text(accumulatedChunkTicking)
             ).build());
         }
     }

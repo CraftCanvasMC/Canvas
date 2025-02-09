@@ -21,6 +21,11 @@ allprojects {
         options.compilerArgs.add("-Xlint:-deprecation")
         options.isWarnings = false
     }
+
+    tasks.withType(JavaCompile::class.java).configureEach {
+        options.isFork = true
+        options.forkOptions.memoryMaximumSize = "4G"
+    }
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
