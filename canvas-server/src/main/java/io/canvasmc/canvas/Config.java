@@ -328,6 +328,8 @@ public class Config {
     public boolean useEuclideanDistanceSquaredChunkPriorities = true;
     @Comment("Configure the max amount of bonus damage the mace item can apply")
     public int maxMaceDamageBonus = -1;
+    @Comment("Ignores the players 'takeXpDelay' field, allowing players to insta-absorb experience orbs")
+    public boolean instantAbsorbXpOrbs = false;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
