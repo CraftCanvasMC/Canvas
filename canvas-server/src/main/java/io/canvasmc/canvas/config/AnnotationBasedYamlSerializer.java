@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.config;
 
+import io.canvasmc.canvas.config.annotation.AlwaysAtTop;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.DumperOptions;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.Yaml;
 import java.io.IOException;
@@ -14,7 +15,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Consumer;
 import org.jetbrains.annotations.NotNull;
 
@@ -72,20 +72,27 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
         this.postConsumerContexts.add(contextConsumer);
     }
 
-    private @NotNull Map<String, Object> sortByKeys(@NotNull Set<String> keysOrder, Map<String, Object> data) {
+    private @NotNull Map<String, Object> sortByKeys(@NotNull Map<String, Field> keysOrder, Map<String, Object> data) {
         Map<String, Object> rebuiltData = new LinkedHashMap<>();
 
-        for (final String fullKey : keysOrder) {
+        for (final String fullKey : keysOrder.keySet()) {
             String[] keys = fullKey.split("\\.");
             Map<String, Object> currentMap = rebuiltData;
             Map<?, ?> latest = data;
+            String alwaysAtTopKey = null;
+            Object alwaysAtTopValue = null;
 
             for (int i = 0; i < keys.length; i++) {
                 String key = keys[i];
 
                 if (i == keys.length - 1) {
                     Object value = latest.get(key);
-                    currentMap.put(key, value);
+                    if (keysOrder.get(fullKey).isAnnotationPresent(AlwaysAtTop.class)) {
+                        alwaysAtTopKey = key;
+                        alwaysAtTopValue = value;
+                    } else {
+                        currentMap.put(key, value);
+                    }
                     break;
                 }
 
@@ -96,7 +103,20 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
 
                 currentMap = (Map<String, Object>) currentMap.computeIfAbsent(key, _ -> new LinkedHashMap<>());
             }
+
+            if (alwaysAtTopKey != null) {
+                Map<String, Object> parentMap = rebuiltData;
+                for (int i = 0; i < keys.length - 1; i++) {
+                    parentMap = (Map<String, Object>) parentMap.get(keys[i]);
+                }
+                Map<String, Object> reorderedMap = new LinkedHashMap<>();
+                reorderedMap.put(alwaysAtTopKey, alwaysAtTopValue);
+                reorderedMap.putAll(parentMap);
+                parentMap.clear();
+                parentMap.putAll(reorderedMap);
+            }
         }
+
         return rebuiltData;
     }
 
@@ -188,7 +208,7 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
             Map<String, Object> data = buildYamlData(config);
 
             // Reorder data based on keyset
-            Map<String, Object> reorderedData = sortByKeys(keyToField.keySet(), data);
+            Map<String, Object> reorderedData = sortByKeys(keyToField, data);
 
             StringWriter yamlWriter = new StringWriter();
             DumperOptions options = new DumperOptions();
