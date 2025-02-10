@@ -42,6 +42,7 @@ Useful links:
 > ./gradlew rebuildPatches               # generate patches
 > ./gradlew runDevServer                 # run dev server
 ```
+
 ## REST API
 
 Canvas has a REST API that can be used to get builds and check for new versions.
