@@ -19,11 +19,18 @@ Useful links:
 - Command Optimizations
 - Entity Improvements
 
-## Development Requirements
+## Requirements
 
-To compile Canvas, you need:
+### Running Canvas
 
-- JDK 22 or higher
+> [!WARNING]
+> Canvas requires Java 22 or higher. It will not run on older Java versions as it uses Foreign Function & Memory API. You can read more about it [here](https://openjdk.org/jeps/454).
+
+- Java 22 or higher
+
+### Building Canvas
+
+- Java 22 or higher
 - Git (with configured email and name)
 - Gradle
 
@@ -33,6 +40,7 @@ To compile Canvas, you need:
 > ./gradlew applyAllPatches              # apply all patches
 > ./gradlew createMojmapPaperclipJar     # build the server jar
 > ./gradlew rebuildPatches               # generate patches
+> ./gradlew runDevServer                 # run dev server
 ```
 ## REST API
 
@@ -40,13 +48,13 @@ Canvas has a REST API that can be used to get builds and check for new versions.
 
 It is temporarily documented in the [Website Repository](https://github.com/CraftCanvasMC/Website/blob/main/docs/API.md). Soon it will be moved over to the documentation website.
 
-## Support the Project
+## Support
 
-If you'd like to support CanvasMC's development:
+You can help CanvasMC grow by:
 
-- Consider [donating on Ko-fi](https://ko-fi.com/dueris)
-- Star and share the project on GitHub
-- Contribute code or documentation improvements
+- Supporting us on [Ko-fi](https://ko-fi.com/dueris)
+- Starring the project on GitHub
+- Contributing code or documentation
 
 Your support helps keep this project active and improving!
 
