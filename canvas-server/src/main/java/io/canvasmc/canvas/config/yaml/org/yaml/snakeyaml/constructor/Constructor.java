@@ -5,6 +5,7 @@
 
 package io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.constructor;
 
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.LoaderOptions;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.TypeDescription;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.error.YAMLException;
@@ -174,7 +175,15 @@ public class Constructor extends SafeConstructor {
 
                 try {
                     TypeDescription memberDescription = Constructor.this.typeDefinitions.get(beanType);
-                    Property property = memberDescription == null ? this.getProperty(beanType, key) : memberDescription.getProperty(key);
+                    // Canvas start - allow removal of config options without killing the server
+                    Property property;
+                    try {
+                        property = memberDescription == null ? this.getProperty(beanType, key) : memberDescription.getProperty(key);
+                    } catch (Exception e) {
+                        Config.LOGGER.warn("Encountered exception when parsing node, skipping: {}", e.getMessage());
+                        continue;
+                    }
+                    // Canvas end
                     if (!property.isWritable()) {
                         throw new YAMLException("No writable property '" + key + "' on class: " + beanType.getName());
                     }

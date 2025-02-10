@@ -52,8 +52,6 @@ public class Config {
     public boolean emptySleepPerWorlds = true;
     @Comment("Enables the \"threadedtick\" command, which is an implementation of the vanilla \"tick\" command for the Canvas threaded context")
     public boolean enableCanvasTickCommand = true;
-    @Comment("Wraps the broadcast of section block updates in a synchronized lock")
-    public boolean wrapBroadcastSynchronized = true;
     @Comment("Allows opening any type of door with your hand, including iron doors")
     public boolean canOpenAnyDoorWithHand = false;
     @Comment("Ensure correct doors. Schedules an extra update on the next tick to ensure the door doesnt get glitched when a Villager and Player both interact with it at the same time")
