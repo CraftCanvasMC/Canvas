@@ -10,7 +10,6 @@ import me.lucko.spark.paper.common.sampler.ThreadDumper;
 import me.lucko.spark.paper.common.util.ThreadFinder;
 import me.lucko.spark.paper.proto.SparkSamplerProtos;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 public final class LevelThreadDumper implements ThreadDumper {
     private final ThreadFinder threadFinder = new ThreadFinder();
@@ -24,17 +23,13 @@ public final class LevelThreadDumper implements ThreadDumper {
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
-        return isThreadIncluded(findThreadByName(threadName));
-    }
-
-    public boolean isThreadIncluded(Thread thread) {
-        return ThreadedBukkitServer.getInstance().isLevelThread(thread) || thread.equals(mainThread);
+        return mainThreadId == threadId || ThreadedBukkitServer.getInstance().isLevelThread(threadId);
     }
 
     @Override
     public ThreadInfo @NotNull [] dumpThreads(ThreadMXBean threadBean) {
         return this.threadFinder.getThreads()
-                                .filter(this::isThreadIncluded)
+                                .filter((thread) -> this.isThreadIncluded(thread.threadId(), thread.getName()))
                                 .map((thread) -> threadBean.getThreadInfo(thread.threadId(), Integer.MAX_VALUE))
                                 .filter(Objects::nonNull).toArray(ThreadInfo[]::new);
     }
@@ -45,12 +40,7 @@ public final class LevelThreadDumper implements ThreadDumper {
                                                               .addAllIds(Arrays.stream(ThreadedServer.getLevelIds()).toList()).addIds(mainThreadId).build();
     }
 
-    private static @Nullable Thread findThreadByName(String threadName) {
-        for (Thread thread : Thread.getAllStackTraces().keySet()) {
-            if (thread.getName().equals(threadName)) {
-                return thread;
-            }
-        }
-        return null;
+    public Thread getMainThread() {
+        return mainThread;
     }
 }
