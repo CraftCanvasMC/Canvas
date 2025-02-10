@@ -158,7 +158,7 @@ public class PlayerJoinThread extends ReentrantBlockableEventLoop<TickTask> impl
                 long k = j / i;
 
                 if (MinecraftServer.getServer().server.getWarnOnOverload()) {
-                    MinecraftServer.LOGGER.warn("Can't keep up! Is the entity scheduler overloaded? Running {}ms or {} ticks behind", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k);
+                    MinecraftServer.LOGGER.warn("Can't keep up! Is the player join thread overloaded? Running {}ms or {} ticks behind", j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k);
                 }
                 this.nextTickTimeNanos += k * i;
                 this.lastOverloadWarningNanos = this.nextTickTimeNanos;
