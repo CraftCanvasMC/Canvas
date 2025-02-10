@@ -5,6 +5,7 @@ import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
 import io.canvasmc.canvas.config.ConfigSerializer;
 import io.canvasmc.canvas.config.Configuration;
 import io.canvasmc.canvas.config.ConfigurationUtils;
+import io.canvasmc.canvas.config.annotation.AlwaysAtTop;
 import io.canvasmc.canvas.config.annotation.Comment;
 import io.canvasmc.canvas.config.annotation.EnumValue;
 import io.canvasmc.canvas.config.annotation.Experimental;
@@ -81,6 +82,7 @@ public class Config {
     @Comment("Async-Pathfinding optimization options")
     public Pathfinding pathfinding = new Pathfinding();
     public static class Pathfinding {
+        @AlwaysAtTop
         public boolean enableThreadedPathfinding = true;
         public boolean useThreadedWorldForScheduling = true;
         @PositiveNumericValue
@@ -93,6 +95,7 @@ public class Config {
 	@Comment("Threaded EntityTracking options")
 	public EntityTracking entityTracking = new EntityTracking();
 	public static class EntityTracking {
+        @AlwaysAtTop
 		public boolean enableThreadedTracking = true;
         @PositiveNumericValue
 		public int maxProcessors = 1;
@@ -146,6 +149,7 @@ public class Config {
     @Comment("Lag compensation related configurations. Improves the player experience when TPS is low")
     public LagCompensation lagCompensation = new LagCompensation();
     public static class LagCompensation {
+        @AlwaysAtTop
         public boolean enabled = true;
         public boolean blockEntityAcceleration = false;
         public boolean blockBreakingAcceleration = true;
@@ -185,6 +189,7 @@ public class Config {
 
     public VirtualThreads virtualThreads = new VirtualThreads();
     public static class VirtualThreads {
+        @AlwaysAtTop
         @Comment("Enables use of Java 21+ virtual threads")
         public boolean enabled = false;
         @Comment("Uses virtual threads for the Bukkit scheduler.")
@@ -221,6 +226,7 @@ public class Config {
 
     public NoChatReports noChatReports = new NoChatReports();
     public static class NoChatReports {
+        @AlwaysAtTop
         @Comment("Enables no chat reports, like the fabric mod.")
         public boolean enable = false;
         @Comment("True if server should include extra query data to help clients know that your server is secure.")
@@ -249,8 +255,8 @@ public class Config {
             "modpacks where many structure mods are using very high weight values in their template pools.",
             "",
             "Pros: Get a bit more performance from high weight Template Pool Structures.",
-            "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"},
-        breakLineBefore = true)
+            "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"}
+    )
     public boolean deduplicateShuffledTemplatePoolElementList = false;
     @Comment("Enables a port of the mod StructureLayoutOptimizer, which optimizes general Jigsaw structure generation")
     public boolean enableStructureLayoutOptimizer = true;
@@ -266,6 +272,7 @@ public class Config {
     @Comment("Related configuration options to chunk sending optimizations")
     public ChunkSending chunkSending = new ChunkSending();
     public static class ChunkSending {
+        @AlwaysAtTop
         @Comment("Runs chunk sending off-level/main")
         public boolean asyncChunkSending = false;
         @PositiveNumericValue
@@ -316,6 +323,8 @@ public class Config {
     public int ticksBetweenRaidTicking = -1;
     @Comment("Configure the amount of ticks between purging stale tickets")
     public int ticksBetweenPurgeStaleTickets = -1;
+    @Comment("Configure the amount of ticks between ticking custom spawners(like phantoms, cats, wandering traders, etc)")
+    public int ticksBetweenCustomSpawnersTick = -1;
     @Comment("Disables the inventory change criterion trigger. Some advancements will not work! 'skipTicksAdvancements' will not work either.")
     public boolean disableInventoryChangeCriterionTrigger = false;
     @Comment("Caches the command block parse results, significantly reducing performance impacts from command blocks(given parsing is often times half the command blocks tick time)")
