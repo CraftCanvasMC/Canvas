@@ -32,7 +32,7 @@ To compile Canvas, you need:
 ```bash
 > ./gradlew applyAllPatches              # apply all patches
 > ./gradlew createMojmapPaperclipJar     # build the server jar
-> ./gradlew rebuildPatches               # generate patches
+> ./rebuildPatches                       # custom script to generate patches for modified directories
 ```
 ## REST API
 
