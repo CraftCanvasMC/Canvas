@@ -326,6 +326,8 @@ public class Config {
     public boolean gracefulTeleportHandling = true;
     @Comment("Uses euclidean distance squared algorithm for determining chunk task priorities(like generation, loading, etc).")
     public boolean useEuclideanDistanceSquaredChunkPriorities = true;
+    @Comment("Configure the max amount of bonus damage the mace item can apply")
+    public int maxMaceDamageBonus = -1;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
