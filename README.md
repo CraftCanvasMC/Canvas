@@ -21,10 +21,10 @@ Useful links:
 
 ## Requirements
 
-### Running Canvas
-
 > [!WARNING]
 > Canvas requires Java 22 or higher. It will not run on older Java versions as it uses Foreign Function & Memory API. You can read more about it [here](https://openjdk.org/jeps/454).
+
+### Running Canvas
 
 - Java 22 or higher
 
