@@ -23,7 +23,7 @@ public final class LevelThreadDumper implements ThreadDumper {
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
-        return mainThreadId == threadId || ThreadedBukkitServer.getInstance().isLevelThread(threadId);
+        return mainThreadId == threadId || ThreadedBukkitServer.getInstance().isLevelThread(threadId) || threadName.startsWith("levelThread:");
     }
 
     @Override
