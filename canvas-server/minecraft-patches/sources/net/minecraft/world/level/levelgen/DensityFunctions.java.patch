@@ -1,18 +1,116 @@
 --- a/net/minecraft/world/level/levelgen/DensityFunctions.java
 +++ b/net/minecraft/world/level/levelgen/DensityFunctions.java
-@@ -5,7 +_,12 @@
+@@ -5,11 +_,23 @@
  import com.mojang.serialization.Codec;
  import com.mojang.serialization.MapCodec;
  import com.mojang.serialization.codecs.RecordCodecBuilder;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.dfc.common.ast.EvalType;
++import io.canvasmc.canvas.dfc.common.ducks.IArrayCacheCapable;
++import io.canvasmc.canvas.dfc.common.ducks.IEqualityOverriding;
++import io.canvasmc.canvas.dfc.common.ducks.IFastCacheLike;
++import io.canvasmc.canvas.dfc.common.util.ArrayCache;
 +import io.canvasmc.canvas.util.Bindings;
  import it.unimi.dsi.fastutil.doubles.Double2DoubleFunction;
 +import java.lang.foreign.Arena;
 +import java.lang.foreign.MemorySegment;
 +import java.lang.invoke.VarHandle;
  import java.util.Arrays;
++import java.util.Objects;
  import java.util.Optional;
  import java.util.function.BiFunction;
+ import java.util.function.Function;
++import java.util.function.Supplier;
+ import net.minecraft.core.Holder;
+ import net.minecraft.core.Registry;
+ import net.minecraft.core.registries.BuiltInRegistries;
+@@ -275,6 +_,7 @@
+ 
+         @Override
+         public void fillArray(double[] array, DensityFunction.ContextProvider contextProvider) {
++            Runnable run = () -> { // Canvas - dfc
+             this.argument1.fillArray(array, contextProvider);
+             switch (this.type) {
+                 case ADD:
+@@ -307,6 +_,33 @@
+                         array[i2] = d2 > d1 ? d2 : Math.max(d2, this.argument2.compute(contextProvider.forIndex(i2)));
+                     }
+             }
++            // Canvas start - dfc
++            };
++            if (Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler && this.type == DensityFunctions.TwoArgumentSimpleFunction.Type.ADD) {
++                this.argument1.fillArray(array, contextProvider);
++                double[] ds;
++
++                ArrayCache arrayCache = contextProvider instanceof IArrayCacheCapable arrayCacheCapable ? arrayCacheCapable.c2me$getArrayCache() : null;
++
++                if (arrayCache != null) {
++                    ds = arrayCache.getDoubleArray(array.length, false);
++                } else {
++                    ds = new double[array.length];
++                }
++
++                this.argument2.fillArray(ds, contextProvider);
++
++                for (int i = 0; i < array.length; i++) {
++                    array[i] += ds[i];
++                }
++
++                if (arrayCache != null) {
++                    arrayCache.recycle(ds);
++                }
++            } else {
++                run.run();
++            }
++            // Canvas end
+         }
+ 
+         @Override
+@@ -348,7 +_,7 @@
+         }
+     }
+ 
+-    protected static enum BlendAlpha implements DensityFunction.SimpleFunction {
++    public static enum BlendAlpha implements DensityFunction.SimpleFunction { // Canvas - protected -> public
+         INSTANCE;
+ 
+         public static final KeyDispatchDataCodec<DensityFunction> CODEC = KeyDispatchDataCodec.of(MapCodec.unit(INSTANCE));
+@@ -379,7 +_,7 @@
+         }
+     }
+ 
+-    record BlendDensity(@Override DensityFunction input) implements DensityFunctions.TransformerWithContext {
++    public record BlendDensity(@Override DensityFunction input) implements DensityFunctions.TransformerWithContext { // Canvas - public
+         static final KeyDispatchDataCodec<DensityFunctions.BlendDensity> CODEC = DensityFunctions.singleFunctionArgumentCodec(
+             DensityFunctions.BlendDensity::new, DensityFunctions.BlendDensity::input
+         );
+@@ -410,7 +_,7 @@
+         }
+     }
+ 
+-    protected static enum BlendOffset implements DensityFunction.SimpleFunction {
++    public static enum BlendOffset implements DensityFunction.SimpleFunction { // Canvas - protected -> public
+         INSTANCE;
+ 
+         public static final KeyDispatchDataCodec<DensityFunction> CODEC = KeyDispatchDataCodec.of(MapCodec.unit(INSTANCE));
+@@ -441,7 +_,7 @@
+         }
+     }
+ 
+-    protected record Clamp(@Override DensityFunction input, @Override double minValue, @Override double maxValue) implements DensityFunctions.PureTransformer {
++    public record Clamp(@Override DensityFunction input, @Override double minValue, @Override double maxValue) implements DensityFunctions.PureTransformer { // Canvas - protected -> public
+         private static final MapCodec<DensityFunctions.Clamp> DATA_CODEC = RecordCodecBuilder.mapCodec(
+             instance -> instance.group(
+                     DensityFunction.DIRECT_CODEC.fieldOf("input").forGetter(DensityFunctions.Clamp::input),
+@@ -468,7 +_,7 @@
+         }
+     }
+ 
+-    record Constant(double value) implements DensityFunction.SimpleFunction {
++    public record Constant(double value) implements DensityFunction.SimpleFunction { // Canvas - public
+         static final KeyDispatchDataCodec<DensityFunctions.Constant> CODEC = DensityFunctions.singleArgumentCodec(
+             DensityFunctions.NOISE_VALUE_CODEC, DensityFunctions.Constant::new, DensityFunctions.Constant::value
+         );
 @@ -501,6 +_,11 @@
      }
  
@@ -56,6 +154,161 @@
          }
  
          @Override
+@@ -619,7 +_,7 @@
+         }
+     }
+ 
+-    protected record Mapped(DensityFunctions.Mapped.Type type, @Override DensityFunction input, @Override double minValue, @Override double maxValue)
++    public record Mapped(DensityFunctions.Mapped.Type type, @Override DensityFunction input, @Override double minValue, @Override double maxValue) // Canvas - protected -> public
+         implements DensityFunctions.PureTransformer {
+         public static DensityFunctions.Mapped create(DensityFunctions.Mapped.Type type, DensityFunction input) {
+             double d = input.minValue();
+@@ -659,7 +_,7 @@
+             return this.type.codec;
+         }
+ 
+-        static enum Type implements StringRepresentable {
++        public static enum Type implements StringRepresentable { // Canvas - public
+             ABS("abs"),
+             SQUARE("square"),
+             CUBE("cube"),
+@@ -683,7 +_,105 @@
+         }
+     }
+ 
+-    protected record Marker(@Override DensityFunctions.Marker.Type type, @Override DensityFunction wrapped) implements DensityFunctions.MarkerOrMarked {
++    // Canvas start - dfc - public - make to class
++    public static final class Marker implements IFastCacheLike, IEqualityOverriding, MarkerOrMarked {
++        private final Type type;
++        private final DensityFunction wrapped;
++        private Object c2me$optionalEquality;
++
++        @Override
++        public boolean equals(final Object that) {
++            Function<Object, Boolean> original = (o) -> {
++                if (o == this) return true;
++                if (o == null || o.getClass() != this.getClass()) return false;
++                var a = (Marker) o;
++                return Objects.equals(this.type, a.type) &&
++                    Objects.equals(this.wrapped, a.wrapped);
++            };
++            if (true) {
++                return original.apply(that);
++            }
++            Object a = this.c2me$getOverriddenEquality();
++            Object b = that instanceof IEqualityOverriding equalityOverriding ? equalityOverriding.c2me$getOverriddenEquality() : null;
++            if (a == null) {
++                return original.apply(b != null ? b : that);
++            } else {
++                return a.equals(b != null ? b : that);
++            }
++        }
++
++        @Override
++        public int hashCode() {
++            Supplier<Integer> original = () -> Objects.hash(type, wrapped);
++            Object c2me$optionalEquality1 = this.c2me$optionalEquality;
++            if (c2me$optionalEquality1 != null && false) {
++                return c2me$optionalEquality1.hashCode();
++            } else {
++                return original.get();
++            }
++        }
++
++        public Marker(Type type, DensityFunction wrapped) {
++            this.type = type;
++            this.wrapped = wrapped;
++        }
++
++        @Override
++        public double c2me$getCached(int x, int y, int z, EvalType evalType) {
++            return Double.longBitsToDouble(CACHE_MISS_NAN_BITS);
++        }
++
++        @Override
++        public boolean c2me$getCached(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            return false;
++        }
++
++        @Override
++        public void c2me$cache(int x, int y, int z, EvalType evalType, double cached) {
++            // nop
++        }
++
++        @Override
++        public void c2me$cache(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            // nop
++        }
++
++        @Override
++        public DensityFunction c2me$getDelegate() {
++            return this.wrapped;
++        }
++
++        @Override
++        public DensityFunction c2me$withDelegate(DensityFunction delegate) {
++            DensityFunctions.Marker wrapping = new DensityFunctions.Marker(this.type(), delegate);
++            ((IEqualityOverriding) (Object) wrapping).c2me$overrideEquality(this);
++            return wrapping;
++        }
++
++        @Override
++        public void c2me$overrideEquality(Object object) {
++            Object inner = object;
++            while (true) {
++                Object inner1 = inner instanceof IEqualityOverriding e1 ? e1.c2me$getOverriddenEquality() : null;
++                if (inner1 == null) {
++                    this.c2me$optionalEquality = inner;
++                    break;
++                }
++                inner = inner1;
++            }
++        }
++
++        @Override
++        public Object c2me$getOverriddenEquality() {
++            return this.c2me$optionalEquality;
++        }
++
++        @Override
++        public DensityFunction mapAll(Visitor visitor) {
++            return visitor.apply(this.c2me$withDelegate(this.wrapped().mapAll(visitor)));
++        }
++
++        // Canvas end
+         @Override
+         public double compute(DensityFunction.FunctionContext context) {
+             return this.wrapped.compute(context);
+@@ -704,7 +_,19 @@
+             return this.wrapped.maxValue();
+         }
+ 
+-        static enum Type implements StringRepresentable {
++        // Canvas start - dfc - convert to class
++        @Override
++        public Type type() {
++            return type;
++        }
++
++        @Override
++        public DensityFunction wrapped() {
++            return wrapped;
++        }
++
++        public static enum Type implements StringRepresentable { // - public
++            // Canvas end
+             Interpolated("interpolated"),
+             FlatCache("flat_cache"),
+             Cache2D("cache_2d"),
+@@ -798,7 +_,7 @@
+         }
+     }
+ 
+-    protected record Noise(DensityFunction.NoiseHolder noise, @Deprecated double xzScale, double yScale) implements DensityFunction {
++    public record Noise(DensityFunction.NoiseHolder noise, @Deprecated double xzScale, double yScale) implements DensityFunction { // Canvas - protected -> public
+         public static final MapCodec<DensityFunctions.Noise> DATA_CODEC = RecordCodecBuilder.mapCodec(
+             instance -> instance.group(
+                     DensityFunction.NoiseHolder.CODEC.fieldOf("noise").forGetter(DensityFunctions.Noise::noise),
 @@ -815,8 +_,40 @@
          }
  
@@ -99,7 +352,25 @@
          }
  
          @Override
-@@ -938,6 +_,46 @@
+@@ -860,7 +_,7 @@
+         double transform(double value);
+     }
+ 
+-    record RangeChoice(DensityFunction input, double minInclusive, double maxExclusive, DensityFunction whenInRange, DensityFunction whenOutOfRange)
++    public record RangeChoice(DensityFunction input, double minInclusive, double maxExclusive, DensityFunction whenInRange, DensityFunction whenOutOfRange) // Canvas - public
+         implements DensityFunction {
+         public static final MapCodec<DensityFunctions.RangeChoice> DATA_CODEC = RecordCodecBuilder.mapCodec(
+             instance -> instance.group(
+@@ -919,7 +_,7 @@
+         }
+     }
+ 
+-    protected record Shift(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise {
++    public record Shift(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise { // Canvas - protected -> public
+         static final KeyDispatchDataCodec<DensityFunctions.Shift> CODEC = DensityFunctions.singleArgumentCodec(
+             DensityFunction.NoiseHolder.CODEC, DensityFunctions.Shift::new, DensityFunctions.Shift::offsetNoise
+         );
+@@ -938,9 +_,49 @@
          public KeyDispatchDataCodec<? extends DensityFunction> codec() {
              return CODEC;
          }
@@ -145,8 +416,12 @@
 +        // Canvas end
      }
  
-     protected record ShiftA(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise {
-@@ -959,6 +_,46 @@
+-    protected record ShiftA(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise {
++    public record ShiftA(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise { // Canvas - protected -> public
+         static final KeyDispatchDataCodec<DensityFunctions.ShiftA> CODEC = DensityFunctions.singleArgumentCodec(
+             DensityFunction.NoiseHolder.CODEC, DensityFunctions.ShiftA::new, DensityFunctions.ShiftA::offsetNoise
+         );
+@@ -959,9 +_,49 @@
          public KeyDispatchDataCodec<? extends DensityFunction> codec() {
              return CODEC;
          }
@@ -192,7 +467,11 @@
 +        // Canvas end
      }
  
-     protected record ShiftB(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise {
+-    protected record ShiftB(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise {
++    public record ShiftB(@Override DensityFunction.NoiseHolder offsetNoise) implements DensityFunctions.ShiftNoise { // Canvas - protected -> public
+         static final KeyDispatchDataCodec<DensityFunctions.ShiftB> CODEC = DensityFunctions.singleArgumentCodec(
+             DensityFunction.NoiseHolder.CODEC, DensityFunctions.ShiftB::new, DensityFunctions.ShiftB::offsetNoise
+         );
 @@ -980,6 +_,46 @@
          public KeyDispatchDataCodec<? extends DensityFunction> codec() {
              return CODEC;
@@ -240,3 +519,48 @@
      }
  
      interface ShiftNoise extends DensityFunction {
+@@ -1005,7 +_,7 @@
+         }
+     }
+ 
+-    protected record ShiftedNoise(
++    public record ShiftedNoise( // Canvas - protected -> public
+         DensityFunction shiftX, DensityFunction shiftY, DensityFunction shiftZ, double xzScale, double yScale, DensityFunction.NoiseHolder noise
+     ) implements DensityFunction {
+         private static final MapCodec<DensityFunctions.ShiftedNoise> DATA_CODEC = RecordCodecBuilder.mapCodec(
+@@ -1175,7 +_,7 @@
+         double transform(DensityFunction.FunctionContext context, double value);
+     }
+ 
+-    interface TwoArgumentSimpleFunction extends DensityFunction {
++    public interface TwoArgumentSimpleFunction extends DensityFunction { // Canvas - public
+         Logger LOGGER = LogUtils.getLogger();
+ 
+         static DensityFunctions.TwoArgumentSimpleFunction create(
+@@ -1265,7 +_,7 @@
+         }
+     }
+ 
+-    protected record WeirdScaledSampler(
++    public record WeirdScaledSampler( // Canvas - protected -> public
+         @Override DensityFunction input, DensityFunction.NoiseHolder noise, DensityFunctions.WeirdScaledSampler.RarityValueMapper rarityValueMapper
+     ) implements DensityFunctions.TransformerWithContext {
+         private static final MapCodec<DensityFunctions.WeirdScaledSampler> DATA_CODEC = RecordCodecBuilder.mapCodec(
+@@ -1314,7 +_,7 @@
+                 DensityFunctions.WeirdScaledSampler.RarityValueMapper::values
+             );
+             private final String name;
+-            final Double2DoubleFunction mapper;
++            public final Double2DoubleFunction mapper; // Canvas - public
+             final double maxRarity;
+ 
+             private RarityValueMapper(final String name, final Double2DoubleFunction mapper, final double maxRarity) {
+@@ -1330,7 +_,7 @@
+         }
+     }
+ 
+-    record YClampedGradient(int fromY, int toY, double fromValue, double toValue) implements DensityFunction.SimpleFunction {
++    public record YClampedGradient(int fromY, int toY, double fromValue, double toValue) implements DensityFunction.SimpleFunction { // Canvas - public
+         private static final MapCodec<DensityFunctions.YClampedGradient> DATA_CODEC = RecordCodecBuilder.mapCodec(
+             codec -> codec.group(
+                     Codec.intRange(DimensionType.MIN_Y * 2, DimensionType.MAX_Y * 2).fieldOf("from_y").forGetter(DensityFunctions.YClampedGradient::fromY),

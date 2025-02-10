@@ -74,6 +74,23 @@ public class Config {
         @EnumValue(enumValue = ChunkSystemAlgorithm.class)
         @Comment("Modifies what algorithm the chunk system will use to define thread counts. values: MOONRISE, C2ME, ANY, ALL")
         public String chunkWorkerAlgorithm = "MOONRISE";
+        @Comment(value = {
+            "Whether to use density function compiler to accelerate world generation",
+            "",
+            "Density function: https://minecraft.wiki/w/Density_function",
+            "",
+            "This functionality compiles density functions from world generation",
+            "datapacks (including vanilla generation) to JVM bytecode to increase",
+            "performance by allowing JVM JIT to better optimize the code",
+            "",
+            "Currently, all functions provided by vanilla are implemented.",
+            "Chunk upgrades from pre-1.18 versions are not implemented and will",
+            "fall back to the unoptimized version of density functions.",
+            "",
+            "Please test if this optimization actually benefits your server, as",
+            "it can sometimes slow down chunk performance than speed it up."
+        })
+        public boolean enableDensityFunctionCompiler = false;
     }
 
     // Async Pathfinding
@@ -243,18 +260,18 @@ public class Config {
     public boolean chainEndCrystalExplosions = false;
     @Comment("Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more")
     public boolean mc258859 = false;
-    @Comment(value =
-        {"Whether to use an alternative strategy to make structure layouts generate slightly even faster than",
-            "the default optimization this mod has for template pool weights. This alternative strategy works by",
-            "changing the list of pieces that structures collect from the template pool to not have duplicate entries.",
-            "",
-            "This will not break the structure generation, but it will make the structure layout different than",
-            "if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large",
-            "modpacks where many structure mods are using very high weight values in their template pools.",
-            "",
-            "Pros: Get a bit more performance from high weight Template Pool Structures.",
-            "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"}
-    )
+    @Comment(value = {
+        "Whether to use an alternative strategy to make structure layouts generate slightly even faster than",
+        "the default optimization this mod has for template pool weights. This alternative strategy works by",
+        "changing the list of pieces that structures collect from the template pool to not have duplicate entries.",
+        "",
+        "This will not break the structure generation, but it will make the structure layout different than",
+        "if this config was off (breaking vanilla seed parity). The cost of speed may be worth it in large",
+        "modpacks where many structure mods are using very high weight values in their template pools.",
+        "",
+        "Pros: Get a bit more performance from high weight Template Pool Structures.",
+        "Cons: Loses parity with vanilla seeds on the layout of the structure. (Structure layout is not broken, just different)"
+    })
     public boolean deduplicateShuffledTemplatePoolElementList = false;
     @Comment("Enables a port of the mod StructureLayoutOptimizer, which optimizes general Jigsaw structure generation")
     public boolean enableStructureLayoutOptimizer = true;
@@ -278,6 +295,8 @@ public class Config {
         public int asyncChunkSendingThreadCount = 1;
         @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
         public boolean useVirtualThreadExecutorForChunkSenders = false;
+        @Comment("Loads the FULL ChunkAccess before sending to the client(async), can smoothen mspt, but might slow down chunk sending. Disabling this makes it run on its own independent task to the executor")
+        public boolean runFullStatusAccessLoadBeforeSending = false;
     }
 
     @Comment("Moves player joining to an isolated queue-thread, severely reducing lag when players are joining, due to blocking tasks now being handled off any tickloops")

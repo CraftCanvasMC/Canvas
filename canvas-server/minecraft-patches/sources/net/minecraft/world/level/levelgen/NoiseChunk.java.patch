@@ -1,0 +1,772 @@
+--- a/net/minecraft/world/level/levelgen/NoiseChunk.java
++++ b/net/minecraft/world/level/levelgen/NoiseChunk.java
+@@ -1,12 +_,23 @@
+ package net.minecraft.world.level.levelgen;
+ 
+ import com.google.common.collect.Lists;
++import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.dfc.common.ast.EvalType;
++import io.canvasmc.canvas.dfc.common.ducks.IArrayCacheCapable;
++import io.canvasmc.canvas.dfc.common.ducks.ICoordinatesFilling;
++import io.canvasmc.canvas.dfc.common.ducks.IFastCacheLike;
++import io.canvasmc.canvas.dfc.common.gen.DelegatingBlendingAwareVisitor;
++import io.canvasmc.canvas.dfc.common.util.ArrayCache;
++import io.canvasmc.canvas.dfc.common.vif.EachApplierVanillaInterface;
++import io.canvasmc.canvas.dfc.common.vif.NoisePosVanillaInterface;
+ import it.unimi.dsi.fastutil.longs.Long2IntMap;
+ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.HashMap;
+ import java.util.List;
+ import java.util.Map;
++import java.util.function.Supplier;
+ import javax.annotation.Nullable;
+ import net.minecraft.core.QuartPos;
+ import net.minecraft.core.SectionPos;
+@@ -19,8 +_,9 @@
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.levelgen.blending.Blender;
+ import net.minecraft.world.level.levelgen.material.MaterialRuleList;
++import org.jetbrains.annotations.NotNull;
+ 
+-public class NoiseChunk implements DensityFunction.ContextProvider, DensityFunction.FunctionContext {
++public class NoiseChunk implements DensityFunction.ContextProvider, DensityFunction.FunctionContext, IArrayCacheCapable, ICoordinatesFilling { // Canvas
+     private final NoiseSettings noiseSettings;
+     final int cellCountXZ;
+     final int cellCountY;
+@@ -56,7 +_,47 @@
+     long interpolationCounter;
+     long arrayInterpolationCounter;
+     int arrayIndex;
+-    private final DensityFunction.ContextProvider sliceFillingContextProvider = new DensityFunction.ContextProvider() {
++    // Canvas start - dfc
++    private final ArrayCache c2me$arrayCache = new ArrayCache();
++
++    @Override
++    public ArrayCache c2me$getArrayCache() {
++        return this.c2me$arrayCache != null ? this.c2me$arrayCache : new ArrayCache();
++    }
++
++    @Override
++    public void c2me$fillCoordinates(int[] x, int[] y, int[] z) {
++        int index = 0;
++        for (int i = this.cellHeight - 1; i >= 0; i--) {
++            int blockY = this.cellStartBlockY + i;
++            for (int j = 0; j < this.cellWidth; j++) {
++                int blockX = this.cellStartBlockX + j;
++                for (int k = 0; k < this.cellWidth; k++) {
++                    int blockZ = this.cellStartBlockZ + k;
++
++                    x[index] = blockX;
++                    y[index] = blockY;
++                    z[index] = blockZ;
++
++                    index++;
++                }
++            }
++        }
++    }
++
++    private @NotNull DelegatingBlendingAwareVisitor c2me$getDelegatingBlendingAwareVisitor(DensityFunction.Visitor visitor) {
++        return new DelegatingBlendingAwareVisitor(visitor, this.getBlender() != Blender.empty());
++    }
++
++    private DensityFunction.Visitor modifyVisitor1(DensityFunction.Visitor visitor) {
++        return c2me$getDelegatingBlendingAwareVisitor(visitor);
++    }
++
++    private DensityFunction.Visitor modifyVisitor2(DensityFunction.Visitor visitor) {
++        return c2me$getDelegatingBlendingAwareVisitor(visitor);
++    }
++
++    public class NoiseChunkSliceFillingContextProvider implements DensityFunction.ContextProvider, IArrayCacheCapable, ICoordinatesFilling {
+         @Override
+         public DensityFunction.FunctionContext forIndex(int arrayIndex) {
+             NoiseChunk.this.cellStartBlockY = (arrayIndex + NoiseChunk.this.cellNoiseMinY) * NoiseChunk.this.cellHeight;
+@@ -76,7 +_,23 @@
+                 values[i] = function.compute(NoiseChunk.this);
+             }
+         }
+-    };
++
++        @Override
++        public ArrayCache c2me$getArrayCache() {
++            return (NoiseChunk.this).c2me$getArrayCache();
++        }
++
++        @Override
++        public void c2me$fillCoordinates(int[] x, int[] y, int[] z) {
++            for (int i = 0; i < (NoiseChunk.this).cellCountY + 1; i++) {
++                x[i] = (NoiseChunk.this).cellStartBlockX + (NoiseChunk.this).inCellX;
++                y[i] = (i + (NoiseChunk.this).cellNoiseMinY) * (NoiseChunk.this).cellHeight;
++                z[i] = (NoiseChunk.this).cellStartBlockZ + (NoiseChunk.this).inCellZ;
++            }
++        }
++    }
++    private final DensityFunction.ContextProvider sliceFillingContextProvider = new NoiseChunkSliceFillingContextProvider();
++    // Canvas end
+ 
+     public static NoiseChunk forChunk(
+         ChunkAccess chunk,
+@@ -135,7 +_,7 @@
+         }
+ 
+         NoiseRouter noiseRouter = random.router();
+-        NoiseRouter noiseRouter1 = noiseRouter.mapAll(this::wrap);
++        NoiseRouter noiseRouter1 = noiseRouter.mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor1(this::wrap) : this::wrap); // Canvas - dfc
+         if (!noiseGeneratorSettings.isAquifersEnabled()) {
+             this.aquifer = Aquifer.createDisabled(fluidPicker);
+         } else {
+@@ -150,7 +_,7 @@
+         DensityFunction densityFunction = DensityFunctions.cacheAllInCell(
+                 DensityFunctions.add(noiseRouter1.finalDensity(), DensityFunctions.BeardifierMarker.INSTANCE)
+             )
+-            .mapAll(this::wrap);
++            .mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor2(this::wrap) : this::wrap); // Canvas - dfc
+         list.add(context -> this.aquifer.computeSubstance(context, densityFunction.compute(context)));
+         if (noiseGeneratorSettings.oreVeinsEnabled()) {
+             list.add(OreVeinifier.create(noiseRouter1.veinToggle(), noiseRouter1.veinRidged(), noiseRouter1.veinGap(), random.oreRandom()));
+@@ -162,12 +_,14 @@
+ 
+     protected Climate.Sampler cachedClimateSampler(NoiseRouter noiseRouter, List<Climate.ParameterPoint> points) {
+         return new Climate.Sampler(
+-            noiseRouter.temperature().mapAll(this::wrap),
+-            noiseRouter.vegetation().mapAll(this::wrap),
+-            noiseRouter.continents().mapAll(this::wrap),
+-            noiseRouter.erosion().mapAll(this::wrap),
+-            noiseRouter.depth().mapAll(this::wrap),
+-            noiseRouter.ridges().mapAll(this::wrap),
++            // Canvas start - dfc
++            noiseRouter.temperature().mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor2(this::wrap) : this::wrap),
++            noiseRouter.vegetation().mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor2(this::wrap) : this::wrap),
++            noiseRouter.continents().mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor2(this::wrap) : this::wrap),
++            noiseRouter.erosion().mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor2(this::wrap) : this::wrap),
++            noiseRouter.depth().mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor2(this::wrap) : this::wrap),
++            noiseRouter.ridges().mapAll(Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler ? modifyVisitor2(this::wrap) : this::wrap),
++            // Canvas end
+             points
+         );
+     }
+@@ -366,6 +_,13 @@
+     }
+ 
+     private DensityFunction wrapNew(DensityFunction densityFunction) {
++        // Canvas start - dfc
++        if (Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler) {
++            if (this.interpolating && densityFunction instanceof DensityFunctions.Marker) {
++                throw new IllegalStateException("Cannot create more wrapping during interpolation loop");
++            }
++        }
++        // Canvas end
+         if (densityFunction instanceof DensityFunctions.Marker marker) {
+             return (DensityFunction)(switch (marker.type()) {
+                 case Interpolated -> new NoiseChunk.NoiseInterpolator(marker.wrapped());
+@@ -393,7 +_,7 @@
+         }
+     }
+ 
+-    class BlendAlpha implements NoiseChunk.NoiseChunkDensityFunction {
++    public class BlendAlpha implements NoiseChunk.NoiseChunkDensityFunction { // Canvas - public
+         @Override
+         public DensityFunction wrapped() {
+             return DensityFunctions.BlendAlpha.INSTANCE;
+@@ -430,7 +_,7 @@
+         }
+     }
+ 
+-    class BlendOffset implements NoiseChunk.NoiseChunkDensityFunction {
++    public class BlendOffset implements NoiseChunk.NoiseChunkDensityFunction { // Canvas - public
+         @Override
+         public DensityFunction wrapped() {
+             return DensityFunctions.BlendOffset.INSTANCE;
+@@ -473,10 +_,49 @@
+         BlockState calculate(DensityFunction.FunctionContext context);
+     }
+ 
+-    static class Cache2D implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction {
+-        private final DensityFunction function;
++    static class Cache2D implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction, IFastCacheLike { // Canvas - dfc
++        private DensityFunction function; // Canvas - mutable
+         private long lastPos2D = ChunkPos.INVALID_CHUNK_POS;
+         private double lastValue;
++        // Canvas start - dfc
++
++        @Override
++        public double c2me$getCached(int x, int y, int z, EvalType evalType) {
++            long l = ChunkPos.asLong(x, z);
++            if (this.lastPos2D == l) {
++                return this.lastValue;
++            } else {
++                return Double.longBitsToDouble(CACHE_MISS_NAN_BITS);
++            }
++        }
++
++        @Override
++        public boolean c2me$getCached(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            return false;
++        }
++
++        @Override
++        public void c2me$cache(int x, int y, int z, EvalType evalType, double cached) {
++            this.lastPos2D = ChunkPos.asLong(x, z);
++            this.lastValue = cached;
++        }
++
++        @Override
++        public void c2me$cache(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            // nop
++        }
++
++        @Override
++        public DensityFunction c2me$getDelegate() {
++            return this.function;
++        }
++
++        @Override
++        public DensityFunction c2me$withDelegate(DensityFunction delegate) {
++            this.function = delegate;
++            return this;
++        }
++        // Canvas end
+ 
+         Cache2D(DensityFunction function) {
+             this.function = function;
+@@ -513,9 +_,92 @@
+         }
+     }
+ 
+-    class CacheAllInCell implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction {
+-        final DensityFunction noiseFiller;
++    class CacheAllInCell implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction, IFastCacheLike { // Canvas - dfc
++        DensityFunction noiseFiller; // Canvas - mutable
+         final double[] values;
++        // Canvas start - dfc
++        @Override
++        public double c2me$getCached(int x, int y, int z, EvalType evalType) {
++            if (evalType == EvalType.INTERPOLATION) {
++                boolean isInInterpolationLoop = (NoiseChunk.this).interpolating;
++                if (isInInterpolationLoop) {
++                    int startBlockX = (NoiseChunk.this).cellStartBlockX;
++                    int startBlockY = (NoiseChunk.this).cellStartBlockY;
++                    int startBlockZ = (NoiseChunk.this).cellStartBlockZ;
++                    int horizontalCellBlockCount = (NoiseChunk.this).cellWidth;
++                    int verticalCellBlockCount = (NoiseChunk.this).cellHeight;
++                    int cellBlockX = x - startBlockX;
++                    int cellBlockY = y - startBlockY;
++                    int cellBlockZ = z - startBlockZ;
++                    if (cellBlockX >= 0 &&
++                        cellBlockY >= 0 &&
++                        cellBlockZ >= 0 &&
++                        cellBlockX < horizontalCellBlockCount &&
++                        cellBlockY < verticalCellBlockCount &&
++                        cellBlockZ < horizontalCellBlockCount) {
++                        return this.values[((verticalCellBlockCount - 1 - cellBlockY) * horizontalCellBlockCount + cellBlockX)
++                            * horizontalCellBlockCount
++                            + cellBlockZ];
++                    }
++                }
++            }
++
++            return CACHE_MISS_NAN_BITS;
++        }
++
++        @Override
++        public boolean c2me$getCached(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            if (evalType == EvalType.INTERPOLATION) {
++                boolean isInInterpolationLoop = (NoiseChunk.this).interpolating;
++                if (isInInterpolationLoop) {
++                    int startBlockX = (NoiseChunk.this).cellStartBlockX;
++                    int startBlockY = (NoiseChunk.this).cellStartBlockY;
++                    int startBlockZ = (NoiseChunk.this).cellStartBlockZ;
++                    int horizontalCellBlockCount = (NoiseChunk.this).cellWidth;
++                    int verticalCellBlockCount = (NoiseChunk.this).cellHeight;
++                    for (int i = 0; i < res.length; i++) {
++                        int cellBlockX = x[i] - startBlockX;
++                        int cellBlockY = y[i] - startBlockY;
++                        int cellBlockZ = z[i] - startBlockZ;
++                        if (cellBlockX >= 0 &&
++                            cellBlockY >= 0 &&
++                            cellBlockZ >= 0 &&
++                            cellBlockX < horizontalCellBlockCount &&
++                            cellBlockY < verticalCellBlockCount &&
++                            cellBlockZ < horizontalCellBlockCount) {
++                            res[i] = this.values[((verticalCellBlockCount - 1 - cellBlockY) * horizontalCellBlockCount + cellBlockX) * horizontalCellBlockCount + cellBlockZ];
++                        } else {
++                            System.out.println("partial cell cache hit");
++                            return false; // partial hit possible
++                        }
++                    }
++                }
++            }
++
++            return false;
++        }
++
++        @Override
++        public void c2me$cache(int x, int y, int z, EvalType evalType, double cached) {
++            // nop
++        }
++
++        @Override
++        public void c2me$cache(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            // nop
++        }
++
++        @Override
++        public DensityFunction c2me$getDelegate() {
++            return this.noiseFiller;
++        }
++
++        @Override
++        public DensityFunction c2me$withDelegate(DensityFunction delegate) {
++            this.noiseFiller = delegate;
++            return this;
++        }
++        // Canvas end
+ 
+         CacheAllInCell(final DensityFunction noiseFilter) {
+             this.noiseFiller = noiseFilter;
+@@ -525,6 +_,7 @@
+ 
+         @Override
+         public double compute(DensityFunction.FunctionContext context) {
++            Supplier<Double> run = () -> { // Canvas - dfc
+             if (context != NoiseChunk.this) {
+                 return this.noiseFiller.compute(context);
+             } else if (!NoiseChunk.this.interpolating) {
+@@ -537,6 +_,37 @@
+                     ? this.values[((NoiseChunk.this.cellHeight - 1 - i1) * NoiseChunk.this.cellWidth + i) * NoiseChunk.this.cellWidth + i2]
+                     : this.noiseFiller.compute(context);
+             }
++            // Canvas start - dfc
++            };
++            if (!Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler || context instanceof NoiseChunk) {
++                return run.get();
++            }
++            if (context instanceof NoisePosVanillaInterface vif && vif.getType() == EvalType.INTERPOLATION) {
++                boolean isInInterpolationLoop = (NoiseChunk.this).interpolating;
++                if (!isInInterpolationLoop) {
++                    return run.get();
++                }
++                int startBlockX = (NoiseChunk.this).cellStartBlockX;
++                int startBlockY = (NoiseChunk.this).cellStartBlockY;
++                int startBlockZ = (NoiseChunk.this).cellStartBlockZ;
++                int horizontalCellBlockCount = (NoiseChunk.this).cellWidth;
++                int verticalCellBlockCount = (NoiseChunk.this).cellHeight;
++                int cellBlockX = context.blockX() - startBlockX;
++                int cellBlockY = context.blockY() - startBlockY;
++                int cellBlockZ = context.blockZ() - startBlockZ;
++                return cellBlockX >= 0
++                    && cellBlockY >= 0
++                    && cellBlockZ >= 0
++                    && cellBlockX < horizontalCellBlockCount
++                    && cellBlockY < verticalCellBlockCount
++                    && cellBlockZ < horizontalCellBlockCount
++                    ? this.values[((verticalCellBlockCount - 1 - cellBlockY) * horizontalCellBlockCount + cellBlockX)
++                    * horizontalCellBlockCount
++                    + cellBlockZ]
++                    : this.noiseFiller.compute(context);
++            }
++            return run.get();
++            // Canvas end
+         }
+ 
+         @Override
+@@ -555,13 +_,84 @@
+         }
+     }
+ 
+-    class CacheOnce implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction {
+-        private final DensityFunction function;
++    class CacheOnce implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction, IFastCacheLike { // Canvas - dfc
++        private DensityFunction function; // Canvas - mutable
+         private long lastCounter;
+         private long lastArrayCounter;
+         private double lastValue;
+         @Nullable
+         private double[] lastArray;
++        // Canvas start - dfc
++        private double c2me$lastValue = Double.NaN;
++        private int c2me$lastX = Integer.MIN_VALUE;
++        private int c2me$lastY = Integer.MIN_VALUE;
++        private int c2me$lastZ = Integer.MIN_VALUE;
++
++        private int[] c2me$lastXa;
++        private int[] c2me$lastYa;
++        private int[] c2me$lastZa;
++        private double[] c2me$lastValuea;
++
++        @Override
++        public double c2me$getCached(int x, int y, int z, EvalType evalType) {
++            if (c2me$lastValuea != null) {
++                for (int i = 0; i < this.c2me$lastValuea.length; i ++) {
++                    if (c2me$lastXa[i] == x && c2me$lastYa[i] == y && c2me$lastZa[i] == z) {
++                        return c2me$lastValuea[i];
++                    }
++                }
++            }
++            if (!Double.isNaN(c2me$lastValue) && c2me$lastX == x && c2me$lastY == y && c2me$lastZ == z) {
++                return c2me$lastValue;
++            }
++
++            return Double.longBitsToDouble(CACHE_MISS_NAN_BITS);
++        }
++
++        @Override
++        public boolean c2me$getCached(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            if (c2me$lastValuea != null && Arrays.equals(y, c2me$lastYa) && Arrays.equals(x, c2me$lastXa) && Arrays.equals(z, c2me$lastZa)) {
++                System.arraycopy(c2me$lastValuea, 0, res, 0, c2me$lastValuea.length);
++                return true;
++            } else {
++                return false;
++            }
++        }
++
++        @Override
++        public void c2me$cache(int x, int y, int z, EvalType evalType, double cached) {
++            c2me$lastValue = cached;
++            c2me$lastX = x;
++            c2me$lastY = y;
++            c2me$lastZ = z;
++        }
++
++        @Override
++        public void c2me$cache(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            if (c2me$lastValuea != null && this.c2me$lastValuea.length == res.length) {
++                System.arraycopy(res, 0, this.c2me$lastValuea, 0, this.c2me$lastValuea.length);
++                System.arraycopy(x, 0, this.c2me$lastXa, 0, this.c2me$lastValuea.length);
++                System.arraycopy(y, 0, this.c2me$lastYa, 0, this.c2me$lastValuea.length);
++                System.arraycopy(z, 0, this.c2me$lastZa, 0, this.c2me$lastValuea.length);
++            } else {
++                this.c2me$lastValuea = Arrays.copyOf(res, res.length);
++                this.c2me$lastXa = Arrays.copyOf(x, x.length);
++                this.c2me$lastYa = Arrays.copyOf(y, y.length);
++                this.c2me$lastZa = Arrays.copyOf(z, z.length);
++            }
++        }
++
++        @Override
++        public DensityFunction c2me$getDelegate() {
++            return this.function;
++        }
++
++        @Override
++        public DensityFunction c2me$withDelegate(DensityFunction delegate) {
++            this.function = delegate;
++            return this;
++        }
++        // Canvas end
+ 
+         CacheOnce(final DensityFunction function) {
+             this.function = function;
+@@ -569,6 +_,7 @@
+ 
+         @Override
+         public double compute(DensityFunction.FunctionContext context) {
++            Supplier<Double> run = () -> { // Canvas
+             if (context != NoiseChunk.this) {
+                 return this.function.compute(context);
+             } else if (this.lastArray != null && this.lastArrayCounter == NoiseChunk.this.arrayInterpolationCounter) {
+@@ -581,10 +_,36 @@
+                 this.lastValue = d;
+                 return d;
+             }
++            // Canvas start - dfc
++            };
++            if (!Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler || context instanceof NoiseChunk) {
++                return run.get();
++            }
++            int blockX = context.blockX();
++            int blockY = context.blockY();
++            int blockZ = context.blockZ();
++            if (c2me$lastValuea != null) {
++                for (int i = 0; i < this.c2me$lastValuea.length; i ++) {
++                    if (c2me$lastXa[i] == blockX && c2me$lastYa[i] == blockY && c2me$lastZa[i] == blockZ) {
++                        return c2me$lastValuea[i];
++                    }
++                }
++            }
++            if (!Double.isNaN(c2me$lastValue) && c2me$lastX == blockX && c2me$lastY == blockY && c2me$lastZ == blockZ) {
++                return c2me$lastValue;
++            }
++            double sample = this.function.compute(context);
++            c2me$lastValue = sample;
++            c2me$lastX = blockX;
++            c2me$lastY = blockY;
++            c2me$lastZ = blockZ;
++            return sample;
++            // Canvas end
+         }
+ 
+         @Override
+         public void fillArray(double[] array, DensityFunction.ContextProvider contextProvider) {
++            Runnable run = () -> { // Canvas - dfc
+             if (this.lastArray != null && this.lastArrayCounter == NoiseChunk.this.arrayInterpolationCounter) {
+                 System.arraycopy(this.lastArray, 0, array, 0, array.length);
+             } else {
+@@ -597,6 +_,26 @@
+ 
+                 this.lastArrayCounter = NoiseChunk.this.arrayInterpolationCounter;
+             }
++            // Canvas start - dfc
++            };
++            if (!Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler || contextProvider instanceof NoiseChunk) {
++                run.run();
++                return;
++            }
++            if (contextProvider instanceof EachApplierVanillaInterface ap) {
++                if (c2me$lastValuea != null && Arrays.equals(ap.getY(), c2me$lastYa) && Arrays.equals(ap.getX(), c2me$lastXa) && Arrays.equals(ap.getZ(), c2me$lastZa)) {
++                    System.arraycopy(c2me$lastValuea, 0, array, 0, c2me$lastValuea.length);
++                } else {
++                    this.function.fillArray(array, contextProvider);
++                    this.c2me$lastValuea = Arrays.copyOf(array, array.length);
++                    this.c2me$lastXa = ap.getX();
++                    this.c2me$lastYa = ap.getY();
++                    this.c2me$lastZa = ap.getZ();
++                }
++                return;
++            }
++            this.function.fillArray(array, contextProvider);
++            // Canvas end
+         }
+ 
+         @Override
+@@ -610,9 +_,64 @@
+         }
+     }
+ 
+-    class FlatCache implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction {
+-        private final DensityFunction noiseFiller;
++    class FlatCache implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction, IFastCacheLike { // Canvas - dfc
++        private DensityFunction noiseFiller; // Canvas - mutable
+         final double[][] values;
++        // Canvas start - dfc
++
++        @Override
++        public double c2me$getCached(int x, int y, int z, EvalType evalType) {
++            int i = QuartPos.fromBlock(x);
++            int j = QuartPos.fromBlock(z);
++            int k = i - (NoiseChunk.this).firstNoiseX;
++            int l = j - (NoiseChunk.this).firstNoiseZ;
++            int m = this.values.length;
++            if (k >= 0 && l >= 0 && k < m && l < m) {
++                return this.values[k][l];
++            } else {
++                return Double.longBitsToDouble(CACHE_MISS_NAN_BITS);
++            }
++        }
++
++        @Override
++        public boolean c2me$getCached(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            for (int i = 0; i < res.length; i ++) {
++                int i1 = QuartPos.fromBlock(x[i]);
++                int j1 = QuartPos.fromBlock(z[i]);
++                int k = i1 - (NoiseChunk.this).firstNoiseX;
++                int l = j1 - (NoiseChunk.this).firstNoiseZ;
++                int m = this.values.length;
++                if (k >= 0 && l >= 0 && k < m && l < m) {
++                    res[i] = this.values[k][l];
++                } else {
++                    System.out.println("partial flat cache hit");
++                    return false; // partial hit possible
++                }
++            }
++            return true;
++        }
++
++        @Override
++        public void c2me$cache(int x, int y, int z, EvalType evalType, double cached) {
++            // nop
++        }
++
++        @Override
++        public void c2me$cache(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            // nop
++        }
++
++        @Override
++        public DensityFunction c2me$getDelegate() {
++            return this.noiseFiller;
++        }
++
++        @Override
++        public DensityFunction c2me$withDelegate(DensityFunction delegate) {
++            this.noiseFiller = delegate;
++            return this;
++        }
++        // Canvas end
+ 
+         FlatCache(final DensityFunction noiseFiller, final boolean computeValues) {
+             this.noiseFiller = noiseFiller;
+@@ -671,10 +_,10 @@
+         }
+     }
+ 
+-    public class NoiseInterpolator implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction {
++    public class NoiseInterpolator implements DensityFunctions.MarkerOrMarked, NoiseChunk.NoiseChunkDensityFunction, IFastCacheLike { // Canvas - dfc
+         double[][] slice0;
+         double[][] slice1;
+-        private final DensityFunction noiseFiller;
++        private DensityFunction noiseFiller; // Canvas - mutable
+         private double noise000;
+         private double noise001;
+         private double noise100;
+@@ -690,6 +_,105 @@
+         private double valueZ0;
+         private double valueZ1;
+         private double value;
++        // Canvas start - dfc
++
++        @Override
++        public double c2me$getCached(int x, int y, int z, EvalType evalType) {
++            if (evalType == EvalType.INTERPOLATION) {
++                boolean isInInterpolationLoop = (NoiseChunk.this).interpolating;
++                if (isInInterpolationLoop) {
++                    if ((NoiseChunk.this).fillingCell) {
++                        int startBlockX = (NoiseChunk.this).cellStartBlockX;
++                        int startBlockY = (NoiseChunk.this).cellStartBlockY;
++                        int startBlockZ = (NoiseChunk.this).cellStartBlockZ;
++                        int horizontalCellBlockCount = (NoiseChunk.this).cellWidth;
++                        int verticalCellBlockCount = (NoiseChunk.this).cellHeight;
++                        int cellBlockX = x - startBlockX;
++                        int cellBlockY = y - startBlockY;
++                        int cellBlockZ = z - startBlockZ;
++                        return Mth.lerp3(
++                            (double) cellBlockX / (double) horizontalCellBlockCount,
++                            (double) cellBlockY / (double) verticalCellBlockCount,
++                            (double) cellBlockZ / (double) horizontalCellBlockCount,
++                            this.noise000,
++                            this.noise100,
++                            this.noise010,
++                            this.noise110,
++                            this.noise001,
++                            this.noise101,
++                            this.noise011,
++                            this.noise111
++                        );
++                    } else {
++                        return this.value;
++                    }
++                }
++            }
++
++            return CACHE_MISS_NAN_BITS;
++        }
++
++        @Override
++        public boolean c2me$getCached(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            if (evalType == EvalType.INTERPOLATION) {
++                boolean isInInterpolationLoop = (NoiseChunk.this).interpolating;
++                if (isInInterpolationLoop) {
++                    if ((NoiseChunk.this).fillingCell) {
++                        int startBlockX = (NoiseChunk.this).cellStartBlockX;
++                        int startBlockY = (NoiseChunk.this).cellStartBlockY;
++                        int startBlockZ = (NoiseChunk.this).cellStartBlockZ;
++                        double horizontalCellBlockCount = (NoiseChunk.this).cellWidth;
++                        double verticalCellBlockCount = (NoiseChunk.this).cellHeight;
++                        for (int i = 0; i < res.length; i ++) {
++                            int cellBlockX = x[i] - startBlockX;
++                            int cellBlockY = y[i] - startBlockY;
++                            int cellBlockZ = z[i] - startBlockZ;
++                            res[i] = Mth.lerp3(
++                                (double)cellBlockX / horizontalCellBlockCount,
++                                (double)cellBlockY / verticalCellBlockCount,
++                                (double)cellBlockZ / horizontalCellBlockCount,
++                                this.noise000,
++                                this.noise100,
++                                this.noise010,
++                                this.noise110,
++                                this.noise001,
++                                this.noise101,
++                                this.noise011,
++                                this.noise111
++                            );
++                        }
++                        return true;
++                    } else {
++                        Arrays.fill(res, this.value);
++                        return true;
++                    }
++                }
++            }
++
++            return false;
++        }
++
++        @Override
++        public void c2me$cache(int x, int y, int z, EvalType evalType, double cached) {
++            // nop
++        }
++
++        @Override
++        public void c2me$cache(double[] res, int[] x, int[] y, int[] z, EvalType evalType) {
++            // nop
++        }
++
++        @Override
++        public DensityFunction c2me$getDelegate() {
++            return this.noiseFiller;
++        }
++
++        @Override
++        public DensityFunction c2me$withDelegate(DensityFunction delegate) {
++            this.noiseFiller = delegate;
++            return this;
++        }
++        // Canvas end
+ 
+         NoiseInterpolator(final DensityFunction noiseFilter) {
+             this.noiseFiller = noiseFilter;
+@@ -739,6 +_,7 @@
+ 
+         @Override
+         public double compute(DensityFunction.FunctionContext context) {
++            Supplier<Double> original = () -> { // Canvas
+             if (context != NoiseChunk.this) {
+                 return this.noiseFiller.compute(context);
+             } else if (!NoiseChunk.this.interpolating) {
+@@ -760,6 +_,43 @@
+                     )
+                     : this.value;
+             }
++            // Canvas start - dfc
++            };
++            if (!Config.INSTANCE.chunkGeneration.enableDensityFunctionCompiler || context instanceof NoiseChunk) {
++                return original.get();
++            }
++            if (context instanceof NoisePosVanillaInterface vif && vif.getType() == EvalType.INTERPOLATION) {
++                NoiseChunk field = NoiseChunk.this;
++                boolean isInInterpolationLoop = field.interpolating;
++                boolean isSamplingForCaches = field.fillingCell;
++                if (!isInInterpolationLoop) {
++                    return original.get();
++                }
++                int startBlockX = field.cellStartBlockX;
++                int startBlockY = field.cellStartBlockY;
++                int startBlockZ = field.cellStartBlockZ;
++                int horizontalCellBlockCount = field.cellWidth();
++                int verticalCellBlockCount = field.cellHeight();
++                int cellBlockX = context.blockX() - startBlockX;
++                int cellBlockY = context.blockY() - startBlockY;
++                int cellBlockZ = context.blockZ() - startBlockZ;
++                return isSamplingForCaches
++                    ? Mth.lerp3(
++                    (double)cellBlockX / (double)horizontalCellBlockCount,
++                    (double)cellBlockY / (double)verticalCellBlockCount,
++                    (double)cellBlockZ / (double)horizontalCellBlockCount,
++                    this.noise000,
++                    this.noise100,
++                    this.noise010,
++                    this.noise110,
++                    this.noise001,
++                    this.noise101,
++                    this.noise011,
++                    this.noise111
++                ) : this.value;
++            }
++            return original.get();
++            // Canvas end
+         }
+ 
+         @Override
