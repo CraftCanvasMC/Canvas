@@ -27,8 +27,8 @@ public final class LevelThreadDumper implements ThreadDumper {
         return isThreadIncluded(findThreadByName(threadName));
     }
 
-    public boolean isThreadIncluded(@Nullable Thread thread) {
-        return thread == null ? false : ThreadedBukkitServer.getInstance().isLevelThread(thread) || thread.equals(mainThread);
+    public boolean isThreadIncluded(Thread thread) {
+        return ThreadedBukkitServer.getInstance().isLevelThread(thread) || thread.equals(mainThread);
     }
 
     @Override
