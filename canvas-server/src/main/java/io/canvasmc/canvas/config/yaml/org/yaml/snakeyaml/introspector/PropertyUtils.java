@@ -22,10 +22,10 @@ import java.util.TreeSet;
 
 public class PropertyUtils {
     private static final String TRANSIENT = "transient";
-    private final Map<Class<?>, Map<String, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property>> propertiesCache;
-    private final Map<Class<?>, Set<io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property>> readableProperties;
+    private final Map<Class<?>, Map<String, Property>> propertiesCache;
+    private final Map<Class<?>, Set<Property>> readableProperties;
     private final PlatformFeatureDetector platformFeatureDetector;
-    private io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess beanAccess;
+    private BeanAccess beanAccess;
     private boolean allowReadOnlyProperties;
     private boolean skipMissingProperties;
 
@@ -36,21 +36,21 @@ public class PropertyUtils {
     PropertyUtils(PlatformFeatureDetector platformFeatureDetector) {
         this.propertiesCache = new HashMap();
         this.readableProperties = new HashMap();
-        this.beanAccess = io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess.DEFAULT;
+        this.beanAccess = BeanAccess.DEFAULT;
         this.allowReadOnlyProperties = false;
         this.skipMissingProperties = false;
         this.platformFeatureDetector = platformFeatureDetector;
         if (platformFeatureDetector.isRunningOnAndroid()) {
-            this.beanAccess = io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess.FIELD;
+            this.beanAccess = BeanAccess.FIELD;
         }
 
     }
 
-    protected Map<String, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> getPropertiesMap(Class<?> type, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess bAccess) {
+    protected Map<String, Property> getPropertiesMap(Class<?> type, BeanAccess bAccess) {
         if (this.propertiesCache.containsKey(type)) {
             return this.propertiesCache.get(type);
         } else {
-            Map<String, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> properties = new LinkedHashMap();
+            Map<String, Property> properties = new LinkedHashMap();
             boolean inaccessableFieldsExist = false;
             switch (bAccess) {
                 case FIELD:
@@ -102,24 +102,24 @@ public class PropertyUtils {
         return Boolean.TRUE.equals(fd.getValue("transient"));
     }
 
-    public Set<io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> getProperties(Class<? extends Object> type) {
+    public Set<Property> getProperties(Class<? extends Object> type) {
         return this.getProperties(type, this.beanAccess);
     }
 
-    public Set<io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> getProperties(Class<? extends Object> type, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess bAccess) {
+    public Set<Property> getProperties(Class<? extends Object> type, BeanAccess bAccess) {
         if (this.readableProperties.containsKey(type)) {
             return this.readableProperties.get(type);
         } else {
-            Set<io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> properties = this.createPropertySet(type, bAccess);
+            Set<Property> properties = this.createPropertySet(type, bAccess);
             this.readableProperties.put(type, properties);
             return properties;
         }
     }
 
-    protected Set<io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> createPropertySet(Class<? extends Object> type, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess bAccess) {
-        Set<io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> properties = new TreeSet();
+    protected Set<Property> createPropertySet(Class<? extends Object> type, BeanAccess bAccess) {
+        Set<Property> properties = new TreeSet();
 
-        for (io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property property : this.getPropertiesMap(type, bAccess).values()) {
+        for (Property property : this.getPropertiesMap(type, bAccess).values()) {
             if (property.isReadable() && (this.allowReadOnlyProperties || property.isWritable())) {
                 properties.add(property);
             }
@@ -128,13 +128,13 @@ public class PropertyUtils {
         return properties;
     }
 
-    public io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property getProperty(Class<? extends Object> type, String name) {
+    public Property getProperty(Class<? extends Object> type, String name) {
         return this.getProperty(type, name, this.beanAccess);
     }
 
-    public io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property getProperty(Class<? extends Object> type, String name, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess bAccess) {
-        Map<String, io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property> properties = this.getPropertiesMap(type, bAccess);
-        io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.Property property = properties.get(name);
+    public Property getProperty(Class<? extends Object> type, String name, BeanAccess bAccess) {
+        Map<String, Property> properties = this.getPropertiesMap(type, bAccess);
+        Property property = properties.get(name);
         if (property == null && this.skipMissingProperties) {
             property = new MissingProperty(name);
         }
@@ -146,7 +146,7 @@ public class PropertyUtils {
         }
     }
 
-    public void setBeanAccess(io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.introspector.BeanAccess beanAccess) {
+    public void setBeanAccess(BeanAccess beanAccess) {
         if (this.platformFeatureDetector.isRunningOnAndroid() && beanAccess != BeanAccess.FIELD) {
             throw new IllegalArgumentException("JVM is Android - only BeanAccess.FIELD is available");
         } else {

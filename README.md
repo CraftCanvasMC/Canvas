@@ -41,6 +41,7 @@ Useful links:
 > ./gradlew createMojmapPaperclipJar     # build the server jar
 > ./gradlew rebuildPatches               # generate patches
 > ./gradlew runDevServer                 # run dev server
+> ./rebuildPatches                       # custom script to generate patches for modified directories
 ```
 
 ## REST API
