@@ -1,37 +1,55 @@
-<img src="readme_top.png">
+# Canvas
 
----
+[![GitHub License](https://img.shields.io/github/license/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas/blob/master/LICENSE)
+[![GitHub contributors](https://img.shields.io/github/contributors/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas/graphs/contributors)
+[![Discord](https://img.shields.io/discord/1168986665038127205?color=5865F2)](https://canvasmc.io/discord)
 
-<center><b style="font-size:29px">Fork of <a href="https://github.com/PurpurMC/Purpur">PurpurMC</a> adding experimental, but heavy performance optimizations.</b></center>
-<p></p>
+CanvasMC is a high-performance Minecraft server software focused on maximizing server performance while maintaining plugin compatibility. Built on top of [Purpur](https://github.com/PurpurMC/Purpur), it implements various experimental optimizations to achieve significant performance improvements.
 
-> [!IMPORTANT]
-> CANVAS REQUIRES JAVA VERSION 22 TO RUN.
+Useful links:
 
-**Canvas is a project created by Dueris in an attempt to create a more powerful and original servertype, unlike most servertypes out there.**
+- [Website](https://canvasmc.io)
+- [Documentation](https://docs.canvasmc.io) (Work in progress)
+- [Discord](https://canvasmc.io/discord)
 
----
+## Key Features
 
-## Optimizations
-### Multithreaded Dimension Ticking
-Canvas' most significant optimization is Multithreaded Dimension Ticking(MDT). Made in a way to be more of an in-between of Paper and Folia, offering
-insane levels of performance while still maintaining plugin compatiblity more(however not guarenteed), and making each world essentially its own
-server with its own tick loop, making the main thread practically useless. This evenly distributes resources on the CPU to their respective worlds, offering
-immense performance improvements. This also comes with a new `threadedtps` command, showing all the TPS of each world. Plugin-Made worlds also work with
-MDT.
-Alongside this, ServerPlayer Connection handling has been reworked to be threaded on the players respective world, meaning any players in the overworld are
-handled and ticked on that thread, and same thing for each world and its players.
-### Chunk Gen Optimizations
-Canvas incorporates many optimizations from mods like C2ME to further improve the chunk generation performance of Canvas. Chunk performance has been
-improved GREATLY, often doubling the CPS(Chunks Per Second) in comparison to Paper.
-### Command Optimizations
-Canvas also runs a few commands off-main, specifically ones that take up a ton of resources on the main thread, often pausing the server for seconds
-at a time until they complete. These commands are the `locate` command, and the `spreadplayers` command.
-### Entity Optimizations
-Canvas implements a ton of more optimizations for entities, most notable async pathfinding, spawning improvements, threaded entity tracking, brain optimizations, and more.
+- Multithreaded Dimension Ticking (MDT)
+- Chunk Generation Optimizations
+- Command Optimizations
+- Entity Improvements
 
----
-These are just the more notable optimziations Canvas provides, but there are a TON more behind the scenes improving performance even more.
-Please consider <a href="https://ko-fi.com/dueris">donating</a>! I(Dueris) have put tons of hours into this project to make it as stable and performant as possible.
+## Development Requirements
 
-Discord: https://discord.gg/cKUt92kbzj
+To compile Canvas, you need:
+
+- JDK 22 or higher
+- Git (with configured email and name)
+- Gradle
+
+## Scripts
+
+```bash
+> ./gradlew applyAllPatches              # apply all patches
+> ./gradlew createMojmapPaperclipJar     # build the server jar
+> ./gradlew rebuildPatches               # generate patches
+```
+## REST API
+
+Canvas has a REST API that can be used to get builds and check for new versions.
+
+It is temporarily documented in the [Website Repository](https://github.com/CraftCanvasMC/Website/blob/main/docs/API.md). Soon it will be moved over to the documentation website.
+
+## Support the Project
+
+If you'd like to support CanvasMC's development:
+
+- Consider [donating on Ko-fi](https://ko-fi.com/dueris)
+- Star and share the project on GitHub
+- Contribute code or documentation improvements
+
+Your support helps keep this project active and improving!
+
+## License
+
+Canvas is licensed under the [GNU AGPLv3](https://github.com/CraftCanvasMC/Canvas/blob/master/LICENSE). <img align="right" width="100" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/AGPLv3_Logo.svg/1200px-AGPLv3_Logo.svg.png" alt="AGPLv3 Logo">
