@@ -6,6 +6,7 @@ import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
 import io.canvasmc.canvas.server.level.LevelThread;
+import io.canvasmc.canvas.server.level.MinecraftServerWorld;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import io.canvasmc.canvas.server.render.TickTimesGraphDisplay;
 import io.netty.util.internal.ConcurrentSet;
@@ -44,7 +45,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public static BooleanSupplier SHOULD_KEEP_TICKING;
     public static Function<ServerLevel, Thread> SPINNER = (level) -> {
         try {
-            LevelThread dedicated = new LevelThread(SERVER_THREAD_GROUP, level::spin, "levelThread:" + level.getName(), level);
+            LevelThread dedicated = new LevelThread(SERVER_THREAD_GROUP, level::spin, "LevelThread:" + level.getName(), level);
             LEVEL_THREAD_IDS.add(dedicated.threadId());
             dedicated.setPriority(Config.INSTANCE.levelThreadPriority);
             dedicated.setUncaughtExceptionHandler((thread, throwable) -> LOGGER.error("Uncaught exception in level thread, {}", ((LevelThread) thread).getLevel().getName(), throwable));
@@ -65,12 +66,20 @@ public class ThreadedServer implements ThreadedBukkitServer {
     }
 
     public static Long @NotNull [] getLevelIds() {
-        return LEVEL_THREAD_IDS.toArray(new Long[0]);
+        return MinecraftServer.getThreadedServer().getAllLevels().stream()
+                              .map(MinecraftServerWorld::getRunningThread)
+                              .map(Thread::threadId)
+                              .toList().toArray(new Long[0]);
     }
 
     @Override
     public boolean isLevelThread(long id) {
-        return LEVEL_THREAD_IDS.contains(id);
+        for (final Long levelId : getLevelIds()) {
+            if (levelId == id) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
