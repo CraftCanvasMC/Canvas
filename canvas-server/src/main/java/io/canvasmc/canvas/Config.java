@@ -130,6 +130,8 @@ public class Config {
             "- https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#setPriority(int)"
         })
         public int threadPoolPriority = Thread.NORM_PRIORITY + 1;
+        @Comment("Changes the maximum view distance for the server, allowing clients to have render distances higher than 32.")
+        public int maxViewDistance = 32;
     }
 
     @Comment("Async-Pathfinding optimization options")
