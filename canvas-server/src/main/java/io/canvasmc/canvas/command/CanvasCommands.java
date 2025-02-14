@@ -1,8 +1,8 @@
 package io.canvasmc.canvas.command;
 
+import com.mojang.brigadier.CommandDispatcher;
 import java.util.HashMap;
 import java.util.Map;
-import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import org.bukkit.command.Command;

@@ -1,14 +1,23 @@
 package io.canvasmc.canvas.util;
 
+import java.lang.foreign.MemorySegment;
+import java.lang.invoke.MethodHandle;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.lang.foreign.MemorySegment;
-import java.lang.invoke.MethodHandle;
 
 public class Bindings {
     private static final Logger LOGGER = LoggerFactory.getLogger(Bindings.class);
+    private static final MethodHandle MH_c2me_natives_noise_perlin_double = bind(BindingsTemplate.c2me_natives_noise_perlin_double, "c2me_natives_noise_perlin_double");
+    private static final MethodHandle MH_c2me_natives_noise_perlin_double_ptr = bind(BindingsTemplate.c2me_natives_noise_perlin_double_ptr, "c2me_natives_noise_perlin_double");
+    private static final MethodHandle MH_c2me_natives_noise_perlin_double_batch = bind(BindingsTemplate.c2me_natives_noise_perlin_double_batch, "c2me_natives_noise_perlin_double_batch");
+    private static final MethodHandle MH_c2me_natives_noise_perlin_double_batch_partial_ptr = bind(BindingsTemplate.c2me_natives_noise_perlin_double_batch_ptr, "c2me_natives_noise_perlin_double_batch");
+    private static final MethodHandle MH_c2me_natives_noise_interpolated = bind(BindingsTemplate.c2me_natives_noise_interpolated, "c2me_natives_noise_interpolated");
+    private static final MethodHandle MH_c2me_natives_noise_interpolated_ptr = bind(BindingsTemplate.c2me_natives_noise_interpolated_ptr, "c2me_natives_noise_interpolated");
+    private static final MethodHandle MH_c2me_natives_end_islands_sample = bind(BindingsTemplate.c2me_natives_end_islands_sample, "c2me_natives_end_islands_sample");
+    private static final MethodHandle MH_c2me_natives_end_islands_sample_ptr = bind(BindingsTemplate.c2me_natives_end_islands_sample_ptr, "c2me_natives_end_islands_sample");
+    private static final MethodHandle MH_c2me_natives_biome_access_sample = bind(BindingsTemplate.c2me_natives_biome_access_sample, "c2me_natives_biome_access_sample");
 
     private static @Nullable MethodHandle bind(@NotNull MethodHandle template, String prefix) {
         if (NativeLoader.currentMachineTarget == null) {
@@ -17,9 +26,6 @@ public class Bindings {
         }
         return template.bindTo(NativeLoader.lookup.find(prefix + NativeLoader.currentMachineTarget.getSuffix()).get());
     }
-
-    private static final MethodHandle MH_c2me_natives_noise_perlin_double = bind(BindingsTemplate.c2me_natives_noise_perlin_double, "c2me_natives_noise_perlin_double");
-    private static final MethodHandle MH_c2me_natives_noise_perlin_double_ptr = bind(BindingsTemplate.c2me_natives_noise_perlin_double_ptr, "c2me_natives_noise_perlin_double");
 
     public static double c2me_natives_noise_perlin_double(MemorySegment data, double x, double y, double z) {
         try {
@@ -37,9 +43,6 @@ public class Bindings {
         }
     }
 
-    private static final MethodHandle MH_c2me_natives_noise_perlin_double_batch = bind(BindingsTemplate.c2me_natives_noise_perlin_double_batch, "c2me_natives_noise_perlin_double_batch");
-    private static final MethodHandle MH_c2me_natives_noise_perlin_double_batch_partial_ptr = bind(BindingsTemplate.c2me_natives_noise_perlin_double_batch_ptr, "c2me_natives_noise_perlin_double_batch");
-
     public static void c2me_natives_noise_perlin_double_batch(MemorySegment data, MemorySegment res, MemorySegment x, MemorySegment y, MemorySegment z, int length) {
         try {
             MH_c2me_natives_noise_perlin_double_batch.invokeExact(data, res, x, y, z, length);
@@ -55,9 +58,6 @@ public class Bindings {
             throw new RuntimeException(e);
         }
     }
-
-    private static final MethodHandle MH_c2me_natives_noise_interpolated = bind(BindingsTemplate.c2me_natives_noise_interpolated, "c2me_natives_noise_interpolated");
-    private static final MethodHandle MH_c2me_natives_noise_interpolated_ptr = bind(BindingsTemplate.c2me_natives_noise_interpolated_ptr, "c2me_natives_noise_interpolated");
 
     public static double c2me_natives_noise_interpolated(MemorySegment data, double x, double y, double z) {
         try {
@@ -75,9 +75,6 @@ public class Bindings {
         }
     }
 
-    private static final MethodHandle MH_c2me_natives_end_islands_sample = bind(BindingsTemplate.c2me_natives_end_islands_sample, "c2me_natives_end_islands_sample");
-    private static final MethodHandle MH_c2me_natives_end_islands_sample_ptr = bind(BindingsTemplate.c2me_natives_end_islands_sample_ptr, "c2me_natives_end_islands_sample");
-
     public static float c2me_natives_end_islands_sample(MemorySegment data, int x, int z) {
         try {
             return (float) MH_c2me_natives_end_islands_sample.invokeExact(data, x, z);
@@ -87,7 +84,7 @@ public class Bindings {
     }
 
     public static float c2me_natives_end_islands_sample(long data_ptr, int x, int z) {
-        if ((int) (x * x + z * z) < 0) { // workaround some compiler bugs
+        if ((x * x + z * z) < 0) { // workaround some compiler bugs
             return Float.NaN;
         }
         try {
@@ -96,8 +93,6 @@ public class Bindings {
             throw new RuntimeException(e);
         }
     }
-
-    private static final MethodHandle MH_c2me_natives_biome_access_sample = bind(BindingsTemplate.c2me_natives_biome_access_sample, "c2me_natives_biome_access_sample");
 
     public static int c2me_natives_biome_access_sample(long seed, int x, int y, int z) {
         try {

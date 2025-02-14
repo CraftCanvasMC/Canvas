@@ -6,7 +6,7 @@ import java.util.function.BooleanSupplier;
 import org.jetbrains.annotations.NotNull;
 
 @FunctionalInterface
-public interface LevelTickProcessor {
+public interface AbstractTick {
     void process(BooleanSupplier shouldKeepTicking, int tickCount);
 
     default void processAndThen(BooleanSupplier shouldKeepTicking, int tickCount, @NotNull Runnable postTick) {

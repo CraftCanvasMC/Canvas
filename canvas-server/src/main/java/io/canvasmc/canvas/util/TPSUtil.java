@@ -23,7 +23,7 @@ public class TPSUtil {
     }
 
     public static double tt20(double ticks, boolean limitZero, @Nullable ServerLevel level) {
-        double newTicks = (double) rawTT20(ticks, level);
+        double newTicks = rawTT20(ticks, level);
 
         if (limitZero) return newTicks > 0 ? newTicks : 1;
         else return newTicks;

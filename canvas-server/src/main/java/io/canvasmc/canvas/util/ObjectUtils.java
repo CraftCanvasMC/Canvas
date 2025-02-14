@@ -1,8 +1,8 @@
 package io.canvasmc.canvas.util;
 
+import java.util.Arrays;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nullable;
-import java.util.Arrays;
 
 public class ObjectUtils {
     @Contract("null, null -> true; null, _ -> false; _, null -> false")
@@ -25,6 +25,7 @@ public class ObjectUtils {
     /**
      * Compare the given arrays with {@code Arrays.equals}, performing an equality
      * check based on the array elements rather than the array reference.
+     *
      * @param o1 first array to compare
      * @param o2 second array to compare
      * @return whether the given objects are equal
@@ -67,6 +68,7 @@ public class ObjectUtils {
      * {@code Object#hashCode()}}. If the object is an array,
      * this method will delegate to any of the {@code Arrays.hashCode}
      * methods. If the object is {@code null}, this method returns 0.
+     *
      * @see Object#hashCode()
      * @see Arrays
      */

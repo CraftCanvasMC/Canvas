@@ -1,287 +1,40 @@
 package io.canvasmc.canvas.util.fastutil;
 
-import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-
-import it.unimi.dsi.fastutil.longs.*;
-import it.unimi.dsi.fastutil.shorts.ShortIterator;
-import org.apache.commons.lang3.ArrayUtils;
-
 import it.unimi.dsi.fastutil.bytes.ByteCollection;
 import it.unimi.dsi.fastutil.bytes.ByteIterator;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import it.unimi.dsi.fastutil.ints.IntIterator;
 import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.longs.Long2ByteMap;
+import it.unimi.dsi.fastutil.longs.Long2LongMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.LongBidirectionalIterator;
+import it.unimi.dsi.fastutil.longs.LongCollection;
+import it.unimi.dsi.fastutil.longs.LongComparator;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongListIterator;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSortedSet;
 import it.unimi.dsi.fastutil.objects.ObjectCollection;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
+import it.unimi.dsi.fastutil.shorts.ShortIterator;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.apache.commons.lang3.ArrayUtils;
 
 public final class FastUtilHackUtil {
-    
+
     private FastUtilHackUtil() {
         throw new AssertionError("No instances");
-    }
-
-    public static class ConvertingObjectSet<E, T> implements ObjectSet<T> {
-        private final Set<E> backing;
-        private final Function<E, T> forward;
-        private final Function<T, E> back;
-
-        public ConvertingObjectSet(Set<E> backing, Function<E, T> forward, Function<T, E> back) {
-            this.backing = Objects.requireNonNull(backing, "Backing set cannot be null");
-            this.forward = Objects.requireNonNull(forward, "Forward function cannot be null");
-            this.back = Objects.requireNonNull(back, "Backward function cannot be null");
-        }
-
-        @Override
-        public int size() {
-            return backing.size();
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return backing.isEmpty();
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean contains(Object o) {
-            try {
-                return backing.contains(back.apply((T) o));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @Override
-        public Object[] toArray() {
-            return backing.stream().map(forward).toArray();
-        }
-
-        @Override
-        public <R> R[] toArray(R[] a) {
-            return backing.stream().map(forward).collect(Collectors.toSet()).toArray(a);
-        }
-
-        @Override
-        public boolean add(T e) {
-            return backing.add(back.apply(e));
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean remove(Object o) {
-            try {
-                return backing.remove(back.apply((T) o));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean containsAll(Collection<?> c) {
-            try {
-                return backing.containsAll(c.stream()
-                        .map(i -> back.apply((T) i))
-                        .collect(Collectors.toSet()));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @Override
-        public boolean addAll(Collection<? extends T> c) {
-            return backing.addAll(c.stream().map(back).collect(Collectors.toSet()));
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean removeAll(Collection<?> c) {
-            try {
-                return backing.removeAll(c.stream()
-                        .map(i -> back.apply((T) i))
-                        .collect(Collectors.toSet()));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean retainAll(Collection<?> c) {
-            try {
-                return backing.retainAll(c.stream()
-                        .map(i -> back.apply((T) i))
-                        .collect(Collectors.toSet()));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @Override
-        public void clear() {
-            backing.clear();
-        }
-
-        @Override
-        public ObjectIterator<T> iterator() {
-            return new ObjectIterator<>() {
-                private final Iterator<E> backg = backing.iterator();
-
-                @Override
-                public boolean hasNext() {
-                    return backg.hasNext();
-                }
-
-                @Override
-                public T next() {
-                    return forward.apply(backg.next());
-                }
-
-                @Override
-                public void remove() {
-                    backg.remove();
-                }
-            };
-        }
-    }
-
-public static class ConvertingObjectSetFast<E, T> 
-            implements Long2ObjectMap.FastEntrySet<T> {
-        private final Set<E> backing;
-        private final Function<E, Long2ObjectMap.Entry<T>> forward;
-        private final Function<Long2ObjectMap.Entry<T>, E> back;
-
-        public ConvertingObjectSetFast(
-                Set<E> backing,
-                Function<E, Long2ObjectMap.Entry<T>> forward,
-                Function<Long2ObjectMap.Entry<T>, E> back) {
-            this.backing = Objects.requireNonNull(backing);
-            this.forward = Objects.requireNonNull(forward);
-            this.back = Objects.requireNonNull(back);
-        }
-
-         @Override
-        public int size() {
-            return backing.size();
-        }
-
-        @Override
-        public boolean isEmpty() {
-            return backing.isEmpty();
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean contains(Object o) {
-            try {
-                return backing.contains(back.apply((Long2ObjectMap.Entry<T>) o));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @Override
-        public Object[] toArray() {
-            return backing.stream().map(forward).toArray();
-        }
-
-        @Override
-        public <R> R[] toArray(R[] a) {
-            return backing.stream().map(forward).collect(Collectors.toSet()).toArray(a);
-        }
-
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean remove(Object o) {
-            try {
-                return backing.remove(back.apply((Long2ObjectMap.Entry<T>) o));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @Override
-        public void clear() {
-            backing.clear();
-        }
-
-        @Override
-        public ObjectIterator<Long2ObjectMap.Entry<T>> iterator() {
-            return fastIterator();
-        }
-
-        @Override
-        public ObjectIterator<Long2ObjectMap.Entry<T>> fastIterator() {
-            return new ObjectIterator<>() {
-                private final Iterator<E> it = backing.iterator();
-
-                @Override
-                public boolean hasNext() {
-                    return it.hasNext();
-                }
-
-                @Override
-                public Long2ObjectMap.Entry<T> next() {
-                    return forward.apply(it.next());
-                }
-
-                @Override
-                public void remove() {
-                    it.remove();
-                }
-            };
-        }
-
-   @Override
-        public boolean add(Long2ObjectMap.Entry<T> e) {
-            return backing.add(back.apply(e));
-        }
-
-        @Override
-        public boolean addAll(Collection<? extends Long2ObjectMap.Entry<T>> c) {
-            return backing.addAll(c.stream().map(back).toList());
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean containsAll(Collection<?> c) {
-            try {
-                return backing.containsAll(c.stream()
-                        .map(i -> back.apply((Long2ObjectMap.Entry<T>) i))
-                        .collect(Collectors.toSet()));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean removeAll(Collection<?> c) {
-            try {
-                return backing.removeAll(c.stream()
-                        .map(i -> back.apply((Long2ObjectMap.Entry<T>) i))
-                        .collect(Collectors.toSet()));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        @Override
-        public boolean retainAll(Collection<?> c) {
-            try {
-                return backing.retainAll(c.stream()
-                        .map(i -> back.apply((Long2ObjectMap.Entry<T>) i))
-                        .collect(Collectors.toSet()));
-            } catch (ClassCastException cce) {
-                return false;
-            }
-        }
     }
 
     private static <T> Int2ObjectMap.Entry<T> intEntryForwards(Map.Entry<Integer, T> entry) {
@@ -436,6 +189,384 @@ public static class ConvertingObjectSetFast<E, T>
 
     private static Map.Entry<Long, Long> longLongEntryBackwards(Long2LongMap.Entry entry) {
         return entry;
+    }
+
+    // Utility methods
+    public static <T> ObjectSet<Int2ObjectMap.Entry<T>> entrySetIntWrap(Map<Integer, T> map) {
+        return new ConvertingObjectSet<>(
+            map.entrySet(),
+            FastUtilHackUtil::intEntryForwards,
+            FastUtilHackUtil::intEntryBackwards
+        );
+    }
+
+    public static <T> ObjectSet<Long2ObjectMap.Entry<T>> entrySetLongWrap(Map<Long, T> map) {
+        return new ConvertingObjectSet<>(
+            map.entrySet(),
+            FastUtilHackUtil::longEntryForwards,
+            FastUtilHackUtil::longEntryBackwards
+        );
+    }
+
+    public static <T> Long2ObjectMap.FastEntrySet<T> entrySetLongWrapFast(Map<Long, T> map) {
+        return new ConvertingObjectSetFast<>(
+            map.entrySet(),
+            FastUtilHackUtil::longEntryForwards,
+            FastUtilHackUtil::longEntryBackwards
+        );
+    }
+
+    public static ObjectSet<Long2ByteMap.Entry> entrySetLongByteWrap(Map<Long, Byte> map) {
+        return new ConvertingObjectSet<>(
+            map.entrySet(),
+            FastUtilHackUtil::longByteEntryForwards,
+            FastUtilHackUtil::longByteEntryBackwards
+        );
+    }
+
+    public static ObjectSet<Long2LongMap.Entry> entrySetLongLongWrap(Map<Long, Long> map) {
+        return new ConvertingObjectSet<>(
+            map.entrySet(),
+            FastUtilHackUtil::longLongEntryForwards,
+            FastUtilHackUtil::longLongEntryBackwards
+        );
+    }
+
+    public static LongSet wrapLongSet(Set<Long> longset) {
+        return new WrappingLongSet(longset);
+    }
+
+    public static LongSortedSet wrapLongSortedSet(Set<Long> longset) {
+        return new WrappingLongSortedSet(longset);
+    }
+
+    public static IntSet wrapIntSet(Set<Integer> intset) {
+        return new WrappingIntSet(intset);
+    }
+
+    public static ByteCollection wrapBytes(Collection<Byte> c) {
+        return new WrappingByteCollection(c);
+    }
+
+    public static ByteIterator itrByteWrap(Iterator<Byte> backing) {
+        return new WrappingByteIterator(backing);
+    }
+
+    public static ByteIterator itrByteWrap(Iterable<Byte> backing) {
+        return itrByteWrap(backing.iterator());
+    }
+
+    public static IntIterator itrIntWrap(Iterator<Integer> backing) {
+        return new WrappingIntIterator(backing);
+    }
+
+    public static IntIterator itrIntWrap(Iterable<Integer> backing) {
+        return itrIntWrap(backing.iterator());
+    }
+
+    public static LongIterator itrLongWrap(Iterator<Long> backing) {
+        return new WrappingLongIterator(backing);
+    }
+
+    public static LongIterator itrLongWrap(Iterable<Long> backing) {
+        return itrLongWrap(backing.iterator());
+    }
+
+    public static ShortIterator itrShortWrap(Iterator<Short> backing) {
+        return new WrappingShortIterator(backing);
+    }
+
+    public static ShortIterator itrShortWrap(Iterable<Short> backing) {
+        return itrShortWrap(backing.iterator());
+    }
+
+    public static LongListIterator wrap(ListIterator<Long> c) {
+        return new WrappingLongListIterator(c);
+    }
+
+    public static LongListIterator wrap(Iterator<Long> c) {
+        return new SlimWrappingLongListIterator(c);
+    }
+
+    // Utility methods
+    public static <K> ObjectCollection<K> wrap(Collection<K> c) {
+        return new WrappingObjectCollection<>(c);
+    }
+
+    public static IntCollection wrapInts(Collection<Integer> c) {
+        return new WrappingIntCollection(c);
+    }
+
+    public static LongCollection wrapLongs(Collection<Long> c) {
+        return new WrappingLongCollection(c);
+    }
+
+    public static <T> ObjectIterator<T> itrWrap(Iterator<T> in) {
+        return new WrapperObjectIterator<>(in);
+    }
+
+    public static <T> ObjectIterator<T> itrWrap(Iterable<T> in) {
+        return new WrapperObjectIterator<>(in.iterator());
+    }
+
+    public static class ConvertingObjectSet<E, T> implements ObjectSet<T> {
+        private final Set<E> backing;
+        private final Function<E, T> forward;
+        private final Function<T, E> back;
+
+        public ConvertingObjectSet(Set<E> backing, Function<E, T> forward, Function<T, E> back) {
+            this.backing = Objects.requireNonNull(backing, "Backing set cannot be null");
+            this.forward = Objects.requireNonNull(forward, "Forward function cannot be null");
+            this.back = Objects.requireNonNull(back, "Backward function cannot be null");
+        }
+
+        @Override
+        public int size() {
+            return backing.size();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return backing.isEmpty();
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean contains(Object o) {
+            try {
+                return backing.contains(back.apply((T) o));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @Override
+        public Object[] toArray() {
+            return backing.stream().map(forward).toArray();
+        }
+
+        @Override
+        public <R> R[] toArray(R[] a) {
+            return backing.stream().map(forward).collect(Collectors.toSet()).toArray(a);
+        }
+
+        @Override
+        public boolean add(T e) {
+            return backing.add(back.apply(e));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean remove(Object o) {
+            try {
+                return backing.remove(back.apply((T) o));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean containsAll(Collection<?> c) {
+            try {
+                return backing.containsAll(c.stream()
+                                            .map(i -> back.apply((T) i))
+                                            .collect(Collectors.toSet()));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @Override
+        public boolean addAll(Collection<? extends T> c) {
+            return backing.addAll(c.stream().map(back).collect(Collectors.toSet()));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean removeAll(Collection<?> c) {
+            try {
+                return backing.removeAll(c.stream()
+                                          .map(i -> back.apply((T) i))
+                                          .collect(Collectors.toSet()));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean retainAll(Collection<?> c) {
+            try {
+                return backing.retainAll(c.stream()
+                                          .map(i -> back.apply((T) i))
+                                          .collect(Collectors.toSet()));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @Override
+        public void clear() {
+            backing.clear();
+        }
+
+        @Override
+        public ObjectIterator<T> iterator() {
+            return new ObjectIterator<>() {
+                private final Iterator<E> backg = backing.iterator();
+
+                @Override
+                public boolean hasNext() {
+                    return backg.hasNext();
+                }
+
+                @Override
+                public T next() {
+                    return forward.apply(backg.next());
+                }
+
+                @Override
+                public void remove() {
+                    backg.remove();
+                }
+            };
+        }
+    }
+
+    public static class ConvertingObjectSetFast<E, T>
+        implements Long2ObjectMap.FastEntrySet<T> {
+        private final Set<E> backing;
+        private final Function<E, Long2ObjectMap.Entry<T>> forward;
+        private final Function<Long2ObjectMap.Entry<T>, E> back;
+
+        public ConvertingObjectSetFast(
+            Set<E> backing,
+            Function<E, Long2ObjectMap.Entry<T>> forward,
+            Function<Long2ObjectMap.Entry<T>, E> back) {
+            this.backing = Objects.requireNonNull(backing);
+            this.forward = Objects.requireNonNull(forward);
+            this.back = Objects.requireNonNull(back);
+        }
+
+        @Override
+        public int size() {
+            return backing.size();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return backing.isEmpty();
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean contains(Object o) {
+            try {
+                return backing.contains(back.apply((Long2ObjectMap.Entry<T>) o));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @Override
+        public Object[] toArray() {
+            return backing.stream().map(forward).toArray();
+        }
+
+        @Override
+        public <R> R[] toArray(R[] a) {
+            return backing.stream().map(forward).collect(Collectors.toSet()).toArray(a);
+        }
+
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean remove(Object o) {
+            try {
+                return backing.remove(back.apply((Long2ObjectMap.Entry<T>) o));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @Override
+        public void clear() {
+            backing.clear();
+        }
+
+        @Override
+        public ObjectIterator<Long2ObjectMap.Entry<T>> iterator() {
+            return fastIterator();
+        }
+
+        @Override
+        public ObjectIterator<Long2ObjectMap.Entry<T>> fastIterator() {
+            return new ObjectIterator<>() {
+                private final Iterator<E> it = backing.iterator();
+
+                @Override
+                public boolean hasNext() {
+                    return it.hasNext();
+                }
+
+                @Override
+                public Long2ObjectMap.Entry<T> next() {
+                    return forward.apply(it.next());
+                }
+
+                @Override
+                public void remove() {
+                    it.remove();
+                }
+            };
+        }
+
+        @Override
+        public boolean add(Long2ObjectMap.Entry<T> e) {
+            return backing.add(back.apply(e));
+        }
+
+        @Override
+        public boolean addAll(Collection<? extends Long2ObjectMap.Entry<T>> c) {
+            return backing.addAll(c.stream().map(back).toList());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean containsAll(Collection<?> c) {
+            try {
+                return backing.containsAll(c.stream()
+                                            .map(i -> back.apply((Long2ObjectMap.Entry<T>) i))
+                                            .collect(Collectors.toSet()));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean removeAll(Collection<?> c) {
+            try {
+                return backing.removeAll(c.stream()
+                                          .map(i -> back.apply((Long2ObjectMap.Entry<T>) i))
+                                          .collect(Collectors.toSet()));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public boolean retainAll(Collection<?> c) {
+            try {
+                return backing.retainAll(c.stream()
+                                          .map(i -> back.apply((Long2ObjectMap.Entry<T>) i))
+                                          .collect(Collectors.toSet()));
+            } catch (ClassCastException cce) {
+                return false;
+            }
+        }
     }
 
     static class WrappingIntIterator implements IntIterator {
@@ -622,7 +753,7 @@ public static class ConvertingObjectSetFast<E, T>
             return backing.containsAll(c);
         }
 
-@Override
+        @Override
         public boolean addAll(Collection<? extends Integer> c) {
             return backing.addAll(c);
         }
@@ -1022,103 +1153,6 @@ public static class ConvertingObjectSetFast<E, T>
         public boolean retainAll(ByteCollection c) {
             return retainAll((Collection<?>) c);
         }
-    }
-
-    // Utility methods
-    public static <T> ObjectSet<Int2ObjectMap.Entry<T>> entrySetIntWrap(Map<Integer, T> map) {
-        return new ConvertingObjectSet<>(
-            map.entrySet(),
-            FastUtilHackUtil::intEntryForwards,
-            FastUtilHackUtil::intEntryBackwards
-        );
-    }
-
-    public static <T> ObjectSet<Long2ObjectMap.Entry<T>> entrySetLongWrap(Map<Long, T> map) {
-        return new ConvertingObjectSet<>(
-            map.entrySet(),
-            FastUtilHackUtil::longEntryForwards,
-            FastUtilHackUtil::longEntryBackwards
-        );
-    }
-
-    public static <T> Long2ObjectMap.FastEntrySet<T> entrySetLongWrapFast(Map<Long, T> map) {
-        return new ConvertingObjectSetFast<>(
-            map.entrySet(),
-            FastUtilHackUtil::longEntryForwards,
-            FastUtilHackUtil::longEntryBackwards
-        );
-    }
-
-    public static ObjectSet<Long2ByteMap.Entry> entrySetLongByteWrap(Map<Long, Byte> map) {
-        return new ConvertingObjectSet<>(
-            map.entrySet(),
-            FastUtilHackUtil::longByteEntryForwards,
-            FastUtilHackUtil::longByteEntryBackwards
-        );
-    }
-
-    public static ObjectSet<Long2LongMap.Entry> entrySetLongLongWrap(Map<Long, Long> map) {
-        return new ConvertingObjectSet<>(
-            map.entrySet(),
-            FastUtilHackUtil::longLongEntryForwards,
-            FastUtilHackUtil::longLongEntryBackwards
-        );
-    }
-
-    public static LongSet wrapLongSet(Set<Long> longset) {
-        return new WrappingLongSet(longset);
-    }
-
-    public static LongSortedSet wrapLongSortedSet(Set<Long> longset) {
-        return new WrappingLongSortedSet(longset);
-    }
-
-    public static IntSet wrapIntSet(Set<Integer> intset) {
-        return new WrappingIntSet(intset);
-    }
-
-    public static ByteCollection wrapBytes(Collection<Byte> c) {
-        return new WrappingByteCollection(c);
-    }
-
-    public static ByteIterator itrByteWrap(Iterator<Byte> backing) {
-        return new WrappingByteIterator(backing);
-    }
-
-    public static ByteIterator itrByteWrap(Iterable<Byte> backing) {
-        return itrByteWrap(backing.iterator());
-    }
-
-    public static IntIterator itrIntWrap(Iterator<Integer> backing) {
-        return new WrappingIntIterator(backing);
-    }
-
-    public static IntIterator itrIntWrap(Iterable<Integer> backing) {
-        return itrIntWrap(backing.iterator());
-    }
-
-    public static LongIterator itrLongWrap(Iterator<Long> backing) {
-        return new WrappingLongIterator(backing);
-    }
-
-    public static LongIterator itrLongWrap(Iterable<Long> backing) {
-        return itrLongWrap(backing.iterator());
-    }
-
-    public static ShortIterator itrShortWrap(Iterator<Short> backing) {
-        return new WrappingShortIterator(backing);
-    }
-
-    public static ShortIterator itrShortWrap(Iterable<Short> backing) {
-        return itrShortWrap(backing.iterator());
-    }
-
-    public static LongListIterator wrap(ListIterator<Long> c) {
-        return new WrappingLongListIterator(c);
-    }
-
-    public static LongListIterator wrap(Iterator<Long> c) {
-        return new SlimWrappingLongListIterator(c);
     }
 
     public static class WrappingLongListIterator implements LongListIterator {
@@ -1526,19 +1560,6 @@ public static class ConvertingObjectSetFast<E, T>
         }
     }
 
-    // Utility methods
-    public static <K> ObjectCollection<K> wrap(Collection<K> c) {
-        return new WrappingObjectCollection<>(c);
-    }
-
-    public static IntCollection wrapInts(Collection<Integer> c) {
-        return new WrappingIntCollection(c);
-    }
-
-    public static LongCollection wrapLongs(Collection<Long> c) {
-        return new WrappingLongCollection(c);
-    }
-
     private static class WrapperObjectIterator<T> implements ObjectIterator<T> {
         private final Iterator<T> parent;
 
@@ -1560,13 +1581,5 @@ public static class ConvertingObjectSetFast<E, T>
         public void remove() {
             parent.remove();
         }
-    }
-
-    public static <T> ObjectIterator<T> itrWrap(Iterator<T> in) {
-        return new WrapperObjectIterator<>(in);
-    }
-
-    public static <T> ObjectIterator<T> itrWrap(Iterable<T> in) {
-        return new WrapperObjectIterator<>(in.iterator());
     }
 }

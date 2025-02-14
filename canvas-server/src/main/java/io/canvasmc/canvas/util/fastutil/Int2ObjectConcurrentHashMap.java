@@ -4,7 +4,6 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import it.unimi.dsi.fastutil.objects.ObjectCollection;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
-
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -133,7 +132,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
      * Attempts to compute a mapping for the specified key and its current mapped value (or null if no
      * current mapping exists).
      *
-     * @param key key with which the specified value is to be associated
+     * @param key               key with which the specified value is to be associated
      * @param remappingFunction the function to compute a value
      * @return the new value associated with the specified key, or null if none
      * @throws NullPointerException if the remappingFunction is null
@@ -156,7 +155,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Int2ObjectMap<?> that)) return false;
-        
+
         if (size() != that.size()) return false;
         return int2ObjectEntrySet().containsAll(that.int2ObjectEntrySet());
     }
@@ -175,7 +174,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
      * Returns the value to which the specified key is mapped, or the default value if
      * this map contains no mapping for the key.
      *
-     * @param key the key whose associated value is to be returned
+     * @param key          the key whose associated value is to be returned
      * @param defaultValue the default mapping of the key
      * @return the value to which the specified key is mapped, or defaultValue
      */
@@ -188,7 +187,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
      * If the specified key is not already associated with a value, associates it with
      * the given value and returns null, else returns the current value.
      *
-     * @param key key with which the specified value is to be associated
+     * @param key   key with which the specified value is to be associated
      * @param value value to be associated with the specified key
      * @return the previous value associated with the specified key, or null
      */
@@ -199,7 +198,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
     /**
      * Removes the entry for the specified key only if it is currently mapped to the specified value.
      *
-     * @param key key with which the specified value is associated
+     * @param key   key with which the specified value is associated
      * @param value value expected to be associated with the specified key
      * @return true if the value was removed
      */
@@ -210,7 +209,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
     /**
      * Replaces the entry for the specified key only if currently mapped to the specified value.
      *
-     * @param key key with which the specified value is associated
+     * @param key      key with which the specified value is associated
      * @param oldValue value expected to be associated with the specified key
      * @param newValue value to be associated with the specified key
      * @return true if the value was replaced
@@ -222,7 +221,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
     /**
      * Replaces the entry for the specified key only if it is currently mapped to some value.
      *
-     * @param key key with which the specified value is associated
+     * @param key   key with which the specified value is associated
      * @param value value to be associated with the specified key
      * @return the previous value associated with the specified key, or null
      */

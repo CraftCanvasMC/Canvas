@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -5,29 +_,40 @@
+@@ -5,29 +_,41 @@
  import com.mojang.datafixers.DataFixer;
  import com.mojang.datafixers.util.Pair;
  import com.mojang.logging.LogUtils;
@@ -13,6 +13,7 @@
 +import io.netty.util.internal.ConcurrentSet;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 -import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
++import it.unimi.dsi.fastutil.longs.Long2IntMaps;
  import it.unimi.dsi.fastutil.longs.LongSet;
  import it.unimi.dsi.fastutil.longs.LongSets;
  import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
@@ -190,6 +191,36 @@
  
      public LevelChunk getChunkIfLoaded(int x, int z) {
          return this.chunkSource.getChunkAtIfLoadedImmediately(x, z); // Paper - Use getChunkIfLoadedImmediately
+@@ -499,7 +_,7 @@
+     // Paper start - chunk tick iteration
+     private static final ServerChunkCache.ChunkAndHolder[] EMPTY_PLAYER_CHUNK_HOLDERS = new ServerChunkCache.ChunkAndHolder[0];
+     private final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerChunkCache.ChunkAndHolder> playerTickingChunks = new ca.spottedleaf.moonrise.common.list.ReferenceList<>(EMPTY_PLAYER_CHUNK_HOLDERS);
+-    private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap playerTickingRequests = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
++    private final it.unimi.dsi.fastutil.longs.Long2IntMap playerTickingRequests = Long2IntMaps.synchronize(new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap()); // Canvas
+ 
+     @Override
+     public final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerChunkCache.ChunkAndHolder> moonrise$getPlayerTickingChunks() {
+@@ -527,7 +_,7 @@
+ 
+         final long chunkKey = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ);
+ 
+-        if (this.playerTickingRequests.addTo(chunkKey, 1) != 0) {
++        if (this.playerTickingRequests.compute(chunkKey, (k, v) -> (v == null ? 0 : v) + 1) != 1) { // Canvas
+             // already added
+             return;
+         }
+@@ -549,7 +_,10 @@
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)(Object)this, chunkX, chunkZ, "Cannot remove ticking request async");
+ 
+         final long chunkKey = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ);
+-        final int val = this.playerTickingRequests.addTo(chunkKey, -1);
++        // Canvas start
++        int val = this.playerTickingRequests.compute(chunkKey, (_, v) -> (v == null ? 0 : v) - 1);
++        val += 1;
++        // Canvas end
+ 
+         if (val <= 0) {
+             throw new IllegalStateException("Negative counter");
 @@ -702,6 +_,16 @@
          // Paper end - rewrite chunk system
          this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
@@ -216,7 +247,7 @@
 +    // Canvas start - Multithreaded Dimension Ticking
 +    private final List<Connection> activeConnections = new ObjectArrayList<>();
 +    private final Object lock = new Object();
-+    private final Object blockUpdatedLock = new Object();
++
 +    private int ticksSinceLastBlockEventsTickCall = 0;
 +    private int ticksSinceLastRaidTickCall = 0;
 +    private int ticksSinceLastTickCustomSpawnersCall = 0;
@@ -683,17 +714,6 @@
              csvOutput.writeRow(pos.getX(), pos.getY(), pos.getZ(), tickingBlockEntity.getType());
          }
      }
-@@ -2435,8 +_,10 @@
-             if (this.populating) {
-                 return;
-             }
-+            synchronized (this.blockUpdatedLock) { // Canvas
-             // CraftBukkit end
-             this.updateNeighborsAt(pos, block);
-+            } // Canvas
-         }
-     }
- 
 @@ -2472,6 +_,16 @@
      public ServerLevel getLevel() {
          return this;

@@ -3,8 +3,7 @@ package io.canvasmc.canvas.util.isa;
 import io.canvasmc.canvas.util.ISATarget;
 
 public enum ISA_aarch64 implements ISATarget {
-    GENERIC("_generic", true)
-    ;
+    GENERIC("_generic", true);
 
     private final String suffix;
     private final boolean nativelySupported;

@@ -4,14 +4,13 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class TPSCalculator {
+    public static final int MAX_TPS = 20;
+    public static final int FULL_TICK = 50;
+    private static final int historyLimit = 40;
+    private final List<Double> tpsHistory = new CopyOnWriteArrayList<>();
     public Long lastTick;
     public Long currentTick;
     private double allMissedTicks = 0;
-    private final List<Double> tpsHistory = new CopyOnWriteArrayList<>();
-    private static final int historyLimit = 40;
-
-    public static final int MAX_TPS = 20;
-    public static final int FULL_TICK = 50;
 
     public TPSCalculator() {
     }
@@ -41,9 +40,9 @@ public class TPSCalculator {
 
     public double getAverageTPS() {
         return tpsHistory.stream()
-            .mapToDouble(Double::doubleValue)
-            .average()
-            .orElse(0.1);
+                         .mapToDouble(Double::doubleValue)
+                         .average()
+                         .orElse(0.1);
     }
 
     public double getTPS() {

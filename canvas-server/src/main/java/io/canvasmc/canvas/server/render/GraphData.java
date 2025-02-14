@@ -1,8 +1,7 @@
 package io.canvasmc.canvas.server.render;
 
-import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
 import java.awt.*;
+import org.jetbrains.annotations.NotNull;
 
 public record GraphData(double mspt) {
 

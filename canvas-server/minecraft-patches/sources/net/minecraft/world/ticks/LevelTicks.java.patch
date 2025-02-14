@@ -1,9 +1,10 @@
 --- a/net/minecraft/world/ticks/LevelTicks.java
 +++ b/net/minecraft/world/ticks/LevelTicks.java
-@@ -1,9 +_,11 @@
+@@ -1,9 +_,12 @@
  package net.minecraft.world.ticks;
  
 +import io.canvasmc.canvas.util.fastutil.Long2LongConcurrentHashMap;
++import io.netty.util.internal.ConcurrentSet;
  import it.unimi.dsi.fastutil.longs.Long2LongMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMaps;
  import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
@@ -12,30 +13,33 @@
  import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMap.Entry;
  import it.unimi.dsi.fastutil.objects.ObjectIterator;
-@@ -16,6 +_,8 @@
+@@ -16,6 +_,9 @@
  import java.util.PriorityQueue;
  import java.util.Queue;
  import java.util.Set;
 +import java.util.concurrent.ConcurrentLinkedQueue;
++import java.util.concurrent.PriorityBlockingQueue;
 +import java.util.concurrent.atomic.AtomicInteger;
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -32,17 +_,23 @@
+@@ -32,17 +_,22 @@
      private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (levelChunkTicks, levelChunkTicks1) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER
          .compare(levelChunkTicks.peek(), levelChunkTicks1.peek());
      private final LongPredicate tickCheck;
 -    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = new Long2ObjectOpenHashMap<>();
 -    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongOpenHashMap(), map -> map.defaultReturnValue(Long.MAX_VALUE));
-+    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>()); // Canvas
-+    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongConcurrentHashMap(Long.MAX_VALUE), map -> map.defaultReturnValue(Long.MAX_VALUE)); // Canvas
-     private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
+-    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
 -    private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
 -    private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
+-    private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
++    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>()); // Canvas
++    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongConcurrentHashMap(Long.MAX_VALUE), map -> map.defaultReturnValue(Long.MAX_VALUE)); // Canvas
++    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityBlockingQueue<>(11, CONTAINER_DRAIN_ORDER); // Canvas
 +    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedQueue<>(); // Canvas
 +    private final AtomicInteger toRunThisTickCount = new AtomicInteger(0); // Canvas
 +    private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>(); // Canvas
-     private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
++    private final Set<ScheduledTick<?>> toRunThisTickSet = new ConcurrentSet<>(); // Canvas
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (levelChunkTicks, scheduledTick) -> {
          if (scheduledTick.equals(levelChunkTicks.peek())) {
              this.updateContainerScheduling(scheduledTick);
@@ -44,7 +48,6 @@
 +    // Canvas start
 +    public int ticksSinceLastFluidTickCall = 0;
 +    public int ticksSinceLastBlockTickCall = 0;
-+    private final Object lock = new Object();
 +    // Canvas end
  
      public LevelTicks(LongPredicate tickCheck) {
@@ -58,9 +61,11 @@
          this.runCollectedTicks(ticker);
          profilerFiller.popPush("cleanup");
          this.cleanupAfterTick();
-@@ -172,15 +_,18 @@
+@@ -171,16 +_,19 @@
+     }
  
      private void scheduleForThisTick(ScheduledTick<T> tick) {
++        if (tick == null) return; // Canvas - technically this is nullable.
          this.toRunThisTick.add(tick);
 +        this.toRunThisTickCount.incrementAndGet(); // Canvas
      }
@@ -71,47 +76,17 @@
      }
  
      private void runCollectedTicks(BiConsumer<BlockPos, T> ticker) {
-+        synchronized (lock) { // Canvas
          while (!this.toRunThisTick.isEmpty()) {
              ScheduledTick<T> scheduledTick = this.toRunThisTick.poll();
 +            this.toRunThisTickCount.decrementAndGet(); // Canvas
              if (!this.toRunThisTickSet.isEmpty()) {
                  this.toRunThisTickSet.remove(scheduledTick);
              }
-@@ -188,13 +_,17 @@
-             this.alreadyRunThisTick.add(scheduledTick);
-             ticker.accept(scheduledTick.pos(), scheduledTick.type());
-         }
-+        } // Canvas
-     }
+@@ -192,6 +_,7 @@
  
      private void cleanupAfterTick() {
-+        synchronized (lock) { // Canvas
          this.toRunThisTick.clear();
 +        this.toRunThisTickCount.set(0); // Canvas
          this.containersToTick.clear();
          this.alreadyRunThisTick.clear();
          this.toRunThisTickSet.clear();
-+        } // Canvas
-     }
- 
-     @Override
-@@ -205,14 +_,18 @@
- 
-     @Override
-     public boolean willTickThisTick(BlockPos pos, T type) {
-+        synchronized (lock) { // Canvas
-         this.calculateTickSetIfNeeded();
-         return this.toRunThisTickSet.contains(ScheduledTick.probe(type, pos));
-+        } // Canvas
-     }
- 
-     private void calculateTickSetIfNeeded() {
-+        synchronized (lock) { // Canvas
-         if (this.toRunThisTickSet.isEmpty() && !this.toRunThisTick.isEmpty()) {
-             this.toRunThisTickSet.addAll(this.toRunThisTick);
-         }
-+        } // Canvas
-     }
- 
-     private void forContainersInArea(BoundingBox area, LevelTicks.PosAndContainerConsumer<T> action) {

@@ -2,12 +2,12 @@ package io.canvasmc.canvas.util.collections;
 
 import it.unimi.dsi.fastutil.bytes.ByteBytePair;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
-import net.minecraft.core.BlockPos;
-import net.minecraft.util.RandomSource;
-import net.minecraft.world.entity.ai.behavior.LongJumpToRandomPos;
 import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.ai.behavior.LongJumpToRandomPos;
 
 public class LongJumpChoiceList extends AbstractList<LongJumpToRandomPos.PossibleJump> {
 
@@ -34,8 +34,9 @@ public class LongJumpChoiceList extends AbstractList<LongJumpToRandomPos.Possibl
     /**
      * Constructs a new LongJumpChoiceList with the given horizontal and vertical range.
      * We avoid creating too many objects here, e.g. LongJumpTask.Target is not created yet.
+     *
      * @param horizontalRange the horizontal range
-     * @param verticalRange the vertical range
+     * @param verticalRange   the vertical range
      */
     public LongJumpChoiceList(byte horizontalRange, byte verticalRange) {
         if (horizontalRange < 0 || verticalRange < 0) {
@@ -43,7 +44,7 @@ public class LongJumpChoiceList extends AbstractList<LongJumpToRandomPos.Possibl
         }
 
         this.origin = BlockPos.ZERO;
-        int maxSqDistance = horizontalRange*horizontalRange * 2 + verticalRange*verticalRange;
+        int maxSqDistance = horizontalRange * horizontalRange * 2 + verticalRange * verticalRange;
         this.packedOffsetsByDistanceSq = new IntArrayList[maxSqDistance];
         this.weightByDistanceSq = new int[maxSqDistance];
 
@@ -74,28 +75,13 @@ public class LongJumpChoiceList extends AbstractList<LongJumpToRandomPos.Possibl
         this.totalWeight = totalWeight;
     }
 
-    private int packOffset(int x, int y, int z) {
-        return (x + 128) | ((y + 128) << 8) | ((z + 128) << 16);
-    }
-
-    private int unpackX(int packedOffset) {
-        return (packedOffset & 0xFF) - 128;
-    }
-
-    private int unpackY(int packedOffset) {
-        return ((packedOffset >>> 8) & 0xFF) - 128;
-    }
-
-    private int unpackZ(int packedOffset) {
-        return ((packedOffset >>> 16) & 0xFF) - 128;
-    }
-
     /**
      * Returns a LongJumpChoiceList for the given center position and ranges.
      * Quickly creates the list by copying an existing, memoized list.
-     * @param centerPos the center position
+     *
+     * @param centerPos       the center position
      * @param horizontalRange the horizontal range
-     * @param verticalRange the vertical range
+     * @param verticalRange   the vertical range
      * @return a LongJumpChoiceList for the given parameters
      */
     public static LongJumpChoiceList forCenter(BlockPos centerPos, byte horizontalRange, byte verticalRange) {
@@ -121,6 +107,22 @@ public class LongJumpChoiceList extends AbstractList<LongJumpToRandomPos.Possibl
         return jumpDestinationsList.offsetCopy(centerPos);
     }
 
+    private int packOffset(int x, int y, int z) {
+        return (x + 128) | ((y + 128) << 8) | ((z + 128) << 16);
+    }
+
+    private int unpackX(int packedOffset) {
+        return (packedOffset & 0xFF) - 128;
+    }
+
+    private int unpackY(int packedOffset) {
+        return ((packedOffset >>> 8) & 0xFF) - 128;
+    }
+
+    private int unpackZ(int packedOffset) {
+        return ((packedOffset >>> 16) & 0xFF) - 128;
+    }
+
     private LongJumpChoiceList offsetCopy(BlockPos offset) {
         IntArrayList[] packedOffsetsByDistanceSq = new IntArrayList[this.packedOffsetsByDistanceSq.length];
         for (int i = 0; i < packedOffsetsByDistanceSq.length; i++) {
@@ -138,6 +140,7 @@ public class LongJumpChoiceList extends AbstractList<LongJumpToRandomPos.Possibl
 
     /**
      * Removes and returns a random target from the list, weighted by squared distance.
+     *
      * @param random the random number generator
      * @return a random target
      */

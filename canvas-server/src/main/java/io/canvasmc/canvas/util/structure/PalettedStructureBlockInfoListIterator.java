@@ -1,9 +1,9 @@
 package io.canvasmc.canvas.util.structure;
 
+import java.util.Iterator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import org.jetbrains.annotations.NotNull;
-import java.util.Iterator;
 
 public class PalettedStructureBlockInfoListIterator implements Iterator<StructureTemplate.StructureBlockInfo> {
     private final PalettedStructureBlockInfoList infos;

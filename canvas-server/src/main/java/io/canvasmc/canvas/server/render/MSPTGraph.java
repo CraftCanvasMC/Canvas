@@ -1,11 +1,11 @@
 package io.canvasmc.canvas.server.render;
 
-import org.jetbrains.annotations.NotNull;
 import java.awt.*;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionListener;
 import java.util.LinkedList;
 import javax.swing.*;
+import org.jetbrains.annotations.NotNull;
 
 public class MSPTGraph extends JComponent {
     private static final int GRAPH_WIDTH = 350;
@@ -31,7 +31,8 @@ public class MSPTGraph extends JComponent {
             }
 
             @Override
-            public void mouseDragged(MouseEvent e) {}
+            public void mouseDragged(MouseEvent e) {
+            }
         });
     }
 

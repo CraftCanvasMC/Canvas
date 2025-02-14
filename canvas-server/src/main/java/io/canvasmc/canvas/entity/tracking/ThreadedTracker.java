@@ -7,7 +7,6 @@ import ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity;
 import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel;
 import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup;
 import ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity;
-import ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.util.NamedAgnosticThreadFactory;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -54,7 +53,7 @@ public class ThreadedTracker {
                     final ChunkMap.TrackedEntity trackedInstance = ((EntityTrackerEntity) entity).moonrise$getTrackedEntity();
                     if (trackedInstance == null) continue;
 
-                    ((EntityTrackerTrackedEntity) trackedInstance).moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition()));
+                    trackedInstance.moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition()));
                     trackedInstance.serverEntity.sendChanges();
                 }
             });
@@ -70,9 +69,9 @@ public class ThreadedTracker {
                 if (tracker == null) {
                     continue;
                 }
-                ((EntityTrackerTrackedEntity) tracker).moonrise$tick(((ChunkSystemEntity) entity).moonrise$getChunkData() == null ? null : ((ChunkSystemEntity) entity).moonrise$getChunkData().nearbyPlayers);
+                tracker.moonrise$tick(((ChunkSystemEntity) entity).moonrise$getChunkData() == null ? null : ((ChunkSystemEntity) entity).moonrise$getChunkData().nearbyPlayers);
                 @Nullable FullChunkStatus chunkStatus = ((ChunkSystemEntity) entity).moonrise$getChunkStatus();
-                if (((EntityTrackerTrackedEntity) tracker).moonrise$hasPlayers()
+                if (tracker.moonrise$hasPlayers()
                     || (chunkStatus != null && chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) {
                     tracker.serverEntity.sendChanges();
                 }

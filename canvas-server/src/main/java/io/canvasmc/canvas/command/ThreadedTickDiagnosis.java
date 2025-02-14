@@ -37,10 +37,10 @@ public class ThreadedTickDiagnosis {
     public static final int BASE_COLOR = 0x4EA2ED;
     public static final int LABEL_COLOR = 0x4EA2ED;
     public static final int VALUE_COLOR = 0x2F8FE9;
-    public static int HEADER_COLOR = 0x5FC3DD;
-    public static int VALUE = 0x96D6F0;
     static final TextComponent BASE = text("").color(color(BASE_COLOR));
     private static final List<String> TPS_OPTIONS = Arrays.asList("tps5", "tps10", "tps60");
+    public static int HEADER_COLOR = 0x5FC3DD;
+    public static int VALUE = 0x96D6F0;
 
     public static @NotNull Double simplifyNumber(@NotNull Float num) {
         DecimalFormat df = new DecimalFormat("###.##");

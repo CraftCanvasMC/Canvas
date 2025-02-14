@@ -4,7 +4,6 @@ import it.unimi.dsi.fastutil.bytes.ByteCollection;
 import it.unimi.dsi.fastutil.longs.Long2ByteMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
-
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,11 +14,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class Long2ByteConcurrentHashMap implements Long2ByteMap {
 
-    private final ConcurrentHashMap<Long, Byte> backing;
-    private byte defaultReturnValue;
-
     private static final int DEFAULT_INITIAL_CAPACITY = 16;
     private static final float DEFAULT_LOAD_FACTOR = 0.75f;
+    private final ConcurrentHashMap<Long, Byte> backing;
+    private byte defaultReturnValue;
 
     /**
      * Creates a new empty concurrent map with default initial capacity and load factor
@@ -32,7 +30,7 @@ public final class Long2ByteConcurrentHashMap implements Long2ByteMap {
      * Creates a new empty concurrent map with specified initial capacity and load factor
      *
      * @param initialCapacity initial capacity of the map
-     * @param loadFactor load factor of the map
+     * @param loadFactor      load factor of the map
      * @throws IllegalArgumentException if initialCapacity is negative or loadFactor is non-positive
      */
     public Long2ByteConcurrentHashMap(int initialCapacity, float loadFactor) {
@@ -144,7 +142,7 @@ public final class Long2ByteConcurrentHashMap implements Long2ByteMap {
      * Returns the value associated with the specified key, or the default value
      * if no mapping exists.
      *
-     * @param key key to look up
+     * @param key          key to look up
      * @param defaultValue value to return if key is not found
      * @return the value associated with key, or defaultValue if not found
      */
@@ -156,7 +154,7 @@ public final class Long2ByteConcurrentHashMap implements Long2ByteMap {
     /**
      * Associates the specified value with the specified key if no value is present
      *
-     * @param key key with which the specified value is to be associated
+     * @param key   key with which the specified value is to be associated
      * @param value value to be associated with the specified key
      * @return the previous value or defaultReturnValue if none
      */
@@ -168,7 +166,7 @@ public final class Long2ByteConcurrentHashMap implements Long2ByteMap {
     /**
      * Removes the entry for the specified key only if it is currently mapped to the specified value
      *
-     * @param key key with which the specified value is associated
+     * @param key   key with which the specified value is associated
      * @param value value expected to be associated with the key
      * @return true if the value was removed
      */
@@ -179,7 +177,7 @@ public final class Long2ByteConcurrentHashMap implements Long2ByteMap {
     /**
      * Replaces the entry for the specified key only if it is currently mapped to the specified value
      *
-     * @param key key with which the specified value is associated
+     * @param key      key with which the specified value is associated
      * @param oldValue value expected to be associated with the key
      * @param newValue value to be associated with the key
      * @return true if the value was replaced
@@ -201,7 +199,7 @@ public final class Long2ByteConcurrentHashMap implements Long2ByteMap {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Long2ByteMap that)) return false;
-        
+
         if (size() != that.size()) return false;
         return long2ByteEntrySet().containsAll(that.long2ByteEntrySet());
     }

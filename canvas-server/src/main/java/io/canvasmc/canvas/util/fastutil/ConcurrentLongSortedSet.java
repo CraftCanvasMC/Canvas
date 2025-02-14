@@ -1,18 +1,20 @@
 package io.canvasmc.canvas.util.fastutil;
 
-import it.unimi.dsi.fastutil.longs.*;
-import org.jetbrains.annotations.NotNull;
-
+import it.unimi.dsi.fastutil.longs.LongBidirectionalIterator;
+import it.unimi.dsi.fastutil.longs.LongCollection;
+import it.unimi.dsi.fastutil.longs.LongComparator;
+import it.unimi.dsi.fastutil.longs.LongSortedSet;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentSkipListSet;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * A thread-safe implementation of LongSortedSet backed by ConcurrentSkipListSet.
  * Provides concurrent access and maintains elements in sorted order.
  */
 public final class ConcurrentLongSortedSet implements LongSortedSet {
-    
+
     private final ConcurrentSkipListSet<Long> backing;
 
     /**
@@ -108,8 +110,8 @@ public final class ConcurrentLongSortedSet implements LongSortedSet {
     @Override
     public long[] toLongArray() {
         return backing.stream()
-                .mapToLong(Long::longValue)
-                .toArray();
+                      .mapToLong(Long::longValue)
+                      .toArray();
     }
 
     @Override
@@ -155,13 +157,13 @@ public final class ConcurrentLongSortedSet implements LongSortedSet {
         return backing.remove(k);
     }
 
-@Override
-public LongSortedSet subSet(long fromElement, long toElement) {
-    // Используем min/max для определения правильного диапазона
-    long actualFromElement = Math.min(fromElement, toElement);
-    long actualToElement = Math.max(fromElement, toElement);
-    return new ConcurrentLongSortedSet(backing.subSet(actualFromElement, actualToElement));
-}
+    @Override
+    public LongSortedSet subSet(long fromElement, long toElement) {
+        // Используем min/max для определения правильного диапазона
+        long actualFromElement = Math.min(fromElement, toElement);
+        long actualToElement = Math.max(fromElement, toElement);
+        return new ConcurrentLongSortedSet(backing.subSet(actualFromElement, actualToElement));
+    }
 
     @Override
     public LongSortedSet headSet(long toElement) {

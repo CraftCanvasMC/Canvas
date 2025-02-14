@@ -1,29 +1,22 @@
 package io.canvasmc.canvas.spark;
 
-import io.canvasmc.canvas.ThreadedBukkitServer;
-import io.canvasmc.canvas.server.ThreadedServer;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
-import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
 import me.lucko.spark.paper.common.sampler.ThreadDumper;
 import me.lucko.spark.paper.common.util.ThreadFinder;
 import me.lucko.spark.paper.proto.SparkSamplerProtos;
 import org.jetbrains.annotations.NotNull;
 
-public final class LevelThreadDumper implements ThreadDumper {
+public final class MultiLoopThreadDumper implements ThreadDumper {
+    public static final List<Thread> REGISTRY = new CopyOnWriteArrayList<>();
     private final ThreadFinder threadFinder = new ThreadFinder();
-    private final Thread mainThread;
-    private final long mainThreadId;
-
-    public LevelThreadDumper(@NotNull Thread mainThread) {
-        this.mainThread = mainThread;
-        this.mainThreadId = mainThread.threadId();
-    }
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
-        return mainThread.getName().equalsIgnoreCase(threadName) || ThreadedBukkitServer.getInstance().isLevelThread(threadId) || threadName.startsWith("LevelThread:");
+        return REGISTRY.stream().map(Thread::getName).toList().contains(threadName);
     }
 
     @Override
@@ -37,10 +30,7 @@ public final class LevelThreadDumper implements ThreadDumper {
     @Override
     public SparkSamplerProtos.SamplerMetadata.ThreadDumper getMetadata() {
         return SparkSamplerProtos.SamplerMetadata.ThreadDumper.newBuilder().setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC)
-                                                              .addAllIds(Arrays.stream(ThreadedServer.getLevelIds()).toList()).addIds(mainThreadId).build();
+                                                              .addAllIds(REGISTRY.stream().map(Thread::threadId).toList()).build();
     }
 
-    public Thread getMainThread() {
-        return mainThread;
-    }
 }

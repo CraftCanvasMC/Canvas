@@ -3,6 +3,8 @@ package io.canvasmc.canvas.util.structure;
 import it.unimi.dsi.fastutil.ints.Int2ObjectArrayMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntComparators;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.Util;
 import net.minecraft.core.FrontAndTop;
 import net.minecraft.nbt.CompoundTag;
@@ -12,11 +14,10 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.JigsawBlock;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import org.jetbrains.annotations.NotNull;
-import java.util.ArrayList;
-import java.util.List;
 
 public final class GeneralUtils {
-    private GeneralUtils() {}
+    private GeneralUtils() {
+    }
 
     // More optimized with checking if the jigsaw blocks can connect
     public static boolean canJigsawsAttach(StructureTemplate.@NotNull JigsawBlockInfo jigsaw1, StructureTemplate.@NotNull JigsawBlockInfo jigsaw2) {
@@ -30,10 +31,9 @@ public final class GeneralUtils {
 
     private static boolean isRollableJoint(StructureTemplate.@NotNull JigsawBlockInfo jigsaw1, FrontAndTop prop1) {
         String joint = getStringMicroOptimised(jigsaw1.info().nbt(), "joint");
-        if(!joint.equals("rollable") && !joint.equals("aligned")) {
+        if (!joint.equals("rollable") && !joint.equals("aligned")) {
             return !prop1.front().getAxis().isHorizontal();
-        }
-        else {
+        } else {
             return joint.equals("rollable");
         }
     }
@@ -59,8 +59,7 @@ public final class GeneralUtils {
         if (buckets.size() == 1) {
             list.clear();
             copyAll(buckets.int2ObjectEntrySet().fastIterator().next().getValue(), list);
-        }
-        else if (buckets.size() > 1) {
+        } else if (buckets.size() > 1) {
             // Priorities found. Concat them into a single new master list in reverse order to match vanilla behavior
             list.clear();
 

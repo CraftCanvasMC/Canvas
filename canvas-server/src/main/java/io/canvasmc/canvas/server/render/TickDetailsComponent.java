@@ -1,9 +1,9 @@
 package io.canvasmc.canvas.server.render;
 
 import io.canvasmc.canvas.server.AverageTickTimeAccessor;
-import net.minecraft.server.MinecraftServer;
-import javax.swing.*;
 import java.awt.*;
+import javax.swing.*;
+import net.minecraft.server.MinecraftServer;
 
 public class TickDetailsComponent extends JPanel {
     private final Timer timer;

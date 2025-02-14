@@ -2,12 +2,12 @@ package io.canvasmc.canvas;
 
 import ca.spottedleaf.moonrise.common.PlatformHooks;
 import io.netty.util.internal.PlatformDependent;
+import java.util.Locale;
+import java.util.function.BiFunction;
 import net.objecthunter.exp4j.ExpressionBuilder;
 import net.objecthunter.exp4j.function.Function;
 import org.jetbrains.annotations.NotNull;
 import oshi.util.tuples.Pair;
-import java.util.Locale;
-import java.util.function.BiFunction;
 
 public enum ChunkSystemAlgorithm {
     MOONRISE((configWorkerThreads, configIoThreads) -> {
@@ -27,36 +27,49 @@ public enum ChunkSystemAlgorithm {
         final int ioThreads = Math.max(1, configIoThreads);
         return new Pair<>(workerThreads, ioThreads);
     }),
-    C2ME((_, configIoThreads) -> {
+    C2ME_AGGRESSIVE((_, configIoThreads) -> {
         String expression = """
-                
-                    max(
-                        1,
-                        min(
-                            if( is_windows,
-                                (cpus / 1.6),
-                                (cpus / 1.3)
-                            )  - if(is_client, 1, 0),
-                            ( ( mem_gb - (if(is_client, 1.0, 0.5)) ) / 0.6 )
-                        )
+            
+                max(
+                    1,
+                    min(
+                        if( is_windows,
+                            (cpus / 1.6),
+                            (cpus / 1.3)
+                        )  - if(is_client, 1, 0),
+                        ( ( mem_gb - (if(is_client, 1.0, 0.5)) ) / 0.6 )
                     )
-                \040""";
+                )
+            \040""";
         int eval = tryEvaluateExpression(expression);
         return new Pair<>(eval, Math.max(1, configIoThreads));
     }),
-    ALL((_, configIoThreads) -> {
-        final int ioThreads = Math.max(1, configIoThreads);
-        return new Pair<>(Runtime.getRuntime().availableProcessors(), ioThreads);
-    }),
-    ANY((configWorkerThreads, configIoThreads) -> {
-        int workerThreads = configWorkerThreads;
-        if (configWorkerThreads <= 0) {
-            // y=(-0.0001x^2)+0.8831x-5.1544
-            int p = Runtime.getRuntime().availableProcessors();
-            workerThreads = (int) Math.round((-0.0001 * Math.pow(p, 2)) + (0.8831 * p) - 5.1544);
-        }
-        return new Pair<>(workerThreads, Math.max(1, configIoThreads));
+    C2ME((_, configIoThreads) -> {
+        String expression = """
+            
+                max(
+                    1,
+                    min(
+                        if( is_windows,
+                            (cpus / 1.6 - 2),
+                            (cpus / 1.2 - 2)
+                        )  - if(is_client, 2, 0),
+                        if( is_j9vm,
+                            ( ( mem_gb - (if(is_client, 0.6, 0.2)) ) / 0.4 ),
+                            ( ( mem_gb - (if(is_client, 1.2, 0.6)) ) / 0.6 )
+                        )
+                    )
+                )
+            \040""";
+        int eval = tryEvaluateExpression(expression);
+        return new Pair<>(eval, Math.max(1, configIoThreads));
     });
+
+    private final BiFunction<Integer, Integer, Pair<Integer, Integer>> eval;
+
+    ChunkSystemAlgorithm(BiFunction<Integer, Integer, Pair<Integer, Integer>> eval) {
+        this.eval = eval;
+    }
 
     private static int tryEvaluateExpression(String expression) {
         return (int) Math.max(1,
@@ -88,12 +101,6 @@ public enum ChunkSystemAlgorithm {
                 .setVariable("mem_gb", Runtime.getRuntime().maxMemory() / 1024.0 / 1024.0 / 1024.0)
                 .evaluate()
         );
-    }
-
-    private final BiFunction<Integer, Integer, Pair<Integer, Integer>> eval;
-
-    ChunkSystemAlgorithm(BiFunction<Integer, Integer, Pair<Integer, Integer>> eval) {
-        this.eval = eval;
     }
 
     public static ChunkSystemAlgorithm fromRaw(@NotNull String raw) {
