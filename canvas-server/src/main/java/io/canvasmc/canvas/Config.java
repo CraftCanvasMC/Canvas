@@ -468,6 +468,9 @@ public class Config {
     @Comment("Ignores the players 'takeXpDelay' field, allowing players to insta-absorb experience orbs")
     public boolean instantAbsorbXpOrbs = false;
 
+    @Comment("Uses a 'dummy inventory' for passing the InventoryMoveEvent, which avoids unneeded resources spent on building a bukkit Inventory.")
+    public boolean useDummyInventoryForHopperInventoryMoveEvent = true;
+
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
         ConfigurationUtils.extractKeys(serializer.getConfigClass());
