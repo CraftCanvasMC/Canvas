@@ -5,7 +5,10 @@ import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 import io.canvasmc.canvas.server.ThreadedServer;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.protocol.Packet;
@@ -14,6 +17,11 @@ import net.minecraft.server.ServerTickRateManager;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.World;
+import org.bukkit.craftbukkit.scheduler.CraftScheduler;
+import org.bukkit.craftbukkit.scheduler.CraftTask;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitTask;
+import org.jetbrains.annotations.NotNull;
 
 public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread, ServerLevel> implements TickRateManagerInstance, LevelAccess, AverageTickTimeAccessor {
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPost = new ConcurrentLinkedQueue<>();
@@ -111,6 +119,26 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
     @Override
     public void scheduleForPreNextTick(Runnable run) {
         queuedForNextTickPre.add(run);
+    }
+
+    @Override
+    public <V> V scheduleOnThread(final Callable<V> callable) throws Exception {
+        Thread current = Thread.currentThread();
+        if (current.equals(getRunningThread())) {
+            return callable.call();
+        }
+        final AtomicReference<V> retVal = new AtomicReference<V>();
+        final AtomicBoolean finished = new AtomicBoolean(false);
+        this.scheduleOnMain(() -> {
+            try {
+                retVal.set(callable.call());
+                finished.set(true);
+            } catch (Exception e) {
+                throw new RuntimeException("Unexpected exception occurred when running Callable<V> to level thread", e);
+            }
+        });
+        this.managedBlock(finished::get);
+        return retVal.get();
     }
 
     @Override
