@@ -132,6 +132,12 @@ public class Config {
         public int threadPoolPriority = Thread.NORM_PRIORITY + 1;
         @Comment("Changes the maximum view distance for the server, allowing clients to have render distances higher than 32.")
         public int maxViewDistance = 32;
+        @Comment(value = {
+            "Allows disabling distance manager updates for when the level thread",
+            "tries to poll a task, which can cause some post process generation",
+            "work to be run on the level thread instead of on the async chunk loader"
+        })
+        public boolean runDistanceManagerUpdatesOnTaskPoll = false;
     }
 
     @Comment("Async-Pathfinding optimization options")
@@ -374,7 +380,7 @@ public class Config {
     public static class ChunkSending {
         @AlwaysAtTop
         @Comment("Runs chunk sending off-level/main")
-        public boolean asyncChunkSending = false;
+        public boolean asyncChunkSending = true;
 
         @PositiveNumericValue
         @Comment("Amount of threads to use for async chunk sending. This does nothing when 'useVirtualThreadExecutorForChunkSenders' is enabled")
