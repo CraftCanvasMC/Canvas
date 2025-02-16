@@ -112,23 +112,36 @@ public class ThreadedTickDiagnosis {
     private static void doLevel(@NotNull List<TextComponent> l, @NotNull ServerLevel level, @NotNull TextComponent base) {
         int playerCount = level.players().size();
         int entityCount = level.moonrise$getEntityLookup().getEntityCount();
+        long[] tickDurationsLong = level.tickTimes10s.getTimes();
+        if (tickDurationsLong.length == 0) {
+            throw new IllegalArgumentException("Array is empty");
+        }
+
+        Arrays.sort(tickDurationsLong);
+        int index = (int) Math.ceil(0.95 * tickDurationsLong.length) - 1;
+        index = Math.max(0, Math.min(index, tickDurationsLong.length - 1));
+
+        double _95$ile = tickDurationsLong[index] / 1.0E6D;
 
         l.add(base.append(text(" - ThreadedLevel [")
             .append(text(level.dimension().location().toString()).color(color(0x96D6F0)))
             .append(text("]").color(color(0x4EA2ED)))));
-
-        l.add(base.append(Component.text("   ")).append(MSPTCommand.getColor(level.getNanoSecondsFromLastTick() / 1_000_000)
-                                                                   .append(text(" MSPT at "))
-                                                                   .append(createColoredComponent(simplifyNumber((float) level.recentTps[0]).toString(), (float) level.recentTps[0], 20F))
-                                                                   .append(text(" TPS"))));
-
-        float threadUtil = (float) (((level.getNanoSecondsFromLastTick() / 1_000_000.0) / 50) * 100);
-        if (threadUtil > 100) threadUtil = 100;
-
+        l.add(base.append(text("   ")).append(createTpsComponent(level)));
         l.add(base
             .append(text("   Players: ").append(text(valueOf(playerCount)).color(color(VALUE))))
             .append(text(" Entities: ").append(text(valueOf(entityCount)).color(color(VALUE))))
-            .append(text(" Thread Utilization: ").append(createColoredUtilComponent(simplifyNumber(threadUtil) + "%", threadUtil))));
+            .append(text(" MSPT 95%ile: ").append(MSPTCommand.getColor(_95$ile)).append(text("ms")))
+        );
+    }
+
+    private static @NotNull Component createTpsComponent(@NotNull ServerLevel level) {
+        double mspt = level.getNanoSecondsFromLastTick() / 1_000_000;
+        float tps = (float) level.recentTps[0];
+
+        return text(" MSPT: ")
+            .append(MSPTCommand.getColor(mspt))
+            .append(text(" | TPS: "))
+            .append(createColoredComponent(simplifyNumber(tps).toString(), tps, 20F));
     }
 
     private static void chunkInfo(final List<TextComponent> list) {

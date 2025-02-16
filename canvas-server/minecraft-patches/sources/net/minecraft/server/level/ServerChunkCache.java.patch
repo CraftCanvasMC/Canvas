@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
-@@ -1,22 +_,33 @@
+@@ -1,22 +_,37 @@
  package net.minecraft.server.level;
  
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -11,6 +11,7 @@
  import com.mojang.logging.LogUtils;
 -import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.server.level.TickRateManagerInstance;
 +import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
 +import io.canvasmc.canvas.util.NamedAgnosticThreadFactory;
 +import io.netty.util.internal.ConcurrentSet;
@@ -24,8 +25,11 @@
  import java.util.Set;
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.CompletionStage;
++import java.util.concurrent.CountDownLatch;
  import java.util.concurrent.Executor;
 +import java.util.concurrent.Executors;
++import java.util.concurrent.ForkJoinPool;
++import java.util.concurrent.locks.LockSupport;
  import java.util.function.BooleanSupplier;
  import java.util.function.Consumer;
  import java.util.function.Supplier;
@@ -170,27 +174,42 @@
          profilerFiller.pop();
          this.clearCache();
      }
-@@ -519,44 +_,160 @@
+@@ -519,44 +_,175 @@
                      this.shuffleRandom.setSeed(this.level.random.nextLong());
                      if (!this.level.paperConfig().entities.spawning.perPlayerMobSpawns) Util.shuffle(list, this.shuffleRandom); // Paper - Optional per player mob spawns; do not need this when per-player is enabled
                      // Paper end - chunk tick iteration optimisation
 +                    // Canvas start - Regionized Chunk Ticking
 +                    if (Config.INSTANCE.chunks.regionized.enableRegionizedChunkTicking) {
 +                        List<List<LevelChunk>> regions = splitChunksIntoRegions(list);
-+                        List<CompletableFuture<Void>> futures = new ArrayList<>();
-+                        for (List<LevelChunk> region : regions) {
-+                            CompletableFuture<Void> future = new CompletableFuture<>();
-+                            futures.add(future);
-+                            REGION_EXECUTOR.execute(() -> {
-+                                try {
-+                                    tickChunks(profilerFiller, l, region);
-+                                } finally {
-+                                    future.complete(null);
++                        int regionCount = regions.size();
++                        CountDownLatch latch = new CountDownLatch(regionCount);
++
++                        try {
++                            ForkJoinPool.managedBlock(new ForkJoinPool.ManagedBlocker() {
++                                @Override
++                                public boolean block() throws InterruptedException {
++                                    for (List<LevelChunk> region : regions) {
++                                        REGION_EXECUTOR.execute(() -> {
++                                            try {
++                                                tickChunks(profilerFiller, l, region);
++                                            } finally {
++                                                latch.countDown();
++                                            }
++                                        });
++                                    }
++
++                                    latch.await();
++                                    return true;
++                                }
++
++                                @Override
++                                public boolean isReleasable() {
++                                    return latch.getCount() == 0;
 +                                }
 +                            });
++                        } catch (InterruptedException e) {
++                            throw new RuntimeException("interrupted managed block for region ticking", e);
 +                        }
-+                        CompletableFuture<Void> finalFuture = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-+                        finalFuture.join();
 +                    } else {
                      this.tickChunks(profilerFiller, l, list);
 +                    }

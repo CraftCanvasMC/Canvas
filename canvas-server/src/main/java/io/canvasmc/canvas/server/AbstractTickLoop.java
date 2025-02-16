@@ -31,6 +31,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
     public final MinecraftServer.RollingAverage tps1 = new MinecraftServer.RollingAverage(60);
     public final MinecraftServer.RollingAverage tps5 = new MinecraftServer.RollingAverage(60 * 5);
     public final MinecraftServer.RollingAverage tps15 = new MinecraftServer.RollingAverage(60 * 15);
+    public final MinecraftServer.TickTimes tickTimes10s = new MinecraftServer.TickTimes(200);
     private final String debugName;
     private final TickThreadConstructor<T, S> constructor;
     public volatile long lastWatchdogTick;
@@ -194,7 +195,8 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
 
         this.preTickNanos = Util.getNanos();
         this.lastWatchdogTick = WatchdogThread.monotonicMillis();
-        tick.process(flag ? () -> false : this::haveTime, tickCount);
+        tick.process(flag ? () -> false : this::haveTime, tickCount++);
+        this.tickTimes10s.add(this.tickCount, Util.getNanos() - currentTime);
 
         this.lastNanoTickTime = Util.getNanos() - preTickNanos;
 
