@@ -87,7 +87,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
             this.threadModifier.accept(thread);
         }
         LOGGER.info("Spinning {} tick-loop on {}", this.debugName, thread.getClass().getSimpleName());
-        MultiLoopThreadDumper.REGISTRY.add(thread);
+        MultiLoopThreadDumper.REGISTRY.add(thread.getName());
         thread.start();
         return thread;
     }

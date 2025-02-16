@@ -1,7 +1,9 @@
 package io.canvasmc.canvas.spark;
 
+import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -11,12 +13,17 @@ import me.lucko.spark.paper.proto.SparkSamplerProtos;
 import org.jetbrains.annotations.NotNull;
 
 public final class MultiLoopThreadDumper implements ThreadDumper {
-    public static final List<Thread> REGISTRY = new CopyOnWriteArrayList<>();
+    public static final List<String> REGISTRY = new CopyOnWriteArrayList<>();
     private final ThreadFinder threadFinder = new ThreadFinder();
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
-        return REGISTRY.stream().map(Thread::getName).toList().contains(threadName);
+        for (final String prefix : REGISTRY) {
+            if (threadName.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -30,7 +37,10 @@ public final class MultiLoopThreadDumper implements ThreadDumper {
     @Override
     public SparkSamplerProtos.SamplerMetadata.ThreadDumper getMetadata() {
         return SparkSamplerProtos.SamplerMetadata.ThreadDumper.newBuilder().setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC)
-                                                              .addAllIds(REGISTRY.stream().map(Thread::threadId).toList()).build();
+                                                              .addAllIds(validThreadIds()).build();
     }
 
+    public List<Long> validThreadIds() {
+        return Arrays.stream(dumpThreads(ManagementFactory.getThreadMXBean())).map(ThreadInfo::getThreadId).toList();
+    }
 }

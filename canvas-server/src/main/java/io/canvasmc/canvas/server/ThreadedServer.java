@@ -113,7 +113,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public void spin() {
         try {
-            MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread());
+            MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             ThreadedBukkitServer.setInstance(this);
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");

@@ -21,6 +21,7 @@ public class NamedAgnosticThreadFactory<T extends Thread> implements ThreadFacto
         SecurityManager securityManager = System.getSecurityManager();
         this.group = securityManager != null ? securityManager.getThreadGroup() : Thread.currentThread().getThreadGroup();
         this.namePrefix = name + "-";
+        MultiLoopThreadDumper.REGISTRY.add(namePrefix);
     }
 
     @Override
@@ -34,7 +35,6 @@ public class NamedAgnosticThreadFactory<T extends Thread> implements ThreadFacto
             thread.setPriority(priority);
         }
 
-        MultiLoopThreadDumper.REGISTRY.add(thread);
         return thread;
     }
 
