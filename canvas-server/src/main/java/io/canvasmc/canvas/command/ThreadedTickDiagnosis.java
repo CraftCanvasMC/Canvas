@@ -113,6 +113,7 @@ public class ThreadedTickDiagnosis {
     private static void doLevel(@NotNull List<TextComponent> l, @NotNull ServerLevel level, @NotNull TextComponent base) {
         int playerCount = level.players().size();
         int entityCount = level.moonrise$getEntityLookup().getEntityCount();
+        int blockEntityCount = level.blockEntityTickers.size();
         long[] tickDurationsLong = level.tickTimes10s.getTimes();
         if (tickDurationsLong.length == 0) {
             throw new IllegalArgumentException("Array is empty");
@@ -131,6 +132,7 @@ public class ThreadedTickDiagnosis {
         l.add(base
             .append(text("   Players: ").append(text(valueOf(playerCount)).color(color(VALUE))))
             .append(text(" Entities: ").append(text(valueOf(entityCount)).color(color(VALUE))))
+            .append(text(" Ticking Block Entities: ").append(text(valueOf(blockEntityCount)).color(color(VALUE))))
             .append(text(" MSPT 95%ile: ").append(MSPTCommand.getColor(_95$ile)).append(text("ms")))
         );
     }
@@ -155,6 +157,8 @@ public class ThreadedTickDiagnosis {
         int accumulatedEntityTicking = 0;
         int accumulatedChunkTicking = 0;
         int accumulatedTickingRegions = 0;
+        int accumulatedBlockTickingChunkHolders = 0;
+        int accumulatedEntityTickingChunkHolders = 0;
 
         for (final World bukkitWorld : worlds) {
             final ServerLevel world = ((CraftWorld) bukkitWorld).getHandle();
@@ -202,6 +206,8 @@ public class ThreadedTickDiagnosis {
             accumulatedEntityTicking += entityTicking;
             accumulatedChunkTicking += world.chunkSource.lastTickingChunksCount;
             accumulatedTickingRegions += world.chunkSource.tickingRegionsCount;
+            accumulatedBlockTickingChunkHolders += world.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.size();
+            accumulatedEntityTickingChunkHolders += world.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.size();
 
             list.add(text("  ").toBuilder().append(text("Chunks in ", color(0x4EA2ED)), text(bukkitWorld.getName(), GREEN), text(":")).build());
             list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(
@@ -211,7 +217,9 @@ public class ThreadedTickDiagnosis {
                 text(" Block Ticking: ", color(0x4EA2ED)), text(blockTicking),
                 text(" Full: ", color(0x4EA2ED)), text(full),
                 text(" Chunk Ticking: ", color(0x4EA2ED)), text(world.chunkSource.lastTickingChunksCount),
-                text(" Tick Regions: ", color(0x4EA2ED)), text(world.chunkSource.tickingRegionsCount)
+                text(" Tick Regions: ", color(0x4EA2ED)), text(world.chunkSource.tickingRegionsCount),
+                text(" Entity Ticking Holders: ", color(0x4EA2ED)), text(world.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.size()),
+                text(" Block Ticking Holders: ", color(0x4EA2ED)), text(world.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.size())
             ).build());
         }
         if (worlds.size() > 1) {
@@ -224,7 +232,9 @@ public class ThreadedTickDiagnosis {
                 text(" Block Ticking: ", color(0x4EA2ED)), text(accumulatedTicking),
                 text(" Full: ", color(0x4EA2ED)), text(accumulatedBorder),
                 text(" Chunk Ticking: ", color(0x4EA2ED)), text(accumulatedChunkTicking),
-                text(" Tick Regions: ", color(0x4EA2ED)), text(accumulatedTickingRegions)
+                text(" Tick Regions: ", color(0x4EA2ED)), text(accumulatedTickingRegions),
+                text(" Entity Ticking Holders: ", color(0x4EA2ED)), text(accumulatedEntityTickingChunkHolders),
+                text(" Block Ticking Holders: ", color(0x4EA2ED)), text(accumulatedBlockTickingChunkHolders)
             ).build());
         }
     }
