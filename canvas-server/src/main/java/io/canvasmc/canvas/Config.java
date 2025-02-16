@@ -16,6 +16,8 @@ import io.canvasmc.canvas.config.annotation.numeric.NonPositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.Range;
 import io.canvasmc.canvas.config.internal.ConfigurationManager;
+import io.canvasmc.canvas.entity.tracking.ThreadedTracker;
+import io.canvasmc.canvas.server.chunk.ChunkSendingExecutor;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -83,11 +85,18 @@ public class Config {
     @Comment("Ensure correct doors. Schedules an extra update on the next tick to ensure the door doesnt get glitched when a Villager and Player both interact with it at the same time")
     public boolean ensureCorrectDoors = false;
 
-    @Comment("Chunk-Gen related config options")
-    public ChunkGeneration chunkGeneration = new ChunkGeneration();
-    public static class ChunkGeneration {
+    @Comment("Chunk related config options")
+    public Chunks chunks = new Chunks();
+    public static class Chunks {
         public long chunkDataCacheSoftLimit = 8192L;
         public long chunkDataCacheLimit = 32678L;
+        @Comment(value = {
+            "Enables AVX512 support for natives-math optimization",
+            "",
+            "References:",
+            "- https://en.wikipedia.org/wiki/AVX-512",
+            "- https://www.intel.com/content/www/us/en/products/docs/accelerator-engines/what-is-intel-avx-512.html"
+        })
         public boolean allowAVX512 = false;
 
         @Range(from = -1, to = 9, inclusive = true)
@@ -138,6 +147,44 @@ public class Config {
             "work to be run on the level thread instead of on the async chunk loader"
         })
         public boolean runDistanceManagerUpdatesOnTaskPoll = false;
+
+        @Comment("Related configuration options to chunk sending optimizations")
+        public ChunkSending chunkSending = new ChunkSending();
+        public static class ChunkSending {
+            @AlwaysAtTop
+            @Comment("Runs chunk sending off-level/main")
+            public boolean asyncChunkSending = true;
+
+            @PositiveNumericValue
+            @Comment("Amount of threads to use for async chunk sending. This does nothing when 'useVirtualThreadExecutorForChunkSenders' is enabled")
+            public int asyncChunkSendingThreadCount = 1;
+
+            @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
+            public boolean useVirtualThreadExecutorForChunkSenders = false;
+
+            @Comment("Loads the FULL ChunkAccess before sending to the client(async), can smoothen mspt, but might slow down chunk sending. Disabling this makes it run on its own independent task to the executor")
+            public boolean runFullStatusAccessLoadBeforeSending = false;
+        }
+
+        @Comment(value = {
+            "Similar to Folia, Canvas includes a few options for regionized chunk ticking",
+            "Original work by @TheDeafCreeper"
+        })
+        public Regionized regionized = new Regionized();
+        public static class Regionized {
+            @Comment("Enables regionized chunk ticking logic")
+            public boolean enableRegionizedChunkTicking = false;
+            @Comment("The amount of threads to allocate to regionized chunk ticking")
+            public int executorThreadCount = 4;
+            @Range(from = 1, to = 10, inclusive = true)
+            @Comment(value = {
+                "Configures the thread priority of the executor. Default is 5(normal thread priority)",
+                "",
+                "References:",
+                "- https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#setPriority(int)"
+            })
+            public int executorThreadPriority = Thread.NORM_PRIORITY;
+        }
     }
 
     @Comment("Async-Pathfinding optimization options")
@@ -375,25 +422,6 @@ public class Config {
     @Comment("Replaces papers version of the spark-paper module with our own")
     public boolean replaceSparkModule = true;
 
-    @Comment("Related configuration options to chunk sending optimizations")
-    public ChunkSending chunkSending = new ChunkSending();
-    public static class ChunkSending {
-        @AlwaysAtTop
-        @Comment("Runs chunk sending off-level/main")
-        public boolean asyncChunkSending = true;
-
-        @PositiveNumericValue
-        @Comment("Amount of threads to use for async chunk sending. This does nothing when 'useVirtualThreadExecutorForChunkSenders' is enabled")
-        public int asyncChunkSendingThreadCount = 1;
-
-        @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
-        public boolean useVirtualThreadExecutorForChunkSenders = false;
-
-        @Comment("Loads the FULL ChunkAccess before sending to the client(async), can smoothen mspt, but might slow down chunk sending. Disabling this makes it run on its own independent task to the executor")
-        public boolean runFullStatusAccessLoadBeforeSending = false;
-    }
-
-
     @Comment("Moves player joining to an isolated queue-thread, severely reducing lag when players are joining, due to blocking tasks now being handled off any tickloops")
     public boolean asyncPlayerJoining = true;
 
@@ -563,7 +591,7 @@ public class Config {
             INSTANCE = context.configuration();
 
             System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
-            boolean configured = INSTANCE.chunkGeneration.nativeAccelerationEnabled;
+            boolean configured = INSTANCE.chunks.nativeAccelerationEnabled;
             if (configured) {
                 try {
                     Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
@@ -571,7 +599,8 @@ public class Config {
                     t.printStackTrace();
                 }
             }
-            io.canvasmc.canvas.entity.tracking.ThreadedTracker.init();
+            ThreadedTracker.init();
+            ChunkSendingExecutor.init();
             for (final GoalMask goalMask : INSTANCE.entityGoalMasks) {
                 try {
                     //noinspection unchecked

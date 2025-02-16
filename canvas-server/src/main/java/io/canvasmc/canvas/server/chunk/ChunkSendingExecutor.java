@@ -11,21 +11,24 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ChunkSendingExecutor {
-    private static final ExecutorService SERVICE = Config.INSTANCE.chunkSending.asyncChunkSending ?
-        Config.INSTANCE.chunkSending.useVirtualThreadExecutorForChunkSenders ?
+    private static final ExecutorService SERVICE = Config.INSTANCE.chunks.chunkSending.asyncChunkSending ?
+        Config.INSTANCE.chunks.chunkSending.useVirtualThreadExecutorForChunkSenders ?
             Executors.newVirtualThreadPerTaskExecutor() :
             Executors.newFixedThreadPool(
-                Config.INSTANCE.chunkSending.asyncChunkSendingThreadCount,
+                Config.INSTANCE.chunks.chunkSending.asyncChunkSendingThreadCount,
                 new NamedAgnosticThreadFactory<>("chunk_sending", TickThread::new, Thread.NORM_PRIORITY)
             ) : null;
 
     public static void execute(Runnable runnable, ServerLevel level) {
         runnable = wrapRunnable(runnable, level);
-        if (Config.INSTANCE.chunkSending.asyncChunkSending) {
+        if (Config.INSTANCE.chunks.chunkSending.asyncChunkSending) {
             SERVICE.submit(runnable);
         } else {
             runnable.run();
         }
+    }
+
+    public static void init() {
     }
 
     @Contract(pure = true)

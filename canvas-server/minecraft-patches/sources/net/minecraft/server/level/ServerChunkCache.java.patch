@@ -1,9 +1,9 @@
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
-@@ -1,9 +_,14 @@
+@@ -1,22 +_,33 @@
  package net.minecraft.server.level;
  
-+import ca.spottedleaf.moonrise.common.misc.NearbyPlayers;
++import ca.spottedleaf.moonrise.common.util.TickThread;
 +import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel;
  import com.google.common.annotations.VisibleForTesting;
 +import com.google.common.collect.Sets;
@@ -12,11 +12,21 @@
 -import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 +import io.canvasmc.canvas.Config;
 +import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
++import io.canvasmc.canvas.util.NamedAgnosticThreadFactory;
 +import io.netty.util.internal.ConcurrentSet;
  import java.io.IOException;
  import java.nio.file.Path;
++import java.util.ArrayDeque;
  import java.util.ArrayList;
-@@ -17,6 +_,8 @@
+ import java.util.Arrays;
++import java.util.HashSet;
+ import java.util.List;
+ import java.util.Set;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.CompletionStage;
+ import java.util.concurrent.Executor;
++import java.util.concurrent.Executors;
+ import java.util.function.BooleanSupplier;
  import java.util.function.Consumer;
  import java.util.function.Supplier;
  import javax.annotation.Nullable;
@@ -25,7 +35,7 @@
  import net.minecraft.FileUtil;
  import net.minecraft.Util;
  import net.minecraft.core.BlockPos;
-@@ -54,9 +_,9 @@
+@@ -54,9 +_,10 @@
  
  public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemServerChunkCache { // Paper - rewrite chunk system
      private static final Logger LOGGER = LogUtils.getLogger();
@@ -34,6 +44,7 @@
      private final ServerLevel level;
 -    public final Thread mainThread;
 +    public Thread mainThread; // Canvas - mutable
++    public static final Executor REGION_EXECUTOR = Executors.newFixedThreadPool(Config.INSTANCE.chunks.regionized.executorThreadCount, new NamedAgnosticThreadFactory<>("region_ticking", TickThread::new, Config.INSTANCE.chunks.regionized.executorThreadPriority)); // Canvas - Regionized Chunk Ticking
      final ThreadedLevelLightEngine lightEngine;
      public final ServerChunkCache.MainThreadExecutor mainThreadProcessor;
      public final ChunkMap chunkMap;
@@ -89,7 +100,47 @@
          // Paper end - rewrite chunk system
      }
  
-@@ -483,20 +_,25 @@
+@@ -479,24 +_,65 @@
+     }
+     // CraftBukkit end
+ 
++    // Canvas Start - Regionized chunk ticking
++    private List<List<LevelChunk>> splitChunksIntoRegions(List<LevelChunk> chunks) {
++        Set<LevelChunk> chunkSet = new HashSet<>(chunks);
++        Set<LevelChunk> visited = new HashSet<>(chunks.size());
++        List<List<LevelChunk>> groups = new ArrayList<>();
++
++        for (LevelChunk chunk : chunks) {
++            if (visited.contains(chunk)) continue;
++
++            List<LevelChunk> group = new ArrayList<>(64);
++            ArrayDeque<LevelChunk> stack = new ArrayDeque<>();
++            stack.push(chunk);
++            visited.add(chunk);
++
++            while (!stack.isEmpty()) {
++                LevelChunk current = stack.pop();
++                group.add(current);
++
++                for (int i = 0; i < 8; i++) {
++                    LevelChunk neighbor = getChunk(current.locX + DX[i], current.locZ + DZ[i], false);
++                    if (neighbor == null || !chunkSet.contains(neighbor) || !visited.add(neighbor)) continue;
++                    stack.push(neighbor);
++                }
++            }
++
++            groups.add(group);
++        }
++
++        return groups;
++    }
++
++    // dfs directions
++    private static final int[] DX = {1, -1, 0, 0, 1, -1, -1, 1};
++    private static final int[] DZ = {0, 0, 1, -1, 1, 1, -1, -1};
++
++    // Canvas End
+     @Override
      public void tick(BooleanSupplier hasTimeLeft, boolean tickChunks) {
          ProfilerFiller profilerFiller = Profiler.get();
          profilerFiller.push("purge");
@@ -119,7 +170,34 @@
          profilerFiller.pop();
          this.clearCache();
      }
-@@ -526,37 +_,133 @@
+@@ -519,44 +_,160 @@
+                     this.shuffleRandom.setSeed(this.level.random.nextLong());
+                     if (!this.level.paperConfig().entities.spawning.perPlayerMobSpawns) Util.shuffle(list, this.shuffleRandom); // Paper - Optional per player mob spawns; do not need this when per-player is enabled
+                     // Paper end - chunk tick iteration optimisation
++                    // Canvas start - Regionized Chunk Ticking
++                    if (Config.INSTANCE.chunks.regionized.enableRegionizedChunkTicking) {
++                        List<List<LevelChunk>> regions = splitChunksIntoRegions(list);
++                        List<CompletableFuture<Void>> futures = new ArrayList<>();
++                        for (List<LevelChunk> region : regions) {
++                            CompletableFuture<Void> future = new CompletableFuture<>();
++                            futures.add(future);
++                            REGION_EXECUTOR.execute(() -> {
++                                try {
++                                    tickChunks(profilerFiller, l, region);
++                                } finally {
++                                    future.complete(null);
++                                }
++                            });
++                        }
++                        CompletableFuture<Void> finalFuture = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
++                        finalFuture.join();
++                    } else {
+                     this.tickChunks(profilerFiller, l, list);
++                    }
++                    // Canvas end
+                     profilerFiller.pop();
+                 } finally {
+                     list.clear();
                  }
              }
  
@@ -326,7 +404,7 @@
              // Paper start - rewrite chunk system
              final ServerChunkCache serverChunkCache = ServerChunkCache.this;
 -            if (serverChunkCache.runDistanceManagerUpdates()) {
-+            if ((!MinecraftServer.getThreadedServer().hasStarted() || Config.INSTANCE.chunkGeneration.runDistanceManagerUpdatesOnTaskPoll) && serverChunkCache.runDistanceManagerUpdates()) { // Canvas - async chunk loader
++            if ((!MinecraftServer.getThreadedServer().hasStarted() || Config.INSTANCE.chunks.runDistanceManagerUpdatesOnTaskPoll) && serverChunkCache.runDistanceManagerUpdates()) { // Canvas - async chunk loader
                  return true;
              } else {
                  return super.pollTask() | ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)serverChunkCache.level).moonrise$getChunkTaskScheduler().executeMainThreadTask();

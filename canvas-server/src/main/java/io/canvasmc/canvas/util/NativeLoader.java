@@ -32,7 +32,7 @@ public class NativeLoader {
         lookup = load0(libName);
         if (lookup == null) {
             currentMachineTarget = null;
-            Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled = false;
+            Config.INSTANCE.chunks.nativeAccelerationEnabled = false;
             LOGGER.warn("Disabling native math optimization(C2ME/Canvas) due to unsupported platform.");
         } else {
             try {
@@ -43,11 +43,11 @@ public class NativeLoader {
                         ValueLayout.JAVA_INT,
                         ValueLayout.JAVA_BOOLEAN
                     )
-                ).invokeExact(Config.INSTANCE.chunkGeneration.allowAVX512);
+                ).invokeExact(Config.INSTANCE.chunks.allowAVX512);
                 ISATarget target;
-                if (Config.INSTANCE.chunkGeneration.isaTargetLevelOverride != -1) {
+                if (Config.INSTANCE.chunks.isaTargetLevelOverride != -1) {
                     // Use override set by configuration
-                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[Config.INSTANCE.chunkGeneration.isaTargetLevelOverride];
+                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[Config.INSTANCE.chunks.isaTargetLevelOverride];
                 } else {
                     // Override not set, use normal
                     target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];
