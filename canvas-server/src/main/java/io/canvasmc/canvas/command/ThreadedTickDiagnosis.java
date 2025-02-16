@@ -29,6 +29,7 @@ import org.jetbrains.annotations.NotNull;
 import org.spigotmc.SpigotConfig;
 
 import static java.lang.String.valueOf;
+import static net.kyori.adventure.text.Component.newline;
 import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.GREEN;
 import static net.kyori.adventure.text.format.TextColor.color;
@@ -153,6 +154,7 @@ public class ThreadedTickDiagnosis {
         int accumulatedTicking = 0;
         int accumulatedEntityTicking = 0;
         int accumulatedChunkTicking = 0;
+        int accumulatedTickingRegions = 0;
 
         for (final World bukkitWorld : worlds) {
             final ServerLevel world = ((CraftWorld) bukkitWorld).getHandle();
@@ -199,15 +201,17 @@ public class ThreadedTickDiagnosis {
             accumulatedTicking += blockTicking;
             accumulatedEntityTicking += entityTicking;
             accumulatedChunkTicking += world.chunkSource.lastTickingChunksCount;
+            accumulatedTickingRegions += world.chunkSource.tickingRegionsCount;
 
             list.add(text("  ").toBuilder().append(text("Chunks in ", color(0x4EA2ED)), text(bukkitWorld.getName(), GREEN), text(":")).build());
             list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(
                 text("Total: ", color(0x4EA2ED)), text(total),
                 text(" Inactive: ", color(0x4EA2ED)), text(inactive),
-                text(" Full: ", color(0x4EA2ED)), text(full),
-                text(" Block Ticking: ", color(0x4EA2ED)), text(blockTicking),
                 text(" Entity Ticking: ", color(0x4EA2ED)), text(entityTicking),
-                text(" Chunk Ticking: ", color(0x4EA2ED)), text(world.chunkSource.lastTickingChunksCount)
+                text(" Block Ticking: ", color(0x4EA2ED)), text(blockTicking),
+                text(" Full: ", color(0x4EA2ED)), text(full),
+                text(" Chunk Ticking: ", color(0x4EA2ED)), text(world.chunkSource.lastTickingChunksCount),
+                text(" Tick Regions: ", color(0x4EA2ED)), text(world.chunkSource.tickingRegionsCount)
             ).build());
         }
         if (worlds.size() > 1) {
@@ -216,10 +220,11 @@ public class ThreadedTickDiagnosis {
             list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(
                 text("Total: ", color(0x4EA2ED)), text(accumulatedTotal),
                 text(" Inactive: ", color(0x4EA2ED)), text(accumulatedInactive),
-                text(" Full: ", color(0x4EA2ED)), text(accumulatedBorder),
-                text(" Block Ticking: ", color(0x4EA2ED)), text(accumulatedTicking),
                 text(" Entity Ticking: ", color(0x4EA2ED)), text(accumulatedEntityTicking),
-                text(" Chunk Ticking: ", color(0x4EA2ED)), text(accumulatedChunkTicking)
+                text(" Block Ticking: ", color(0x4EA2ED)), text(accumulatedTicking),
+                text(" Full: ", color(0x4EA2ED)), text(accumulatedBorder),
+                text(" Chunk Ticking: ", color(0x4EA2ED)), text(accumulatedChunkTicking),
+                text(" Tick Regions: ", color(0x4EA2ED)), text(accumulatedTickingRegions)
             ).build());
         }
     }
