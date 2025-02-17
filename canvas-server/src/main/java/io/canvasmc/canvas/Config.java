@@ -126,12 +126,6 @@ public class Config {
         })
         public boolean enableDensityFunctionCompiler = false;
 
-        @Comment("Uncaps the max concurrent chunk load tasks")
-        public boolean uncapMaxConcurrentLoads = false;
-
-        @Comment("Uncaps the max concurrent chunk generation tasks")
-        public boolean uncapMaxConcurrentGens = false;
-
         @Comment(value = {
             "Sets the thread priority for worker threads",
             "",
@@ -162,8 +156,16 @@ public class Config {
             @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
             public boolean useVirtualThreadExecutorForChunkSenders = false;
 
-            @Comment("Loads the FULL ChunkAccess before sending to the client(async), can smoothen mspt, but might slow down chunk sending. Disabling this makes it run on its own independent task to the executor")
-            public boolean runFullStatusAccessLoadBeforeSending = false;
+            @Comment(value = {
+                "With how chunks are loaded and generated with Canvas, chunk",
+                "loading is much faster, causing the server to spam the",
+                "client with a ton of packets when they first load in. This",
+                "allows the server to rate-limit the amount of chunk sends per tick",
+                "allowing a smoother ping when sending chunks on join",
+                "",
+                "Default is -1 to disable the rate limit."
+            })
+            public int rateLimitChunkSends = -1;
         }
 
         @Comment(value = {
