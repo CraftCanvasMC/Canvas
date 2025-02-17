@@ -1,10 +1,7 @@
 package io.canvasmc.canvas;
 
 import org.bukkit.World;
-import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.scheduler.BukkitTask;
-import org.jetbrains.annotations.NotNull;
+import org.bukkit.scheduler.BukkitScheduler;
 import java.util.concurrent.Callable;
 
 public interface LevelAccess {
@@ -41,4 +38,8 @@ public interface LevelAccess {
      * @return true if the level is processing ticks
      */
     boolean isTicking();
+    /**
+     * Gets the scheduler impl for the level thread
+     */
+    BukkitScheduler getBukkitScheduler();
 }

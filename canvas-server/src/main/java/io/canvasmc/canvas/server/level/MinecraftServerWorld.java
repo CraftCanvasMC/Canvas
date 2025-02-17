@@ -18,19 +18,18 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.scheduler.CraftScheduler;
-import org.bukkit.craftbukkit.scheduler.CraftTask;
-import org.bukkit.plugin.Plugin;
-import org.bukkit.scheduler.BukkitTask;
-import org.jetbrains.annotations.NotNull;
+import org.bukkit.scheduler.BukkitScheduler;
 
 public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread, ServerLevel> implements TickRateManagerInstance, LevelAccess, AverageTickTimeAccessor {
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPost = new ConcurrentLinkedQueue<>();
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPre = new ConcurrentLinkedQueue<>();
     protected final ServerTickRateManager tickRateManager;
+    protected final CraftScheduler bukkitScheduler;
 
     public MinecraftServerWorld(final String name, final String debugName) {
         super(name, debugName, (r, n, self) -> new LevelThread(ThreadedServer.SERVER_THREAD_GROUP, r, n, self));
         this.tickRateManager = new ServerTickRateManager(this);
+        this.bukkitScheduler = new CraftScheduler();
         this.setThreadModifier((levelThread) -> {
             levelThread.setName(this.name());
             levelThread.setPriority(Config.INSTANCE.tickLoopThreadPriority);
@@ -144,5 +143,10 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
     @Override
     public double getAverageTickTime() {
         return getNanoSecondsFromLastTick() / 1_000_000;
+    }
+
+    @Override
+    public BukkitScheduler getBukkitScheduler() {
+        return bukkitScheduler;
     }
 }
