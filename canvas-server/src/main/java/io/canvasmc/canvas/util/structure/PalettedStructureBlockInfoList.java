@@ -1,10 +1,6 @@
 package io.canvasmc.canvas.util.structure;
 
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
-import org.jetbrains.annotations.NotNull;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -13,6 +9,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.function.Predicate;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
+import org.jetbrains.annotations.NotNull;
 
 public class PalettedStructureBlockInfoList implements List<StructureTemplate.StructureBlockInfo> {
     private static final long[] EMPTY_DATA = new long[0];
@@ -94,7 +94,8 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
             int entriesPerLong = 64 / this.bitsPerEntry;
             this.data = new long[(this.size + entriesPerLong - 1) / entriesPerLong];
             for (int i = 0; i < this.size; i++) {
-                this.data[i / entriesPerLong] |= entries.get(i).compress(this.xBits, this.yBits, this.zBits, this.stateBits) << ((i % entriesPerLong) * this.bitsPerEntry);
+                this.data[i / entriesPerLong] |= entries.get(i)
+                                                        .compress(this.xBits, this.yBits, this.zBits, this.stateBits) << ((i % entriesPerLong) * this.bitsPerEntry);
             }
         } else {
             this.data = EMPTY_DATA;
@@ -121,7 +122,7 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
     }
 
     private @NotNull List<StructureTemplate.StructureBlockInfo> convertBackToStructureBlockInfoListAndCache() {
-        synchronized(data) {
+        synchronized (data) {
             List<StructureTemplate.StructureBlockInfo> structureBlockInfos = cachedStructureBlockInfoList.get();
             if (structureBlockInfos != null) {
                 return structureBlockInfos;

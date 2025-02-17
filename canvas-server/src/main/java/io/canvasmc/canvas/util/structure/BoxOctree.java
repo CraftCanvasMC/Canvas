@@ -1,11 +1,11 @@
 package io.canvasmc.canvas.util.structure;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.NotNull;
-import java.util.ArrayList;
-import java.util.List;
 
 public class BoxOctree {
 
@@ -29,17 +29,17 @@ public class BoxOctree {
     }
 
     private int roundAwayFromZero(double value) {
-        return (value >= 0) ? (int)Math.ceil(value) : (int)Math.floor(value);
+        return (value >= 0) ? (int) Math.ceil(value) : (int) Math.floor(value);
     }
 
     private void subdivide() {
-        if(!childrenOctants.isEmpty()) {
+        if (!childrenOctants.isEmpty()) {
             throw new UnsupportedOperationException("Tried to subdivide when there are already children octants.");
         }
 
-        int halfXSize = size.getX()/2;
-        int halfYSize = size.getY()/2;
-        int halfZSize = size.getZ()/2;
+        int halfXSize = size.getX() / 2;
+        int halfYSize = size.getY() / 2;
+        int halfZSize = size.getZ() / 2;
 
         // Lower Left Back Corner
         childrenOctants.add(new BoxOctree(new AABB(
@@ -111,8 +111,7 @@ public class BoxOctree {
                     octree.addBox(axisAlignedBB);
                 }
             }
-        }
-        else {
+        } else {
             // Prevent re-adding the same box if it already exists
             for (AABB parentInnerBox : innerBoxes) {
                 if (parentInnerBox.equals(axisAlignedBB)) {
@@ -144,8 +143,7 @@ public class BoxOctree {
                     return true;
                 }
             }
-        }
-        else {
+        } else {
             for (AABB innerBox : innerBoxes) {
                 if (innerBox.intersects(axisAlignedBB)) {
                     return true;
@@ -167,8 +165,7 @@ public class BoxOctree {
                     return true;
                 }
             }
-        }
-        else {
+        } else {
             for (AABB innerBox : innerBoxes) {
                 if (innerBox.contains(position.getX(), position.getY(), position.getZ())) {
                     return true;

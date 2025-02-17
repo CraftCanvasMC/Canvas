@@ -1,14 +1,19 @@
 package io.canvasmc.canvas.util.fastutil;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Factory methods for creating thread-safe collection instances.
@@ -17,7 +22,7 @@ import java.util.stream.Collectors;
 public final class ConcurrentCollections {
 
     private static final Logger LOGGER = LogManager.getLogger(ConcurrentCollections.class);
-    
+
     private static final int DEFAULT_INITIAL_CAPACITY = 16;
     private static final float DEFAULT_LOAD_FACTOR = 0.75f;
 
@@ -38,7 +43,7 @@ public final class ConcurrentCollections {
     /**
      * Creates a new thread-safe set with the specified initial capacity
      *
-     * @param <T> the type of elements maintained by this set
+     * @param <T>             the type of elements maintained by this set
      * @param initialCapacity initial capacity of the set
      * @return a new concurrent hash set
      * @throws IllegalArgumentException if initialCapacity is negative
@@ -64,8 +69,8 @@ public final class ConcurrentCollections {
     /**
      * Creates a new thread-safe map with the specified initial capacity
      *
-     * @param <K> the type of keys maintained by this map
-     * @param <V> the type of mapped values
+     * @param <K>             the type of keys maintained by this map
+     * @param <V>             the type of mapped values
      * @param initialCapacity initial capacity of the map
      * @return a new concurrent hash map
      * @throws IllegalArgumentException if initialCapacity is negative
@@ -113,7 +118,7 @@ public final class ConcurrentCollections {
     /**
      * Creates a new thread-safe list with the specified initial elements
      *
-     * @param <T> the type of elements maintained by this list
+     * @param <T>      the type of elements maintained by this list
      * @param elements collection containing elements to be placed in the list
      * @return a new copy-on-write array list containing the specified elements
      * @throws NullPointerException if elements is null
@@ -140,7 +145,7 @@ public final class ConcurrentCollections {
     /**
      * Creates a synchronized (thread-safe) view of the specified collection
      *
-     * @param <T> the type of elements in the collection
+     * @param <T>        the type of elements in the collection
      * @param collection the collection for which a synchronized view is to be created
      * @return a synchronized view of the specified collection
      * @throws NullPointerException if collection is null

@@ -1,10 +1,10 @@
 package io.canvasmc.canvas.util;
 
 import ca.spottedleaf.moonrise.common.util.TickThread;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class AsyncProcessor {
     private static final Logger LOGGER = LogManager.getLogger(AsyncProcessor.class);

@@ -8,7 +8,7 @@
  import com.mojang.authlib.GameProfile;
  import com.mojang.authlib.GameProfileRepository;
  import com.mojang.authlib.minecraft.MinecraftSessionService;
-@@ -13,6 +_,16 @@
+@@ -13,6 +_,14 @@
  import com.mojang.jtracy.DiscontinuousFrame;
  import com.mojang.jtracy.TracyClient;
  import com.mojang.logging.LogUtils;
@@ -17,24 +17,18 @@
 +import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 +import io.canvasmc.canvas.server.ThreadedServer;
 +import io.canvasmc.canvas.server.level.TickRateManagerInstance;
-+import io.canvasmc.canvas.server.level.WatchdogWatcher;
 +import io.canvasmc.canvas.server.network.PlayerJoinThread;
 +import io.canvasmc.canvas.util.TPSCalculator;
-+import io.papermc.paper.configuration.GlobalConfiguration;
 +import io.canvasmc.canvas.util.AsyncProcessor;
  import it.unimi.dsi.fastutil.longs.LongIterator;
  import it.unimi.dsi.fastutil.objects.ObjectArrayList;
  import it.unimi.dsi.fastutil.objects.ObjectArraySet;
-@@ -41,8 +_,12 @@
- import java.util.UUID;
+@@ -42,7 +_,7 @@
  import java.util.Map.Entry;
  import java.util.concurrent.CompletableFuture;
-+import java.util.concurrent.ExecutionException;
  import java.util.concurrent.Executor;
+-import java.util.concurrent.RejectedExecutionException;
 +import java.util.concurrent.Executors;
- import java.util.concurrent.RejectedExecutionException;
-+import java.util.concurrent.TimeUnit;
-+import java.util.concurrent.TimeoutException;
  import java.util.concurrent.atomic.AtomicReference;
  import java.util.concurrent.locks.LockSupport;
  import java.util.function.BooleanSupplier;
@@ -46,6 +40,30 @@
  import net.minecraft.network.protocol.PacketType;
  import net.minecraft.network.protocol.game.ClientboundChangeDifficultyPacket;
  import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
+@@ -129,7 +_,6 @@
+ import net.minecraft.util.profiling.metrics.storage.MetricsPersister;
+ import net.minecraft.util.thread.ReentrantBlockableEventLoop;
+ import net.minecraft.world.Difficulty;
+-import net.minecraft.world.RandomSequences;
+ import net.minecraft.world.entity.ai.village.VillageSiege;
+ import net.minecraft.world.entity.npc.CatSpawner;
+ import net.minecraft.world.entity.npc.WanderingTraderSpawner;
+@@ -150,7 +_,6 @@
+ import net.minecraft.world.level.biome.BiomeManager;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.entity.FuelValues;
+-import net.minecraft.world.level.border.BorderChangeListener;
+ import net.minecraft.world.level.border.WorldBorder;
+ import net.minecraft.world.level.chunk.storage.ChunkIOErrorReporter;
+ import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+@@ -161,7 +_,6 @@
+ import net.minecraft.world.level.levelgen.WorldOptions;
+ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
+ import net.minecraft.world.level.storage.CommandStorage;
+-import net.minecraft.world.level.storage.DerivedLevelData;
+ import net.minecraft.world.level.storage.DimensionDataStorage;
+ import net.minecraft.world.level.storage.LevelData;
+ import net.minecraft.world.level.storage.LevelResource;
 @@ -171,18 +_,20 @@
  import net.minecraft.world.level.storage.WorldData;
  import net.minecraft.world.phys.Vec2;
@@ -54,7 +72,7 @@
  import org.slf4j.Logger;
  
 -public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer { // Paper - rewrite chunk system
-+public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer, WatchdogWatcher, TickRateManagerInstance, AverageTickTimeAccessor { // Paper - rewrite chunk system // Canvas - Threaded Dimensions
++public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer, TickRateManagerInstance, AverageTickTimeAccessor { // Paper - rewrite chunk system // Canvas - Threaded Dimensions
      private static MinecraftServer SERVER; // Paper
 +    private static ThreadedServer THREADED_SERVER; // Canvas
      public static final Logger LOGGER = LogUtils.getLogger();
@@ -239,7 +257,7 @@
          if (!hasLoggedStop && isDebugging()) io.papermc.paper.util.TraceUtil.dumpTraceForThread("Server stopped"); // Paper - Debugging
          shutdownThread = Thread.currentThread(); // Paper - Improved watchdog support
          org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
-@@ -1002,7 +_,36 @@
+@@ -1002,7 +_,17 @@
              this.cancelRecordingMetrics();
          }
  
@@ -247,28 +265,9 @@
 +        // Canvas start
 +        ThreadedServer.LOGGER.info("Halting level-threads");
 +        long startNanos = Util.getNanos();
-+        Thread currentThread = Thread.currentThread();
 +        for (final ServerLevel level : this.getAllLevels()) {
-+            if (level.running) {
-+                level.stopSpin();
-+                if (currentThread.equals(level.getRunningThread())) {
-+                    continue;
-+                }
-+                try {
-+                    CompletableFuture<Void> killThreadFuture = CompletableFuture.runAsync(() -> {
-+                        try {
-+                            level.getRunningThread().join();
-+                        } catch (Throwable e) {
-+                            throw new RuntimeException("Server encountered an unexpected exception when waiting for level thread to terminate!", e);
-+                        }
-+                    });
-+                    killThreadFuture.get(30, TimeUnit.SECONDS);
-+                } catch (TimeoutException timeoutException) {
-+                    LOGGER.error("Timed out waiting for level {} to terminate, force-killing.", level.dimension().location());
-+                    level.getRunningThread().interrupt();
-+                } catch (InterruptedException | ExecutionException e) {
-+                    throw new RuntimeException(e);
-+                }
++            if (level.isRunning()) {
++                level.stopSpin(true);
 +            }
 +        }
 +        long nanoTickTime = Util.getNanos() - startNanos;
@@ -727,4 +726,13 @@
 +    public int pauseWhileEmptySeconds() { // Canvas - protected -> public
          return 0;
      }
+ 
+@@ -2923,7 +_,7 @@
+             times = new long[length];
+         }
+ 
+-        void add(int index, long time) {
++        public void add(int index, long time) { // Canvas - public
+             times[index % times.length] = time;
+         }
  

@@ -5,12 +5,6 @@ import io.canvasmc.canvas.util.isa.ISA_x86_64;
 
 public interface ISATarget {
 
-    int ordinal();
-
-    String getSuffix();
-
-    boolean isNativelySupported();
-
     static Class<? extends Enum<? extends ISATarget>> getInstance() {
         return switch (NativeLoader.NORMALIZED_ARCH) {
             case "x86_64" -> ISA_x86_64.class;
@@ -18,5 +12,8 @@ public interface ISATarget {
             default -> null;
         };
     }
+    int ordinal();
+    String getSuffix();
+    boolean isNativelySupported();
 
 }

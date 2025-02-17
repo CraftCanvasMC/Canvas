@@ -1,12 +1,12 @@
 package io.canvasmc.canvas.dfc.common.ast.spline;
 
+import com.ishland.flowsched.util.Assertions;
 import io.canvasmc.canvas.dfc.common.ast.AstNode;
 import io.canvasmc.canvas.dfc.common.ast.AstTransformer;
 import io.canvasmc.canvas.dfc.common.ast.EvalType;
 import io.canvasmc.canvas.dfc.common.ast.McToAst;
 import io.canvasmc.canvas.dfc.common.gen.BytecodeGen;
 import io.canvasmc.canvas.dfc.common.vif.NoisePosVanillaInterface;
-import io.canvasmc.canvas.util.Assertions;
 import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.ints.IntObjectPair;
 import java.util.ArrayList;

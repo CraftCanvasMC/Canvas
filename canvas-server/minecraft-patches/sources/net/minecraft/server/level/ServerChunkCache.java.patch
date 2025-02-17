@@ -1,20 +1,36 @@
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
-@@ -1,9 +_,12 @@
+@@ -1,22 +_,37 @@
  package net.minecraft.server.level;
  
-+import ca.spottedleaf.moonrise.common.misc.NearbyPlayers;
++import ca.spottedleaf.moonrise.common.util.TickThread;
++import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel;
  import com.google.common.annotations.VisibleForTesting;
++import com.google.common.collect.Sets;
  import com.mojang.datafixers.DataFixer;
  import com.mojang.logging.LogUtils;
 -import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.server.level.TickRateManagerInstance;
 +import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
++import io.canvasmc.canvas.util.NamedAgnosticThreadFactory;
 +import io.netty.util.internal.ConcurrentSet;
  import java.io.IOException;
  import java.nio.file.Path;
++import java.util.ArrayDeque;
  import java.util.ArrayList;
-@@ -17,6 +_,8 @@
+ import java.util.Arrays;
++import java.util.HashSet;
+ import java.util.List;
+ import java.util.Set;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.CompletionStage;
++import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.Executor;
++import java.util.concurrent.Executors;
++import java.util.concurrent.ForkJoinPool;
++import java.util.concurrent.locks.LockSupport;
+ import java.util.function.BooleanSupplier;
  import java.util.function.Consumer;
  import java.util.function.Supplier;
  import javax.annotation.Nullable;
@@ -23,7 +39,7 @@
  import net.minecraft.FileUtil;
  import net.minecraft.Util;
  import net.minecraft.core.BlockPos;
-@@ -54,9 +_,9 @@
+@@ -54,9 +_,10 @@
  
  public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moonrise.patches.chunk_system.world.ChunkSystemServerChunkCache { // Paper - rewrite chunk system
      private static final Logger LOGGER = LogUtils.getLogger();
@@ -32,6 +48,7 @@
      private final ServerLevel level;
 -    public final Thread mainThread;
 +    public Thread mainThread; // Canvas - mutable
++    public static final Executor REGION_EXECUTOR = Executors.newFixedThreadPool(Config.INSTANCE.chunks.regionized.executorThreadCount, new NamedAgnosticThreadFactory<>("region_ticking", TickThread::new, Config.INSTANCE.chunks.regionized.executorThreadPriority)); // Canvas - Regionized Chunk Ticking
      final ThreadedLevelLightEngine lightEngine;
      public final ServerChunkCache.MainThreadExecutor mainThreadProcessor;
      public final ChunkMap chunkMap;
@@ -50,10 +67,23 @@
          return this.fullChunks.size();
      }
      long chunkFutureAwaitCounter;
-+    private int ticksSinceLastPurgeStaleTicketsCall = 0;
++    public int ticksSinceLastPurgeStaleTicketsCall = 0; // Canvas
      // Paper end
      // Paper start - rewrite chunk system
  
+@@ -172,7 +_,11 @@
+ 
+         java.util.Objects.checkFromIndexSize(0, len, raw.length);
+         for (int i = 0; i < len; ++i) {
+-            if (chunkMap.playerIsCloseEnoughForSpawning(raw[i], chunkPos, 16384.0D)) { // Spigot (reducedRange = false)
++            // Canvas start
++            ServerPlayer player = raw[i];
++            if (player == null) continue;
++            if (chunkMap.playerIsCloseEnoughForSpawning(player, chunkPos, 16384.0D)) { // Spigot (reducedRange = false)
++            // Canvas end
+                 return true;
+             }
+         }
 @@ -181,6 +_,8 @@
      }
      // Paper end - chunk tick iteration optimisations
@@ -63,19 +93,62 @@
  
      public ServerChunkCache(
          ServerLevel level,
-@@ -435,7 +_,7 @@
-         return this.mainThreadProcessor.pollTask();
+@@ -441,8 +_,7 @@
+ 
+     public boolean isPositionTicking(long chunkPos) {
+         // Paper start - rewrite chunk system
+-        final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder newChunkHolder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
+-        return newChunkHolder != null && newChunkHolder.isTickingReady();
++        return ((ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.contains(chunkPos); // Canvas - faster impl
+         // Paper end - rewrite chunk system
      }
  
--    public boolean runDistanceManagerUpdates() { // Paper - public
-+    public synchronized boolean runDistanceManagerUpdates() { // Paper - public
-         return ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates(); // Paper - rewrite chunk system
+@@ -479,28 +_,70 @@
      }
+     // CraftBukkit end
  
-@@ -484,15 +_,22 @@
++    // Canvas Start - Regionized chunk ticking
++    private List<List<LevelChunk>> splitChunksIntoRegions(List<LevelChunk> chunks) {
++        Set<LevelChunk> chunkSet = new HashSet<>(chunks);
++        Set<LevelChunk> visited = new HashSet<>(chunks.size());
++        List<List<LevelChunk>> groups = new ArrayList<>();
++
++        for (LevelChunk chunk : chunks) {
++            if (visited.contains(chunk)) continue;
++
++            List<LevelChunk> group = new ArrayList<>(64);
++            ArrayDeque<LevelChunk> stack = new ArrayDeque<>();
++            stack.push(chunk);
++            visited.add(chunk);
++
++            while (!stack.isEmpty()) {
++                LevelChunk current = stack.pop();
++                group.add(current);
++
++                for (int i = 0; i < 8; i++) {
++                    LevelChunk neighbor = getChunk(current.locX + DX[i], current.locZ + DZ[i], false);
++                    if (neighbor == null || !chunkSet.contains(neighbor) || !visited.add(neighbor)) continue;
++                    stack.push(neighbor);
++                }
++            }
++
++            groups.add(group);
++        }
++
++        return groups;
++    }
++
++    // dfs directions
++    private static final int[] DX = {1, -1, 0, 0, 1, -1, -1, 1};
++    private static final int[] DZ = {0, 0, 1, -1, 1, 1, -1, -1};
++
++    // Canvas End
+     @Override
+     public void tick(BooleanSupplier hasTimeLeft, boolean tickChunks) {
          ProfilerFiller profilerFiller = Profiler.get();
          profilerFiller.push("purge");
-         if (this.level.tickRateManager().runsNormally() || !tickChunks || this.level.spigotConfig.unloadFrozenChunks) { // Spigot
+-        if (this.level.tickRateManager().runsNormally() || !tickChunks || this.level.spigotConfig.unloadFrozenChunks) { // Spigot
++        if (false && (this.level.tickRateManager().runsNormally() || !tickChunks || this.level.spigotConfig.unloadFrozenChunks)) { // Spigot // Canvas
 +            // Canvas start
 +            if (this.ticksSinceLastPurgeStaleTicketsCall++ > Config.INSTANCE.ticksBetweenPurgeStaleTickets) {
              this.distanceManager.purgeStaleTickets();
@@ -84,19 +157,76 @@
 +            // Canvas end
          }
  
-         this.runDistanceManagerUpdates();
+-        this.runDistanceManagerUpdates();
++        // this.runDistanceManagerUpdates(); // Canvas
          profilerFiller.popPush("chunks");
          if (tickChunks) {
-+            synchronized (this) { // Canvas - Multithreaded Dimension Ticking - only 1 thread can tick this instance at a time
-             ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().tick(); // Paper - rewrite chunk system
+-            ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().tick(); // Paper - rewrite chunk system
++            // ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().tick(); // Paper - rewrite chunk system // Canvas
              this.tickChunks();
              this.chunkMap.tick();
-+            } // Canvas
          }
  
          profilerFiller.popPush("unload");
-@@ -529,6 +_,34 @@
-             this.broadcastChangedChunks(profilerFiller);
+-        this.chunkMap.tick(hasTimeLeft);
++        // this.chunkMap.tick(hasTimeLeft);
+         profilerFiller.pop();
+         this.clearCache();
+     }
+ 
++    public volatile int tickingRegionsCount = 0; // Canvas
+     private void tickChunks() {
+         long gameTime = this.level.getGameTime();
+         long l = gameTime - this.lastInhabitedUpdate;
+@@ -519,44 +_,176 @@
+                     this.shuffleRandom.setSeed(this.level.random.nextLong());
+                     if (!this.level.paperConfig().entities.spawning.perPlayerMobSpawns) Util.shuffle(list, this.shuffleRandom); // Paper - Optional per player mob spawns; do not need this when per-player is enabled
+                     // Paper end - chunk tick iteration optimisation
++                    // Canvas start - Regionized Chunk Ticking
++                    if (Config.INSTANCE.chunks.regionized.enableRegionizedChunkTicking) {
++                        List<List<LevelChunk>> regions = splitChunksIntoRegions(list);
++                        int regionCount = regions.size();
++                        this.tickingRegionsCount = regionCount;
++                        CountDownLatch latch = new CountDownLatch(regionCount);
++
++                        try {
++                            ForkJoinPool.managedBlock(new ForkJoinPool.ManagedBlocker() {
++                                @Override
++                                public boolean block() throws InterruptedException {
++                                    for (List<LevelChunk> region : regions) {
++                                        REGION_EXECUTOR.execute(() -> {
++                                            try {
++                                                tickChunks(profilerFiller, l, region);
++                                            } finally {
++                                                latch.countDown();
++                                            }
++                                        });
++                                    }
++
++                                    latch.await();
++                                    return true;
++                                }
++
++                                @Override
++                                public boolean isReleasable() {
++                                    return latch.getCount() == 0;
++                                }
++                            });
++                        } catch (InterruptedException e) {
++                            throw new RuntimeException("interrupted managed block for region ticking", e);
++                        }
++                    } else {
+                     this.tickChunks(profilerFiller, l, list);
++                    }
++                    // Canvas end
+                     profilerFiller.pop();
+                 } finally {
+                     list.clear();
+                 }
+             }
+ 
+-            this.broadcastChangedChunks(profilerFiller);
++            // this.broadcastChangedChunks(profilerFiller); // Canvas
              profilerFiller.pop();
          }
 +        // Canvas start
@@ -129,9 +259,24 @@
 +        // Canvas end
      }
  
-     private void broadcastChangedChunks(ProfilerFiller profiler) {
-@@ -544,19 +_,83 @@
-         this.chunkHoldersToBroadcast.clear();
+-    private void broadcastChangedChunks(ProfilerFiller profiler) {
++    public void broadcastChangedChunks(ProfilerFiller profiler) { // Canvas - private -> public
+         profiler.push("broadcast");
+ 
+-        for (ChunkHolder chunkHolder : this.chunkHoldersToBroadcast) {
++        // Canvas start - async chunk loader
++        Set<ChunkHolder> clone = Sets.newConcurrentHashSet(this.chunkHoldersToBroadcast);
++        this.chunkHoldersToBroadcast.clear();
++        for (ChunkHolder chunkHolder : clone) {
++        // Canvas end
+             LevelChunk tickingChunk = chunkHolder.getChunkToSend(); // Paper - rewrite chunk system
+             if (tickingChunk != null) {
+                 chunkHolder.broadcastChanges(tickingChunk);
+             }
+         }
+ 
+-        this.chunkHoldersToBroadcast.clear();
++        // Canvas - async chunk loader
          profiler.pop();
      }
 +    // Canvas start - tick distance maps
@@ -262,7 +407,7 @@
              }
  
              if (true) { // Paper - rewrite chunk system
-@@ -818,6 +_,18 @@
+@@ -818,11 +_,23 @@
              super.doRunTask(task);
          }
  
@@ -281,3 +426,9 @@
          @Override
          public boolean pollTask() {
              // Paper start - rewrite chunk system
+             final ServerChunkCache serverChunkCache = ServerChunkCache.this;
+-            if (serverChunkCache.runDistanceManagerUpdates()) {
++            if ((!MinecraftServer.getThreadedServer().hasStarted() || Config.INSTANCE.chunks.runDistanceManagerUpdatesOnTaskPoll) && serverChunkCache.runDistanceManagerUpdates()) { // Canvas - async chunk loader
+                 return true;
+             } else {
+                 return super.pollTask() | ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)serverChunkCache.level).moonrise$getChunkTaskScheduler().executeMainThreadTask();

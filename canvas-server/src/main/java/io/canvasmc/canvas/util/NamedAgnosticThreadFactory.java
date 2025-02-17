@@ -3,6 +3,7 @@ package io.canvasmc.canvas.util;
 import com.mojang.logging.LogUtils;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
@@ -20,6 +21,7 @@ public class NamedAgnosticThreadFactory<T extends Thread> implements ThreadFacto
         SecurityManager securityManager = System.getSecurityManager();
         this.group = securityManager != null ? securityManager.getThreadGroup() : Thread.currentThread().getThreadGroup();
         this.namePrefix = name + "-";
+        MultiLoopThreadDumper.REGISTRY.add(namePrefix);
     }
 
     @Override

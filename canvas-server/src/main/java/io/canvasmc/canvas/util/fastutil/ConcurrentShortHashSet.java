@@ -3,20 +3,19 @@ package io.canvasmc.canvas.util.fastutil;
 import it.unimi.dsi.fastutil.shorts.ShortCollection;
 import it.unimi.dsi.fastutil.shorts.ShortIterator;
 import it.unimi.dsi.fastutil.shorts.ShortSet;
-import org.jetbrains.annotations.NotNull;
-
 import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * A thread-safe implementation of ShortSet using ConcurrentHashMap.KeySetView as backing storage.
  * This implementation provides concurrent access and high performance for concurrent operations.
  */
 public final class ConcurrentShortHashSet implements ShortSet {
-    
+
     private final ConcurrentHashMap.KeySetView<Short, Boolean> backing;
-    
+
     /**
      * Creates a new empty concurrent short set
      */
@@ -189,9 +188,9 @@ public final class ConcurrentShortHashSet implements ShortSet {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof ShortSet that)) return false;
-        
+
         if (size() != that.size()) return false;
-        return containsAll((ShortCollection) that);
+        return containsAll(that);
     }
 
     @Override

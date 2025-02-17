@@ -1,6 +1,12 @@
 package io.canvasmc.canvas.util.fastutil;
 
-import it.unimi.dsi.fastutil.longs.*;
+import it.unimi.dsi.fastutil.longs.LongArrays;
+import it.unimi.dsi.fastutil.longs.LongCollection;
+import it.unimi.dsi.fastutil.longs.LongComparator;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongListIterator;
+import it.unimi.dsi.fastutil.longs.LongSortedSet;
 import java.io.Serial;
 import java.util.Collection;
 import java.util.Iterator;
@@ -15,9 +21,9 @@ public class ConcurrentLongLinkedOpenHashSet extends LongLinkedOpenHashSet {
 
     @Serial
     private static final long serialVersionUID = -5532128240738069111L;
-    
+
     private static final int DEFAULT_INITIAL_CAPACITY = 16;
-    
+
     private final ConcurrentSkipListSet<Long> backing;
 
     /**
@@ -39,7 +45,7 @@ public class ConcurrentLongLinkedOpenHashSet extends LongLinkedOpenHashSet {
     /**
      * Constructs an empty set with the specified initial capacity and load factor
      *
-     * @param initial initial capacity
+     * @param initial    initial capacity
      * @param loadFactor load factor (ignored in this implementation)
      */
     public ConcurrentLongLinkedOpenHashSet(final int initial, final float loadFactor) {
@@ -69,7 +75,7 @@ public class ConcurrentLongLinkedOpenHashSet extends LongLinkedOpenHashSet {
     /**
      * Constructs a new set with elements from array segment
      *
-     * @param array source array
+     * @param array  source array
      * @param offset starting position
      * @param length number of elements
      */
@@ -77,7 +83,7 @@ public class ConcurrentLongLinkedOpenHashSet extends LongLinkedOpenHashSet {
         this(Math.max(length, 0));
         Objects.requireNonNull(array, "Source array cannot be null");
         LongArrays.ensureOffsetLength(array, offset, length);
-        
+
         for (int i = 0; i < length; i++) {
             add(array[offset + i]);
         }

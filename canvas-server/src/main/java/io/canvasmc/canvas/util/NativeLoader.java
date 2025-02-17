@@ -2,37 +2,37 @@ package io.canvasmc.canvas.util;
 
 import io.canvasmc.canvas.Config;
 import io.netty.util.internal.SystemPropertyUtil;
+import java.io.InputStream;
+import java.lang.foreign.Arena;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.SymbolLookup;
+import java.lang.foreign.ValueLayout;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.InputStream;
-import java.lang.foreign.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Locale;
-
 public class NativeLoader {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(NativeLoader.class);
 
     public static final String NORMALIZED_ARCH = normalizeArch(SystemPropertyUtil.get("os.arch", ""));
     public static final String NORMALIZED_OS = normalizeOs(SystemPropertyUtil.get("os.name", ""));
-
-    private static final Arena arena = Arena.ofAuto();
     public static final SymbolLookup lookup;
     public static final Linker linker = Linker.nativeLinker();
     public static final ISATarget currentMachineTarget;
-
+    private static final Logger LOGGER = LoggerFactory.getLogger(NativeLoader.class);
+    private static final Arena arena = Arena.ofAuto();
     static {
         String libName = String.format("%s-%s-%s", NORMALIZED_OS, NORMALIZED_ARCH, System.mapLibraryName("c2me-opts-natives-math"));
         lookup = load0(libName);
         if (lookup == null) {
             currentMachineTarget = null;
-            Config.INSTANCE.chunkGeneration.nativeAccelerationEnabled = false;
+            Config.INSTANCE.chunks.nativeAccelerationEnabled = false;
             LOGGER.warn("Disabling native math optimization(C2ME/Canvas) due to unsupported platform.");
         } else {
             try {
@@ -43,11 +43,11 @@ public class NativeLoader {
                         ValueLayout.JAVA_INT,
                         ValueLayout.JAVA_BOOLEAN
                     )
-                ).invokeExact(Config.INSTANCE.chunkGeneration.allowAVX512);
+                ).invokeExact(Config.INSTANCE.chunks.allowAVX512);
                 ISATarget target;
-                if (Config.INSTANCE.chunkGeneration.isaTargetLevelOverride != -1) {
+                if (Config.INSTANCE.chunks.isaTargetLevelOverride != -1) {
                     // Use override set by configuration
-                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[Config.INSTANCE.chunkGeneration.isaTargetLevelOverride];
+                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[Config.INSTANCE.chunks.isaTargetLevelOverride];
                 } else {
                     // Override not set, use normal
                     target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];

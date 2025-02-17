@@ -2,6 +2,7 @@ package io.canvasmc.canvas.util;
 
 import com.ibm.asyncutil.locks.AsyncSemaphore;
 import com.ibm.asyncutil.locks.FairAsyncSemaphore;
+import java.util.concurrent.CompletableFuture;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ChunkLevel;
 import net.minecraft.server.level.ChunkResult;
@@ -14,13 +15,13 @@ import net.minecraft.util.Unit;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import java.util.concurrent.CompletableFuture;
 
 public class AsyncChunkLoadUtil {
 
     private static final TicketType<Unit> ASYNC_CHUNK_LOAD = TicketType.create("vmp_async_chunk_load", (_, _) -> 0);
 
     private static final AsyncSemaphore SEMAPHORE = new FairAsyncSemaphore(6);
+    private static final ThreadLocal<Boolean> isRespawnChunkLoadFinished = ThreadLocal.withInitial(() -> false);
 
     public static CompletableFuture<ChunkResult<ChunkAccess>> scheduleChunkLoad(ServerLevel world, ChunkPos pos) {
         return scheduleChunkLoadWithRadius(world, pos, 3);
@@ -39,22 +40,26 @@ public class AsyncChunkLoadUtil {
         final DistanceManager ticketManager = (chunkManager).distanceManager;
 
         final CompletableFuture<ChunkResult<ChunkAccess>> future = SEMAPHORE.acquire()
-            .toCompletableFuture()
-            .thenComposeAsync(_ -> {
-                ticketManager.addTicket(ASYNC_CHUNK_LOAD, pos, level, Unit.INSTANCE);
-                (chunkManager).runDistanceManagerUpdates();
-                final ChunkHolder chunkHolder = (chunkManager.chunkMap).getUpdatingChunkIfPresent(pos.toLong());
-                if (chunkHolder == null) {
-                    throw new IllegalStateException("Chunk not there when requested");
-                }
-                final FullChunkStatus levelType = ChunkLevel.fullStatus(level);
-                return switch (levelType) {
-                    case INACCESSIBLE -> chunkHolder.scheduleChunkGenerationTask(ChunkLevel.generationStatus(level), world.getChunkSource().chunkMap);
-                    case FULL -> chunkHolder.getFullChunkFuture().thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
-                    case BLOCK_TICKING -> chunkHolder.getTickingChunkFuture().thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
-                    case ENTITY_TICKING -> chunkHolder.getEntityTickingChunkFuture().thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
-                };
-            }, world.getServer());
+                                                                            .toCompletableFuture()
+                                                                            .thenComposeAsync(_ -> {
+                                                                                ticketManager.addTicket(ASYNC_CHUNK_LOAD, pos, level, Unit.INSTANCE);
+                                                                                (chunkManager).runDistanceManagerUpdates();
+                                                                                final ChunkHolder chunkHolder = (chunkManager.chunkMap).getUpdatingChunkIfPresent(pos.toLong());
+                                                                                if (chunkHolder == null) {
+                                                                                    throw new IllegalStateException("Chunk not there when requested");
+                                                                                }
+                                                                                final FullChunkStatus levelType = ChunkLevel.fullStatus(level);
+                                                                                return switch (levelType) {
+                                                                                    case INACCESSIBLE ->
+                                                                                        chunkHolder.scheduleChunkGenerationTask(ChunkLevel.generationStatus(level), world.getChunkSource().chunkMap);
+                                                                                    case FULL -> chunkHolder.getFullChunkFuture()
+                                                                                                            .thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
+                                                                                    case BLOCK_TICKING -> chunkHolder.getTickingChunkFuture()
+                                                                                                                     .thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
+                                                                                    case ENTITY_TICKING -> chunkHolder.getEntityTickingChunkFuture()
+                                                                                                                      .thenApply(either -> (ChunkResult<ChunkAccess>) (Object) either);
+                                                                                };
+                                                                            }, world.getServer());
         future.whenCompleteAsync((_, throwable) -> {
             SEMAPHORE.release();
             if (throwable != null) throwable.printStackTrace();
@@ -62,8 +67,6 @@ public class AsyncChunkLoadUtil {
         }, world.getServer());
         return future;
     }
-
-    private static final ThreadLocal<Boolean> isRespawnChunkLoadFinished = ThreadLocal.withInitial(() -> false);
 
     public static void setIsRespawnChunkLoadFinished(boolean value) {
         isRespawnChunkLoadFinished.set(value);

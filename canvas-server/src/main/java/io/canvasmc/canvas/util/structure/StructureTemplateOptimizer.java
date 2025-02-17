@@ -2,6 +2,9 @@ package io.canvasmc.canvas.util.structure;
 
 import it.unimi.dsi.fastutil.objects.Object2BooleanMaps;
 import it.unimi.dsi.fastutil.objects.Object2BooleanOpenHashMap;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.block.Mirror;
@@ -11,9 +14,6 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlac
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureProcessor;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import org.jetbrains.annotations.NotNull;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 public class StructureTemplateOptimizer {
 
@@ -65,8 +65,7 @@ public class StructureTemplateOptimizer {
                 "finalizeProcessing", ServerLevelAccessor.class, BlockPos.class, BlockPos.class, List.class, List.class, StructurePlaceSettings.class);
 
             return method.getDeclaringClass() != StructureProcessor.class;
-        }
-        catch (NoSuchMethodException e) {
+        } catch (NoSuchMethodException e) {
             throw new RuntimeException("Unable to find 'finalizeProcessing' method. Report this major issue to Canvas", e);
         }
     }

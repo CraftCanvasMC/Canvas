@@ -1,15 +1,20 @@
 package io.canvasmc.canvas.util;
 
-import net.minecraft.world.level.levelgen.synth.BlendedNoise;
-import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
-import net.minecraft.world.level.levelgen.synth.PerlinNoise;
-import org.jetbrains.annotations.NotNull;
-
-import java.lang.foreign.*;
+import java.lang.foreign.Arena;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.MemoryLayout;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.StructLayout;
+import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.VarHandle;
 import java.util.Objects;
 import java.util.stream.IntStream;
+import net.minecraft.world.level.levelgen.synth.BlendedNoise;
+import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
+import net.minecraft.world.level.levelgen.synth.PerlinNoise;
+import org.jetbrains.annotations.NotNull;
 
 public class BindingsTemplate {
 
@@ -102,6 +107,125 @@ public class BindingsTemplate {
     public static final VarHandle double_octave_sampler_data$sampler_originY = double_octave_sampler_data.varHandle(MemoryLayout.PathElement.groupElement("sampler_originY"));
     public static final VarHandle double_octave_sampler_data$sampler_originZ = double_octave_sampler_data.varHandle(MemoryLayout.PathElement.groupElement("sampler_originZ"));
     public static final VarHandle double_octave_sampler_data$amplitudes = double_octave_sampler_data.varHandle(MemoryLayout.PathElement.groupElement("amplitudes"));
+    // c2me_natives_noise_interpolated, double, (const interpolated_noise_sampler_t *const data, const double x, const double y, const double z)
+    public static final MethodHandle c2me_natives_noise_interpolated = NativeLoader.linker.downcallHandle(
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_DOUBLE,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_DOUBLE,
+            ValueLayout.JAVA_DOUBLE,
+            ValueLayout.JAVA_DOUBLE
+        ),
+        Linker.Option.critical(false)
+    );
+    public static final MethodHandle c2me_natives_noise_interpolated_ptr = NativeLoader.linker.downcallHandle(
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_DOUBLE,
+            ValueLayout.JAVA_LONG,
+            ValueLayout.JAVA_DOUBLE,
+            ValueLayout.JAVA_DOUBLE,
+            ValueLayout.JAVA_DOUBLE
+        ),
+        Linker.Option.critical(false)
+    );
+    // typedef const struct interpolated_noise_sub_sampler {
+    //     const aligned_uint8_ptr sampler_permutations;
+    //     const aligned_double_ptr sampler_originX;
+    //     const aligned_double_ptr sampler_originY;
+    //     const aligned_double_ptr sampler_originZ;
+    //     const aligned_double_ptr sampler_mulFactor;
+    //     const uint32_t length;
+    // } interpolated_noise_sub_sampler_t;
+    public static final StructLayout interpolated_noise_sub_sampler = MemoryLayout.structLayout(
+        ValueLayout.ADDRESS.withName("sampler_permutations"),
+        ValueLayout.ADDRESS.withName("sampler_originX"),
+        ValueLayout.ADDRESS.withName("sampler_originY"),
+        ValueLayout.ADDRESS.withName("sampler_originZ"),
+        ValueLayout.ADDRESS.withName("sampler_mulFactor"),
+        ValueLayout.JAVA_INT.withName("length"),
+        MemoryLayout.paddingLayout(4)
+    ).withName("interpolated_noise_sub_sampler_t");
+    // typedef const struct interpolated_noise_sampler {
+    //     const double scaledXzScale;
+    //     const double scaledYScale;
+    //     const double xzFactor;
+    //     const double yFactor;
+    //     const double smearScaleMultiplier;
+    //     const double xzScale;
+    //     const double yScale;
+    //
+    //     const interpolated_noise_sub_sampler_t lower;
+    //     const interpolated_noise_sub_sampler_t upper;
+    //     const interpolated_noise_sub_sampler_t normal;
+    // } interpolated_noise_sampler_t;
+    public static final StructLayout interpolated_noise_sampler = MemoryLayout.structLayout(
+        ValueLayout.JAVA_DOUBLE.withName("scaledXzScale"),
+        ValueLayout.JAVA_DOUBLE.withName("scaledYScale"),
+        ValueLayout.JAVA_DOUBLE.withName("xzFactor"),
+        ValueLayout.JAVA_DOUBLE.withName("yFactor"),
+        ValueLayout.JAVA_DOUBLE.withName("smearScaleMultiplier"),
+        ValueLayout.JAVA_DOUBLE.withName("xzScale"),
+        ValueLayout.JAVA_DOUBLE.withName("yScale"),
+
+        interpolated_noise_sub_sampler.withName("lower"),
+        interpolated_noise_sub_sampler.withName("upper"),
+        interpolated_noise_sub_sampler.withName("normal")
+    ).withByteAlignment(32).withName("interpolated_noise_sampler_t");
+    public static final VarHandle interpolated_noise_sampler$scaledXzScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("scaledXzScale"));
+    public static final VarHandle interpolated_noise_sampler$scaledYScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("scaledYScale"));
+    public static final VarHandle interpolated_noise_sampler$xzFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("xzFactor"));
+    public static final VarHandle interpolated_noise_sampler$yFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("yFactor"));
+    public static final VarHandle interpolated_noise_sampler$smearScaleMultiplier = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("smearScaleMultiplier"));
+    public static final VarHandle interpolated_noise_sampler$xzScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("xzScale"));
+    public static final VarHandle interpolated_noise_sampler$yScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("yScale"));
+    public static final VarHandle interpolated_noise_sampler$lower$sampler_permutations = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_permutations"));
+    public static final VarHandle interpolated_noise_sampler$lower$sampler_originX = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_originX"));
+    public static final VarHandle interpolated_noise_sampler$lower$sampler_originY = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_originY"));
+    public static final VarHandle interpolated_noise_sampler$lower$sampler_originZ = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_originZ"));
+    public static final VarHandle interpolated_noise_sampler$lower$sampler_mulFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_mulFactor"));
+    public static final VarHandle interpolated_noise_sampler$lower$length = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("length"));
+    public static final VarHandle interpolated_noise_sampler$upper$sampler_permutations = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_permutations"));
+    public static final VarHandle interpolated_noise_sampler$upper$sampler_originX = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_originX"));
+    public static final VarHandle interpolated_noise_sampler$upper$sampler_originY = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_originY"));
+    public static final VarHandle interpolated_noise_sampler$upper$sampler_originZ = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_originZ"));
+    public static final VarHandle interpolated_noise_sampler$upper$sampler_mulFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_mulFactor"));
+    public static final VarHandle interpolated_noise_sampler$upper$length = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("length"));
+    public static final VarHandle interpolated_noise_sampler$normal$sampler_permutations = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_permutations"));
+    public static final VarHandle interpolated_noise_sampler$normal$sampler_originX = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_originX"));
+    public static final VarHandle interpolated_noise_sampler$normal$sampler_originY = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_originY"));
+    public static final VarHandle interpolated_noise_sampler$normal$sampler_originZ = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_originZ"));
+    public static final VarHandle interpolated_noise_sampler$normal$sampler_mulFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_mulFactor"));
+    public static final VarHandle interpolated_noise_sampler$normal$length = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("length"));
+    // c2me_natives_end_islands_sample, float, (const int32_t *const simplex_permutations, const int32_t x, const int32_t z)
+    public static final MethodHandle c2me_natives_end_islands_sample = NativeLoader.linker.downcallHandle(
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_FLOAT,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT
+        ),
+        Linker.Option.critical(true)
+    );
+    public static final MethodHandle c2me_natives_end_islands_sample_ptr = NativeLoader.linker.downcallHandle(
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_FLOAT,
+            ValueLayout.JAVA_LONG,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT
+        ),
+        Linker.Option.critical(false)
+    );
+    // c2me_natives_biome_access_sample, uint32_t, (const int64_t theSeed, const int32_t x, const int32_t y, const int32_t z)
+    public static final MethodHandle c2me_natives_biome_access_sample = NativeLoader.linker.downcallHandle(
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_LONG,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT
+        ),
+        Linker.Option.critical(false)
+    );
 
     public static MemorySegment double_octave_sampler_data$create(Arena arena, @NotNull PerlinNoise firstSampler, PerlinNoise secondSampler, double amplitude) {
         long nonNullSamplerCount = 0;
@@ -175,99 +299,6 @@ public class BindingsTemplate {
         return data;
     }
 
-    // c2me_natives_noise_interpolated, double, (const interpolated_noise_sampler_t *const data, const double x, const double y, const double z)
-    public static final MethodHandle c2me_natives_noise_interpolated = NativeLoader.linker.downcallHandle(
-        FunctionDescriptor.of(
-            ValueLayout.JAVA_DOUBLE,
-            ValueLayout.ADDRESS,
-            ValueLayout.JAVA_DOUBLE,
-            ValueLayout.JAVA_DOUBLE,
-            ValueLayout.JAVA_DOUBLE
-        ),
-        Linker.Option.critical(false)
-    );
-    public static final MethodHandle c2me_natives_noise_interpolated_ptr = NativeLoader.linker.downcallHandle(
-        FunctionDescriptor.of(
-            ValueLayout.JAVA_DOUBLE,
-            ValueLayout.JAVA_LONG,
-            ValueLayout.JAVA_DOUBLE,
-            ValueLayout.JAVA_DOUBLE,
-            ValueLayout.JAVA_DOUBLE
-        ),
-        Linker.Option.critical(false)
-    );
-
-    // typedef const struct interpolated_noise_sub_sampler {
-    //     const aligned_uint8_ptr sampler_permutations;
-    //     const aligned_double_ptr sampler_originX;
-    //     const aligned_double_ptr sampler_originY;
-    //     const aligned_double_ptr sampler_originZ;
-    //     const aligned_double_ptr sampler_mulFactor;
-    //     const uint32_t length;
-    // } interpolated_noise_sub_sampler_t;
-    public static final StructLayout interpolated_noise_sub_sampler = MemoryLayout.structLayout(
-        ValueLayout.ADDRESS.withName("sampler_permutations"),
-        ValueLayout.ADDRESS.withName("sampler_originX"),
-        ValueLayout.ADDRESS.withName("sampler_originY"),
-        ValueLayout.ADDRESS.withName("sampler_originZ"),
-        ValueLayout.ADDRESS.withName("sampler_mulFactor"),
-        ValueLayout.JAVA_INT.withName("length"),
-        MemoryLayout.paddingLayout(4)
-    ).withName("interpolated_noise_sub_sampler_t");
-
-    // typedef const struct interpolated_noise_sampler {
-    //     const double scaledXzScale;
-    //     const double scaledYScale;
-    //     const double xzFactor;
-    //     const double yFactor;
-    //     const double smearScaleMultiplier;
-    //     const double xzScale;
-    //     const double yScale;
-    //
-    //     const interpolated_noise_sub_sampler_t lower;
-    //     const interpolated_noise_sub_sampler_t upper;
-    //     const interpolated_noise_sub_sampler_t normal;
-    // } interpolated_noise_sampler_t;
-    public static final StructLayout interpolated_noise_sampler = MemoryLayout.structLayout(
-        ValueLayout.JAVA_DOUBLE.withName("scaledXzScale"),
-        ValueLayout.JAVA_DOUBLE.withName("scaledYScale"),
-        ValueLayout.JAVA_DOUBLE.withName("xzFactor"),
-        ValueLayout.JAVA_DOUBLE.withName("yFactor"),
-        ValueLayout.JAVA_DOUBLE.withName("smearScaleMultiplier"),
-        ValueLayout.JAVA_DOUBLE.withName("xzScale"),
-        ValueLayout.JAVA_DOUBLE.withName("yScale"),
-
-        interpolated_noise_sub_sampler.withName("lower"),
-        interpolated_noise_sub_sampler.withName("upper"),
-        interpolated_noise_sub_sampler.withName("normal")
-    ).withByteAlignment(32).withName("interpolated_noise_sampler_t");
-
-    public static final VarHandle interpolated_noise_sampler$scaledXzScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("scaledXzScale"));
-    public static final VarHandle interpolated_noise_sampler$scaledYScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("scaledYScale"));
-    public static final VarHandle interpolated_noise_sampler$xzFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("xzFactor"));
-    public static final VarHandle interpolated_noise_sampler$yFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("yFactor"));
-    public static final VarHandle interpolated_noise_sampler$smearScaleMultiplier = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("smearScaleMultiplier"));
-    public static final VarHandle interpolated_noise_sampler$xzScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("xzScale"));
-    public static final VarHandle interpolated_noise_sampler$yScale = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("yScale"));
-    public static final VarHandle interpolated_noise_sampler$lower$sampler_permutations = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_permutations"));
-    public static final VarHandle interpolated_noise_sampler$lower$sampler_originX = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_originX"));
-    public static final VarHandle interpolated_noise_sampler$lower$sampler_originY = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_originY"));
-    public static final VarHandle interpolated_noise_sampler$lower$sampler_originZ = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_originZ"));
-    public static final VarHandle interpolated_noise_sampler$lower$sampler_mulFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("sampler_mulFactor"));
-    public static final VarHandle interpolated_noise_sampler$lower$length = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("lower"), MemoryLayout.PathElement.groupElement("length"));
-    public static final VarHandle interpolated_noise_sampler$upper$sampler_permutations = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_permutations"));
-    public static final VarHandle interpolated_noise_sampler$upper$sampler_originX = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_originX"));
-    public static final VarHandle interpolated_noise_sampler$upper$sampler_originY = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_originY"));
-    public static final VarHandle interpolated_noise_sampler$upper$sampler_originZ = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_originZ"));
-    public static final VarHandle interpolated_noise_sampler$upper$sampler_mulFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("sampler_mulFactor"));
-    public static final VarHandle interpolated_noise_sampler$upper$length = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("upper"), MemoryLayout.PathElement.groupElement("length"));
-    public static final VarHandle interpolated_noise_sampler$normal$sampler_permutations = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_permutations"));
-    public static final VarHandle interpolated_noise_sampler$normal$sampler_originX = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_originX"));
-    public static final VarHandle interpolated_noise_sampler$normal$sampler_originY = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_originY"));
-    public static final VarHandle interpolated_noise_sampler$normal$sampler_originZ = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_originZ"));
-    public static final VarHandle interpolated_noise_sampler$normal$sampler_mulFactor = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("sampler_mulFactor"));
-    public static final VarHandle interpolated_noise_sampler$normal$length = interpolated_noise_sampler.varHandle(MemoryLayout.PathElement.groupElement("normal"), MemoryLayout.PathElement.groupElement("length"));
-
     public static boolean interpolated_noise_sampler$isSpecializedBase3dNoiseFunction(BlendedNoise interpolated) {
         return IntStream.range(0, 16).mapToObj((interpolated).minLimitNoise::getOctaveNoise).filter(Objects::nonNull).count() == 16 &&
             IntStream.range(0, 16).mapToObj((interpolated).maxLimitNoise::getOctaveNoise).filter(Objects::nonNull).count() == 16 &&
@@ -310,7 +341,7 @@ public class BindingsTemplate {
                     sampler_originY.set(ValueLayout.JAVA_DOUBLE, index * 8L, sampler.yo);
                     sampler_originZ.set(ValueLayout.JAVA_DOUBLE, index * 8L, sampler.zo);
                     sampler_mulFactor.set(ValueLayout.JAVA_DOUBLE, index * 8L, Math.pow(2, -i));
-                    index ++;
+                    index++;
                 }
             }
 
@@ -333,7 +364,7 @@ public class BindingsTemplate {
                     sampler_originY.set(ValueLayout.JAVA_DOUBLE, index * 8L, sampler.yo);
                     sampler_originZ.set(ValueLayout.JAVA_DOUBLE, index * 8L, sampler.zo);
                     sampler_mulFactor.set(ValueLayout.JAVA_DOUBLE, index * 8L, Math.pow(2, -i));
-                    index ++;
+                    index++;
                 }
             }
 
@@ -356,7 +387,7 @@ public class BindingsTemplate {
                     sampler_originY.set(ValueLayout.JAVA_DOUBLE, index * 8L, sampler.yo);
                     sampler_originZ.set(ValueLayout.JAVA_DOUBLE, index * 8L, sampler.zo);
                     sampler_mulFactor.set(ValueLayout.JAVA_DOUBLE, index * 8L, Math.pow(2, -i));
-                    index ++;
+                    index++;
                 }
             }
 
@@ -372,37 +403,5 @@ public class BindingsTemplate {
 
         return data;
     }
-
-    // c2me_natives_end_islands_sample, float, (const int32_t *const simplex_permutations, const int32_t x, const int32_t z)
-    public static final MethodHandle c2me_natives_end_islands_sample = NativeLoader.linker.downcallHandle(
-        FunctionDescriptor.of(
-            ValueLayout.JAVA_FLOAT,
-            ValueLayout.ADDRESS,
-            ValueLayout.JAVA_INT,
-            ValueLayout.JAVA_INT
-        ),
-        Linker.Option.critical(true)
-    );
-    public static final MethodHandle c2me_natives_end_islands_sample_ptr = NativeLoader.linker.downcallHandle(
-        FunctionDescriptor.of(
-            ValueLayout.JAVA_FLOAT,
-            ValueLayout.JAVA_LONG,
-            ValueLayout.JAVA_INT,
-            ValueLayout.JAVA_INT
-        ),
-        Linker.Option.critical(false)
-    );
-
-    // c2me_natives_biome_access_sample, uint32_t, (const int64_t theSeed, const int32_t x, const int32_t y, const int32_t z)
-    public static final MethodHandle c2me_natives_biome_access_sample = NativeLoader.linker.downcallHandle(
-        FunctionDescriptor.of(
-            ValueLayout.JAVA_INT,
-            ValueLayout.JAVA_LONG,
-            ValueLayout.JAVA_INT,
-            ValueLayout.JAVA_INT,
-            ValueLayout.JAVA_INT
-        ),
-        Linker.Option.critical(false)
-    );
 
 }

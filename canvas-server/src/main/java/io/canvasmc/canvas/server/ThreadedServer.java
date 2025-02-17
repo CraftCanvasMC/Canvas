@@ -1,27 +1,15 @@
 package io.canvasmc.canvas.server;
 
-import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
+import io.canvasmc.canvas.server.chunk.AsyncPlayerChunkLoader;
 import io.canvasmc.canvas.server.level.LevelThread;
 import io.canvasmc.canvas.server.level.MinecraftServerWorld;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import io.canvasmc.canvas.server.render.TickTimesGraphDisplay;
-import io.netty.util.internal.ConcurrentSet;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.BooleanSupplier;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
@@ -36,21 +24,26 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public class ThreadedServer implements ThreadedBukkitServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
     public static final long MAX_NANOSECONDS_FOR_TICK_FRAME = 50_000_000;
     public static final ThreadGroup SERVER_THREAD_GROUP = new ThreadGroup("ServerThreadGroup");
-    private static final Set<Long> LEVEL_THREAD_IDS = new ConcurrentSet<>();
     public static BooleanSupplier SHOULD_KEEP_TICKING;
-    public static Function<ServerLevel, Thread> SPINNER = (level) -> {
+    public static Function<ServerLevel, LevelThread> LEVEL_SPINNER = (level) -> {
         try {
-            LevelThread dedicated = new LevelThread(SERVER_THREAD_GROUP, level::spin, "LevelThread:" + level.getName(), level);
-            LEVEL_THREAD_IDS.add(dedicated.threadId());
-            dedicated.setPriority(Config.INSTANCE.levelThreadPriority);
-            dedicated.setUncaughtExceptionHandler((thread, throwable) -> LOGGER.error("Uncaught exception in level thread, {}", ((LevelThread) thread).getLevel().getName(), throwable));
-            dedicated.start();
-            return dedicated;
+            return level.start((self) -> self::tick);
         } catch (Throwable throwable) {
             throw new RuntimeException("Unable to spin world '" + level.getName() + "'!", throwable);
         }
@@ -120,22 +113,22 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public void spin() {
         try {
+            MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             ThreadedBukkitServer.setInstance(this);
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
+            //noinspection resource
+            AsyncPlayerChunkLoader chunkLoader = new AsyncPlayerChunkLoader("AsyncChunkLoader", "async player chunk loader");
+            chunkLoader.start((self) -> (hasTimeLeft, _) -> self.tick(hasTimeLeft));
             if (Config.INSTANCE.threadedEntityTicking) {
-                //noinspection resource
-                final ThreadedEntityScheduler entityScheduler = new ThreadedEntityScheduler("EntityScheduler");
+                final ThreadedEntityScheduler entityScheduler = new ThreadedEntityScheduler("EntityScheduler", "entity scheduler");
                 this.entityScheduler = entityScheduler;
-                TickThread entitySchedulerThread = new TickThread(entityScheduler::spin, "EntityScheduler");
-                LEVEL_THREAD_IDS.add(entitySchedulerThread.threadId());
-                entitySchedulerThread.setPriority(Config.INSTANCE.levelThreadPriority); // Keep priority same as level threads to avoid inconsistency
-                entitySchedulerThread.start();
+                entityScheduler.start((self) -> (_, _) -> self.tickEntities());
             }
             if (Config.INSTANCE.asyncPlayerJoining) {
-                PlayerJoinThread.getInstance().start();
+                PlayerJoinThread.getInstance().start((self) -> (_, _) -> self.run());
             }
             if (Config.INSTANCE.enableDevelopmentTickGuiGraph) TickTimesGraphDisplay.showFrameFor((DedicatedServer) this.server, getTickTimeAccessors());
             this.started = true;
@@ -216,7 +209,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public void loadLevel(@NotNull ServerLevel level) {
         this.levels.add(level);
-        LOGGER.info("Loaded level to threaded context: {}", level.dimension().location());
     }
 
     public String getName() {
@@ -225,8 +217,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public void stopLevel(@NotNull ServerLevel level) {
         this.levels.remove(level);
-        level.stopSpin();
-        LOGGER.info("Removed level from threaded context: {}", level.dimension().location());
+        level.stopSpin(false);
     }
 
     public Collection<ServerLevel> getAllLevels() {

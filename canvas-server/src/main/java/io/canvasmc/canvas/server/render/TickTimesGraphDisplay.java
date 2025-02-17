@@ -3,28 +3,45 @@ package io.canvasmc.canvas.server.render;
 import com.google.common.collect.Lists;
 import com.mojang.logging.LogUtils;
 import io.canvasmc.canvas.server.AverageTickTimeAccessor;
-import net.minecraft.server.dedicated.DedicatedServer;
-import net.minecraft.server.gui.MinecraftServerGui;
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-
-import javax.swing.*;
-import javax.swing.border.EtchedBorder;
-import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.swing.*;
+import javax.swing.border.EtchedBorder;
+import javax.swing.border.TitledBorder;
+import net.minecraft.server.dedicated.DedicatedServer;
+import net.minecraft.server.gui.MinecraftServerGui;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
 
 public class TickTimesGraphDisplay extends JComponent {
-    public static TickTimesGraphDisplay INSTANCE = null;
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String TITLE = "Tick Times - Minecraft server";
+    public static TickTimesGraphDisplay INSTANCE = null;
+    final AtomicBoolean isClosing = new AtomicBoolean();
     private final DedicatedServer server;
     private final Collection<Runnable> finalizers = Lists.newArrayList();
-    final AtomicBoolean isClosing = new AtomicBoolean();
+
+    private TickTimesGraphDisplay(DedicatedServer server, List<AverageTickTimeAccessor> accessors) {
+        this.server = server;
+        this.setPreferredSize(new Dimension(854, 480));
+        this.setLayout(new GridLayout(3, 2, 5, 5)); // 3 rows, 2 columns, with spacing
+
+        try {
+            for (AverageTickTimeAccessor accessor : accessors) {
+                this.add(this.buildGraphPanel(accessor));
+            }
+
+            for (int i = accessors.size(); i < 6; i++) {
+                this.add(new JPanel());
+            }
+        } catch (Exception e) {
+            LOGGER.error("Couldn't build tick graph GUI", e);
+        }
+    }
 
     public static void showFrameFor(final DedicatedServer server, List<AverageTickTimeAccessor> accessors) {
         try {
@@ -56,24 +73,6 @@ public class TickTimesGraphDisplay extends JComponent {
         });
         gui.addFinalizer(jFrame::dispose);
         INSTANCE = gui;
-    }
-
-    private TickTimesGraphDisplay(DedicatedServer server, List<AverageTickTimeAccessor> accessors) {
-        this.server = server;
-        this.setPreferredSize(new Dimension(854, 480));
-        this.setLayout(new GridLayout(3, 2, 5, 5)); // 3 rows, 2 columns, with spacing
-
-        try {
-            for (AverageTickTimeAccessor accessor : accessors) {
-                this.add(this.buildGraphPanel(accessor));
-            }
-
-            for (int i = accessors.size(); i < 6; i++) {
-                this.add(new JPanel());
-            }
-        } catch (Exception e) {
-            LOGGER.error("Couldn't build tick graph GUI", e);
-        }
     }
 
     public void addFinalizer(Runnable finalizer) {

@@ -4,7 +4,6 @@ import it.unimi.dsi.fastutil.ints.IntCollection;
 import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
-
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,11 +14,10 @@ import java.util.function.BiFunction;
  */
 public final class Long2IntConcurrentHashMap implements Long2IntMap {
 
-    private final ConcurrentHashMap<Long, Integer> backing;
-    private int defaultReturnValue;
-
     private static final int DEFAULT_INITIAL_CAPACITY = 16;
     private static final float DEFAULT_LOAD_FACTOR = 0.75f;
+    private final ConcurrentHashMap<Long, Integer> backing;
+    private int defaultReturnValue;
 
     public Long2IntConcurrentHashMap() {
         this(DEFAULT_INITIAL_CAPACITY);
@@ -167,7 +165,7 @@ public final class Long2IntConcurrentHashMap implements Long2IntMap {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Long2IntMap that)) return false;
-        
+
         if (size() != that.size()) return false;
         try {
             for (Entry entry : that.long2IntEntrySet()) {

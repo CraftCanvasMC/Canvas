@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -5,29 +_,40 @@
+@@ -5,29 +_,41 @@
  import com.mojang.datafixers.DataFixer;
  import com.mojang.datafixers.util.Pair;
  import com.mojang.logging.LogUtils;
@@ -13,6 +13,7 @@
 +import io.netty.util.internal.ConcurrentSet;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 -import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
++import it.unimi.dsi.fastutil.longs.Long2IntMaps;
  import it.unimi.dsi.fastutil.longs.LongSet;
  import it.unimi.dsi.fastutil.longs.LongSets;
  import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
@@ -190,6 +191,36 @@
  
      public LevelChunk getChunkIfLoaded(int x, int z) {
          return this.chunkSource.getChunkAtIfLoadedImmediately(x, z); // Paper - Use getChunkIfLoadedImmediately
+@@ -499,7 +_,7 @@
+     // Paper start - chunk tick iteration
+     private static final ServerChunkCache.ChunkAndHolder[] EMPTY_PLAYER_CHUNK_HOLDERS = new ServerChunkCache.ChunkAndHolder[0];
+     private final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerChunkCache.ChunkAndHolder> playerTickingChunks = new ca.spottedleaf.moonrise.common.list.ReferenceList<>(EMPTY_PLAYER_CHUNK_HOLDERS);
+-    private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap playerTickingRequests = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
++    private final it.unimi.dsi.fastutil.longs.Long2IntMap playerTickingRequests = Long2IntMaps.synchronize(new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap()); // Canvas
+ 
+     @Override
+     public final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerChunkCache.ChunkAndHolder> moonrise$getPlayerTickingChunks() {
+@@ -527,7 +_,7 @@
+ 
+         final long chunkKey = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ);
+ 
+-        if (this.playerTickingRequests.addTo(chunkKey, 1) != 0) {
++        if (this.playerTickingRequests.compute(chunkKey, (k, v) -> (v == null ? 0 : v) + 1) != 1) { // Canvas
+             // already added
+             return;
+         }
+@@ -549,7 +_,10 @@
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread((ServerLevel)(Object)this, chunkX, chunkZ, "Cannot remove ticking request async");
+ 
+         final long chunkKey = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ);
+-        final int val = this.playerTickingRequests.addTo(chunkKey, -1);
++        // Canvas start
++        int val = this.playerTickingRequests.compute(chunkKey, (_, v) -> (v == null ? 0 : v) - 1);
++        val += 1;
++        // Canvas end
+ 
+         if (val <= 0) {
+             throw new IllegalStateException("Negative counter");
 @@ -702,6 +_,16 @@
          // Paper end - rewrite chunk system
          this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
@@ -207,7 +238,7 @@
      }
  
      // Paper start
-@@ -733,8 +_,146 @@
+@@ -733,8 +_,148 @@
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -216,7 +247,7 @@
 +    // Canvas start - Multithreaded Dimension Ticking
 +    private final List<Connection> activeConnections = new ObjectArrayList<>();
 +    private final Object lock = new Object();
-+    private final Object blockUpdatedLock = new Object();
++
 +    private int ticksSinceLastBlockEventsTickCall = 0;
 +    private int ticksSinceLastRaidTickCall = 0;
 +    private int ticksSinceLastTickCustomSpawnersCall = 0;
@@ -248,6 +279,7 @@
 +                if (this.emptyTicks == serverEmptySecondsLimit) {
 +                    MinecraftServer.LOGGER.info("Level empty for {} seconds, pausing", this.server.pauseWhileEmptySeconds());
 +                }
++                this.bukkitScheduler.mainThreadHeartbeat();
 +                return true;
 +            }
 +        }
@@ -325,6 +357,7 @@
 +        this.tpsCalculator.doTick();
 +        // Mark handling tick AFTER ticking empty level check
 +        this.handlingTick = true;
++        this.bukkitScheduler.mainThreadHeartbeat();
 +
 +        for (final Entity entity : this.getEntities().getAll()) {
 +            if (entity.isRemoved()) {
@@ -422,7 +455,7 @@
                          if (!entity.isRemoved()) {
                              if (!tickRateManager.isEntityFrozen(entity)) {
                                  profilerFiller.push("checkDespawn");
-@@ -841,7 +_,8 @@
+@@ -841,21 +_,75 @@
                              }
                          }
                      }
@@ -430,9 +463,10 @@
 +            */ // Canvas // - threaded entity ticking
 +            this.tickEntities(false); // Canvas - threaded entity ticking
              profilerFiller.pop();
-             this.tickBlockEntities();
+-            this.tickBlockEntities();
++            this.tickBlockEntities(profilerFiller);
          }
-@@ -849,7 +_,61 @@
+ 
          profilerFiller.push("entityManagement");
          // Paper - rewrite chunk system
          profilerFiller.pop();
@@ -495,6 +529,13 @@
  
      @Override
      public boolean shouldTickBlocksAt(long chunkPos) {
+         // Paper start - rewrite chunk system
+-        final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder holder = this.moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
+-        return holder != null && holder.isTickingReady();
++        return this.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.contains(chunkPos); // Canvas - faster impl
+         // Paper end - rewrite chunk system
+     }
+ 
 @@ -874,10 +_,17 @@
                      this.setDayTime(this.preciseTime);
                  } else
@@ -663,6 +704,22 @@
              }
          }
          } // Paper - option to disable pathfinding updates
+@@ -1810,13 +_,13 @@
+ 
+     @Override
+     public void updateNeighborsAt(BlockPos pos, Block block) {
+-        if (captureBlockStates) { return; } // Paper - Cancel all physics during placement
++        if (captureBlockStates.get()) { return; } // Paper - Cancel all physics during placement // Canvas - atomic
+         this.updateNeighborsAt(pos, block, ExperimentalRedstoneUtils.initialOrientation(this, null, null));
+     }
+ 
+     @Override
+     public void updateNeighborsAt(BlockPos pos, Block block, @Nullable Orientation orientation) {
+-        if (captureBlockStates) { return; } // Paper - Cancel all physics during placement
++        if (captureBlockStates.get()) { return; } // Paper - Cancel all physics during placement // Canvas - atomic
+         this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, null, orientation);
+     }
+ 
 @@ -2157,8 +_,8 @@
      }
  
@@ -683,17 +740,6 @@
              csvOutput.writeRow(pos.getX(), pos.getY(), pos.getZ(), tickingBlockEntity.getType());
          }
      }
-@@ -2435,8 +_,10 @@
-             if (this.populating) {
-                 return;
-             }
-+            synchronized (this.blockUpdatedLock) { // Canvas
-             // CraftBukkit end
-             this.updateNeighborsAt(pos, block);
-+            } // Canvas
-         }
-     }
- 
 @@ -2472,6 +_,16 @@
      public ServerLevel getLevel() {
          return this;
@@ -729,6 +775,35 @@
          super.close();
          // Paper - rewrite chunk system
      }
+@@ -2562,9 +_,7 @@
+ 
+     private boolean isPositionTickingWithEntitiesLoaded(long chunkPos) {
+         // Paper start - rewrite chunk system
+-        final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder chunkHolder = this.moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
+-        // isTicking implies the chunk is loaded, and the chunk is loaded now implies the entities are loaded
+-        return chunkHolder != null && chunkHolder.isTickingReady();
++        return this.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.contains(chunkPos); // Canvas - faster impl
+         // Paper end - rewrite chunk system
+     }
+ 
+@@ -2577,15 +_,13 @@
+ 
+     public boolean isNaturalSpawningAllowed(BlockPos pos) {
+         // Paper start - rewrite chunk system
+-        final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder chunkHolder = this.moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(pos));
+-        return chunkHolder != null && chunkHolder.isEntityTickingReady();
++        return this.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.contains(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(pos)); // Canvas - faster impl
+         // Paper end - rewrite chunk system
+     }
+ 
+     public boolean isNaturalSpawningAllowed(ChunkPos chunkPos) {
+         // Paper start - rewrite chunk system
+-        final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder chunkHolder = this.moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkPos));
+-        return chunkHolder != null && chunkHolder.isEntityTickingReady();
++        return this.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.contains(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkPos)); // Canvas - faster impl
+         // Paper end - rewrite chunk system
+     }
+ 
 @@ -2657,6 +_,35 @@
      // Paper end - optimize redstone (Alternate Current)
  

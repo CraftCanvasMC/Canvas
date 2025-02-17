@@ -1,10 +1,10 @@
 package io.canvasmc.canvas.server;
 
+import java.nio.file.Path;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
-import java.nio.file.Path;
 
 public class TickLoopConstantsUtils {
 

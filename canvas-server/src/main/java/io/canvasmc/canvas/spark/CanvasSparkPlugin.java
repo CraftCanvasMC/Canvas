@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.spark;
 
+import io.canvasmc.canvas.Config;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
@@ -7,7 +8,6 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
-import io.canvasmc.canvas.Config;
 import me.lucko.spark.api.Spark;
 import me.lucko.spark.paper.PaperClassSourceLookup;
 import me.lucko.spark.paper.PaperCommandSender;
@@ -54,7 +54,7 @@ public class CanvasSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.classLookup = classLookup;
         this.tickHook = new PaperTickHook();
         this.tickReporter = new PaperTickReporter();
-        this.gameThreadDumper = new LevelThreadDumper(Thread.currentThread());
+        this.gameThreadDumper = new MultiLoopThreadDumper();
         this.platform = new SparkPlatform(this);
     }
 

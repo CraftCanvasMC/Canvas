@@ -1,24 +1,29 @@
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
-@@ -4,14 +_,16 @@
+@@ -4,14 +_,20 @@
  import com.mojang.serialization.Codec;
  import java.io.IOException;
  import java.util.Collection;
+-import java.util.Iterator;
 +import java.util.Collections;
- import java.util.Iterator;
  import java.util.List;
++import java.util.Set;
++import java.util.concurrent.atomic.AtomicBoolean;
 +import java.util.concurrent.atomic.AtomicReference;
  import java.util.function.Consumer;
  import java.util.function.Predicate;
  import javax.annotation.Nullable;
 +import io.canvasmc.canvas.server.level.MinecraftServerWorld;
++import it.unimi.dsi.fastutil.objects.ObjectArrayList;
++import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
++import it.unimi.dsi.fastutil.objects.ObjectLists;
  import net.minecraft.CrashReport;
  import net.minecraft.CrashReportCategory;
 -import net.minecraft.ReportedException;
  import net.minecraft.core.BlockPos;
  import net.minecraft.core.Direction;
  import net.minecraft.core.Holder;
-@@ -24,14 +_,13 @@
+@@ -24,26 +_,23 @@
  import net.minecraft.network.protocol.Packet;
  import net.minecraft.resources.ResourceKey;
  import net.minecraft.resources.ResourceLocation;
@@ -34,6 +39,18 @@
  import net.minecraft.util.Mth;
  import net.minecraft.util.RandomSource;
  import net.minecraft.util.StringRepresentable;
+ import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+-import net.minecraft.world.TickRateManager;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.damagesource.DamageSources;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.boss.EnderDragonPart;
+-import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.alchemy.PotionBrewing;
 @@ -103,7 +_,7 @@
  import org.bukkit.event.block.BlockPhysicsEvent;
  // CraftBukkit end
@@ -43,16 +60,28 @@
      public static final Codec<ResourceKey<Level>> RESOURCE_KEY_CODEC = ResourceKey.codec(Registries.DIMENSION);
      public static final ResourceKey<Level> OVERWORLD = ResourceKey.create(Registries.DIMENSION, ResourceLocation.withDefaultNamespace("overworld"));
      public static final ResourceKey<Level> NETHER = ResourceKey.create(Registries.DIMENSION, ResourceLocation.withDefaultNamespace("the_nether"));
-@@ -115,7 +_,7 @@
+@@ -115,9 +_,9 @@
      public static final int TICKS_PER_DAY = 24000;
      public static final int MAX_ENTITY_SPAWN_Y = 20000000;
      public static final int MIN_ENTITY_SPAWN_Y = -20000000;
 -    public final List<TickingBlockEntity> blockEntityTickers = Lists.newArrayList(); // Paper - public
-+    public final List<TickingBlockEntity> blockEntityTickers = Collections.synchronizedList(Lists.newArrayList()); // Paper - public // Canvas - syncrhonize
++    public final List<TickingBlockEntity> blockEntityTickers = ObjectLists.synchronize(new ObjectArrayList<>()); // Paper - public // Canvas - syncrhonize && fastutil
      protected final NeighborUpdater neighborUpdater;
-     private final List<TickingBlockEntity> pendingBlockEntityTickers = Lists.newArrayList();
+-    private final List<TickingBlockEntity> pendingBlockEntityTickers = Lists.newArrayList();
++    private final Set<TickingBlockEntity> pendingBlockEntityTickers = new ObjectLinkedOpenHashSet<>(); // Canvas - fastutil
      private boolean tickingBlockEntities;
-@@ -152,7 +_,7 @@
+     public final Thread thread;
+     private final boolean isDebug;
+@@ -146,13 +_,13 @@
+     public boolean pvpMode;
+     public org.bukkit.generator.ChunkGenerator generator;
+ 
+-    public boolean preventPoiUpdated = false; // CraftBukkit - SPIGOT-5710
+-    public boolean captureBlockStates = false;
+-    public boolean captureTreeGeneration = false;
++    public final AtomicBoolean preventPoiUpdated = new AtomicBoolean(false); // CraftBukkit - SPIGOT-5710 // Canvas - atomic
++    public final AtomicBoolean captureBlockStates = new AtomicBoolean(false); // Canvas - atomic
++    public final AtomicBoolean captureTreeGeneration = new AtomicBoolean(false);
      public boolean isBlockPlaceCancelled = false; // Paper - prevent calling cleanup logic when undoing a block place upon a cancelled BlockPlaceEvent
      public Map<BlockPos, org.bukkit.craftbukkit.block.CraftBlockState> capturedBlockStates = new java.util.LinkedHashMap<>(); // Paper
      public Map<BlockPos, BlockEntity> capturedTileEntities = new java.util.LinkedHashMap<>(); // Paper - Retain block place order when capturing blockstates
@@ -65,19 +94,92 @@
          io.papermc.paper.configuration.WorldConfiguration> paperWorldConfigCreator, // Paper - create paper world config
          java.util.concurrent.Executor executor // Paper - Anti-Xray
      ) {
-+        super(dimension.location().toString()); // Canvas
++        super(dimension.location().toString(), "level thread " + dimension.location()); // Canvas
          // Paper start - getblock optimisations - cache world height/sections
          final DimensionType dimType = dimensionTypeRegistration.value();
          this.minY = dimType.minY();
-@@ -1503,7 +_,7 @@
+@@ -1081,7 +_,7 @@
+     @Nullable
+     public final BlockState getBlockStateIfLoaded(BlockPos pos) {
+         // CraftBukkit start - tree generation
+-        if (this.captureTreeGeneration) {
++        if (this.captureTreeGeneration.get()) { // Canvas - atomic
+             CraftBlockState previous = this.capturedBlockStates.get(pos);
+             if (previous != null) {
+                 return previous.getHandle();
+@@ -1145,7 +_,7 @@
+     @Override
+     public boolean setBlock(BlockPos pos, BlockState state, int flags, int recursionLeft) {
+         // CraftBukkit start - tree generation
+-        if (this.captureTreeGeneration) {
++        if (this.captureTreeGeneration.get()) { // Canvas - atomic
+             // Paper start - Protect Bedrock and End Portal/Frames from being destroyed
+             BlockState type = getBlockState(pos);
+             if (!type.isDestroyable()) return false;
+@@ -1169,7 +_,7 @@
+             Block block = state.getBlock();
+             // CraftBukkit start - capture blockstates
+             boolean captured = false;
+-            if (this.captureBlockStates && !this.capturedBlockStates.containsKey(pos)) {
++            if (this.captureBlockStates.get() && !this.capturedBlockStates.containsKey(pos)) { // Canvas - atomic
+                 CraftBlockState blockstate = (CraftBlockState) world.getBlockAt(pos.getX(), pos.getY(), pos.getZ()).getState(); // Paper - use CB getState to get a suitable snapshot
+                 blockstate.setFlag(flags); // Paper - set flag
+                 this.capturedBlockStates.put(pos.immutable(), blockstate);
+@@ -1182,7 +_,7 @@
+ 
+             if (blockState == null) {
+                 // CraftBukkit start - remove blockstate if failed (or the same)
+-                if (this.captureBlockStates && captured) {
++                if (this.captureBlockStates.get() && captured) { // Canvas - atomic
+                     this.capturedBlockStates.remove(pos);
+                 }
+                 // CraftBukkit end
+@@ -1220,7 +_,7 @@
+                 */
+ 
+                 // CraftBukkit start
+-                if (!this.captureBlockStates) { // Don't notify clients or update physics while capturing blockstates
++                if (!this.captureBlockStates.get() || true) { // Don't notify clients or update physics while capturing blockstates // Canvas - atomic // - always update physics
+                     // Modularize client and physic updates
+                     // Spigot start
+                     try {
+@@ -1238,7 +_,7 @@
+     }
+ 
+     // CraftBukkit start - Split off from above in order to directly send client and physic updates
+-    public void notifyAndUpdatePhysics(BlockPos blockposition, LevelChunk chunk, BlockState oldBlock, BlockState newBlock, BlockState actualBlock, int i, int j) {
++    public synchronized void notifyAndUpdatePhysics(BlockPos blockposition, LevelChunk chunk, BlockState oldBlock, BlockState newBlock, BlockState actualBlock, int i, int j) { // Canvas - synchronize
+         BlockState iblockdata = newBlock;
+         BlockState iblockdata1 = oldBlock;
+         BlockState iblockdata2 = actualBlock;
+@@ -1279,7 +_,7 @@
+             }
+ 
+             // CraftBukkit start - SPIGOT-5710
+-            if (!this.preventPoiUpdated) {
++            if (!this.preventPoiUpdated.get()) { // Canvas - atomic
+                 this.onBlockStateChange(blockposition, iblockdata1, iblockdata2);
+             }
+             // CraftBukkit end
+@@ -1395,7 +_,7 @@
+     @Override
+     public BlockState getBlockState(BlockPos pos) {
+         // CraftBukkit start - tree generation
+-        if (this.captureTreeGeneration) {
++        if (this.captureTreeGeneration.get()) { // Canvas - atomic
+             CraftBlockState previous = this.capturedBlockStates.get(pos); // Paper
+             if (previous != null) {
+                 return previous.getHandle();
+@@ -1503,8 +_,7 @@
          (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
      }
  
 -    protected void tickBlockEntities() {
-+    public void tickBlockEntities() { // Canvas - protected -> public
-         ProfilerFiller profilerFiller = Profiler.get();
+-        ProfilerFiller profilerFiller = Profiler.get();
++    protected void tickBlockEntities(ProfilerFiller profilerFiller) { // Canvas - reduce the amt of times we run Profiler.get for no reason
          profilerFiller.push("blockEntities");
          this.tickingBlockEntities = true;
+         if (!this.pendingBlockEntityTickers.isEmpty()) {
 @@ -1522,9 +_,10 @@
              this.tileTickPosition = (this.tileTickPosition < this.blockEntityTickers.size()) ? this.tileTickPosition : 0;
              TickingBlockEntity tickingBlockEntity = this.blockEntityTickers.get(this.tileTickPosition);
@@ -106,6 +208,15 @@
  
      public <T extends Entity> void guardEntityTick(Consumer<T> consumerEntity, T entity) {
          try {
+@@ -1714,7 +_,7 @@
+         BlockPos blockPos = blockEntity.getBlockPos();
+         if (!this.isOutsideBuildHeight(blockPos)) {
+             // CraftBukkit start
+-            if (this.captureBlockStates) {
++            if (this.captureBlockStates.get()) { // Canvas - atomic
+                 this.capturedTileEntities.put(blockPos.immutable(), blockEntity);
+                 return;
+             }
 @@ -1783,8 +_,14 @@
      }
  
