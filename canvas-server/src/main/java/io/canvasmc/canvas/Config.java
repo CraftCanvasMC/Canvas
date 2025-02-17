@@ -185,8 +185,12 @@ public class Config {
             })
             public int executorThreadPriority = Thread.NORM_PRIORITY;
         }
+
         @Comment("Smoothens the bedrock layer at the bottom(and top if in the nether) of the world during world generation.")
         public boolean smoothBedrockLayer = false;
+
+        @Comment("Runs noise filling and biome populating in a virtual thread executor. If disabled, it will run sync")
+        public boolean runNoiseFillAsync = false;
     }
 
     @Comment("Async-Pathfinding optimization options")
