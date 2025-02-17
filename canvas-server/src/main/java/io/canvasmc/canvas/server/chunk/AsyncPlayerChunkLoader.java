@@ -12,6 +12,7 @@ import net.minecraft.util.profiling.ProfilerFiller;
 import java.util.function.BooleanSupplier;
 
 public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPlayerChunkLoader> {
+    public static AsyncPlayerChunkLoader INSTANCE;
 
     public AsyncPlayerChunkLoader(final String name, final String debugName) {
         super(name, debugName);
@@ -21,6 +22,7 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
             tickThread.setDaemon(Config.INSTANCE.setDaemonForTickLoops);
             tickThread.setUncaughtExceptionHandler((_, exception) -> LOGGER.error("Uncaught exception in player join thread", exception));
         });
+        INSTANCE = this;
     }
 
     @Override
