@@ -206,8 +206,8 @@ public class ThreadedTickDiagnosis {
             accumulatedEntityTicking += entityTicking;
             accumulatedChunkTicking += world.chunkSource.lastTickingChunksCount;
             accumulatedTickingRegions += world.chunkSource.tickingRegionsCount;
-            accumulatedBlockTickingChunkHolders += world.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.count();
-            accumulatedEntityTickingChunkHolders += world.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.count();
+            accumulatedBlockTickingChunkHolders += world.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.size();
+            accumulatedEntityTickingChunkHolders += world.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.size();
 
             list.add(text("  ").toBuilder().append(text("Chunks in ", color(0x4EA2ED)), text(bukkitWorld.getName(), GREEN), text(":")).build());
             list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(
@@ -218,8 +218,8 @@ public class ThreadedTickDiagnosis {
                 text(" Full: ", color(0x4EA2ED)), text(full),
                 text(" Chunk Ticking: ", color(0x4EA2ED)), text(world.chunkSource.lastTickingChunksCount),
                 text(" Tick Regions: ", color(0x4EA2ED)), text(world.chunkSource.tickingRegionsCount),
-                text(" Entity Ticking Holders: ", color(0x4EA2ED)), text(world.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.count()),
-                text(" Block Ticking Holders: ", color(0x4EA2ED)), text(world.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.count())
+                text(" Entity Ticking Holders: ", color(0x4EA2ED)), text(world.moonrise$getChunkTaskScheduler().chunkHolderManager.entityTickingChunkHolders.size()),
+                text(" Block Ticking Holders: ", color(0x4EA2ED)), text(world.moonrise$getChunkTaskScheduler().chunkHolderManager.blockTickingChunkHolders.size())
             ).build());
         }
         if (worlds.size() > 1) {
