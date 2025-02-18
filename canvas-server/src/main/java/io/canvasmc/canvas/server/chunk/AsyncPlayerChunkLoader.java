@@ -32,18 +32,25 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
 
     public void tick(BooleanSupplier hasTimeLeft) {
         ProfilerFiller profilerFiller = Profiler.get();
-        for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-            ServerChunkCache chunkSource = level.getChunkSource();
-            if (level.tickRateManager().runsNormally() || level.spigotConfig.unloadFrozenChunks) {
-                if (chunkSource.ticksSinceLastPurgeStaleTicketsCall++ > Config.INSTANCE.ticksBetweenPurgeStaleTickets) {
-                    chunkSource.distanceManager.purgeStaleTickets();
-                    chunkSource.ticksSinceLastPurgeStaleTicketsCall = 0;
+        if (MinecraftServer.getThreadedServer().hasStarted()) {
+            for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+                ServerChunkCache chunkSource = level.getChunkSource();
+                if (level.tickRateManager().runsNormally() || level.spigotConfig.unloadFrozenChunks) {
+                    if (chunkSource.ticksSinceLastPurgeStaleTicketsCall++ > Config.INSTANCE.ticksBetweenPurgeStaleTickets) {
+                        chunkSource.distanceManager.purgeStaleTickets();
+                        chunkSource.ticksSinceLastPurgeStaleTicketsCall = 0;
+                    }
                 }
+                level.moonrise$getPlayerChunkLoader().tick();
+                chunkSource.broadcastChangedChunks(profilerFiller);
+                chunkSource.runDistanceManagerUpdates();
+                chunkSource.chunkMap.tick(hasTimeLeft);
             }
-            level.moonrise$getPlayerChunkLoader().tick();
-            chunkSource.broadcastChangedChunks(profilerFiller);
-            chunkSource.runDistanceManagerUpdates();
-            chunkSource.chunkMap.tick(hasTimeLeft);
+        } else {
+            MinecraftServer.getServer().getAllLevels().forEach((level -> {
+                level.moonrise$getPlayerChunkLoader().tick();
+                level.getChunkSource().pollTask();
+            }));
         }
     }
 }

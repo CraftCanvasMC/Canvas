@@ -163,9 +163,11 @@ public class Config {
                 "allows the server to rate-limit the amount of chunk sends per tick",
                 "allowing a smoother ping when sending chunks on join",
                 "",
-                "Default is -1 to disable the rate limit."
+                "Default is -1 to disable the rate limit",
+                "Disabling this is highly not recommended, this spam-sent hundreds",
+                "of chunks per tick to the client when developing chunk loading optimizations"
             })
-            public int rateLimitChunkSends = -1;
+            public int rateLimitChunkSends = 50;
         }
 
         @Comment(value = {

@@ -115,13 +115,11 @@ public class ThreadedServer implements ThreadedBukkitServer {
         try {
             MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             ThreadedBukkitServer.setInstance(this);
+
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
-            //noinspection resource
-            AsyncPlayerChunkLoader chunkLoader = new AsyncPlayerChunkLoader("AsyncChunkLoader", "async player chunk loader");
-            chunkLoader.start((self) -> (hasTimeLeft, _) -> self.tick(hasTimeLeft));
             if (Config.INSTANCE.threadedEntityTicking) {
                 final ThreadedEntityScheduler entityScheduler = new ThreadedEntityScheduler("EntityScheduler", "entity scheduler");
                 this.entityScheduler = entityScheduler;

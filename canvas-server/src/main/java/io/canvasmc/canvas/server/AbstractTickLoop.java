@@ -56,6 +56,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
     private long postTickNanos = 0L;
     private Consumer<T> threadModifier = null;
     private Runnable preblockstart = null;
+    private boolean waitUntilServerIsStarted = false;
 
     public AbstractTickLoop(final String name, final String debugName) {
         //noinspection unchecked
@@ -80,6 +81,11 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
     }
 
     public T start(Function<S, AbstractTick> tick) {
+        return this.start(tick, true);
+    }
+
+    public T start(Function<S, AbstractTick> tick, boolean waitUntilServerIsStarted) {
+        this.waitUntilServerIsStarted = waitUntilServerIsStarted;
         //noinspection unchecked
         S thisAsS = (S) this;
         T thread = this.constructor.construct(() -> this.spin(tick.apply(thisAsS)), this.name(), thisAsS);
@@ -103,7 +109,9 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
             }
             this.prepared = true;
 
-            this.managedBlock(() -> MinecraftServer.getServer().isTicking());
+            if (waitUntilServerIsStarted) {
+                this.managedBlock(() -> MinecraftServer.getServer().isTicking());
+            }
             ticking = true;
 
             tickSection = Util.getNanos();
