@@ -5,9 +5,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
 import java.util.*;
+import com.google.common.collect.Lists;
 
 public class ChunkPriorityManager {
     private final Map<Player, ChunkPos> playerChunks = new HashMap<>();
+    public final List<ChunkPos> blockingOverride = Lists.newCopyOnWriteArrayList();
 
     public enum TaskType {
         GEN, LOAD, FULL, LIGHT;
@@ -19,6 +21,7 @@ public class ChunkPriorityManager {
 
     public Priority getPriority(int chunkX, int chunkZ, TaskType taskType) {
         if (playerChunks.isEmpty()) return Priority.LOWEST;
+        if (blockingOverride.contains(new ChunkPos(chunkX, chunkZ))) return Priority.BLOCKING;
 
         int closestDistance = Integer.MAX_VALUE;
 
