@@ -39,7 +39,6 @@ public class ThreadedTickDiagnosis {
     public static final int LABEL_COLOR = 0x4EA2ED;
     public static final int VALUE_COLOR = 0x2F8FE9;
     static final TextComponent BASE = text("").color(color(BASE_COLOR));
-    private static final List<String> TPS_OPTIONS = Arrays.asList("tps5", "tps10", "tps60");
     public static int HEADER_COLOR = 0x5FC3DD;
     public static int VALUE = 0x96D6F0;
 
@@ -86,7 +85,7 @@ public class ThreadedTickDiagnosis {
 
                 list.add(BASE.append(text("Util ThreadCount:").color(color(HEADER_COLOR))));
                 list.add(subReportLine("NettyIO: ", valueOf(SpigotConfig.getInt("settings.netty-threads", 4)), VALUE_COLOR, VALUE));
-                list.add(subReportLine("Moonrise Workers: ", valueOf(MoonriseCommon.WORKER_POOL.getCoreThreads().length), VALUE_COLOR, VALUE));
+                list.add(subReportLine("Moonrise Workers: ", MoonriseCommon.WORKER_POOL.getAliveThreads() + "/" + MoonriseCommon.WORKER_POOL.getCoreThreads().length, VALUE_COLOR, VALUE));
             }, (list) -> {
                 MinecraftServer.getThreadedServer().getThreadedWorlds().forEach(level -> doLevel(list, level, BASE));
             }, (list) -> {

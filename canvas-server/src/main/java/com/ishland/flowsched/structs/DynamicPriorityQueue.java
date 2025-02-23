@@ -1,5 +1,6 @@
 package com.ishland.flowsched.structs;
 
+import ca.spottedleaf.concurrentutil.util.Priority;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicIntegerArray;
@@ -14,6 +15,7 @@ public class DynamicPriorityQueue<E> {
     private final AtomicIntegerArray taskCount;
     private final ConcurrentLinkedQueue<E>[] priorities;
     private final ConcurrentHashMap<E, Integer> priorityMap = new ConcurrentHashMap<>();
+    private Priority moonrise$highest = Priority.NORMAL; // Canvas
 
     public DynamicPriorityQueue(int priorityCount) {
         this.taskCount = new AtomicIntegerArray(priorityCount);
@@ -32,6 +34,7 @@ public class DynamicPriorityQueue<E> {
 
         this.priorities[priority].add(element);
         this.taskCount.incrementAndGet(priority);
+        recalc(); // Canvas
     }
 
     // behavior is undefined when changing priority for one item concurrently
@@ -41,20 +44,24 @@ public class DynamicPriorityQueue<E> {
 
         int currentPriority = this.priorityMap.getOrDefault(element, -1);
         if (currentPriority == -1 || currentPriority == priority) {
+            recalc(); // Canvas
             return false; // a clear failure
         }
         final boolean removedFromQueue = this.priorities[currentPriority].remove(element);
         if (!removedFromQueue) {
+            recalc(); // Canvas
             return false; // the element is dequeued while we are changing priority
         }
         this.taskCount.decrementAndGet(currentPriority);
         final Integer put = this.priorityMap.put(element, priority);
         final boolean changeSuccess = put != null && put == currentPriority;
         if (!changeSuccess) {
+            recalc(); // Canvas
             return false; // something else may have called remove()
         }
         this.priorities[priority].add(element);
         this.taskCount.incrementAndGet(priority);
+        recalc(); // Canvas
         return true;
     }
 
@@ -65,9 +72,11 @@ public class DynamicPriorityQueue<E> {
             if (element != null) {
                 this.taskCount.decrementAndGet(i);
                 this.priorityMap.remove(element);
+                recalc(); // Canvas
                 return element;
             }
         }
+        recalc(); // Canvas
         return null;
     }
 
@@ -77,13 +86,38 @@ public class DynamicPriorityQueue<E> {
 
     public void remove(E element) {
         final Integer remove = this.priorityMap.remove(element);
-        if (remove == null) return;
+        // Canvas start
+        if (remove == null) {
+            recalc();
+            return;
+        }
+        // Canvas end
         boolean removed = this.priorities[remove].remove(element); // best-effort
         if (removed) this.taskCount.decrementAndGet(remove);
+        recalc(); // Canvas
     }
 
     public int size() {
         return priorityMap.size();
     }
 
+    // Canvas start
+    public boolean isEmpty() {
+        return size() == 0;
+    }
+
+    public void recalc() {
+        int highest = 0;
+        for (final Integer value : this.priorityMap.values()) {
+            if (value > highest) {
+                highest = value;
+            }
+        }
+        this.moonrise$highest = Priority.getPriority(highest);
+    }
+
+    public Priority getHighestPriority() {
+        return this.moonrise$highest;
+    }
+    // Canvas end
 }

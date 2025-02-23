@@ -10,10 +10,10 @@ import java.util.function.Consumer;
 
 public class ExecutorManager {
 
-    private final DynamicPriorityQueue<Task> globalWorkQueue;
-    private final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>();
+    protected final DynamicPriorityQueue<Task> globalWorkQueue; // Canvas - private -> protected
+    protected final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>(); // Canvas - private -> protected
     final Object workerMonitor = new Object();
-    private final WorkerThread[] workerThreads;
+    protected final WorkerThread[] workerThreads; // Canvas - private -> protected
 
     /**
      * Creates a new executor manager.
@@ -155,7 +155,7 @@ public class ExecutorManager {
         this.globalWorkQueue.enqueue(task, task.priority());
     }
 
-    private void wakeup() {
+    protected void wakeup() { // Canvas - private -> protected
         synchronized (this.workerMonitor) {
             this.workerMonitor.notify();
         }
@@ -194,7 +194,7 @@ public class ExecutorManager {
         this.globalWorkQueue.changePriority(task, task.priority());
     }
 
-    private static class FreeableTaskList extends ReferenceArrayList<Task> {
+    protected static class FreeableTaskList extends ReferenceArrayList<Task> { // Canvas - private -> protected
 
         private boolean freed = false;
 
