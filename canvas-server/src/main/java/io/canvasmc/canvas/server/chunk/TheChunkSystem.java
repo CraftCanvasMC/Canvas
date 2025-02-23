@@ -16,13 +16,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TheChunkSystem extends ExecutorManager {
     private final Logger LOGGER;
     private final String name;
+    private boolean shutdown;
 
     private final TheChunkSystem.COWArrayList<TheChunkSystem.ExecutorGroup> executors = new TheChunkSystem.COWArrayList<>(TheChunkSystem.ExecutorGroup.class);
-
-    private static final Priority HIGH_PRIORITY_NOTIFY_THRESHOLD = Priority.HIGH;
-    private static final Priority QUEUE_SHUTDOWN_PRIORITY = Priority.HIGH;
-
-    private boolean shutdown;
 
     public TheChunkSystem(final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
         super(workerThreadCount, threadInitializer, 16);
@@ -134,7 +130,7 @@ public class TheChunkSystem extends ExecutorManager {
                 return TheChunkSystem.ExecutorGroup.this;
             }
 
-            private void notifyHighPriority() {
+            private void notifyPriorityShift() {
                 TheChunkSystem.this.notifyAllThreads();
             }
 
@@ -175,22 +171,6 @@ public class TheChunkSystem extends ExecutorManager {
             @Override
             public boolean isShutdown() {
                 return TheChunkSystem.this.shutdown;
-            }
-
-            public void setMaxParallelism(final int maxParallelism) {
-                // assume that we could have increased the parallelism
-                if (this.getTargetPriority() != null) {
-                    TheChunkSystem.ExecutorGroup.this.getThreadPool().notifyAllThreads();
-                }
-            }
-
-            Priority getTargetPriority() {
-                final Priority ret = TheChunkSystem.this.globalWorkQueue.getHighestPriority();
-                if (!this.isShutdown()) {
-                    return ret;
-                }
-
-                return ret == null ? QUEUE_SHUTDOWN_PRIORITY : Priority.max(ret, QUEUE_SHUTDOWN_PRIORITY);
             }
 
             @Override
@@ -273,11 +253,8 @@ public class TheChunkSystem extends ExecutorManager {
                     if (this.wrapped.queue()) {
                         final Priority priority = this.getPriority();
                         if (priority != Priority.COMPLETING) {
-                            if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
-                                TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
-                            } else {
-                                TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyScheduled();
-                            }
+                            // technically we don't have a "high priority alert"
+                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyScheduled();
                         }
                         return true;
                     }
@@ -308,9 +285,8 @@ public class TheChunkSystem extends ExecutorManager {
                 @Override
                 public boolean setPriority(final Priority priority) {
                     if (this.wrapped.setPriority(priority)) {
-                        if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
-                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
-                        }
+                        // technically we don't have a "high priority alert"
+                        TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyPriorityShift();
                         return true;
                     }
 
@@ -320,9 +296,8 @@ public class TheChunkSystem extends ExecutorManager {
                 @Override
                 public boolean raisePriority(final Priority priority) {
                     if (this.wrapped.raisePriority(priority)) {
-                        if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
-                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
-                        }
+                        // technically we don't have a "high priority alert"
+                        TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyPriorityShift();
                         return true;
                     }
 
@@ -357,9 +332,8 @@ public class TheChunkSystem extends ExecutorManager {
                 @Override
                 public boolean setPriorityAndSubOrder(final Priority priority, final long subOrder) {
                     if (this.wrapped.setPriorityAndSubOrder(priority, subOrder)) {
-                        if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
-                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
-                        }
+                        // technically we don't have a "high priority alert"
+                        TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyPriorityShift();
                         return true;
                     }
 
