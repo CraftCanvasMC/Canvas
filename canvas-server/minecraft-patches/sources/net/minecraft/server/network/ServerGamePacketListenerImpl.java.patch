@@ -24,6 +24,15 @@
  import net.minecraft.server.level.ServerLevel;
  import net.minecraft.server.level.ServerPlayer;
  import net.minecraft.util.FutureChain;
+@@ -185,6 +_,8 @@
+ import net.minecraft.world.level.block.entity.StructureBlockEntity;
+ import net.minecraft.world.level.block.state.BlockBehaviour;
+ import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.ChunkAccess;
++import net.minecraft.world.level.chunk.status.ChunkStatus;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.BlockHitResult;
+ import net.minecraft.world.phys.Vec3;
 @@ -572,7 +_,7 @@
                      return;
                  }
@@ -121,6 +130,43 @@
                                  && d7 > org.spigotmc.SpigotConfig.movedWronglyThreshold // Spigot
                                  && !this.player.isSleeping()
                                  && !this.player.gameMode.isCreative()
+@@ -1534,6 +_,27 @@
+                             // Paper start - Add fail move event
+                             // Paper start - optimise out extra getCubes
+                             boolean teleportBack = !this.player.noPhysics && !this.player.isSleeping() && movedWrongly;
++                            // Canvas start - prevent syncload
++                            ServerLevel level = this.player.serverLevel();
++                            // d -> x
++                            // d2 -> z
++                            int chunkX = (int) Math.floor(d) >> 4;
++                            int chunkZ = (int) Math.floor(d2) >> 4;
++                            ChunkAccess access = level.getChunkSource().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
++                            if (access == null) {
++                                // the chunk technically isn't loaded, or doesn't have a FULL status
++                                // schedule the chunk load for full, dont syncload, pullback
++                                // technically this only happens when players move into unloaded chunks
++                                // or when the player is first loading into the world
++                                level.moonrise$getChunkTaskScheduler().scheduleChunkLoad(
++                                    chunkX, chunkZ, ChunkStatus.FULL, true, ca.spottedleaf.concurrentutil.util.Priority.BLOCKING,
++                                    (_ -> {
++                                        this.player.setFrozenMovement(false);
++                                    })
++                                );
++                                this.player.setFrozenMovement(true);
++                            }
++                            // Canvas end
+                             this.player.absMoveTo(d, d1, d2, f, f1); // prevent desync by tping to the set position, dropped for unknown reasons by mojang
+                             if (!this.player.noPhysics && !this.player.isSleeping() && !teleportBack) {
+                                 AABB newBox = this.player.getBoundingBox();
+@@ -1543,7 +_,7 @@
+                                 } // else: no collision at all detected, why do we care?
+                             }
+                             // Paper end - optimise out extra getCubes
+-                            if (teleportBack) {
++                            if (teleportBack || this.player.isFrozenMovement()) { // Canvas - prevent syncload
+                                 io.papermc.paper.event.player.PlayerFailMoveEvent event = fireFailMove(io.papermc.paper.event.player.PlayerFailMoveEvent.FailReason.CLIPPED_INTO_BLOCK,
+                                     toX, toY, toZ, toYaw, toPitch, false);
+                                 if (event.isAllowed()) {
 @@ -1849,7 +_,16 @@
  
      @Override
