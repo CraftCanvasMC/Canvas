@@ -52,14 +52,6 @@ public class TheChunkSystem extends ExecutorManager {
         // shutdown workers
         super.shutdown();
         this.wakeup();
-        for (final WorkerThread thread : this.workerThreads) {
-            try {
-                thread.join(TimeUnit.SECONDS.toMillis(30));
-            } catch (InterruptedException e) {
-                LOGGER.error("Worker thread, '{}' took more than 30 seconds to shutdown", thread.getName());
-                throw new RuntimeException("Unable to kill worker thread", e);
-            }
-        }
 
         for (final TheChunkSystem.ExecutorGroup group : this.executors.getArray()) {
             for (final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor executor : group.executors.getArray()) {
