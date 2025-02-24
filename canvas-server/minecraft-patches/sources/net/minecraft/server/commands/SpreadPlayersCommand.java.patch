@@ -1,6 +1,13 @@
 --- a/net/minecraft/server/commands/SpreadPlayersCommand.java
 +++ b/net/minecraft/server/commands/SpreadPlayersCommand.java
-@@ -9,10 +_,20 @@
+@@ -1,5 +_,6 @@
+ package net.minecraft.server.commands;
+ 
++import ca.spottedleaf.concurrentutil.util.Priority;
+ import com.google.common.collect.Maps;
+ import com.google.common.collect.Sets;
+ import com.mojang.brigadier.CommandDispatcher;
+@@ -9,29 +_,59 @@
  import com.mojang.brigadier.exceptions.CommandSyntaxException;
  import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
  import com.mojang.brigadier.exceptions.Dynamic4CommandExceptionType;
@@ -9,8 +16,10 @@
  import java.util.Collection;
  import java.util.Locale;
  import java.util.Map;
++import java.util.Objects;
  import java.util.Set;
 +import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.ConcurrentLinkedQueue;
 +import java.util.concurrent.LinkedBlockingQueue;
 +import java.util.concurrent.ThreadPoolExecutor;
 +import java.util.concurrent.TimeUnit;
@@ -21,14 +30,16 @@
  import net.minecraft.commands.CommandSourceStack;
  import net.minecraft.commands.Commands;
  import net.minecraft.commands.arguments.EntityArgument;
-@@ -20,18 +_,30 @@
+ import net.minecraft.commands.arguments.coordinates.Vec2Argument;
  import net.minecraft.core.BlockPos;
  import net.minecraft.core.Direction;
++import net.minecraft.core.SectionPos;
  import net.minecraft.network.chat.Component;
 +import net.minecraft.network.chat.ComponentUtils;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.TickTask;
  import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
 +import net.minecraft.server.rcon.RconConsoleSource;
  import net.minecraft.tags.BlockTags;
  import net.minecraft.util.Mth;
@@ -38,8 +49,12 @@
  import net.minecraft.world.level.BlockGetter;
 +import net.minecraft.world.level.ChunkPos;
  import net.minecraft.world.level.block.state.BlockState;
++import net.minecraft.world.level.chunk.LevelChunk;
++import net.minecraft.world.level.chunk.status.ChunkStatus;
++import net.minecraft.world.level.levelgen.Heightmap;
  import net.minecraft.world.phys.Vec2;
  import net.minecraft.world.scores.Team;
++import javax.annotation.Nullable;
  
  public class SpreadPlayersCommand {
 +    // Canvas start
@@ -63,7 +78,61 @@
          ServerLevel level = source.getLevel();
          int minY = level.getMinY();
          if (maxHeight < minY) {
-@@ -129,6 +_,47 @@
+@@ -115,6 +_,53 @@
+             SpreadPlayersCommand.Position[] positions = createInitialPositions(
+                 randomSource, respectTeams ? getNumberOfTeams(targets) : targets.size(), d, d1, d2, d3
+             );
++            ConcurrentLinkedQueue<Entity> queue = new ConcurrentLinkedQueue<>(targets);
++            int scheduled = 0;
++            int sent = 0;
++            for (final Position position : positions) {
++                int chunkX = SectionPos.blockToSectionCoord(position.getX());
++                int chunkZ = SectionPos.blockToSectionCoord(position.getZ());
++                @Nullable LevelChunk chunk = level.getChunkIfLoaded(chunkX, chunkZ);
++                if (chunk == null) {
++                    ServerPlayer entity = (ServerPlayer) Objects.requireNonNull(queue.poll());
++                    entity.sendSystemMessage(Component.literal("Teleporting via spreadplayers command, please wait..."));
++                    level.moonrise$getChunkTaskScheduler().scheduleChunkLoad(
++                        chunkX, chunkZ, true, ChunkStatus.FULL, true, Priority.BLOCKING, (_) -> {
++                            try {
++                                spreadPosition(center, spreadDistance, level, randomSource, d, d1, d2, d3, maxHeight, position, respectTeams);
++                            } catch (CommandSyntaxException e) {
++                                throw new RuntimeException(e);
++                            }
++                            setEntityPosition(
++                                level, new Position[]{position}, maxHeight, entity, position, 0.0D
++                            );
++                            entity.setFrozenMovement(false);
++                        }
++                    );
++                    scheduled++;
++                    entity.setFrozenMovement(true);
++                } else {
++                    spreadPosition(center, spreadDistance, level, randomSource, d, d1, d2, d3, maxHeight, position, respectTeams);
++                    setEntityPosition(
++                        level, new Position[]{position}, maxHeight, Objects.requireNonNull(queue.poll()), position, 0.0D
++                    );
++                    sent++;
++                }
++            }
++            if (true) {
++                source.sendSuccess("Prepared and/or scheduled teleports for spreadplayers command. " + scheduled + " scheduled, " + sent + " sent.");
++                source.sendSuccess(
++                    () -> Component.translatable(
++                        "commands.spreadplayers.success." + (respectTeams ? "teams" : "entities"),
++                        positions.length,
++                        center.x,
++                        center.y,
++                        String.format(Locale.ROOT, "%.2f", -1.0)
++                    ),
++                    true
++                );
++                return positions.length;
++            }
+             spreadPositions(center, spreadDistance, level, randomSource, d, d1, d2, d3, maxHeight, positions, respectTeams);
+             double d4 = setPlayerPositions(targets, level, positions, maxHeight, respectTeams);
+             source.sendSuccess(
+@@ -129,6 +_,95 @@
              );
              return positions.length;
          }
@@ -108,13 +177,113 @@
 +        }
 +        return retV;
 +        // Canvas end
++    }
++
++    private static void spreadPosition(
++        Vec2 center,
++        double spreadDistance,
++        ServerLevel level,
++        RandomSource random,
++        double minX,
++        double minZ,
++        double maxX,
++        double maxZ,
++        int maxHeight,
++        SpreadPlayersCommand.Position position,
++        boolean respectTeams
++    ) throws CommandSyntaxException {
++        boolean flag = true;
++        double d = Float.MAX_VALUE;
++
++        int i;
++        for (i = 0; i < 10000 && flag; i++) {
++            flag = false;
++            d = Float.MAX_VALUE;
++
++            for (int i1 = 0; i1 < 1; i1++) {
++                if (position.clamp(minX, minZ, maxX, maxZ)) {
++                    flag = true;
++                }
++            }
++
++            if (!flag) {
++                if (!position.isSafe(level, maxHeight)) {
++                    position.randomize(random, minX, minZ, maxX, maxZ);
++                    flag = true;
++                }
++            }
++        }
++
++        if (d == Float.MAX_VALUE) {
++            d = 0.0;
++        }
++
++        if (i >= 10000) {
++            if (respectTeams) {
++                throw ERROR_FAILED_TO_SPREAD_TEAMS.create(1, center.x, center.y, String.format(Locale.ROOT, "%.2f", d));
++            } else {
++                throw ERROR_FAILED_TO_SPREAD_ENTITIES.create(1, center.x, center.y, String.format(Locale.ROOT, "%.2f", d));
++            }
++        }
      }
  
      private static int getNumberOfTeams(Collection<? extends Entity> entities) {
-@@ -272,6 +_,155 @@
+@@ -246,32 +_,186 @@
+                 position = positions[i++];
+             }
+ 
+-            entity.teleportTo(
+-                level,
+-                Mth.floor(position.x) + 0.5,
+-                position.getSpawnY(level, maxHeight),
+-                Mth.floor(position.z) + 0.5,
+-                Set.of(),
+-                entity.getYRot(),
+-                entity.getXRot(),
+-                true
+-                , org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.COMMAND // CraftBukkit - handle teleport reason
+-            );
+-            double d1 = Double.MAX_VALUE;
+-
+-            for (SpreadPlayersCommand.Position position1 : positions) {
+-                if (position != position1) {
+-                    double d2 = position.dist(position1);
+-                    d1 = Math.min(d2, d1);
+-                }
+-            }
+-
+-            d += d1;
++            d = setEntityPosition(level, positions, maxHeight, entity, position, d);
+         }
+ 
          return targets.size() < 2 ? 0.0 : d / targets.size();
      }
  
++    private static double setEntityPosition(ServerLevel level, Position[] positions, int maxHeight, Entity entity, Position position, double d) {
++        entity.teleportTo(
++            level,
++            Mth.floor(position.x) + 0.5,
++            position.getSpawnY(level, maxHeight),
++            Mth.floor(position.z) + 0.5,
++            Set.of(),
++            entity.getYRot(),
++            entity.getXRot(),
++            true
++            , org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.COMMAND
++        );
++        double d1 = Double.MAX_VALUE;
++
++        for (Position position1 : positions) {
++            if (position != position1) {
++                double d2 = position.dist(position1);
++                d1 = Math.min(d2, d1);
++            }
++        }
++
++        d += d1;
++        return d;
++    }
++
 +    // Canvas start
 +    private static void vmp$spread(
 +        Vec2 center,
@@ -294,3 +463,24 @@
          double dist(SpreadPlayersCommand.Position other) {
              double d = this.x - other.x;
              double d1 = this.z - other.z;
+@@ -332,6 +_,10 @@
+ 
+         public int getSpawnY(BlockGetter level, int y) {
+             BlockPos.MutableBlockPos mutableBlockPos = new BlockPos.MutableBlockPos(this.x, (double)(y + 1), this.z);
++            if (true) {
++                BlockPos max = ((ServerLevel) level).getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, mutableBlockPos);
++                return max.getY();
++            }
+             boolean isAir = level.getBlockState(mutableBlockPos).isAir();
+             mutableBlockPos.move(Direction.DOWN);
+             boolean isAir1 = level.getBlockState(mutableBlockPos).isAir();
+@@ -352,8 +_,7 @@
+ 
+         public boolean isSafe(BlockGetter level, int y) {
+             BlockPos blockPos = BlockPos.containing(this.x, this.getSpawnY(level, y) - 1, this.z);
+-            BlockState blockState = level.getBlockState(blockPos);
+-            return blockPos.getY() < y && !blockState.liquid() && !blockState.is(BlockTags.FIRE);
++            return blockPos.getY() < y; // Canvas
+         }
+ 
+         public void randomize(RandomSource random, double minX, double minZ, double maxX, double maxZ) {

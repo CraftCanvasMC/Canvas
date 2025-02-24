@@ -10,7 +10,7 @@ import java.util.function.Consumer;
 
 public class ExecutorManager {
 
-    protected final DynamicPriorityQueue<Task> globalWorkQueue; // Canvas - private -> protected
+    public final DynamicPriorityQueue<Task> globalWorkQueue; // Canvas - private -> protected
     protected final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>(); // Canvas - private -> protected
     final Object workerMonitor = new Object();
     protected final WorkerThread[] workerThreads; // Canvas - private -> protected

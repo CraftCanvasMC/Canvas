@@ -12,9 +12,9 @@ import java.util.concurrent.atomic.AtomicIntegerArray;
  */
 public class DynamicPriorityQueue<E> {
 
-    private final AtomicIntegerArray taskCount;
-    private final ConcurrentLinkedQueue<E>[] priorities;
-    private final ConcurrentHashMap<E, Integer> priorityMap = new ConcurrentHashMap<>();
+    public final AtomicIntegerArray taskCount;
+    public final ConcurrentLinkedQueue<E>[] priorities;
+    public final ConcurrentHashMap<E, Integer> priorityMap = new ConcurrentHashMap<>();
     private Priority moonrise$highest = Priority.NORMAL; // Canvas
 
     public DynamicPriorityQueue(int priorityCount) {
