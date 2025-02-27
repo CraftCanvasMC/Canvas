@@ -17,6 +17,7 @@ import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.nodes.NodeTuple;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.nodes.ScalarNode;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.nodes.SequenceNode;
 import io.canvasmc.canvas.config.yaml.org.yaml.snakeyaml.nodes.Tag;
+import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -366,7 +367,16 @@ public class Constructor extends SafeConstructor {
                                 String enumValueName = node.getValue();
 
                                 try {
-                                    result = Enum.valueOf(type, enumValueName);
+                                    // Canvas start - allow overriding parse rules
+                                    try {
+                                        Method lenientMethod = type.getDeclaredMethod("lenientParse", String.class);
+                                        lenientMethod.setAccessible(true);
+                                        result = lenientMethod.invoke(null, enumValueName); // invoke static
+                                    } catch (NoSuchMethodException e) {
+                                        // the enum isn't lenient, use normal parsing
+                                        result = Enum.valueOf(type, enumValueName);
+                                    }
+                                    // Canvas end
                                 } catch (Exception var7) {
                                     throw new YAMLException("Unable to find enum value '" + enumValueName + "' for enum class: " + type.getName());
                                 }

@@ -103,7 +103,7 @@ public enum ChunkSystemAlgorithm {
         );
     }
 
-    public static ChunkSystemAlgorithm fromRaw(@NotNull String raw) {
+    public static ChunkSystemAlgorithm lenientParse(@NotNull String raw) {
         String capital = raw.toUpperCase(Locale.ROOT);
         return valueOf(capital);
     }

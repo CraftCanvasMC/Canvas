@@ -22,7 +22,7 @@ if (!file(".git").exists()) {
          zip from GitHub.
          
          Built Canvas jars are available for download at
-         https://canvas.kesug.com/downloads/
+         https://canvasmc.io/downloads
          
          See https://github.com/CraftCanvasMC/Canvas/blob/HEAD/CONTRIBUTING.md
          for further information on building and modifying Canvas.
