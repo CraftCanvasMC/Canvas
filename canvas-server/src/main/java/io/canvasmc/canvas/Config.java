@@ -2,28 +2,23 @@ package io.canvasmc.canvas;
 
 import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants;
 import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
+import io.canvasmc.canvas.config.ConfigHandlers;
 import io.canvasmc.canvas.config.ConfigSerializer;
 import io.canvasmc.canvas.config.Configuration;
 import io.canvasmc.canvas.config.ConfigurationUtils;
-import io.canvasmc.canvas.config.ValidationException;
+import io.canvasmc.canvas.config.SerializationBuilder;
 import io.canvasmc.canvas.config.annotation.AlwaysAtTop;
 import io.canvasmc.canvas.config.annotation.Comment;
-import io.canvasmc.canvas.config.annotation.EnumValue;
 import io.canvasmc.canvas.config.annotation.Experimental;
-import io.canvasmc.canvas.config.annotation.numeric.NegativeNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.NonNegativeNumericValue;
-import io.canvasmc.canvas.config.annotation.numeric.NonPositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.Range;
 import io.canvasmc.canvas.config.internal.ConfigurationManager;
 import io.canvasmc.canvas.entity.tracking.ThreadedTracker;
 import io.canvasmc.canvas.server.chunk.ChunkSendingExecutor;
-import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.resources.ResourceLocation;
@@ -129,24 +124,6 @@ public class Config {
             " - C2ME_AGGRESSIVE [Modern algorithm from C2ME, more aggressive than the previous]"
         })
         public ChunkSystemAlgorithm chunkWorkerAlgorithm = ChunkSystemAlgorithm.MOONRISE;
-
-        @Comment(value = {
-            "Whether to use density function compiler to accelerate world generation",
-            "",
-            "Density function: https://minecraft.wiki/w/Density_function",
-            "",
-            "This functionality compiles density functions from world generation",
-            "datapacks (including vanilla generation) to JVM bytecode to increase",
-            "performance by allowing JVM JIT to better optimize the code",
-            "",
-            "Currently, all functions provided by vanilla are implemented.",
-            "Chunk upgrades from pre-1.18 versions are not implemented and will",
-            "fall back to the unoptimized version of density functions.",
-            "",
-            "Please test if this optimization actually benefits your server, as",
-            "it can sometimes slow down chunk performance than speed it up."
-        })
-        public boolean enableDensityFunctionCompiler = false;
 
         @Comment(value = {
             "Sets the thread priority for worker threads",
@@ -584,6 +561,7 @@ public class Config {
     @Comment("Uses a 'dummy inventory' for passing the InventoryMoveEvent, which avoids unneeded resources spent on building a bukkit Inventory.")
     public boolean useDummyInventoryForHopperInventoryMoveEvent = true;
 
+    @NonNegativeNumericValue
     @Comment(value = {
         "In certain checks, like if a player is near a chunk(primarily used for spawning), it checks if the player is within a certain",
         "circular range of the chunk. This configuration allows configurability of the distance(in blocks) the player must be to pass the check."
@@ -591,127 +569,58 @@ public class Config {
     public double playerNearChunkDetectionRange = 16384.0D;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
-        AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
-        ConfigurationUtils.extractKeys(serializer.getConfigClass());
-        serializer.registerAnnotationHandler(Comment.class, (yamlWriter, indent, _, _, comment) -> {
-            if (comment.breakLineBefore()) {
-                yamlWriter.append("\n");
-            }
-            Arrays.stream(comment.value()).forEach(val -> yamlWriter.append(indent).append("## ").append(val).append("\n"));
-        });
-        serializer.registerAnnotationValidator(Range.class, (key, _, range, value) -> {
-            if (value instanceof Number number) {
-                float floatValue = number.floatValue();
-                int from = range.from();
-                int to = range.to();
-                if (!(range.inclusive() ? (floatValue >= from && floatValue <= to) : floatValue > from && floatValue < to)) {
-                    throw new ValidationException("Number for key, '" + key + "' was out of bounds! Value must be between " + from + " and " + to);
-                }
-                return true;
-            } else {
-                throw new ValidationException("Range validation was applied to a non-numeric object.");
-            }
-        });
-        serializer.registerAnnotationValidator(EnumValue.class, (_, _, enumValue, value) -> {
-            @SuppressWarnings("rawtypes") Class<? extends Enum> enumClass = enumValue.enumValue();
-
-            if (!enumClass.isEnum()) {
-                throw new ValidationException("EnumValue annotation applied to a non-enum type.");
-            }
-
-            Object[] enumConstants = enumClass.getEnumConstants();
-
-            if (value instanceof String str) {
-                String normalized = str.trim().toUpperCase(Locale.ROOT);
-                for (Object constant : enumConstants) {
-                    if (((Enum<?>) constant).name().equalsIgnoreCase(normalized)) {
-                        return true;
-                    }
-                }
-            } else if (value instanceof Enum<?> enumInstance) {
-                if (enumClass.isInstance(enumInstance)) {
-                    return true;
-                }
-            }
-
-            throw new ValidationException("Invalid enum value: " + value);
-        });
-        serializer.registerAnnotationValidator(NegativeNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() < 0)) {
-                    throw new ValidationException("Value must be a negative value");
-                }
-                return true;
-            }
-            throw new ValidationException("NegativeNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerAnnotationValidator(NonNegativeNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() >= 0)) {
-                    throw new ValidationException("Value must be a non-negative value");
-                }
-                return true;
-            }
-            throw new ValidationException("NonNegativeNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerAnnotationValidator(NonPositiveNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() <= 0)) {
-                    throw new ValidationException("Value must be a non-positive value");
-                }
-                return true;
-            }
-            throw new ValidationException("NonPositiveNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerAnnotationValidator(PositiveNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() > 0)) {
-                    throw new ValidationException("Value must be a positive value");
-                }
-                return true;
-            }
-            throw new ValidationException("PositiveNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerPostSerializeAction((context) -> {
-            INSTANCE = context.configuration();
-
-            System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
-            boolean configured = INSTANCE.chunks.nativeAccelerationEnabled;
-            if (configured) {
-                try {
-                    Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
-                } catch (Throwable t) {
-                    t.printStackTrace();
-                }
-            }
-            ThreadedTracker.init();
-            ChunkSendingExecutor.init();
-            for (final GoalMask goalMask : INSTANCE.entityGoalMasks) {
-                try {
-                    //noinspection unchecked
-                    Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalMask.goalClass);
-                    COMPILED_GOAL_MASKS.put(clazz, goalMask);
-                    LOGGER.info("Enabling Goal Mask for \"{}\"...", clazz.getSimpleName());
-                } catch (ClassNotFoundException e) {
-                    LOGGER.error("Unable to locate goal class \"{}\", skipping.", goalMask, e);
-                    continue;
-                }
-            }
-            for (final EntityMask entityMask : INSTANCE.entityMasks) {
-                if (!CHECK_ENTITY_MASKS) {
-                    LOGGER.warn("An EntityMask was registered, please be very careful with this, as it can make the movement of entities a lot more choppy(if using delays)");
-                    CHECK_ENTITY_MASKS = true;
-                }
-                LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
-                COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
-            }
-        });
-
-        return serializer;
+        ConfigurationUtils.extractKeys(configClass);
+        return new AnnotationBasedYamlSerializer<>(SerializationBuilder.<T>newBuilder()
+            .header(new String[]{
+                "This is the main Canvas configuration file",
+                "All configuration options here are made for vanilla-compatibility",
+                "and not for performance. Settings must be configured specific",
+                "to your hardware and server type. If you have questions",
+                "join our discord at https://discord.gg/canvasmc/"
+            })
+            .handler(ConfigHandlers.CommentProcessor::new)
+            .validator(ConfigHandlers.RangeProcessor::new)
+            .validator(ConfigHandlers.NegativeProcessor::new)
+            .validator(ConfigHandlers.PositiveProcessor::new)
+            .validator(ConfigHandlers.NonNegativeProcessor::new)
+            .validator(ConfigHandlers.NonPositiveProcessor::new)
+            .post(context -> INSTANCE = context.configuration())
+            .build(config, configClass)
+        );
     }
 
     public static Config init() {
         ConfigurationManager.register(Config.class, Config::buildSerializer);
+        System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
+        boolean configured = INSTANCE.chunks.nativeAccelerationEnabled;
+        if (configured) {
+            try {
+                Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+        ThreadedTracker.init();
+        ChunkSendingExecutor.init();
+        for (final GoalMask goalMask : INSTANCE.entityGoalMasks) {
+            try {
+                //noinspection unchecked
+                Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalMask.goalClass);
+                COMPILED_GOAL_MASKS.put(clazz, goalMask);
+                LOGGER.info("Enabling Goal Mask for \"{}\"...", clazz.getSimpleName());
+            } catch (ClassNotFoundException e) {
+                LOGGER.error("Unable to locate goal class \"{}\", skipping.", goalMask, e);
+                continue;
+            }
+        }
+        for (final EntityMask entityMask : INSTANCE.entityMasks) {
+            if (!CHECK_ENTITY_MASKS) {
+                LOGGER.warn("An EntityMask was registered, please be very careful with this, as it can make the movement of entities a lot more choppy(if using delays)");
+                CHECK_ENTITY_MASKS = true;
+            }
+            LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
+            COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
+        }
         return INSTANCE;
     }
 

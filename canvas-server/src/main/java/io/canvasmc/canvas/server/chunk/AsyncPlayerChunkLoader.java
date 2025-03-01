@@ -44,7 +44,7 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
                 level.moonrise$getPlayerChunkLoader().tick();
                 chunkSource.broadcastChangedChunks(profilerFiller);
                 chunkSource.runDistanceManagerUpdates();
-                chunkSource.chunkMap.tick(hasTimeLeft);
+                chunkSource.chunkMap.tick(hasTimeLeft, true);
             }
         } else {
             MinecraftServer.getServer().getAllLevels().forEach((level -> {
