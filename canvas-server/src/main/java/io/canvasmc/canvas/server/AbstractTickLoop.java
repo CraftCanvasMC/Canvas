@@ -69,6 +69,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
         this.debugName = debugName;
         this.constructor = constructor;
         WatchdogThread.registerWatcher(this);
+        MinecraftServer.getThreadedServer().loops.add(this);
         LOGGER.info("Loaded {} to threaded context", debugName);
     }
 
@@ -142,7 +143,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
                     try {
                         this.getRunningThread().join();
                     } catch (Throwable e) {
-                        throw new RuntimeException("Server encountered an unexpected exception when waiting for level thread to terminate!", e);
+                        throw new RuntimeException("Server encountered an unexpected exception when waiting for tick-loop to terminate!", e);
                     }
                 });
                 killThreadFuture.get(30, TimeUnit.SECONDS);

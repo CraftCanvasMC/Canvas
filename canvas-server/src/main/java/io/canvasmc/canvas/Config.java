@@ -705,11 +705,6 @@ public class Config {
                 LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
                 COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
             }
-
-            if (context.configuration().asyncPlayerJoining) {
-                //noinspection resource
-                new PlayerJoinThread("AsyncPlayerJoinThread", "player join thread");
-            }
         });
 
         return serializer;
