@@ -40,7 +40,7 @@ public class Config {
     public static boolean CHECK_ENTITY_MASKS = false;
     public static Config INSTANCE = new Config();
 
-    @Comment({
+    @Comment(value = {
         "Determines if the server should tick the playerlist assigned to each world on their own level threads",
         "or if it should tick on the main thread(globally)"
     })
@@ -223,9 +223,6 @@ public class Config {
 
         @Comment("Smoothens the bedrock layer at the bottom(and top if in the nether) of the world during world generation.")
         public boolean smoothBedrockLayer = false;
-
-        @Comment("Runs noise filling and biome populating in a virtual thread executor. If disabled, it will run sync")
-        public boolean runNoiseFillAsync = false;
     }
 
     @Comment("Async-Pathfinding optimization options")
@@ -586,6 +583,12 @@ public class Config {
 
     @Comment("Uses a 'dummy inventory' for passing the InventoryMoveEvent, which avoids unneeded resources spent on building a bukkit Inventory.")
     public boolean useDummyInventoryForHopperInventoryMoveEvent = true;
+
+    @Comment(value = {
+        "In certain checks, like if a player is near a chunk(primarily used for spawning), it checks if the player is within a certain",
+        "circular range of the chunk. This configuration allows configurability of the distance(in blocks) the player must be to pass the check."
+    })
+    public double playerNearChunkDetectionRange = 16384.0D;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
