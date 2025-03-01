@@ -92,6 +92,19 @@ public class Config {
     })
     public boolean ensureCorrectDoors = false;
 
+    @Comment(value = {
+        "Enables plugin compatibility mode.",
+        "With Canvas' multi-threaded context, plugins most likely are not going to be as compatible with",
+        "Canvas, given it can fire events basically anywhere at anytime. Because of this, some plugins break.",
+        "This option sync-locks any 'single-threaded' events. What this means is \"single-threaded\" events",
+        "are locked so only 1 thread can call a \"single-threaded event\" at a time. \"asynchronous-marked\"",
+        "events remain unlocked, given plugins that use them should already be prepared for them to fire basically",
+        "whenever and wherever. This may cause performance issues, so proceed with caution when using this, and",
+        "only use this when absolutely necessary(its better to fix the problem in the plugin than have the entire",
+        "server suffer performance loss)"
+    })
+    public boolean pluginCompatibilityMode = false;
+
     @Comment("Chunk related config options")
     public Chunks chunks = new Chunks();
     public static class Chunks {
