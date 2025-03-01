@@ -43,15 +43,7 @@ public final class MultiLoopThreadDumper implements ThreadDumper {
 
         return SparkSamplerProtos.SamplerMetadata.ThreadDumper.newBuilder()
                                                               .setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC)
-                                                              .addAllIds(validThreadIds(threads))
+                                                              .addAllPatterns(REGISTRY)
                                                               .build();
-    }
-
-    public List<Long> validThreadIds(ThreadInfo[] threads) {
-        return Arrays.stream(threads).map(ThreadInfo::getThreadId).collect(Collectors.toList());
-    }
-
-    public static void removeRegistryEntry(String prefix) {
-        REGISTRY.remove(prefix);
     }
 }
