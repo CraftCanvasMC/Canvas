@@ -56,6 +56,9 @@ public class Config {
     })
     public int tickLoopThreadPriority = calculateDefaultThreadPriority();
 
+    @Comment("This enables a debug log for when the method 'syncload' is called, purely for development purposes.")
+    public boolean debugSyncload = false;
+
     private int calculateDefaultThreadPriority() {
         return Runtime.getRuntime().availableProcessors() > 4 ? 8 : Thread.NORM_PRIORITY + 2;
     }
