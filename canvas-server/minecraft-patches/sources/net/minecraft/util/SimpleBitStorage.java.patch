@@ -1,11 +1,202 @@
 --- a/net/minecraft/util/SimpleBitStorage.java
 +++ b/net/minecraft/util/SimpleBitStorage.java
+@@ -1,5 +_,6 @@
+ package net.minecraft.util;
+ 
++import java.util.concurrent.atomic.AtomicLongArray;
+ import java.util.function.IntConsumer;
+ import javax.annotation.Nullable;
+ import org.apache.commons.lang3.Validate;
 @@ -199,7 +_,7 @@
          0,
          5
      };
 -    private final long[] data;
-+    private volatile long[] data; // Canvas - volatile
++    private final AtomicLongArray data; // Canvas - atomic
      private final int bits;
      private final long mask;
      private final int size;
+@@ -235,7 +_,7 @@
+                 l |= data[i1 + i2] & this.mask;
+             }
+ 
+-            this.data[i++] = l;
++            this.data.set(i++, l); // Canvas - atomic
+         }
+ 
+         int i3 = size - i1;
+@@ -247,7 +_,7 @@
+                 l1 |= data[i1 + i4] & this.mask;
+             }
+ 
+-            this.data[i] = l1;
++            this.data.set(i, l1); // Canvas - atomic
+         }
+     }
+ 
+@@ -271,9 +_,9 @@
+                 throw new SimpleBitStorage.InitializationException("Invalid length given for storage, got: " + data.length + " but expected: " + i1);
+             }
+ 
+-            this.data = data;
++            this.data = new AtomicLongArray(data); // Canvas - atomic
+         } else {
+-            this.data = new long[i1];
++            this.data = new AtomicLongArray(new long[i1]); // Canvas - atomic
+         }
+         // Paper start - optimise bitstorage read/write operations
+         this.magic = BETTER_MAGIC[this.bits];
+@@ -295,14 +_,14 @@
+         final int divQ = full >>> 20;
+         final int divR = (full & 0xFFFFF) * this.mulBits >>> 20;
+ 
+-        final long[] dataArray = this.data;
++        final AtomicLongArray dataArray = this.data; // Canvas - atomic
+ 
+-        final long data = dataArray[divQ];
++        final long data = dataArray.get(divQ); // Canvas - atomic
+         final long mask = this.mask;
+ 
+         final long write = data & ~(mask << divR) | ((long)value & mask) << divR;
+ 
+-        dataArray[divQ] = write;
++        dataArray.set(divQ, write); // Canvas - atomic
+ 
+         return (int)(data >>> divR & mask);
+         // Paper end - optimise bitstorage read/write operations
+@@ -315,14 +_,14 @@
+         final int divQ = full >>> 20;
+         final int divR = (full & 0xFFFFF) * this.mulBits >>> 20;
+ 
+-        final long[] dataArray = this.data;
++        final AtomicLongArray dataArray = this.data; // Canvas - atomic
+ 
+-        final long data = dataArray[divQ];
++        final long data = dataArray.get(divQ); // Canvas - atomic
+         final long mask = this.mask;
+ 
+         final long write = data & ~(mask << divR) | ((long)value & mask) << divR;
+ 
+-        dataArray[divQ] = write;
++        dataArray.set(divQ, write); // Canvas - atomic
+         // Paper end - optimise bitstorage read/write operations
+     }
+ 
+@@ -333,14 +_,31 @@
+         final int divQ = full >>> 20;
+         final int divR = (full & 0xFFFFF) * this.mulBits >>> 20;
+ 
+-        return (int)(this.data[divQ] >>> divR & this.mask);
++        return (int)(this.data.get(divQ) >>> divR & this.mask); // Canvas - atomic
+         // Paper end - optimise bitstorage read/write operations
+     }
+ 
+     @Override
+     public long[] getRaw() {
+-        return this.data;
+-    }
++        return this.unpack(this.data); // Canvas - atomic
++    }
++    // Canvas start
++
++    public synchronized AtomicLongArray copyAtomicLongArray(AtomicLongArray original) {
++        return new AtomicLongArray(unpack(original));
++    }
++
++    public synchronized long[] unpack(AtomicLongArray original) {
++        int length = original.length();
++        long[] tempArray = new long[length];
++
++        for (int i = 0; i < length; i++) {
++            tempArray[i] = original.get(i);
++        }
++
++        return tempArray;
++    }
++    // Canvas end
+ 
+     @Override
+     public int getSize() {
+@@ -353,10 +_,14 @@
+     }
+ 
+     @Override
+-    public void getAll(IntConsumer consumer) {
++    public synchronized void getAll(IntConsumer consumer) { // Canvas - synchronized
+         int i = 0;
+ 
+-        for (long l : this.data) {
++        // Canvas start - atomic
++        AtomicLongArray copy = copyAtomicLongArray(this.data);
++        for (int ind = 0; ind < copy.length(); ind++) {
++            long l = copy.get(ind);
++        // Canvas end
+             for (int i1 = 0; i1 < this.valuesPerLong; i1++) {
+                 consumer.accept((int)(l & this.mask));
+                 l >>= this.bits;
+@@ -369,11 +_,11 @@
+ 
+     @Override
+     public void unpack(int[] array) {
+-        int i = this.data.length;
++        int i = this.data.length(); // Canvas - atomic
+         int i1 = 0;
+ 
+         for (int i2 = 0; i2 < i - 1; i2++) {
+-            long l = this.data[i2];
++            long l = this.data.get(i2); // Canvas - atomic
+ 
+             for (int i3 = 0; i3 < this.valuesPerLong; i3++) {
+                 array[i1 + i3] = (int)(l & this.mask);
+@@ -385,7 +_,7 @@
+ 
+         int i2 = this.size - i1;
+         if (i2 > 0) {
+-            long l = this.data[i - 1];
++            long l = this.data.get(i - 1); // Canvas - atomic
+ 
+             for (int i3 = 0; i3 < i2; i3++) {
+                 array[i1 + i3] = (int)(l & this.mask);
+@@ -395,13 +_,13 @@
+     }
+ 
+     @Override
+-    public BitStorage copy() {
+-        return new SimpleBitStorage(this.bits, this.size, (long[])this.data.clone());
++    public synchronized BitStorage copy() { // Canvas - synchronized
++        return new SimpleBitStorage(this.bits, this.size, (long[])unpack(this.data)); // Canvas - atomic
+     }
+ 
+     // Paper start - block counting
+     @Override
+-    public final it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.ShortArrayList> moonrise$countEntries() {
++    public synchronized final it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<it.unimi.dsi.fastutil.shorts.ShortArrayList> moonrise$countEntries() { // Canvas - synchronized
+         final int valuesPerLong = this.valuesPerLong;
+         final int bits = this.bits;
+         final long mask = (1L << bits) - 1L;
+@@ -413,7 +_,11 @@
+ 
+             int index = 0;
+ 
+-            for (long value : this.data) {
++            // Canvas start
++            AtomicLongArray copy = copyAtomicLongArray(this.data);
++            for (int ind = 0; ind < copy.length(); ind++) {
++                long value = copy.get(ind);
++            // Canvas end
+                 int li = 0;
+                 do {
+                     final int paletteIdx = (int)(value & mask);
+@@ -442,7 +_,11 @@
+ 
+             int index = 0;
+ 
+-            for (long value : this.data) {
++            // Canvas start
++            AtomicLongArray copy = copyAtomicLongArray(this.data);
++            for (int ind = 0; ind < copy.length(); ind++) {
++                long value = copy.get(ind);
++            // Canvas end
+                 int li = 0;
+                 do {
+                     final int paletteIdx = (int)(value & mask);
