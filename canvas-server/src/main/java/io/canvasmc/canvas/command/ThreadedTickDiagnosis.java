@@ -39,7 +39,6 @@ public class ThreadedTickDiagnosis {
     public static final int LABEL_COLOR = 0x4EA2ED;
     public static final int VALUE_COLOR = 0x2F8FE9;
     static final TextComponent BASE = text("").color(color(BASE_COLOR));
-    private static final List<String> TPS_OPTIONS = Arrays.asList("tps5", "tps10", "tps60");
     public static int HEADER_COLOR = 0x5FC3DD;
     public static int VALUE = 0x96D6F0;
 
@@ -86,7 +85,7 @@ public class ThreadedTickDiagnosis {
 
                 list.add(BASE.append(text("Util ThreadCount:").color(color(HEADER_COLOR))));
                 list.add(subReportLine("NettyIO: ", valueOf(SpigotConfig.getInt("settings.netty-threads", 4)), VALUE_COLOR, VALUE));
-                list.add(subReportLine("Moonrise Workers: ", valueOf(MoonriseCommon.WORKER_POOL.getCoreThreads().length), VALUE_COLOR, VALUE));
+                list.add(subReportLine("Moonrise Workers: ", MoonriseCommon.WORKER_POOL.getAliveThreads() + "/" + MoonriseCommon.WORKER_POOL.getCoreThreads().length, VALUE_COLOR, VALUE));
             }, (list) -> {
                 MinecraftServer.getThreadedServer().getThreadedWorlds().forEach(level -> doLevel(list, level, BASE));
             }, (list) -> {
@@ -159,6 +158,8 @@ public class ThreadedTickDiagnosis {
         int accumulatedTickingRegions = 0;
         int accumulatedBlockTickingChunkHolders = 0;
         int accumulatedEntityTickingChunkHolders = 0;
+        int fullChunksSize = 0;
+        int newChunkHolderCount = 0;
 
         for (final World bukkitWorld : worlds) {
             final ServerLevel world = ((CraftWorld) bukkitWorld).getHandle();
@@ -168,6 +169,8 @@ public class ThreadedTickDiagnosis {
             int full = 0;
             int blockTicking = 0;
             int entityTicking = 0;
+            fullChunksSize += world.getChunkSource().getFullChunksCount();
+            newChunkHolderCount += world.moonrise$getChunkTaskScheduler().chunkHolderManager.size();
 
             for (final NewChunkHolder holder : ((ChunkSystemServerLevel) world).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolders()) {
                 final NewChunkHolder.ChunkCompletion completion = holder.getLastChunkCompletion();
@@ -237,6 +240,8 @@ public class ThreadedTickDiagnosis {
                 text(" Block Ticking Holders: ", color(0x4EA2ED)), text(accumulatedBlockTickingChunkHolders)
             ).build());
         }
+        list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(text(" LevelChunk full count", color(0x4EA2ED)), text(fullChunksSize)).build());
+        list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(text(" NewChunkHolder count", color(0x4EA2ED)), text(newChunkHolderCount)).build());
     }
 
     public static void sendCollective(@NotNull Function<List<TextComponent>, List<TextComponent>> builder, CommandSender sender) {

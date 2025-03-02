@@ -2,17 +2,20 @@ package com.ishland.flowsched.executor;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
+import ca.spottedleaf.moonrise.common.util.TickThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class WorkerThread extends Thread {
+public class WorkerThread extends TickThread { // Canvas - extend TickThread
 
     private static final Logger LOGGER = LoggerFactory.getLogger("FlowSched Executor Worker Thread");
 
     private final ExecutorManager executorManager;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
+    public volatile boolean active = false; // Canvas - add activity boolean for api
 
     public WorkerThread(ExecutorManager executorManager) {
+        super("null_worker"); // Canvas - extend TickThread
         this.executorManager = executorManager;
     }
 
@@ -23,6 +26,7 @@ public class WorkerThread extends Thread {
             if (this.shutdown.get()) {
                 return;
             }
+            active = true; // Canvas - add activity boolean for api
             if (pollTasks()) {
                 continue;
             }
@@ -40,6 +44,7 @@ public class WorkerThread extends Thread {
             synchronized (this.executorManager.workerMonitor) {
                 if (this.executorManager.hasPendingTasks()) continue main_loop;
                 try {
+                    active = false; // Canvas - add activity boolean for api
                     this.executorManager.workerMonitor.wait();
                 } catch (InterruptedException ignored) {
                 }

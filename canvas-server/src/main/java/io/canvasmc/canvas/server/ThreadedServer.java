@@ -1,5 +1,7 @@
 package io.canvasmc.canvas.server;
 
+import ca.spottedleaf.moonrise.common.util.TickThread;
+import com.google.common.collect.Sets;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
@@ -31,6 +33,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
@@ -53,9 +58,11 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public ThreadedEntityScheduler entityScheduler;
     private long tickSection;
     private boolean started = false;
+    protected final Set<AbstractTickLoop<?,?>> loops;
 
     public ThreadedServer(MinecraftServer server) {
         this.server = server;
+        this.loops = Sets.newConcurrentHashSet();
     }
 
     public static Long @NotNull [] getLevelIds() {
@@ -230,4 +237,8 @@ public class ThreadedServer implements ThreadedBukkitServer {
         }
         return accessors;
     }
+
+	public Set<AbstractTickLoop<?, ?>> getTickLoops() {
+        return this.loops;
+	}
 }

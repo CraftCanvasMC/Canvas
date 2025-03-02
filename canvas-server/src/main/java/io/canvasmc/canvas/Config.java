@@ -2,28 +2,23 @@ package io.canvasmc.canvas;
 
 import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants;
 import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
+import io.canvasmc.canvas.config.ConfigHandlers;
 import io.canvasmc.canvas.config.ConfigSerializer;
 import io.canvasmc.canvas.config.Configuration;
 import io.canvasmc.canvas.config.ConfigurationUtils;
-import io.canvasmc.canvas.config.ValidationException;
+import io.canvasmc.canvas.config.SerializationBuilder;
 import io.canvasmc.canvas.config.annotation.AlwaysAtTop;
 import io.canvasmc.canvas.config.annotation.Comment;
-import io.canvasmc.canvas.config.annotation.EnumValue;
 import io.canvasmc.canvas.config.annotation.Experimental;
-import io.canvasmc.canvas.config.annotation.numeric.NegativeNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.NonNegativeNumericValue;
-import io.canvasmc.canvas.config.annotation.numeric.NonPositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.Range;
 import io.canvasmc.canvas.config.internal.ConfigurationManager;
 import io.canvasmc.canvas.entity.tracking.ThreadedTracker;
 import io.canvasmc.canvas.server.chunk.ChunkSendingExecutor;
-import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.resources.ResourceLocation;
@@ -40,7 +35,10 @@ public class Config {
     public static boolean CHECK_ENTITY_MASKS = false;
     public static Config INSTANCE = new Config();
 
-    @Comment("Determines if the server should tick the playerlist assigned to each world on their own level threads, or if it should tick on the main thread(globally)")
+    @Comment(value = {
+        "Determines if the server should tick the playerlist assigned to each world on their own level threads",
+        "or if it should tick on the main thread(globally)"
+    })
     public boolean runPlayerListTickOnIndependentLevel = true;
 
     @Comment("Amount of ticks until the level will resync time with the player")
@@ -58,6 +56,9 @@ public class Config {
     })
     public int tickLoopThreadPriority = calculateDefaultThreadPriority();
 
+    @Comment("This enables a debug log for when the method 'syncload' is called, purely for development purposes.")
+    public boolean debugSyncload = false;
+
     private int calculateDefaultThreadPriority() {
         return Runtime.getRuntime().availableProcessors() > 4 ? 8 : Thread.NORM_PRIORITY + 2;
     }
@@ -70,20 +71,42 @@ public class Config {
     })
     public boolean setDaemonForTickLoops = false;
 
-    @Comment("In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to schedule to the level thread")
+    @Comment(value = {
+        "In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to",
+        "schedule to the level thread"
+    })
     public boolean useLevelThreadsAsChunkSourceMain = true;
 
     @Comment("Enables each world to have the \"empty server\" logic per world introduced in Minecraft 1.21.4")
     public boolean emptySleepPerWorlds = true;
 
-    @Comment("Enables the \"threadedtick\" command, which is an implementation of the vanilla \"tick\" command for the Canvas threaded context")
+    @Comment(value = {
+        "Enables the \"threadedtick\" command, which is an implementation of the vanilla",
+        "\"tick\" command for the Canvas threaded context"
+    })
     public boolean enableCanvasTickCommand = true;
 
     @Comment("Allows opening any type of door with your hand, including iron doors")
     public boolean canOpenAnyDoorWithHand = false;
 
-    @Comment("Ensure correct doors. Schedules an extra update on the next tick to ensure the door doesnt get glitched when a Villager and Player both interact with it at the same time")
+    @Comment(value = {
+        "Ensure correct doors. Schedules an extra update on the next tick to ensure the door doesnt get",
+        "glitched when a Villager and Player both interact with it at the same time"
+    })
     public boolean ensureCorrectDoors = false;
+
+    @Comment(value = {
+        "Enables plugin compatibility mode.",
+        "With Canvas' multi-threaded context, plugins most likely are not going to be as compatible with",
+        "Canvas, given it can fire events basically anywhere at anytime. Because of this, some plugins break.",
+        "This option sync-locks any 'single-threaded' events. What this means is \"single-threaded\" events",
+        "are locked so only 1 thread can call a \"single-threaded event\" at a time. \"asynchronous-marked\"",
+        "events remain unlocked, given plugins that use them should already be prepared for them to fire basically",
+        "whenever and wherever. This may cause performance issues, so proceed with caution when using this, and",
+        "only use this when absolutely necessary(its better to fix the problem in the plugin than have the entire",
+        "server suffer performance loss)"
+    })
+    public boolean pluginCompatibilityMode = false;
 
     @Comment("Chunk related config options")
     public Chunks chunks = new Chunks();
@@ -100,31 +123,23 @@ public class Config {
         public boolean allowAVX512 = false;
 
         @Range(from = -1, to = 9, inclusive = true)
-        @Comment("Overrides the ISA target located by the native loader, which allows forcing AVX512(must be a value between 6-9 for AVX512 support). Value must be between 1-9(inclusive), -1 to disable override")
+        @Comment(value = {
+            "Overrides the ISA target located by the native loader, which allows forcing AVX512.",
+            "Value must be between 1-9(inclusive), -1 to disable override",
+            "",
+            "Must be a value between 6-9 for AVX512 support"
+        })
         public int isaTargetLevelOverride = -1;
         public boolean nativeAccelerationEnabled = true;
 
-        @EnumValue(enumValue = ChunkSystemAlgorithm.class)
-        @Comment("Modifies what algorithm the chunk system will use to define thread counts. values: MOONRISE, C2ME, C2ME_AGGRESSIVE")
-        public String chunkWorkerAlgorithm = "C2ME";
-
         @Comment(value = {
-            "Whether to use density function compiler to accelerate world generation",
-            "",
-            "Density function: https://minecraft.wiki/w/Density_function",
-            "",
-            "This functionality compiles density functions from world generation",
-            "datapacks (including vanilla generation) to JVM bytecode to increase",
-            "performance by allowing JVM JIT to better optimize the code",
-            "",
-            "Currently, all functions provided by vanilla are implemented.",
-            "Chunk upgrades from pre-1.18 versions are not implemented and will",
-            "fall back to the unoptimized version of density functions.",
-            "",
-            "Please test if this optimization actually benefits your server, as",
-            "it can sometimes slow down chunk performance than speed it up."
+            "Modifies what algorithm the chunk system will use to define thread counts.",
+            "Valid options(lowercase or uppercase):",
+            " - MOONRISE [Paper default thread count]",
+            " - C2ME [Old algorithm from C2ME, less aggressive than the modern one]",
+            " - C2ME_AGGRESSIVE [Modern algorithm from C2ME, more aggressive than the previous]"
         })
-        public boolean enableDensityFunctionCompiler = false;
+        public ChunkSystemAlgorithm chunkWorkerAlgorithm = ChunkSystemAlgorithm.MOONRISE;
 
         @Comment(value = {
             "Sets the thread priority for worker threads",
@@ -133,7 +148,10 @@ public class Config {
             "- https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#setPriority(int)"
         })
         public int threadPoolPriority = Thread.NORM_PRIORITY + 1;
-        @Comment("Changes the maximum view distance for the server, allowing clients to have render distances higher than 32.")
+        @Comment(value = {
+            "Changes the maximum view distance for the server, allowing clients to have",
+            "render distances higher than 32"
+        })
         public int maxViewDistance = 32;
         @Comment(value = {
             "Allows disabling distance manager updates for when the level thread",
@@ -150,10 +168,16 @@ public class Config {
             public boolean asyncChunkSending = true;
 
             @PositiveNumericValue
-            @Comment("Amount of threads to use for async chunk sending. This does nothing when 'useVirtualThreadExecutorForChunkSenders' is enabled")
+            @Comment(value = {
+                "Amount of threads to use for async chunk sending.",
+                "With 'useVirtualThreadExecutorForChunkSenders' enabled, this does nothing."
+            })
             public int asyncChunkSendingThreadCount = 1;
 
-            @Comment("Similar to the 'virtual-thread' options, this makes it so that the executor for chunk senders uses a virtual thread pool")
+            @Comment(value = {
+                "Similar to the 'virtual-thread' options, this makes it",
+                "so that the executor for chunk senders uses a virtual thread pool"
+            })
             public boolean useVirtualThreadExecutorForChunkSenders = false;
 
             @Comment(value = {
@@ -192,9 +216,6 @@ public class Config {
 
         @Comment("Smoothens the bedrock layer at the bottom(and top if in the nether) of the world during world generation.")
         public boolean smoothBedrockLayer = false;
-
-        @Comment("Runs noise filling and biome populating in a virtual thread executor. If disabled, it will run sync")
-        public boolean runNoiseFillAsync = false;
     }
 
     @Comment("Async-Pathfinding optimization options")
@@ -229,7 +250,10 @@ public class Config {
     @Comment("Enables a modified version of Pufferfish's async mob spawning patch")
     public boolean enableAsyncSpawning = true;
 
-    @Comment("Delays the inventory change trigger to tick at an interval to avoid excessive usage of advancement updates and recipe updates")
+    @Comment(value = {
+        "Delays the inventory change trigger to tick at an interval to avoid",
+        "excessive usage of advancement updates and recipe updates"
+    })
     public int skipTicksAdvancements = 3;
 
     @Comment("Disables the ticking of a useless secondary poi sensor")
@@ -251,7 +275,11 @@ public class Config {
         public boolean explosionNoBlockDamage = false;
         public double tntRandomRange = -1;
 
-        @Comment("Enables 'merge tnt logic', which makes it so that nearby tnt are merged together, increasing the power of 1 tnt explosion and reducing the amount of explosions. Helpful for anarchy servers")
+        @Comment(value = {
+            "Enables 'merge tnt logic', which makes it so that nearby tnt are merged together,",
+            "increasing the power of 1 tnt explosion and reducing the amount of explosions.",
+            "Helpful for anarchy servers"
+        })
         public boolean mergeTntLogic = false;
 
         @Comment("Max TNT primed for merging logic to start. Requires 'mergeTntLogic' to be enabled")
@@ -262,13 +290,23 @@ public class Config {
     @Comment("Amount of entities to summon per tick from the summon command")
     public int summonCommandBatchCount = 50;
 
-    @Comment("Batches summon command tasks to spread across multiple ticks, preventing the server from freezing for multiple seconds when processing higher summon counts")
+    @Comment(value = {
+        "Batches summon command tasks to spread across multiple ticks, preventing the server",
+        "from freezing for multiple seconds when processing higher summon counts"
+    })
     public boolean batchSummonCommandTasks = true;
 
-    @Comment("Ignore \"<player> moved too quickly\" if the server is lagging. Improves general gameplay experience of the player when the server is lagging, as they wont get lagged back")
+    @Comment(value = {
+        "Ignore \"<player> moved too quickly\" if the server is lagging. Improves general",
+        "gameplay experience of the player when the server is lagging, as they wont get lagged back"
+    })
     public boolean ignoreMovedTooQuicklyWhenLagging = true;
 
-    @Comment("Masks for goals. Allows disabling and adding delays to the tick rate of the goal. The 'goalClass' must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\"")
+    @Comment(value = {
+        "Masks for goals. Allows disabling and adding delays to the tick rate of the goal. The 'goalClass'",
+        "must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a",
+        "subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\""
+    })
     public List<GoalMask> entityGoalMasks = new ArrayList<>();
     public static class GoalMask {
         public String goalClass;
@@ -308,10 +346,16 @@ public class Config {
 
 
     @Experimental
-    @Comment("Moves entity ticking to their own async scheduler. Benefits SOME servers, not all. Best helps servers where players are primarily in 1 world spread out.")
+    @Comment(value = {
+        "Moves entity ticking to their own async scheduler. Benefits SOME servers, not all.",
+        "Best helps servers where players are primarily in 1 world spread out."
+    })
     public boolean threadedEntityTicking = false;
 
-    @Comment("Disables entity pushing, but the player can still be pushed. Immensely optimizes entity performance with lots of crammed entities")
+    @Comment(value = {
+        "Disables entity pushing, but the player can still be pushed.",
+        "Immensely optimizes entity performance with lots of crammed entities"
+    })
     public boolean disableEntityPushing = false;
 
     @Comment("Ignores messages like 'moved too quickly' and 'moved wrongly'")
@@ -320,7 +364,10 @@ public class Config {
     @Comment("Prevents players being disconnected by disconnect.spam")
     public boolean disableDisconnectSpam = false;
 
-    @Comment("Defines a percentage of which the server will apply to the velocity applied to item entities dropped on death. 0 means it has no velocity, 1 is default.")
+    @Comment(value = {
+        "Defines a percentage of which the server will apply to the velocity applied to",
+        "item entities dropped on death. 0 means it has no velocity, 1 is default."
+    })
     public double itemEntitySpreadFactor = 1;
 
     @Comment("Disables saving snowball entities. This patches certain lag machines.")
@@ -403,7 +450,10 @@ public class Config {
     @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
     public boolean chainEndCrystalExplosions = false;
 
-    @Comment("Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more")
+    @Comment(value = {
+        "Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing",
+        "some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more"
+    })
     public boolean mc258859 = false;
 
     @Comment(value = {
@@ -432,14 +482,23 @@ public class Config {
     @Comment("Replaces papers version of the spark-paper module with our own")
     public boolean replaceSparkModule = true;
 
-    @Comment("Moves player joining to an isolated queue-thread, severely reducing lag when players are joining, due to blocking tasks now being handled off any tickloops")
+    @Comment(value = {
+        "Moves player joining to an isolated queue-thread, severely reducing",
+        "lag when players are joining, due to blocking tasks now being handled off any tickloops"
+    })
     public boolean asyncPlayerJoining = true;
 
-    @Comment("Allows configurability of the distance of which certain objects need to be from a player to tick, like chunks, block entities, etc. This can cause major behavior changes.")
+    @Comment(value = {
+        "Allows configurability of the distance of which certain objects need to be from a player",
+        "to tick, like chunks, block entities, etc. This can cause major behavior changes."
+    })
     public TickDistanceMaps tickDistanceMaps = new TickDistanceMaps();
     public static class TickDistanceMaps {
         @NonNegativeNumericValue
-        @Comment("Controls the radius for chunk ticking, allowing configurability of random tick distances, block tick distances, and chunk tick distances")
+        @Comment(value = {
+            "Controls the radius for chunk ticking, allowing configurability of",
+            "random tick distances, block tick distances, and chunk tick distances"
+        })
         public int chunkTickingRadius = 5;
 
         @Comment("Enables the override that applies the 'chunkTickingRadius'")
@@ -494,7 +553,10 @@ public class Config {
     @Comment("Disables the inventory change criterion trigger. Some advancements will not work! 'skipTicksAdvancements' will not work either.")
     public boolean disableInventoryChangeCriterionTrigger = false;
 
-    @Comment("Caches the command block parse results, significantly reducing performance impacts from command blocks(given parsing is often times half the command blocks tick time)")
+    @Comment(value = {
+        "Caches the command block parse results, significantly reducing performance",
+        "impacts from command blocks(given parsing is often times half the command blocks tick time)"
+    })
     public boolean cacheCommandBlockParseResults = false;
 
     @Comment("Enables the development GUI tick graph rendering(another window of the Minecraft Server GUI), disabled by '--nogui' arg")
@@ -515,133 +577,66 @@ public class Config {
     @Comment("Uses a 'dummy inventory' for passing the InventoryMoveEvent, which avoids unneeded resources spent on building a bukkit Inventory.")
     public boolean useDummyInventoryForHopperInventoryMoveEvent = true;
 
+    @NonNegativeNumericValue
+    @Comment(value = {
+        "In certain checks, like if a player is near a chunk(primarily used for spawning), it checks if the player is within a certain",
+        "circular range of the chunk. This configuration allows configurability of the distance(in blocks) the player must be to pass the check."
+    })
+    public double playerNearChunkDetectionRange = 16384.0D;
+
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
-        AnnotationBasedYamlSerializer<T> serializer = new AnnotationBasedYamlSerializer<>(config, configClass);
-        ConfigurationUtils.extractKeys(serializer.getConfigClass());
-        serializer.registerAnnotationHandler(Comment.class, (yamlWriter, indent, _, _, comment) -> {
-            if (comment.breakLineBefore()) {
-                yamlWriter.append("\n");
-            }
-            Arrays.stream(comment.value()).forEach(val -> yamlWriter.append(indent).append("## ").append(val).append("\n"));
-        });
-        serializer.registerAnnotationValidator(Range.class, (key, _, range, value) -> {
-            if (value instanceof Number number) {
-                float floatValue = number.floatValue();
-                int from = range.from();
-                int to = range.to();
-                if (!(range.inclusive() ? (floatValue >= from && floatValue <= to) : floatValue > from && floatValue < to)) {
-                    throw new ValidationException("Number for key, '" + key + "' was out of bounds! Value must be between " + from + " and " + to);
-                }
-                return true;
-            } else {
-                throw new ValidationException("Range validation was applied to a non-numeric object.");
-            }
-        });
-        serializer.registerAnnotationValidator(EnumValue.class, (_, _, enumValue, value) -> {
-            @SuppressWarnings("rawtypes") Class<? extends Enum> enumClass = enumValue.enumValue();
-
-            if (!enumClass.isEnum()) {
-                throw new ValidationException("EnumValue annotation applied to a non-enum type.");
-            }
-
-            Object[] enumConstants = enumClass.getEnumConstants();
-
-            if (value instanceof String str) {
-                String normalized = str.trim().toUpperCase(Locale.ROOT);
-                for (Object constant : enumConstants) {
-                    if (((Enum<?>) constant).name().equalsIgnoreCase(normalized)) {
-                        return true;
-                    }
-                }
-            } else if (value instanceof Enum<?> enumInstance) {
-                if (enumClass.isInstance(enumInstance)) {
-                    return true;
-                }
-            }
-
-            throw new ValidationException("Invalid enum value: " + value);
-        });
-        serializer.registerAnnotationValidator(NegativeNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() < 0)) {
-                    throw new ValidationException("Value must be a negative value");
-                }
-                return true;
-            }
-            throw new ValidationException("NegativeNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerAnnotationValidator(NonNegativeNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() >= 0)) {
-                    throw new ValidationException("Value must be a non-negative value");
-                }
-                return true;
-            }
-            throw new ValidationException("NonNegativeNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerAnnotationValidator(NonPositiveNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() <= 0)) {
-                    throw new ValidationException("Value must be a non-positive value");
-                }
-                return true;
-            }
-            throw new ValidationException("NonPositiveNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerAnnotationValidator(PositiveNumericValue.class, (_, _, _, value) -> {
-            if (value instanceof Number number) {
-                if (!(number.floatValue() > 0)) {
-                    throw new ValidationException("Value must be a positive value");
-                }
-                return true;
-            }
-            throw new ValidationException("PositiveNumericValue validation applied to a non-numeric object.");
-        });
-        serializer.registerPostSerializeAction((context) -> {
-            INSTANCE = context.configuration();
-
-            System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
-            boolean configured = INSTANCE.chunks.nativeAccelerationEnabled;
-            if (configured) {
-                try {
-                    Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
-                } catch (Throwable t) {
-                    t.printStackTrace();
-                }
-            }
-            ThreadedTracker.init();
-            ChunkSendingExecutor.init();
-            for (final GoalMask goalMask : INSTANCE.entityGoalMasks) {
-                try {
-                    //noinspection unchecked
-                    Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalMask.goalClass);
-                    COMPILED_GOAL_MASKS.put(clazz, goalMask);
-                    LOGGER.info("Enabling Goal Mask for \"{}\"...", clazz.getSimpleName());
-                } catch (ClassNotFoundException e) {
-                    LOGGER.error("Unable to locate goal class \"{}\", skipping.", goalMask, e);
-                    continue;
-                }
-            }
-            for (final EntityMask entityMask : INSTANCE.entityMasks) {
-                if (!CHECK_ENTITY_MASKS) {
-                    LOGGER.warn("An EntityMask was registered, please be very careful with this, as it can make the movement of entities a lot more choppy(if using delays)");
-                    CHECK_ENTITY_MASKS = true;
-                }
-                LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
-                COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
-            }
-
-            if (context.configuration().asyncPlayerJoining) {
-                //noinspection resource
-                new PlayerJoinThread("AsyncPlayerJoinThread", "player join thread");
-            }
-        });
-
-        return serializer;
+        ConfigurationUtils.extractKeys(configClass);
+        return new AnnotationBasedYamlSerializer<>(SerializationBuilder.<T>newBuilder()
+            .header(new String[]{
+                "This is the main Canvas configuration file",
+                "All configuration options here are made for vanilla-compatibility",
+                "and not for performance. Settings must be configured specific",
+                "to your hardware and server type. If you have questions",
+                "join our discord at https://discord.gg/canvasmc/"
+            })
+            .handler(ConfigHandlers.CommentProcessor::new)
+            .validator(ConfigHandlers.RangeProcessor::new)
+            .validator(ConfigHandlers.NegativeProcessor::new)
+            .validator(ConfigHandlers.PositiveProcessor::new)
+            .validator(ConfigHandlers.NonNegativeProcessor::new)
+            .validator(ConfigHandlers.NonPositiveProcessor::new)
+            .post(context -> INSTANCE = context.configuration())
+            .build(config, configClass)
+        );
     }
 
     public static Config init() {
         ConfigurationManager.register(Config.class, Config::buildSerializer);
+        System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
+        boolean configured = INSTANCE.chunks.nativeAccelerationEnabled;
+        if (configured) {
+            try {
+                Class.forName("io.canvasmc.canvas.util.NativeLoader").getField("lookup").get(null);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+        ThreadedTracker.init();
+        ChunkSendingExecutor.init();
+        for (final GoalMask goalMask : INSTANCE.entityGoalMasks) {
+            try {
+                //noinspection unchecked
+                Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalMask.goalClass);
+                COMPILED_GOAL_MASKS.put(clazz, goalMask);
+                LOGGER.info("Enabling Goal Mask for \"{}\"...", clazz.getSimpleName());
+            } catch (ClassNotFoundException e) {
+                LOGGER.error("Unable to locate goal class \"{}\", skipping.", goalMask, e);
+                continue;
+            }
+        }
+        for (final EntityMask entityMask : INSTANCE.entityMasks) {
+            if (!CHECK_ENTITY_MASKS) {
+                LOGGER.warn("An EntityMask was registered, please be very careful with this, as it can make the movement of entities a lot more choppy(if using delays)");
+                CHECK_ENTITY_MASKS = true;
+            }
+            LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
+            COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
+        }
         return INSTANCE;
     }
 
