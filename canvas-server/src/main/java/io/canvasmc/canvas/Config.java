@@ -41,9 +41,6 @@ public class Config {
     })
     public boolean runPlayerListTickOnIndependentLevel = true;
 
-    @Comment("Amount of ticks until the level will resync time with the player")
-    public int timeResyncInterval = 2400;
-
     @Range(from = 1, to = 10, inclusive = true)
     @Comment(value = {
         "Sets the thread priority for tick loop threads",
@@ -64,14 +61,6 @@ public class Config {
     }
 
     @Comment(value = {
-        "Sets the thread daemon for tick loop threads",
-        "",
-        "References:",
-        "- https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#setDaemon(boolean)"
-    })
-    public boolean setDaemonForTickLoops = false;
-
-    @Comment(value = {
         "In the ServerChunkCache, it schedules tasks to the main thread. Enabling this changes it to",
         "schedule to the level thread"
     })
@@ -80,20 +69,8 @@ public class Config {
     @Comment("Enables each world to have the \"empty server\" logic per world introduced in Minecraft 1.21.4")
     public boolean emptySleepPerWorlds = true;
 
-    @Comment(value = {
-        "Enables the \"threadedtick\" command, which is an implementation of the vanilla",
-        "\"tick\" command for the Canvas threaded context"
-    })
-    public boolean enableCanvasTickCommand = true;
-
     @Comment("Allows opening any type of door with your hand, including iron doors")
     public boolean canOpenAnyDoorWithHand = false;
-
-    @Comment(value = {
-        "Ensure correct doors. Schedules an extra update on the next tick to ensure the door doesnt get",
-        "glitched when a Villager and Player both interact with it at the same time"
-    })
-    public boolean ensureCorrectDoors = false;
 
     @Comment(value = {
         "Enables plugin compatibility mode.",
@@ -139,26 +116,21 @@ public class Config {
             " - C2ME [Old algorithm from C2ME, less aggressive than the modern one]",
             " - C2ME_AGGRESSIVE [Modern algorithm from C2ME, more aggressive than the previous]"
         })
-        public ChunkSystemAlgorithm chunkWorkerAlgorithm = ChunkSystemAlgorithm.MOONRISE;
+        public ChunkSystemAlgorithm chunkWorkerAlgorithm = ChunkSystemAlgorithm.C2ME;
 
         @Comment(value = {
-            "Sets the thread priority for worker threads",
+            "Sets the thread priority for worker threads. Default is NORMAL+1",
             "",
             "References:",
             "- https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#setPriority(int)"
         })
         public int threadPoolPriority = Thread.NORM_PRIORITY + 1;
+
         @Comment(value = {
             "Changes the maximum view distance for the server, allowing clients to have",
             "render distances higher than 32"
         })
         public int maxViewDistance = 32;
-        @Comment(value = {
-            "Allows disabling distance manager updates for when the level thread",
-            "tries to poll a task, which can cause some post process generation",
-            "work to be run on the level thread instead of on the async chunk loader"
-        })
-        public boolean runDistanceManagerUpdatesOnTaskPoll = false;
 
         @Comment("Related configuration options to chunk sending optimizations")
         public ChunkSending chunkSending = new ChunkSending();
@@ -191,7 +163,7 @@ public class Config {
                 "Disabling this is highly not recommended, this spam-sent hundreds",
                 "of chunks per tick to the client when developing chunk loading optimizations"
             })
-            public int rateLimitChunkSends = 50;
+            public int rateLimitChunkSends = -1;
         }
 
         @Comment(value = {
@@ -200,18 +172,21 @@ public class Config {
         })
         public Regionized regionized = new Regionized();
         public static class Regionized {
+            @AlwaysAtTop
             @Comment("Enables regionized chunk ticking logic")
             public boolean enableRegionizedChunkTicking = false;
+
             @Comment("The amount of threads to allocate to regionized chunk ticking")
             public int executorThreadCount = 4;
+
             @Range(from = 1, to = 10, inclusive = true)
             @Comment(value = {
-                "Configures the thread priority of the executor. Default is 5(normal thread priority)",
+                "Configures the thread priority of the executor. Default is NORMAL+2",
                 "",
                 "References:",
                 "- https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#setPriority(int)"
             })
-            public int executorThreadPriority = Thread.NORM_PRIORITY;
+            public int executorThreadPriority = Thread.NORM_PRIORITY + 2;
         }
 
         @Comment("Smoothens the bedrock layer at the bottom(and top if in the nether) of the world during world generation.")
@@ -232,7 +207,6 @@ public class Config {
         public int keepAlive = 60;
     }
 
-
     @Comment("Threaded EntityTracking options")
     public EntityTracking entityTracking = new EntityTracking();
     public static class EntityTracking {
@@ -246,15 +220,8 @@ public class Config {
         public int keepAlive = 60;
     }
 
-
     @Comment("Enables a modified version of Pufferfish's async mob spawning patch")
     public boolean enableAsyncSpawning = true;
-
-    @Comment(value = {
-        "Delays the inventory change trigger to tick at an interval to avoid",
-        "excessive usage of advancement updates and recipe updates"
-    })
-    public int skipTicksAdvancements = 3;
 
     @Comment("Disables the ticking of a useless secondary poi sensor")
     public boolean skipUselessSecondaryPoiSensor = true;
@@ -286,16 +253,6 @@ public class Config {
         public int maxTntPrimedForMerge = 100;
     }
 
-
-    @Comment("Amount of entities to summon per tick from the summon command")
-    public int summonCommandBatchCount = 50;
-
-    @Comment(value = {
-        "Batches summon command tasks to spread across multiple ticks, preventing the server",
-        "from freezing for multiple seconds when processing higher summon counts"
-    })
-    public boolean batchSummonCommandTasks = true;
-
     @Comment(value = {
         "Ignore \"<player> moved too quickly\" if the server is lagging. Improves general",
         "gameplay experience of the player when the server is lagging, as they wont get lagged back"
@@ -313,7 +270,6 @@ public class Config {
         public boolean disableGoal = false;
         public int goalTickDelay = 0;
     }
-
 
     @Comment("Enable the server watchdog")
     public boolean enableWatchdog = true;
@@ -335,7 +291,6 @@ public class Config {
         public boolean randomTickSpeedAcceleration = true;
     }
 
-
     @Comment("Allows configuration of how entities are ticked, and if they should be ticked based on the type")
     public List<EntityMask> entityMasks = new ArrayList<>();
     public static class EntityMask {
@@ -343,7 +298,6 @@ public class Config {
         public boolean shouldTick = true;
         public int tickRate = 1;
     }
-
 
     @Experimental
     @Comment(value = {
@@ -375,6 +329,7 @@ public class Config {
 
     @Comment("Disables saving firework entities. This patches certain lag machines.")
     public boolean disableFireworkSaving = false;
+
     public VirtualThreads virtualThreads = new VirtualThreads();
     public static class VirtualThreads {
         @AlwaysAtTop
@@ -446,7 +401,6 @@ public class Config {
         public String disconnectDemandOnClientMessage = "You do not have No Chat Reports, and this server is configured to require it on client!";
     }
 
-
     @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
     public boolean chainEndCrystalExplosions = false;
 
@@ -478,9 +432,6 @@ public class Config {
 
     @Comment("Disables leaf block decay")
     public boolean disableLeafDecay = false;
-
-    @Comment("Replaces papers version of the spark-paper module with our own")
-    public boolean replaceSparkModule = true;
 
     @Comment(value = {
         "Moves player joining to an isolated queue-thread, severely reducing",
@@ -522,10 +473,6 @@ public class Config {
         public boolean enableNearbyPlayersSpawnRangeOverride = false;
     }
 
-
-    @Comment("Disables the world weather cycle")
-    public boolean disableWeatherCycle = false;
-
     @Comment("Configure the amount of ticks between updating chunk precipitation")
     public int ticksBetweenPrecipitationUpdates = -1;
 
@@ -550,29 +497,24 @@ public class Config {
     @Comment("Configure the amount of ticks between ticking custom spawners(like phantoms, cats, wandering traders, etc)")
     public int ticksBetweenCustomSpawnersTick = -1;
 
-    @Comment("Disables the inventory change criterion trigger. Some advancements will not work! 'skipTicksAdvancements' will not work either.")
-    public boolean disableInventoryChangeCriterionTrigger = false;
-
     @Comment(value = {
-        "Caches the command block parse results, significantly reducing performance",
-        "impacts from command blocks(given parsing is often times half the command blocks tick time)"
+        "Caches the command block parse results, significantly reducing performance impact",
+        "from command blocks(given parsing is often times half the command blocks tick time)"
     })
-    public boolean cacheCommandBlockParseResults = false;
-
-    @Comment("Enables the development GUI tick graph rendering(another window of the Minecraft Server GUI), disabled by '--nogui' arg")
-    public boolean enableDevelopmentTickGuiGraph = false;
+    public boolean cacheCommandBlockParseResults = true;
 
     @Comment("Disables being disconnected from 'multiplayer.disconnect.invalid_player_movement', and just silently declines the packet handling.")
     public boolean gracefulTeleportHandling = true;
 
-    @Comment("Uses euclidean distance squared algorithm for determining chunk task priorities(like generation, loading, etc).")
+    @Comment(value = {
+        "Uses euclidean distance squared algorithm for determining chunk task priorities(like generation, loading, etc).",
+        "If true: chunk priorities will be ordered in a circle pattern",
+        "If false: chunk priorities will be ordered in a diamond pattern"
+    })
     public boolean useEuclideanDistanceSquaredChunkPriorities = true;
 
     @Comment("Configure the max amount of bonus damage the mace item can apply")
     public int maxMaceDamageBonus = -1;
-
-    @Comment("Ignores the players 'takeXpDelay' field, allowing players to insta-absorb experience orbs")
-    public boolean instantAbsorbXpOrbs = false;
 
     @Comment("Uses a 'dummy inventory' for passing the InventoryMoveEvent, which avoids unneeded resources spent on building a bukkit Inventory.")
     public boolean useDummyInventoryForHopperInventoryMoveEvent = true;
@@ -583,6 +525,16 @@ public class Config {
         "circular range of the chunk. This configuration allows configurability of the distance(in blocks) the player must be to pass the check."
     })
     public double playerNearChunkDetectionRange = 16384.0D;
+
+    @Comment(value = {
+        "Blacklists criterion triggers based off its name in the key in the ResourceLocation associated with the trigger.",
+        "Criterion Triggers are essentially the triggers that drive advancements. Some, can be really performance-heavy",
+        "with high playercounts, like the 'inventory_changed' criterion. For each string placed in the blacklist, any key",
+        "matching that during registration will be unregistered, disabling the criterion trigger.",
+        "",
+        "To disable all criterion triggers, input '*'"
+    })
+    public List<String> blacklistedCriterionTriggers = new ArrayList<>();
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         ConfigurationUtils.extractKeys(configClass);
@@ -600,6 +552,7 @@ public class Config {
             .validator(ConfigHandlers.PositiveProcessor::new)
             .validator(ConfigHandlers.NonNegativeProcessor::new)
             .validator(ConfigHandlers.NonPositiveProcessor::new)
+            .validator(ConfigHandlers.PatternProcessor::new)
             .post(context -> INSTANCE = context.configuration())
             .build(config, configClass)
         );

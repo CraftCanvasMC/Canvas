@@ -33,7 +33,6 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
         this.setThreadModifier((levelThread) -> {
             levelThread.setName(this.name());
             levelThread.setPriority(Config.INSTANCE.tickLoopThreadPriority);
-            levelThread.setDaemon(Config.INSTANCE.setDaemonForTickLoops);
             levelThread.setUncaughtExceptionHandler((_, throwable) -> LOGGER.error("Uncaught exception in level thread, {}", this.name(), throwable));
         });
         this.setPreBlockStart(() -> {

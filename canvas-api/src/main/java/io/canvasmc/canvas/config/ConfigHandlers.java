@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.config;
 
 import io.canvasmc.canvas.config.annotation.Comment;
+import io.canvasmc.canvas.config.annotation.Pattern;
 import io.canvasmc.canvas.config.annotation.RegisteredHandler;
 import io.canvasmc.canvas.config.annotation.numeric.NegativeNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.NonNegativeNumericValue;
@@ -119,6 +120,21 @@ public class ConfigHandlers {
 
         public Class<PositiveNumericValue> positive() {
             return PositiveNumericValue.class;
+        }
+    }
+
+    @RegisteredHandler("pattern")
+    public static class PatternProcessor implements AnnotationValidationProvider<Pattern> {
+        @Override
+        public boolean validate(final String fullKey, final Field field, final Pattern annotation, final Object value) throws ValidationException {
+            if (value == null) {
+                return false; // quick escape
+            }
+            return value.toString().matches(annotation.pattern());
+        }
+
+        public Class<Pattern> pattern() {
+            return Pattern.class;
         }
     }
 }

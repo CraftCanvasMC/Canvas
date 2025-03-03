@@ -59,7 +59,7 @@ public class CanvasSparkPlugin implements PaperSparkModule, SparkPlugin {
     }
 
     public static @NotNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
-        return Config.INSTANCE.replaceSparkModule ? new CanvasSparkPlugin(server, logger, scheduler, classLookup) : PaperSparkModule.create(compatibility, server, logger, scheduler, classLookup);
+        return new CanvasSparkPlugin(server, logger, scheduler, classLookup);
     }
 
     public void enable() {

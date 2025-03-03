@@ -19,7 +19,6 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
         this.setThreadModifier((tickThread) -> {
             tickThread.setName(this.name());
             tickThread.setPriority(Config.INSTANCE.tickLoopThreadPriority);
-            tickThread.setDaemon(Config.INSTANCE.setDaemonForTickLoops);
             tickThread.setUncaughtExceptionHandler((_, exception) -> LOGGER.error("Uncaught exception in player join thread", exception));
         });
         INSTANCE = this;

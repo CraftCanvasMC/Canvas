@@ -10,7 +10,6 @@ import io.canvasmc.canvas.server.chunk.AsyncPlayerChunkLoader;
 import io.canvasmc.canvas.server.level.LevelThread;
 import io.canvasmc.canvas.server.level.MinecraftServerWorld;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
-import io.canvasmc.canvas.server.render.TickTimesGraphDisplay;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
@@ -135,7 +134,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
             if (Config.INSTANCE.asyncPlayerJoining) {
                 PlayerJoinThread.getInstance().start((self) -> (_, _) -> self.run());
             }
-            if (Config.INSTANCE.enableDevelopmentTickGuiGraph) TickTimesGraphDisplay.showFrameFor((DedicatedServer) this.server, getTickTimeAccessors());
             this.started = true;
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);

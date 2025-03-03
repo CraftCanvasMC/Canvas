@@ -15,7 +15,6 @@ public class ThreadedEntityScheduler extends AbstractTickLoop<TickThread, Thread
         this.setThreadModifier((levelThread) -> {
             levelThread.setName(this.name());
             levelThread.setPriority(Config.INSTANCE.tickLoopThreadPriority);
-            levelThread.setDaemon(Config.INSTANCE.setDaemonForTickLoops);
             levelThread.setUncaughtExceptionHandler((_, throwable) -> LOGGER.error("Uncaught exception in entity thread", throwable));
         });
     }

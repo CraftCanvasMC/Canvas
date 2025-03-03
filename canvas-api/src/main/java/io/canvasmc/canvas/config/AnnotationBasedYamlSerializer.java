@@ -196,7 +196,7 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
                             writer.append(indent).append("   -\n");
                             writeYaml(writer, (Map<String, Object>) itemMap, fields, indentLevel + 2, fullKey);
                         } else {
-                            writer.append(indent).append("   - ").append(item.toString()).append(NEW_LINE);
+                            writer.append(indent).append("   - ").append(item instanceof String ? "\"" + item + "\"" : item.toString()).append(NEW_LINE);
                         }
                     }
                 } else {
@@ -244,6 +244,9 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
             // Validate entries
             data = buildYamlData(deserialized);
             forEach(data, keyToField, "", (key, field, value) -> {
+                if (field == null) {
+                    throw new RuntimeException("Field for associated key '" + key + "' was null!");
+                }
                 this.annotationValidationProviderRegistry.forEach((annotation, validator) -> {
                     if (field.isAnnotationPresent(annotation)) {
                         try {
