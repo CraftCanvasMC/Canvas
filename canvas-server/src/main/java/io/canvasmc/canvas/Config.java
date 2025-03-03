@@ -354,6 +354,12 @@ public class Config {
         @Comment("Uses virtual threads for the Async Command Builder Thread Pool")
         public boolean commandBuilderScheduler = false;
 
+        @Comment("Use virtual threads for the Profile Lookup pool, which fetches player profile info")
+        public boolean profileLookupPool = false;
+
+        @Comment("Use virtual threads for the server text filter pool")
+        public boolean serverTextFilterPool = false;
+
         public boolean shouldReplaceAuthenticator() {
             return enabled && authenticatorScheduler;
         }
@@ -376,6 +382,14 @@ public class Config {
 
         public boolean shouldReplaceCommandBuilderExecutor() {
             return enabled && commandBuilderScheduler;
+        }
+
+        public boolean shouldReplaceProfileLookupPool() {
+            return enabled && profileLookupPool;
+        }
+
+        public boolean shouldReplaceTextFilterPool() {
+            return enabled && serverTextFilterPool;
         }
     }
 
