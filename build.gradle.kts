@@ -1,5 +1,6 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
+import kotlin.system.measureTimeMillis
 
 plugins {
     java
@@ -106,13 +107,108 @@ paperweight {
     }
 }
 
+tasks.register<Jar>("createMojmapClipboardJar") {
+    dependsOn(":canvas-server:createMojmapPaperclipJar", "clipboard:shadowJar")
+
+    outputs.upToDateWhen { false }
+
+    val paperclipJarTask = project(":canvas-server").tasks.getByName("createMojmapPaperclipJar")
+    val clipboardJarTask = project(":clipboard").tasks.getByName("shadowJar")
+
+    val paperclipJar = paperclipJarTask.outputs.files.singleFile
+    val clipboardJar = clipboardJarTask.outputs.files.singleFile
+    val outputDir = paperclipJar.parentFile
+    val tempDir = File(outputDir, "tempJarWork")
+    val clipboardExtractDir = File(outputDir, "tempClipboardExtract")
+    val newJarName = "canvas-clipboard-${properties.get("version")}-mojmap.jar"
+
+    doFirst {
+        val time = measureTimeMillis {
+            println("Recompiling paperclip jar with clipboard sources...")
+            outputDir.listFiles()
+                ?.filter { it.name.startsWith("canvas-build.") && it.name.endsWith(".jar") }
+                ?.forEach { it.delete() }
+
+            tempDir.deleteRecursively()
+            tempDir.mkdirs()
+
+            clipboardExtractDir.deleteRecursively()
+            clipboardExtractDir.mkdirs()
+
+            copy {
+                from(zipTree(paperclipJar))
+                into(tempDir)
+            }
+
+            copy {
+                from(zipTree(clipboardJar))
+                into(clipboardExtractDir)
+            }
+
+            val oldPackagePath = "io/papermc/paperclip/"
+            val newPackagePath = "io/canvasmc/clipboard/"
+
+            println("Walking and replacing sources...")
+            clipboardExtractDir.walkTopDown()
+                .filter { it.isFile && it.extension == "class" && it.relativeTo(clipboardExtractDir).path.startsWith(newPackagePath) }
+                .forEach { clipboardClass ->
+                    val relativePath = clipboardClass.relativeTo(clipboardExtractDir).path
+                    val targetFile = File(tempDir, relativePath)
+
+                    targetFile.parentFile.mkdirs()
+                    clipboardClass.copyTo(targetFile, overwrite = true)
+                }
+
+            tempDir.walkTopDown()
+                .filter { it.isFile && it.relativeTo(tempDir).path.startsWith(oldPackagePath) }
+                .forEach { it.delete() }
+
+            tempDir.walkBottomUp()
+                .filter { it.isDirectory && it.listFiles().isNullOrEmpty() }
+                .forEach { it.delete() }
+
+            val metaInfDir = File(tempDir, "META-INF")
+            metaInfDir.mkdirs()
+            File(metaInfDir, "main-class").writeText("net.minecraft.server.Main")
+        }
+        println("Finished recompile in ${time}ms")
+    }
+
+    archiveFileName.set(newJarName)
+    destinationDirectory.set(outputDir)
+    from(tempDir)
+
+    from("path/to/vanilla.versions") {
+        into("/")
+    }
+
+    manifest {
+        attributes(
+            // paperclip args
+            "Main-Class" to "io.canvasmc.clipboard.Main",
+            "Enable-Native-Access" to "ALL-UNNAMED",
+            // setup agent
+            "Agent-Class" to "io.canvasmc.clipboard.Instrumentation",
+            "Premain-Class" to "io.canvasmc.clipboard.Instrumentation",
+            "Launcher-Agent-Class" to "io.canvasmc.clipboard.Instrumentation",
+            "Can-Redefine-Classes" to true,
+            "Can-Retransform-Classes" to true
+        )
+    }
+
+    doLast {
+        tempDir.deleteRecursively()
+        clipboardExtractDir.deleteRecursively()
+    }
+}
+
 tasks.register("buildPublisherJar") {
-    dependsOn(":canvas-server:createMojmapPaperclipJar")
+    dependsOn(":createMojmapClipboardJar")
 
     doLast {
         val buildNumber = System.getenv("BUILD_NUMBER") ?: "local"
 
-        val paperclipJarTask = project(":canvas-server").tasks.getByName("createMojmapPaperclipJar")
+        val paperclipJarTask = tasks.getByName("createMojmapClipboardJar")
         val outputJar = paperclipJarTask.outputs.files.singleFile
         val outputDir = outputJar.parentFile
 
