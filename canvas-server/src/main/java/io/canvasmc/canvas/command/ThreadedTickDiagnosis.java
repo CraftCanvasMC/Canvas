@@ -240,8 +240,8 @@ public class ThreadedTickDiagnosis {
                 text(" Block Ticking Holders: ", color(0x4EA2ED)), text(accumulatedBlockTickingChunkHolders)
             ).build());
         }
-        list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(text(" LevelChunk full count", color(0x4EA2ED)), text(fullChunksSize)).build());
-        list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(text(" NewChunkHolder count", color(0x4EA2ED)), text(newChunkHolderCount)).build());
+        list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(text(" LevelChunk full count: ", color(0x4EA2ED)), text(fullChunksSize)).build());
+        list.add(text("  ").toBuilder().color(NamedTextColor.AQUA).append(text(" NewChunkHolder count: ", color(0x4EA2ED)), text(newChunkHolderCount)).build());
     }
 
     public static void sendCollective(@NotNull Function<List<TextComponent>, List<TextComponent>> builder, CommandSender sender) {

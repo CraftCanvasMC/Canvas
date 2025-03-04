@@ -460,19 +460,6 @@ public class Config {
     public TickDistanceMaps tickDistanceMaps = new TickDistanceMaps();
     public static class TickDistanceMaps {
         @NonNegativeNumericValue
-        @Comment(value = {
-            "Controls the radius for chunk ticking, allowing configurability of",
-            "random tick distances, block tick distances, and chunk tick distances"
-        })
-        public int chunkTickingRadius = 5;
-
-        @Comment("Enables the override that applies the 'chunkTickingRadius'")
-        public boolean enableChunkDistanceMapOverride = false;
-
-        @Comment("Enables the chunk ticking of spawn chunks")
-        public boolean includeSpawnChunks = true;
-
-        @NonNegativeNumericValue
         @Comment("Controls the distance defined in the nearby player updates for 'TICK_VIEW_DISTANCE', affects per-player mob spawning")
         public int nearbyPlayersTickDistance = 4;
 

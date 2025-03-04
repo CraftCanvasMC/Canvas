@@ -1,8 +1,9 @@
 --- a/net/minecraft/server/level/ServerChunkCache.java
 +++ b/net/minecraft/server/level/ServerChunkCache.java
-@@ -1,22 +_,38 @@
+@@ -1,22 +_,40 @@
  package net.minecraft.server.level;
  
++import ca.spottedleaf.moonrise.common.list.ReferenceList;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel;
  import com.google.common.annotations.VisibleForTesting;
@@ -22,6 +23,7 @@
  import java.util.ArrayList;
  import java.util.Arrays;
 +import java.util.HashSet;
++import java.util.IdentityHashMap;
  import java.util.List;
  import java.util.Set;
  import java.util.concurrent.CompletableFuture;
@@ -117,10 +119,24 @@
  
          if (ifPresent != null && (toStatus != ChunkStatus.FULL || currentChunk.isFullChunkReady())) {
              return ifPresent;
-@@ -166,21 +_,12 @@
-         if (players == null) {
-             return false;
-         }
+@@ -153,34 +_,21 @@
+     // Paper end - rewrite chunk system
+     // Paper start - chunk tick iteration optimisations
+     private final ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom shuffleRandom = new ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom(0L);
++    // Canvas start - optimize - reduce overhead
+     private boolean isChunkNearPlayer(final ChunkMap chunkMap, final ChunkPos chunkPos, final LevelChunk levelChunk) {
+-        final ca.spottedleaf.moonrise.patches.chunk_system.level.chunk.ChunkData chunkData = ((ca.spottedleaf.moonrise.patches.chunk_system.level.chunk.ChunkSystemChunkHolder)((ca.spottedleaf.moonrise.patches.chunk_system.level.chunk.ChunkSystemLevelChunk)levelChunk).moonrise$getChunkAndHolder().holder())
+-            .moonrise$getRealChunkHolder().holderData;
+-        final ca.spottedleaf.moonrise.common.misc.NearbyPlayers.TrackedChunk nearbyPlayers = chunkData.nearbyPlayers;
+-        if (nearbyPlayers == null) {
+-            return false;
+-        }
+-
+-        final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players = nearbyPlayers.getPlayers(ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE);
+-
+-        if (players == null) {
+-            return false;
+-        }
 -
 -        final ServerPlayer[] raw = players.getRawDataUnchecked();
 -        final int len = players.size();
@@ -133,8 +149,15 @@
 -        }
 -
 -        return false;
-+        return !players.isEmpty(); // Canvas - optimize isChunkNearPlayer lookups
++        ca.spottedleaf.moonrise.common.misc.NearbyPlayers.TrackedChunk nearbyPlayers =
++            (levelChunk).chunkAndHolder.holder.newChunkHolder.holderData.nearbyPlayers;
++
++        if (nearbyPlayers == null) return false;
++        ReferenceList<ServerPlayer> list = nearbyPlayers.getPlayers(ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE);
++        return list != null &&
++            !list.isEmpty();
      }
++    // Canvas end
      // Paper end - chunk tick iteration optimisations
  
 +    public boolean firstRunSpawnCounts = true; // Canvas
@@ -152,39 +175,44 @@
          // Paper end - rewrite chunk system
      }
  
-@@ -479,28 +_,70 @@
+@@ -479,28 +_,75 @@
      }
      // CraftBukkit end
  
 +    // Canvas Start - Regionized chunk ticking
-+    private List<List<LevelChunk>> splitChunksIntoRegions(List<LevelChunk> chunks) {
-+        Set<LevelChunk> chunkSet = new HashSet<>(chunks);
-+        Set<LevelChunk> visited = new HashSet<>(chunks.size());
-+        List<List<LevelChunk>> groups = new ArrayList<>();
++    private List<LevelChunk>[] splitChunksIntoRegions(List<LevelChunk> chunks) {
++        int size = chunks.size();
++        IdentityHashMap<LevelChunk, Boolean> chunkSet = new IdentityHashMap<>(size);
 +
 +        for (LevelChunk chunk : chunks) {
-+            if (visited.contains(chunk)) continue;
++            chunkSet.put(chunk, Boolean.TRUE);
++        }
 +
-+            List<LevelChunk> group = new ArrayList<>(64);
-+            ArrayDeque<LevelChunk> stack = new ArrayDeque<>();
-+            stack.push(chunk);
-+            visited.add(chunk);
++        List<List<LevelChunk>> groups = new ObjectArrayList<>(size >> 3);
++        LevelChunk[] stack = new LevelChunk[size];
++        int stackPointer = 0;
 +
-+            while (!stack.isEmpty()) {
-+                LevelChunk current = stack.pop();
++        for (LevelChunk chunk : chunks) {
++            if (chunkSet.remove(chunk) == null) continue;
++
++            List<LevelChunk> group = new ObjectArrayList<>(64);
++            stack[stackPointer++] = chunk;
++
++            while (stackPointer > 0) {
++                LevelChunk current = stack[--stackPointer];
 +                group.add(current);
 +
 +                for (int i = 0; i < 8; i++) {
 +                    LevelChunk neighbor = getChunk(current.locX + DX[i], current.locZ + DZ[i], false);
-+                    if (neighbor == null || !chunkSet.contains(neighbor) || !visited.add(neighbor)) continue;
-+                    stack.push(neighbor);
++                    if (neighbor == null || chunkSet.remove(neighbor) == null) continue;
++                    stack[stackPointer++] = neighbor;
 +                }
 +            }
 +
 +            groups.add(group);
 +        }
 +
-+        return groups;
++        return groups.toArray(new List[0]);
 +    }
 +
 +    // dfs directions
@@ -227,14 +255,14 @@
      private void tickChunks() {
          long gameTime = this.level.getGameTime();
          long l = gameTime - this.lastInhabitedUpdate;
-@@ -519,44 +_,176 @@
+@@ -519,31 +_,101 @@
                      this.shuffleRandom.setSeed(this.level.random.nextLong());
                      if (!this.level.paperConfig().entities.spawning.perPlayerMobSpawns) Util.shuffle(list, this.shuffleRandom); // Paper - Optional per player mob spawns; do not need this when per-player is enabled
                      // Paper end - chunk tick iteration optimisation
 +                    // Canvas start - Regionized Chunk Ticking
 +                    if (Config.INSTANCE.chunks.regionized.enableRegionizedChunkTicking) {
-+                        List<List<LevelChunk>> regions = splitChunksIntoRegions(list);
-+                        int regionCount = regions.size();
++                        List<LevelChunk>[] regions = splitChunksIntoRegions(list);
++                        int regionCount = regions.length;
 +                        this.tickingRegionsCount = regionCount;
 +                        CountDownLatch latch = new CountDownLatch(regionCount);
 +
@@ -243,6 +271,7 @@
 +                                @Override
 +                                public boolean block() throws InterruptedException {
 +                                    for (List<LevelChunk> region : regions) {
++                                        if (region == null) continue;
 +                                        REGION_EXECUTOR.execute(() -> {
 +                                            try {
 +                                                tickChunks(profilerFiller, l, region);
@@ -328,77 +357,15 @@
 +        // Canvas - async chunk loader
          profiler.pop();
      }
-+    // Canvas start - tick distance maps
-+    public volatile int lastTickingChunksCount = 0;
++    public volatile int lastTickingChunksCount = 0; // Canvas - last ticking chunks count
  
      private void collectTickingChunks(List<LevelChunk> output) {
-+        if (Config.INSTANCE.tickDistanceMaps.enableChunkDistanceMapOverride) {
-+            int radius = Config.INSTANCE.tickDistanceMaps.chunkTickingRadius;
-+            int maxRadius = WorldSpecificViewDistancePersistentState.getFrom(level).getLocalViewDistance();
-+            radius = Math.min(radius, maxRadius == 0 ? this.level.getServer().getPlayerList().getViewDistance() : maxRadius);
-+            LongOpenHashSet processedChunks = new LongOpenHashSet();
-+            int count = 0;
-+
-+            // spawn chunks
-+            if (Config.INSTANCE.tickDistanceMaps.includeSpawnChunks) {
-+                for (int x = -radius; x <= radius; x++) {
-+                    for (int z = -radius; z <= radius; z++) {
-+                        long chunkPos = ChunkPos.asLong(x, z);
-+                        if (processedChunks.add(chunkPos)) {
-+                            ChunkHolder holder = chunkMap.getVisibleChunkIfPresent(chunkPos);
-+                            LevelChunk chunk = (holder == null) ? null : holder.getFullChunkNow();
-+                            if (chunk != null) {
-+                                count++;
-+                                output.add(chunk);
-+                            }
-+                        }
-+                    }
-+                }
-+            }
-+
-+            for (ServerPlayer player : chunkMap.level.players()) {
-+                ChunkPos playerChunk = player.chunkPosition();
-+
-+                if (radius <= 1) {
-+                    long pos = playerChunk.toLong();
-+                    if (processedChunks.add(pos)) { // dont duplicate
-+                        ChunkHolder holder = chunkMap.getVisibleChunkIfPresent(pos);
-+                        LevelChunk chunk = (holder == null) ? null : holder.getFullChunkNow();
-+                        if (chunk != null) {
-+                            count++;
-+                            output.add(chunk);
-+                        }
-+                    }
-+                } else {
-+                    int px = playerChunk.x;
-+                    int pz = playerChunk.z;
-+
-+                    for (int dx = -radius; dx <= radius; dx++) {
-+                        for (int dz = -radius; dz <= radius; dz++) {
-+                            long chunkPos = ChunkPos.asLong(px + dx, pz + dz);
-+                            if (processedChunks.add(chunkPos)) { // dont duplicate
-+                                ChunkHolder holder = chunkMap.getVisibleChunkIfPresent(chunkPos);
-+                                LevelChunk chunk = (holder == null) ? null : holder.getFullChunkNow();
-+                                if (chunk != null) {
-+                                    count++;
-+                                    output.add(chunk);
-+                                }
-+                            }
-+                        }
-+                    }
-+                }
-+            }
-+            lastTickingChunksCount = count;
-+            return;
-+        }
-+    // Canvas end
          // Paper start - chunk tick iteration optimisation
-         final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerChunkCache.ChunkAndHolder> tickingChunks =
-             ((ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickServerLevel)this.level).moonrise$getPlayerTickingChunks();
+@@ -552,11 +_,13 @@
  
          final ServerChunkCache.ChunkAndHolder[] raw = tickingChunks.getRawDataUnchecked();
          final int size = tickingChunks.size();
-+        this.lastTickingChunksCount = size; // Canvas
++        this.lastTickingChunksCount = size; // Canvas - last ticking chunks count
  
          final ChunkMap chunkMap = this.chunkMap;
  
