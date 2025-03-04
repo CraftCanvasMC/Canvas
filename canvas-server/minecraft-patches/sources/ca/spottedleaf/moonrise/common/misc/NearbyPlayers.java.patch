@@ -1,6 +1,6 @@
 --- a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
 +++ b/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
-@@ -8,13 +_,19 @@
+@@ -8,13 +_,21 @@
  import ca.spottedleaf.moonrise.patches.chunk_system.level.chunk.ChunkData;
  import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants;
  import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickServerLevel;
@@ -15,8 +15,10 @@
  import net.minecraft.server.level.ServerLevel;
  import net.minecraft.server.level.ServerPlayer;
  import net.minecraft.world.level.ChunkPos;
++import org.agrona.collections.Long2ObjectHashMap;
  import java.util.ArrayList;
-+import java.util.concurrent.atomic.AtomicReferenceArray;
++import java.util.Collections;
++import java.util.Map;
  
  public final class NearbyPlayers {
  
@@ -37,33 +39,22 @@
          }
      }
  
-@@ -121,9 +_,9 @@
+@@ -121,7 +_,7 @@
          players[NearbyMapType.GENERAL.ordinal()].update(chunk.x, chunk.z, GENERAL_AREA_VIEW_DISTANCE);
          players[NearbyMapType.GENERAL_SMALL.ordinal()].update(chunk.x, chunk.z, GENERAL_SMALL_VIEW_DISTANCE);
          players[NearbyMapType.GENERAL_REALLY_SMALL.ordinal()].update(chunk.x, chunk.z, GENERAL_REALLY_SMALL_VIEW_DISTANCE);
 -        players[NearbyMapType.TICK_VIEW_DISTANCE.ordinal()].update(chunk.x, chunk.z, PlatformHooks.get().getTickViewDistance(player));
 +        players[NearbyMapType.TICK_VIEW_DISTANCE.ordinal()].update(chunk.x, chunk.z, Config.INSTANCE.tickDistanceMaps.enableNearbyPlayersTickViewDistanceOverride ? Config.INSTANCE.tickDistanceMaps.nearbyPlayersTickDistance : PlatformHooks.get().getTickViewDistance(player)); // Canvas - tick distance maps
          players[NearbyMapType.VIEW_DISTANCE.ordinal()].update(chunk.x, chunk.z, PlatformHooks.get().getViewDistance(player));
--        players[NearbyMapType.SPAWN_RANGE.ordinal()].update(chunk.x, chunk.z, ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Moonrise - chunk tick iteration
-+        players[NearbyMapType.SPAWN_RANGE.ordinal()].update(chunk.x, chunk.z, Config.INSTANCE.tickDistanceMaps.enableNearbyPlayersSpawnRangeOverride ? Config.INSTANCE.tickDistanceMaps.playerSpawnTrackingRange : ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Moonrise - chunk tick iteration // Canvas - tick distance maps
+         players[NearbyMapType.SPAWN_RANGE.ordinal()].update(chunk.x, chunk.z, ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE); // Moonrise - chunk tick iteration
      }
- 
-     public TrackedChunk getChunk(final ChunkPos pos) {
-@@ -160,7 +_,7 @@
- 
-         private final long chunkKey;
-         private final NearbyPlayers nearbyPlayers;
--        private final ReferenceList<ServerPlayer>[] players = new ReferenceList[TOTAL_MAP_TYPES];
-+        private final AtomicReferenceArray<ReferenceList<ServerPlayer>> players = new AtomicReferenceArray<>(new ReferenceList[TOTAL_MAP_TYPES]); // Canvas - atomic
-         private int nonEmptyLists;
-         private long updateCount;
- 
-@@ -178,17 +_,17 @@
+@@ -177,18 +_,19 @@
+             return this.updateCount;
          }
  
-         public ReferenceList<ServerPlayer> getPlayers(final NearbyMapType type) {
--            return this.players[type.ordinal()];
-+            return this.players.get(type.ordinal()); // Canvas - atomic
+-        public ReferenceList<ServerPlayer> getPlayers(final NearbyMapType type) {
++        public synchronized ReferenceList<ServerPlayer> getPlayers(final NearbyMapType type) { // Canvas - synchronized
+             return this.players[type.ordinal()];
          }
  
 -        public void addPlayer(final ServerPlayer player, final NearbyMapType type) {
@@ -71,16 +62,16 @@
              ++this.updateCount;
  
              final int idx = type.ordinal();
--            final ReferenceList<ServerPlayer> list = this.players[idx];
-+            final ReferenceList<ServerPlayer> list = this.players.get(idx); // Canvas - atomic
+             final ReferenceList<ServerPlayer> list = this.players[idx];
              if (list == null) {
                  ++this.nonEmptyLists;
 -                final ReferenceList<ServerPlayer> players = (this.players[idx] = new ReferenceList<>(EMPTY_PLAYERS_ARRAY));
-+                this.players.set(idx, new ReferenceList<>(EMPTY_PLAYERS_ARRAY)); final ReferenceList<ServerPlayer> players = this.players.get(idx); // Canvas - atomic
++                this.players[idx] = new ReferenceList<>(EMPTY_PLAYERS_ARRAY);
++                final ReferenceList<ServerPlayer> players = this.players[idx]; // Canvas
                  this.nearbyPlayers.directByChunk[idx].put(this.chunkKey, players);
                  players.add(player);
                  return;
-@@ -199,11 +_,11 @@
+@@ -199,7 +_,7 @@
              }
          }
  
@@ -89,20 +80,6 @@
              ++this.updateCount;
  
              final int idx = type.ordinal();
--            final ReferenceList<ServerPlayer> list = this.players[idx];
-+            final ReferenceList<ServerPlayer> list = this.players.get(idx); // Canvas - atomic
-             if (list == null) {
-                 throw new IllegalStateException("Does not contain player " + player);
-             }
-@@ -213,7 +_,7 @@
-             }
- 
-             if (list.size() == 0) {
--                this.players[idx] = null;
-+                this.players.set(idx, null); // Canvas - atomic
-                 this.nearbyPlayers.directByChunk[idx].remove(this.chunkKey);
-                 --this.nonEmptyLists;
-             }
 @@ -230,7 +_,7 @@
          }
  

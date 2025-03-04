@@ -480,11 +480,15 @@ public class Config {
         public boolean enableNearbyPlayersTickViewDistanceOverride = false;
 
         @NonNegativeNumericValue
-        @Comment("Controls the distance defined in the nearby player updates for `SPAWN_RANGE`, affects the local mob cap")
-        public int playerSpawnTrackingRange = ChunkTickConstants.PLAYER_SPAWN_TRACK_RANGE; // 8
-
-        @Comment("Enables the override that applies 'playerSpawnTrackingRange'")
-        public boolean enableNearbyPlayersSpawnRangeOverride = false;
+        @Comment(value = {
+            "In certain checks, like if a player is near a chunk(primarily used for spawning), it checks if the player is within a certain",
+            "circular range of the chunk. This configuration allows configurability of the distance(in blocks) the player must be to pass the check.",
+            "",
+            "This value is used in the calculation 'range/16' to get the distance in chunks any player must be to allow the check to pass",
+            "By default, this range is computed to 8, meaning a player must be within an 8 chunk radius of a chunk position to pass",
+            "Keep in mind the result is rounded to the nearest whole number."
+        })
+        public int playerNearChunkDetectionRange = 128;
     }
 
     @Comment("Configure the amount of ticks between updating chunk precipitation")
@@ -532,13 +536,6 @@ public class Config {
 
     @Comment("Uses a 'dummy inventory' for passing the InventoryMoveEvent, which avoids unneeded resources spent on building a bukkit Inventory.")
     public boolean useDummyInventoryForHopperInventoryMoveEvent = true;
-
-    @NonNegativeNumericValue
-    @Comment(value = {
-        "In certain checks, like if a player is near a chunk(primarily used for spawning), it checks if the player is within a certain",
-        "circular range of the chunk. This configuration allows configurability of the distance(in blocks) the player must be to pass the check."
-    })
-    public double playerNearChunkDetectionRange = 16384.0D;
 
     @Comment(value = {
         "Blacklists criterion triggers based off its name in the key in the ResourceLocation associated with the trigger.",
