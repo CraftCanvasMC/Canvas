@@ -29,7 +29,6 @@ import org.jetbrains.annotations.NotNull;
 import org.spigotmc.SpigotConfig;
 
 import static java.lang.String.valueOf;
-import static net.kyori.adventure.text.Component.newline;
 import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.GREEN;
 import static net.kyori.adventure.text.format.TextColor.color;
@@ -47,7 +46,7 @@ public class ThreadedTickDiagnosis {
         return Double.parseDouble(df.format(num.doubleValue()).replace(",", "."));
     }
 
-    public static boolean execute(@NotNull final CommandSender sender) {
+    public static boolean dump(@NotNull final CommandSender sender) {
         CraftServer server = (CraftServer) sender.getServer();
         float min;
         float max;

@@ -73,6 +73,15 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
         LOGGER.info("Loaded {} to threaded context", debugName);
     }
 
+    public static @NotNull AbstractTickLoop<?,?> getByName(String name) {
+        for (final AbstractTickLoop<?, ?> loop : MinecraftServer.getThreadedServer().loops) {
+            if (loop.name().equalsIgnoreCase(name)) {
+                return loop;
+            }
+        }
+        throw new IllegalArgumentException("Unable to locate AbstractTickLoop of state '" + name + "'");
+    }
+
     public void setThreadModifier(Consumer<T> threadModifier) {
         this.threadModifier = threadModifier;
     }
