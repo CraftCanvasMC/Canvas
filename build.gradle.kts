@@ -5,7 +5,7 @@ import kotlin.system.measureTimeMillis
 plugins {
     java
     `maven-publish`
-    id("io.papermc.paperweight.patcher") version "2.0.0-beta.14"
+    id("io.papermc.paperweight.patcher") version "2.0.0-SNAPSHOT"
 }
 
 allprojects {
