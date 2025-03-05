@@ -9,7 +9,7 @@ CanvasMC is a high-performance Minecraft server software focused on maximizing s
 Useful links:
 
 - [Website](https://canvasmc.io)
-- [Documentation](https://docs.canvasmc.io) (Work in progress)
+- [Documentation](https://docs.canvasmc.io)
 - [Discord](https://canvasmc.io/discord)
 
 ## Key Features
@@ -19,22 +19,25 @@ Useful links:
 - Command Optimizations
 - Entity Improvements
 
-## Requirements
+## Running Canvas
 
-> [!WARNING]
-> Canvas requires Java 22 or higher. It will not run on older Java versions as it uses Foreign Function & Memory API. You can read more about it [here](https://openjdk.org/jeps/454).
-
-### Running Canvas
+### Requirements
 
 - Java 22 or higher
 
-### Building Canvas
+### Obtaining Server Jar
+
+You can download the server jar from the [downloads page](https://canvasmc.io/downloads).
+
+## Building Canvas
+
+### Requirements
 
 - Java 22 or higher
 - Git (with configured email and name)
 - Gradle
 
-## Scripts
+### Scripts
 
 ```bash
 > ./gradlew applyAllPatches              # apply all patches
