@@ -70,6 +70,56 @@ subprojects {
         maven("https://maven.terraformersmc.com/releases/")
     }
 
+    val subproject = this;
+    // we don't have any form of publishing for canvas-server, because thats the dev bundle
+    if (subproject.name == "canvas-api") {
+        publishing {
+            repositories {
+                maven {
+                    name = "central"
+                    url = uri("https://central.sonatype.com/repository/maven-snapshots/")
+                    credentials {
+                        username=System.getenv("PUBLISH_USER")
+                        password=System.getenv("PUBLISH_TOKEN")
+                    }
+                }
+            }
+
+            publications {
+                create<MavenPublication>("mavenJava") {
+                    from(components["java"])
+
+                    afterEvaluate {
+                        pom {
+                            name.set("canvas-api")
+                            description.set(subproject.description)
+                            url.set("https://github.com/CraftCanvasMC/Canvas")
+                            licenses {
+                                license {
+                                    name.set("GNU Affero General Public License v3.0")
+                                    url.set("https://github.com/CraftCanvasMC/Canvas/blob/master/LICENSE")
+                                    distribution.set("repo")
+                                }
+                            }
+                            developers {
+                                developer {
+                                    id.set("canvas-team")
+                                    name.set("Canvas Team")
+                                    organization.set("CanvasMC")
+                                    organizationUrl.set("https://canvasmc.io")
+                                    roles.add("developer")
+                                }
+                            }
+                            scm {
+                                url.set("https://github.com/CraftCanvasMC/Canvas")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 repositories {
@@ -107,6 +157,7 @@ paperweight {
     }
 }
 
+// build publication
 tasks.register<Jar>("createMojmapClipboardJar") {
     dependsOn(":canvas-server:createMojmapPaperclipJar", "clipboard:shadowJar")
 
@@ -225,6 +276,7 @@ tasks.register("buildPublisherJar") {
     }
 }
 
+// patching scripts
 tasks.register("fixupMinecraftFilePatches") {
     dependsOn(":canvas-server:fixupMinecraftSourcePatches")
 }
