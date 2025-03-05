@@ -1,14 +1,20 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -5,29 +_,43 @@
+@@ -1,33 +_,49 @@
+ package net.minecraft.server.level;
+ 
++import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
+ import com.google.common.annotations.VisibleForTesting;
+ import com.google.common.collect.Lists;
  import com.mojang.datafixers.DataFixer;
  import com.mojang.datafixers.util.Pair;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.entity.tnt.TNTMergeManager;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.folia.CanvasPerWorldScheduler;
 +import io.canvasmc.canvas.server.chunk.ChunkPriorityManager;
 +import io.canvasmc.canvas.server.level.distance.command.DistanceUtils;
-+import io.canvasmc.canvas.util.QueuedTaskScheduler;
++import io.canvasmc.canvas.util.SimpleThreadLocalRandomSource;
 +import io.canvasmc.canvas.util.TPSCalculator;
 +import io.netty.util.internal.ConcurrentSet;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
@@ -108,7 +114,7 @@
  import net.minecraft.world.item.alchemy.PotionBrewing;
  import net.minecraft.world.item.crafting.RecipeManager;
  import net.minecraft.world.level.BlockEventData;
-@@ -179,12 +_,13 @@
+@@ -179,31 +_,35 @@
      private static final Logger LOGGER = LogUtils.getLogger();
      private static final int EMPTY_TIME_NO_TICK = 300;
      private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
@@ -117,6 +123,7 @@
      public final ServerChunkCache chunkSource;
      private final MinecraftServer server;
      public final net.minecraft.world.level.storage.PrimaryLevelData serverLevelData; // CraftBukkit - type
++    public final ChunkHolderManager.LevelHolderData chunkHolderData; // Canvas
 +    public ItemStack ominousBanner; // Canvas
      private int lastSpawnChunkRadius;
 -    final EntityTickList entityTickList = new EntityTickList();
@@ -124,9 +131,15 @@
      // Paper - rewrite chunk system
      private final GameEventDispatcher gameEventDispatcher;
      public boolean noSave;
-@@ -194,22 +_,23 @@
-     private final LevelTicks<Block> blockTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
-     private final LevelTicks<Fluid> fluidTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
+     private final SleepStatus sleepStatus;
+     private int emptyTime;
+     private final PortalForcer portalForcer;
+-    private final LevelTicks<Block> blockTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
+-    private final LevelTicks<Fluid> fluidTicks = new LevelTicks<>(this::isPositionTickingWithEntitiesLoaded);
++    // Canvas start - allow all block ticks
++    private final LevelTicks<Block> blockTicks = new LevelTicks<>((_) -> true);
++    private final LevelTicks<Fluid> fluidTicks = new LevelTicks<>((_) -> true);
++    // Canvas end
      private final PathTypeCache pathTypesByPosCache = new PathTypeCache();
 -    final Set<Mob> navigatingMobs = new ObjectOpenHashSet<>();
 -    volatile boolean isUpdatingNavigations;
@@ -146,13 +159,6 @@
      private final StructureManager structureManager;
      private final StructureCheck structureCheck;
      private final boolean tickTime;
-     private double preciseTime; // Purpur - Configurable daylight cycle
-     private boolean forceTime; // Purpur - Configurable daylight cycle
-     private final RandomSequences randomSequences;
-+    public final QueuedTaskScheduler taskScheduler = new QueuedTaskScheduler(); // Canvas
- 
-     // CraftBukkit start
-     public final LevelStorageSource.LevelStorageAccess levelStorageAccess;
 @@ -218,6 +_,11 @@
      public boolean hasEntityMoveEvent; // Paper - Add EntityMoveEvent
      private final alternate.current.wire.WireHandler wireHandler = new alternate.current.wire.WireHandler(this); // Paper - optimize redstone (Alternate Current)
@@ -209,6 +215,14 @@
  
          if (val <= 0) {
              throw new IllegalStateException("Negative counter");
+@@ -689,6 +_,7 @@
+         // Paper start - rewrite chunk system
+         this.moonrise$setEntityLookup(new ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup((ServerLevel)(Object)this, ((ServerLevel)(Object)this).new EntityCallbacks()));
+         this.chunkTaskScheduler = new ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler((ServerLevel)(Object)this);
++        this.chunkHolderData = new ChunkHolderManager.LevelHolderData();
+         this.entityDataController = new ca.spottedleaf.moonrise.patches.chunk_system.io.datacontroller.EntityDataController(
+             new ca.spottedleaf.moonrise.patches.chunk_system.io.datacontroller.EntityDataController.EntityRegionFileStorage(
+                 new RegionStorageInfo(levelStorageAccess.getLevelId(), dimension, "entities"),
 @@ -702,6 +_,16 @@
          // Paper end - rewrite chunk system
          this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
@@ -226,7 +240,7 @@
      }
  
      // Paper start
-@@ -733,8 +_,139 @@
+@@ -733,8 +_,140 @@
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -343,6 +357,7 @@
 +        this.handlingTick = true;
 +        this.bukkitScheduler.mainThreadHeartbeat();
 +
++        ((CanvasPerWorldScheduler) this.server.server.getRegionScheduler()).tick(this); // Canvas - folia regionized support
 +        for (final Entity entity : this.getEntities().getAll()) {
 +            if (entity.isRemoved()) {
 +                continue;
@@ -538,7 +553,7 @@
  
      public void setDayTime(long time) {
          this.serverLevelData.setDayTime(time);
-@@ -898,14 +_,20 @@
+@@ -898,23 +_,29 @@
      // Purpur end - Configurable daylight cycle
  
      public void tickCustomSpawners(boolean spawnEnemies, boolean spawnFriendlies) {
@@ -559,6 +574,26 @@
      }
  
      // Paper start - optimise random ticking
+-    private final ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom simpleRandom = new ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed());
++    private final SimpleThreadLocalRandomSource simpleRandom = SimpleThreadLocalRandomSource.INSTANCE; // Canvas
+ 
+     private void optimiseRandomTick(final LevelChunk chunk, final int tickSpeed) {
+         final LevelChunkSection[] sections = chunk.getSections();
+         final int minSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection((ServerLevel)(Object)this);
+-        final ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom simpleRandom = this.simpleRandom;
++        final SimpleThreadLocalRandomSource simpleRandom = this.simpleRandom; // Canvas
+         final boolean doubleTickFluids = !ca.spottedleaf.moonrise.common.PlatformHooks.get().configFixMC224294();
+ 
+         final ChunkPos cpos = chunk.getPos();
+@@ -961,7 +_,7 @@
+     // Paper end - optimise random ticking
+ 
+     public void tickChunk(LevelChunk chunk, int randomTickSpeed) {
+-        final ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom simpleRandom = this.simpleRandom; // Paper - optimise random ticking
++        final SimpleThreadLocalRandomSource simpleRandom = this.simpleRandom; // Paper - optimise random ticking // Canvas
+         ChunkPos pos = chunk.getPos();
+         boolean isRaining = this.isRaining();
+         int minBlockX = pos.getMinBlockX();
 @@ -1005,15 +_,23 @@
          profilerFiller.popPush("iceandsnow");
  

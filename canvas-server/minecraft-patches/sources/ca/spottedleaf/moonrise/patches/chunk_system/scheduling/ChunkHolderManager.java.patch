@@ -1,14 +1,5 @@
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkHolderManager.java
-@@ -20,6 +_,8 @@
- import com.google.gson.JsonArray;
- import com.google.gson.JsonObject;
- import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.server.chunk.DynamicChunkPosLongSet;
-+import io.canvasmc.canvas.util.ConcurrentLinkedDequeTree;
- import it.unimi.dsi.fastutil.longs.Long2ByteLinkedOpenHashMap;
- import it.unimi.dsi.fastutil.longs.Long2ByteMap;
- import it.unimi.dsi.fastutil.longs.Long2IntMap;
 @@ -40,16 +_,26 @@
  import net.minecraft.util.Unit;
  import net.minecraft.world.level.ChunkPos;
@@ -36,7 +27,7 @@
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicBoolean;
  import java.util.concurrent.atomic.AtomicReference;
-@@ -71,36 +_,18 @@
+@@ -71,36 +_,49 @@
      private static final long PROBE_MARKER = Long.MIN_VALUE + 1;
      public final ReentrantAreaLock ticketLockArea;
  
@@ -74,8 +65,39 @@
 -
 -        return Long.compare(coord1, coord2);
 -    });
-+    private final ConcurrentLinkedDeque<NewChunkHolder> pendingFullLoadUpdate = new ConcurrentLinkedDeque<>(); // Canvas - concurrent
-+    private final ConcurrentLinkedDequeTree<NewChunkHolder> autoSaveQueue = new ConcurrentLinkedDequeTree<>(); // Canvas - replace ObjectRBTreeSet with DequeTree
++    // Canvas start
++    // split this per-level to avoid race conditions where multiple levels write/read to the queues
++    public static class LevelHolderData {
++        private final ConcurrentLinkedDeque<NewChunkHolder> pendingFullLoadUpdate = new ConcurrentLinkedDeque<>(); // Canvas - concurrent
++        private final ObjectRBTreeSet<NewChunkHolder> autoSaveQueue = new ObjectRBTreeSet<>((final NewChunkHolder c1, final NewChunkHolder c2) -> {
++            if (c1 == c2) {
++                return 0;
++            }
++
++            final int saveTickCompare = Long.compare(c1.lastAutoSave, c2.lastAutoSave);
++
++            if (saveTickCompare != 0) {
++                return saveTickCompare;
++            }
++
++            final long coord1 = CoordinateUtils.getChunkKey(c1.chunkX, c1.chunkZ);
++            final long coord2 = CoordinateUtils.getChunkKey(c2.chunkX, c2.chunkZ);
++
++            if (coord1 == coord2) {
++                throw new IllegalStateException("Duplicate chunkholder in auto save queue");
++            }
++
++            return Long.compare(coord1, coord2);
++        });
++    }
++
++    public LevelHolderData getData() {
++        if (this.world == null) {
++            throw new RuntimeException("World was null!");
++        }
++        return world.chunkHolderData;
++    }
++    // Canvas end
  
      public ChunkHolderManager(final ServerLevel world, final ChunkTaskScheduler taskScheduler) {
          this.world = world;
@@ -112,6 +134,51 @@
                  return new Iterator<ChunkHolder>() {
                      @Override
                      public boolean hasNext() {
+@@ -222,26 +_,28 @@
+         this.taskScheduler.setShutdown(true);
+     }
+ 
+-    void ensureInAutosave(final NewChunkHolder holder) {
+-        if (!this.autoSaveQueue.contains(holder)) {
++    synchronized void ensureInAutosave(final NewChunkHolder holder) { // Canvas - synchronized
++        final LevelHolderData data = getData(); // Canvas
++        if (!data.autoSaveQueue.contains(holder)) { // Canvas
+             holder.lastAutoSave = this.currentTick;
+-            this.autoSaveQueue.add(holder);
++            data.autoSaveQueue.add(holder); // Canvas
+         }
+     }
+ 
+-    public void autoSave() {
++    public synchronized void autoSave() { // Canvas - synchronized
++        final LevelHolderData data = getData(); // Canvas
+         final List<NewChunkHolder> reschedule = new ArrayList<>();
+         final long currentTick = this.currentTick;
+         final long maxSaveTime = currentTick - Math.max(1L, PlatformHooks.get().configAutoSaveInterval(this.world));
+         final int maxToSave = PlatformHooks.get().configMaxAutoSavePerTick(this.world);
+-        for (int autoSaved = 0; autoSaved < maxToSave && !this.autoSaveQueue.isEmpty();) {
+-            final NewChunkHolder holder = this.autoSaveQueue.first();
++        for (int autoSaved = 0; autoSaved < maxToSave && !data.autoSaveQueue.isEmpty();) { // Canvas
++            final NewChunkHolder holder = data.autoSaveQueue.first(); // Canvas
+ 
+             if (holder.lastAutoSave > maxSaveTime) {
+                 break;
+             }
+ 
+-            this.autoSaveQueue.remove(holder);
++            data.autoSaveQueue.remove(holder); // Canvas
+ 
+             holder.lastAutoSave = currentTick;
+             if (holder.save(false) != null) {
+@@ -255,7 +_,7 @@
+ 
+         for (final NewChunkHolder holder : reschedule) {
+             if (holder.getChunkStatus().isOrAfter(FullChunkStatus.FULL)) {
+-                this.autoSaveQueue.add(holder);
++                data.autoSaveQueue.add(holder); // Canvas
+             }
+         }
+     }
 @@ -317,7 +_,7 @@
              }
              if (logProgress) {
@@ -181,19 +248,30 @@
          if (!TickThread.isTickThread()) {
              this.taskScheduler.scheduleChunkTask(() -> {
 -                final ArrayDeque<NewChunkHolder> pendingFullLoadUpdate = ChunkHolderManager.this.pendingFullLoadUpdate;
-+                final Deque<NewChunkHolder> pendingFullLoadUpdate = ChunkHolderManager.this.pendingFullLoadUpdate; // Canvas
++                final Deque<NewChunkHolder> pendingFullLoadUpdate = ChunkHolderManager.this.getData().pendingFullLoadUpdate; // Canvas
                  for (int i = 0, len = changedFullStatus.size(); i < len; ++i) {
                      pendingFullLoadUpdate.add(changedFullStatus.get(i));
                  }
-@@ -1041,7 +_,7 @@
+@@ -1041,16 +_,16 @@
                  ChunkHolderManager.this.processPendingFullUpdate();
              }, Priority.HIGHEST);
          } else {
 -            final ArrayDeque<NewChunkHolder> pendingFullLoadUpdate = this.pendingFullLoadUpdate;
-+            final Deque<NewChunkHolder> pendingFullLoadUpdate = this.pendingFullLoadUpdate; // Canvas
++            final Deque<NewChunkHolder> pendingFullLoadUpdate = this.getData().pendingFullLoadUpdate; // Canvas
              for (int i = 0, len = changedFullStatus.size(); i < len; ++i) {
                  pendingFullLoadUpdate.add(changedFullStatus.get(i));
              }
+         }
+     }
+ 
+-    private void removeChunkHolder(final NewChunkHolder holder) {
++    private synchronized void removeChunkHolder(final NewChunkHolder holder) { // Canvas - synchronized
+         holder.onUnload();
+-        this.autoSaveQueue.remove(holder);
++        this.getData().autoSaveQueue.remove(holder); // Canvas
+         PlatformHooks.get().onChunkHolderDelete(this.world, holder.vanillaChunkHolder);
+         this.chunkHolders.remove(CoordinateUtils.getChunkKey(holder.chunkX, holder.chunkZ));
+     }
 @@ -1207,6 +_,26 @@
              }
          }
@@ -226,7 +304,7 @@
      // only call on tick thread
      private boolean processPendingFullUpdate() {
 -        final ArrayDeque<NewChunkHolder> pendingFullLoadUpdate = this.pendingFullLoadUpdate;
-+        final Deque<NewChunkHolder> pendingFullLoadUpdate = this.pendingFullLoadUpdate; // Canvas
++        final Deque<NewChunkHolder> pendingFullLoadUpdate = this.getData().pendingFullLoadUpdate; // Canvas
  
          boolean ret = false;
  
