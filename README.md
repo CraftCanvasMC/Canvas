@@ -42,7 +42,6 @@ You can download the server jar from the [downloads page](https://canvasmc.io/do
 ```bash
 > ./gradlew applyAllPatches              # apply all patches
 > ./gradlew createMojmapPaperclipJar     # build the server jar
-> ./gradlew rebuildPatches               # generate patches
 > ./gradlew runDevServer                 # run dev server
 > ./rebuildPatches                       # custom script to generate patches for modified directories
 ```
