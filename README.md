@@ -9,7 +9,7 @@ CanvasMC is a high-performance Minecraft server software focused on maximizing s
 Useful links:
 
 - [Website](https://canvasmc.io)
-- [Documentation](https://docs.canvasmc.io) (Work in progress)
+- [Documentation](https://docs.canvasmc.io)
 - [Discord](https://canvasmc.io/discord)
 
 ## Key Features
@@ -19,34 +19,46 @@ Useful links:
 - Command Optimizations
 - Entity Improvements
 
-## Development Requirements
+## Running Canvas
 
-To compile Canvas, you need:
+### Requirements
 
-- JDK 22 or higher
+- Java 22 or higher
+
+### Obtaining Server Jar
+
+You can download the server jar from the [downloads page](https://canvasmc.io/downloads).
+
+## Building Canvas
+
+### Requirements
+
+- Java 22 or higher
 - Git (with configured email and name)
 - Gradle
 
-## Scripts
+### Scripts
 
 ```bash
 > ./gradlew applyAllPatches              # apply all patches
 > ./gradlew createMojmapPaperclipJar     # build the server jar
+> ./gradlew runDevServer                 # run dev server
 > ./rebuildPatches                       # custom script to generate patches for modified directories
 ```
+
 ## REST API
 
 Canvas has a REST API that can be used to get builds and check for new versions.
 
 It is temporarily documented in the [Website Repository](https://github.com/CraftCanvasMC/Website/blob/main/docs/API.md). Soon it will be moved over to the documentation website.
 
-## Support the Project
+## Support
 
-If you'd like to support CanvasMC's development:
+You can help CanvasMC grow by:
 
-- Consider [donating on Ko-fi](https://ko-fi.com/dueris)
-- Star and share the project on GitHub
-- Contribute code or documentation improvements
+- Supporting us on [Ko-fi](https://ko-fi.com/dueris)
+- Starring the project on GitHub
+- Contributing code or documentation
 
 Your support helps keep this project active and improving!
 
