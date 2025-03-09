@@ -155,7 +155,7 @@ public class ExecutorManager {
         this.globalWorkQueue.enqueue(task, task.priority());
     }
 
-    protected void wakeup() { // Canvas - private -> protected
+    public void wakeup() { // Canvas - private -> public
         synchronized (this.workerMonitor) {
             this.workerMonitor.notify();
         }

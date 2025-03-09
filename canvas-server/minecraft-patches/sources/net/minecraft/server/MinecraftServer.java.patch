@@ -31,11 +31,10 @@
  import java.util.List;
  import java.util.Locale;
  import java.util.Map;
-@@ -42,7 +_,7 @@
- import java.util.Map.Entry;
+@@ -43,6 +_,7 @@
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.Executor;
--import java.util.concurrent.RejectedExecutionException;
+ import java.util.concurrent.RejectedExecutionException;
 +import java.util.concurrent.Executors;
  import java.util.concurrent.atomic.AtomicReference;
  import java.util.concurrent.locks.LockSupport;
@@ -48,10 +47,19 @@
  import net.minecraft.network.protocol.PacketType;
  import net.minecraft.network.protocol.game.ClientboundChangeDifficultyPacket;
  import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
-@@ -171,18 +_,20 @@
+@@ -136,6 +_,7 @@
+ import net.minecraft.world.entity.player.Player;
+ import net.minecraft.world.flag.FeatureFlagSet;
+ import net.minecraft.world.flag.FeatureFlags;
++import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.alchemy.PotionBrewing;
+ import net.minecraft.world.item.crafting.RecipeManager;
+ import net.minecraft.world.level.ChunkPos;
+@@ -171,18 +_,21 @@
  import net.minecraft.world.level.storage.WorldData;
  import net.minecraft.world.phys.Vec2;
  import net.minecraft.world.phys.Vec3;
++import org.bukkit.event.inventory.InventoryCloseEvent;
 +import org.bukkit.event.player.PlayerRespawnEvent;
  import org.slf4j.Logger;
  
@@ -123,7 +131,7 @@
      @Deprecated(forRemoval = true) // Paper
      public final double[] recentTps = new double[4]; // Purpur - Add 5 second tps average in /tps
      // Spigot end
-@@ -302,17 +_,42 @@
+@@ -302,17 +_,41 @@
      public volatile Thread shutdownThread; // Paper - Improved watchdog support
      public final io.papermc.paper.configuration.PaperConfigurations paperConfigurations; // Paper - add paper configuration files
      public boolean isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
@@ -159,7 +167,6 @@
 -        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> atomicReference.get().runServer(), "Server thread");
 +        // Canvas start - Threaded Dimensions
 +        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> {
-+            ((MinecraftServer) atomicReference.get()).runServer();
 +            THREADED_SERVER = new ThreadedServer(atomicReference.get());
 +            THREADED_SERVER.spin();
 +        }, "Server thread");
@@ -200,6 +207,36 @@
  
      protected void loadLevel(String levelId) { // CraftBukkit
          if (!JvmProfiler.INSTANCE.isRunning()) {
+@@ -713,7 +_,19 @@
+             // Back to the createLevels method without crazy modifications
+             primaryLevelData.setModdedInfo(this.getServerModName(), this.getModdedStatus().shouldReportAsModified());
+             this.addLevel(serverLevel); // Paper - Put world into worldlist before initing the world; move up
+-            this.initWorld(serverLevel, primaryLevelData, this.worldData, worldOptions);
++            // Canvas start
++            int loadRegionRadius = 1024 >> 4;
++            serverLevel.randomSpawnSelection = new ChunkPos(serverLevel.getChunkSource().randomState().sampler().findSpawnPosition());
++            for (int currX = -loadRegionRadius; currX <= loadRegionRadius; ++currX) {
++                for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
++                    ChunkPos pos = new ChunkPos(currX, currZ);
++                    serverLevel.chunkSource.addTicketAtLevel(
++                        net.minecraft.server.level.TicketType.UNKNOWN, pos, ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, pos
++                    );
++                }
++            }
++            // this.initWorld(serverLevel, primaryLevelData, this.worldData, worldOptions); // move to first tick of MinecraftServerWorld
++            // Canvas end
+ 
+             // Paper - Put world into worldlist before initing the world; move up
+             this.getPlayerList().addWorldborderListener(serverLevel);
+@@ -807,7 +_,7 @@
+                 }
+             }
+             // CraftBukkit end
+-            ChunkPos chunkPos = new ChunkPos(chunkSource.randomState().sampler().findSpawnPosition()); // Paper - Only attempt to find spawn position if there isn't a fixed spawn position set
++            ChunkPos chunkPos = level.randomSpawnSelection == null ? new ChunkPos(chunkSource.randomState().sampler().findSpawnPosition()) : level.randomSpawnSelection; // Paper - Only attempt to find spawn position if there isn't a fixed spawn position set // Canvas
+             int spawnHeight = chunkSource.getGenerator().getSpawnHeight(level);
+             if (spawnHeight < level.getMinY()) {
+                 BlockPos worldPosition = chunkPos.getWorldPosition();
 @@ -876,6 +_,7 @@
              // CraftBukkit start
              // this.nextTickTimeNanos = Util.getNanos() + PREPARE_LEVELS_DEFAULT_DELAY_NANOS;
@@ -213,45 +250,70 @@
  
      // CraftBukkit start
 -    private boolean hasStopped = false;
-+    public boolean hasStopped = false; // Canvas - private -> public
++    public volatile boolean hasStopped = false; // Canvas - private -> public // volatile
      private boolean hasLoggedStop = false; // Paper - Debugging
      private final Object stopLock = new Object();
      public final boolean hasStopped() {
-@@ -994,6 +_,16 @@
+@@ -994,6 +_,53 @@
              if (this.hasStopped) return;
              this.hasStopped = true;
          }
-+        // Canvas start - respawn all players that are dead // async player joining
-+        if (Config.INSTANCE.asyncPlayerJoining) {
-+            PlayerJoinThread.getInstance().stopAcceptingConnections();
-+        }
-+        for (ServerPlayer player : this.playerList.players) {
-+            if (player.isDeadOrDying() || (player.isRemoved() && player.getRemovalReason() == net.minecraft.world.entity.Entity.RemovalReason.KILLED)) {
-+                this.playerList.respawn(player, false, net.minecraft.world.entity.Entity.RemovalReason.KILLED, PlayerRespawnEvent.RespawnReason.DEATH);
-+            }
-+        }
-+        // Canvas end
-         if (!hasLoggedStop && isDebugging()) io.papermc.paper.util.TraceUtil.dumpTraceForThread("Server stopped"); // Paper - Debugging
-         shutdownThread = Thread.currentThread(); // Paper - Improved watchdog support
-         org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
-@@ -1002,8 +_,19 @@
-             this.cancelRecordingMetrics();
-         }
- 
--        LOGGER.info("Stopping server");
--        Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
-+        // Canvas start
++        // Canvas start - Threaded Dimensions
 +        ThreadedServer.LOGGER.info("Halting tick-loops");
 +        long startNanos = Util.getNanos();
 +        ThreadedServer threadedServer = MinecraftServer.getThreadedServer();
++        // cleanup tick-loops, ensure all are terminated.
++        threadedServer.markPrepareHalt(); // notify to threads we are halting
 +        for (final AbstractTickLoop<?, ?> tickLoop : threadedServer.getTickLoops()) {
-+            if (tickLoop.isRunning()) {
++            if (tickLoop.getRunningThread() == null) {
++                LOGGER.warn("Running thread for tick-loop '{}' was null when shutting down!", tickLoop.name());
++                continue;
++            }
++            if (tickLoop.getRunningThread().isAlive()) {
++                // if thread is still running, wait for them
 +                tickLoop.stopSpin(true);
 +            }
 +        }
 +        long nanoTickTime = Util.getNanos() - startNanos;
 +        ThreadedServer.LOGGER.info("Successfully halted all tick-loops in {}ms", (nanoTickTime / 1_000_000));
++
++        PlayerJoinThread.getInstance().stopAcceptingConnections();
++        for (ServerPlayer player : this.playerList.players) {
++            if (player.isDeadOrDying() || (player.isRemoved() && player.getRemovalReason() == net.minecraft.world.entity.Entity.RemovalReason.KILLED)) {
++                this.playerList.respawn(player, false, net.minecraft.world.entity.Entity.RemovalReason.KILLED, PlayerRespawnEvent.RespawnReason.DEATH);
++            }
++        }
++
++        // close current inventory
++        LOGGER.info("Closing player inventories...");
++        for (final ServerPlayer player : this.playerList.players) {
++            try {
++                // close inventory
++                if (player.containerMenu != player.inventoryMenu) {
++                    player.closeContainer(InventoryCloseEvent.Reason.DISCONNECT);
++                }
++
++                // drop carried item
++                if (!player.containerMenu.getCarried().isEmpty()) {
++                    ItemStack carried = player.containerMenu.getCarried();
++                    player.containerMenu.setCarried(ItemStack.EMPTY);
++                    player.drop(carried, false);
++                }
++            } catch (final Throwable thr) {
++                LOGGER.error("Failed to close player inventory for player: {}", player, thr);
++            }
++        }
++        LOGGER.info("Closed player inventories");
 +        // Canvas end
+         if (!hasLoggedStop && isDebugging()) io.papermc.paper.util.TraceUtil.dumpTraceForThread("Server stopped"); // Paper - Debugging
+         shutdownThread = Thread.currentThread(); // Paper - Improved watchdog support
+         org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
+@@ -1002,8 +_,7 @@
+             this.cancelRecordingMetrics();
+         }
+ 
+-        LOGGER.info("Stopping server");
+-        Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
 +        // Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing // Canvas - move down
          // Purpur start - UPnP Port Forwarding
          if (upnp) {
@@ -287,7 +349,7 @@
              this.size = size;
              this.time = size * SEC_IN_NANO;
              this.total = dec(TPS).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
-@@ -1170,10 +_,12 @@
+@@ -1170,10 +_,11 @@
              return total.divide(dec(time), 30, java.math.RoundingMode.HALF_UP).doubleValue();
          }
      }
@@ -295,9 +357,8 @@
 +    public static final java.math.BigDecimal TPS_BASE = new java.math.BigDecimal(1E9).multiply(new java.math.BigDecimal(SAMPLE_INTERVAL)); // Canvas - private -> public
      // Paper end
  
-+    @Deprecated(forRemoval = true) // Canvas - Multithreaded Dimension Ticking - mark deprecated because we dont even use this anymore
      protected void runServer() {
-+        if (true) return; // Canvas - nope!
++        if (true) throw new UnsupportedOperationException(); // Canvas - Threaded Dimensions
          try {
              if (!this.initServer()) {
                  throw new IllegalStateException("Failed to initialize server");
@@ -725,12 +786,40 @@
          return 0;
      }
  
-@@ -2923,7 +_,7 @@
+@@ -2918,13 +_,17 @@
+     // Paper start - Add tick times API and /mspt command
+     public static class TickTimes {
+         private final long[] times;
++        private final long intervalNs; // Canvas - utilization
++        private int index = 0; // Canvas - utilization
+ 
+         public TickTimes(int length) {
              times = new long[length];
++            this.intervalNs = 50 * 1_000_000 ; // Canvas - utilization - ms -> nanos -- ms * 1_000_000
          }
  
 -        void add(int index, long time) {
 +        public void add(int index, long time) { // Canvas - public
              times[index % times.length] = time;
++            index++; // Canvas - utilization
          }
+ 
+         public long[] getTimes() {
+@@ -2938,6 +_,17 @@
+             }
+             return ((double) total / (double) times.length) * 1.0E-6D;
+         }
++        // Canvas start - utilization
++
++        public double getUtilization() {
++            long totalExecutionTime = 0L;
++            for (long time : times) {
++                totalExecutionTime += time;
++            }
++            long totalElapsedTime = times.length * intervalNs;
++            return ((double) totalExecutionTime / totalElapsedTime) * 100;
++        }
++        // Canvas end
+     }
+     // Paper end - Add tick times API and /mspt command
  

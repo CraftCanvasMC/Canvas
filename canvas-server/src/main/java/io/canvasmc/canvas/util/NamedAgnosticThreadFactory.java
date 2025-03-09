@@ -1,9 +1,9 @@
 package io.canvasmc.canvas.util;
 
 import com.mojang.logging.LogUtils;
+import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
-import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 

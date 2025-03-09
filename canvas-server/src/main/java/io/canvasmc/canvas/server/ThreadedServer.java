@@ -1,16 +1,27 @@
 package io.canvasmc.canvas.server;
 
-import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.google.common.collect.Sets;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
-import io.canvasmc.canvas.server.chunk.AsyncPlayerChunkLoader;
 import io.canvasmc.canvas.server.level.LevelThread;
 import io.canvasmc.canvas.server.level.MinecraftServerWorld;
 import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
@@ -25,20 +36,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.BooleanSupplier;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 public class ThreadedServer implements ThreadedBukkitServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
@@ -47,7 +44,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public static BooleanSupplier SHOULD_KEEP_TICKING;
     public static Function<ServerLevel, LevelThread> LEVEL_SPINNER = (level) -> {
         try {
-            return level.start((self) -> self::tick);
+            return level.start((self) -> self::worldtick, () -> MinecraftServer.getServer().isTicking());
         } catch (Throwable throwable) {
             throw new RuntimeException("Unable to spin world '" + level.getName() + "'!", throwable);
         }
@@ -61,7 +58,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public ThreadedServer(MinecraftServer server) {
         this.server = server;
-        this.loops = Sets.newConcurrentHashSet();
+        this.loops = Collections.synchronizedSet(Sets.newLinkedHashSet());
     }
 
     public static Long @NotNull [] getLevelIds() {
@@ -126,14 +123,26 @@ public class ThreadedServer implements ThreadedBukkitServer {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
+            // we have a "dependency hierarchy" for tick-loops, meaning each
+            // tick-loop depends on a certain part of the server before it
+            // can start ticking
+            // the dependency tree goes as such:
+            // - CHUNK_LOADER
+            // - MAIN
+            // - WORLD
+            // - ENTITY (if applicable)
+            // - JOIN
+            // this ensures we don't create race conditions where say entities
+            // tick before the world has booted, or the join thread is accepting
+            // connections before the server is fully loaded. the likelihood
+            // of this is unlikely, but we ensure its built like this to avoid
+            // any sort of race condition from occurring
             if (Config.INSTANCE.threadedEntityTicking) {
                 final ThreadedEntityScheduler entityScheduler = new ThreadedEntityScheduler("EntityScheduler", "entity scheduler");
                 this.entityScheduler = entityScheduler;
-                entityScheduler.start((self) -> (_, _) -> self.tickEntities());
+                entityScheduler.start((self) -> (_, _) -> self.tickEntities(), this::areAllWorldsTicking);
             }
-            if (Config.INSTANCE.asyncPlayerJoining) {
-                PlayerJoinThread.getInstance().start((self) -> (_, _) -> self.run());
-            }
+            PlayerJoinThread.getInstance().start((self) -> (_, _) -> self.run(), () -> Config.INSTANCE.threadedEntityTicking ? this.entityScheduler.isTicking() : this.areAllWorldsTicking());
             this.started = true;
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
@@ -210,6 +219,15 @@ public class ThreadedServer implements ThreadedBukkitServer {
         }
     }
 
+    private boolean areAllWorldsTicking() {
+        for (final ServerLevel level : this.server.getAllLevels()) {
+            if (level.checkInitialised.get() != ServerLevel.WORLD_INIT_CHECKED) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public void loadLevel(@NotNull ServerLevel level) {
         this.levels.add(level);
     }
@@ -238,5 +256,12 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
 	public Set<AbstractTickLoop<?, ?>> getTickLoops() {
         return this.loops;
+	}
+
+	public void markPrepareHalt() {
+        // mark all threads to stop ticking.
+        for (final AbstractTickLoop<?, ?> loop : this.loops) {
+            loop.stopSpin(false);
+        }
 	}
 }

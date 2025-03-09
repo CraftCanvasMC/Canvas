@@ -4,135 +4,97 @@
  import com.mojang.logging.LogUtils;
  import java.util.ArrayDeque;
  import java.util.ArrayList;
++import java.util.Collections;
 +import java.util.Deque;
  import java.util.List;
 +import java.util.NoSuchElementException;
-+import java.util.concurrent.ConcurrentLinkedDeque;
-+import java.util.concurrent.atomic.AtomicInteger;
++import java.util.concurrent.LinkedBlockingDeque;
  import javax.annotation.Nullable;
  import net.minecraft.core.BlockPos;
  import net.minecraft.core.Direction;
-@@ -17,7 +_,7 @@
+@@ -17,8 +_,8 @@
      private static final Logger LOGGER = LogUtils.getLogger();
      private final Level level;
      private final int maxChainedNeighborUpdates;
 -    private final ArrayDeque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>();
-+    private final Deque<NeighborUpdates> stack = new ConcurrentLinkedDeque<>(); // Canvas - fix CME/NPE
-     private final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
+-    private final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
++    public final Deque<CollectingNeighborUpdater.NeighborUpdates> stack = new LinkedBlockingDeque<>(); // Canvas - LinkedBlockingDeque
++    public final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = Collections.synchronizedList(new ArrayList<>()); // Canvas - synchronized
      private int count = 0;
  
-@@ -57,33 +_,55 @@
-                 this.stack.push(updates);
-             }
-         } else if (this.count - 1 == this.maxChainedNeighborUpdates) {
--            LOGGER.error("Too many chained neighbor updates. Skipping the rest. First skipped position: " + pos.toShortString());
-+            LOGGER.error("Too many chained neighbor updates. Skipping the rest. First skipped position: {}", pos.toShortString(), new Throwable()); // Canvas - debug chained neighbor updates
-         }
- 
-         if (!flag) {
-             this.runUpdates();
-         }
-     }
-+    // Canvas start
-+
-+    private Deque<NeighborUpdates> cloneAndClear() {
-+        final Deque<NeighborUpdates> neighborUpdates = new ConcurrentLinkedDeque<>(this.stack);
-+        this.stack.clear();
-+        return neighborUpdates;
-+    }
-+    // Canvas end
- 
+     public CollectingNeighborUpdater(Level level, int maxChainedNeighborUpdates) {
+@@ -68,19 +_,22 @@
      private void runUpdates() {
          try {
--            while (!this.stack.isEmpty() || !this.addedThisLayer.isEmpty()) {
-+            Deque<NeighborUpdates> updates = cloneAndClear(); // Canvas - leave less room for tasks to be submitted during processing
-+            while (!updates.isEmpty() || !this.addedThisLayer.isEmpty()) { // Canvas - leave less room for tasks to be submitted during processing
+             while (!this.stack.isEmpty() || !this.addedThisLayer.isEmpty()) {
++                try { // Canvas
                  for (int i = this.addedThisLayer.size() - 1; i >= 0; i--) {
--                    this.stack.push(this.addedThisLayer.get(i));
-+                    // Canvas start
-+                    try {
-+                        NeighborUpdates nu = this.addedThisLayer.get(i);
-+                        if (nu == null) continue;
-+                        updates.push(nu); // Canvas - leave less room for tasks to be submitted during processing
-+                    } catch (NullPointerException ignored) {
-+                    }
-+                    // Canvas end
+                     this.stack.push(this.addedThisLayer.get(i));
                  }
  
                  this.addedThisLayer.clear();
 -                CollectingNeighborUpdater.NeighborUpdates neighborUpdates = this.stack.peek();
-+                CollectingNeighborUpdater.NeighborUpdates neighborUpdates = updates.peek(); // Canvas - leave less room for tasks to be submitted during processing
++                CollectingNeighborUpdater.NeighborUpdates neighborUpdates = this.stack.pop(); // Canvas - pop
++                if (neighborUpdates == null) continue; // Canvas
  
-+                if (neighborUpdates == null) continue; // Canvas - ensure not null
                  while (this.addedThisLayer.isEmpty()) {
                      if (!neighborUpdates.runNext(this.level)) {
 -                        this.stack.pop();
-+                        // Canvas start
-+                        try {
-+                        updates.pop(); // Canvas - leave less room for tasks to be submitted during processing
++                        // this.stack.pop(); // Canvas - move pop up
                          break;
-+                        } catch (java.util.NoSuchElementException ignored) {
-+                        }
-+                        // Canvas end
                      }
                  }
++                } catch (NoSuchElementException ignored) {} // Canvas
              }
          } finally {
--            this.stack.clear();
-+            // this.stack.clear(); // Canvas - leave less room for tasks to be submitted during processing
-             this.addedThisLayer.clear();
-             this.count = 0;
+             this.stack.clear();
+@@ -89,7 +_,7 @@
          }
-@@ -105,21 +_,31 @@
+     }
+ 
+-    record FullNeighborUpdate(BlockState state, BlockPos pos, Block block, @Nullable Orientation orientation, boolean movedByPiston)
++    public record FullNeighborUpdate(BlockState state, BlockPos pos, Block block, @Nullable Orientation orientation, boolean movedByPiston) // Canvas - public
+         implements CollectingNeighborUpdater.NeighborUpdates {
+         @Override
+         public boolean runNext(Level level) {
+@@ -98,14 +_,14 @@
+         }
+     }
+ 
+-    static final class MultiNeighborUpdate implements CollectingNeighborUpdater.NeighborUpdates {
++    public static final class MultiNeighborUpdate implements CollectingNeighborUpdater.NeighborUpdates { // Canvas - public
+         private final BlockPos sourcePos;
+-        private final Block sourceBlock;
++        public final Block sourceBlock; // Canvas - private -> public
+         @Nullable
          private Orientation orientation;
          @Nullable
          private final Direction skipDirection;
 -        private int idx = 0;
-+        private final AtomicInteger idx = new AtomicInteger(); // Canvas - atomic
++        private volatile int idx = 0; // Canvas - volatile
  
          MultiNeighborUpdate(BlockPos sourcePos, Block sourceBlock, @Nullable Orientation orientation, @Nullable Direction skipDirection) {
              this.sourcePos = sourcePos;
-             this.sourceBlock = sourceBlock;
-             this.orientation = orientation;
-+            // Canvas start - atomic
-             this.skipDirection = skipDirection;
--            if (NeighborUpdater.UPDATE_ORDER[this.idx] == skipDirection) {
--                this.idx++;
-+            if (NeighborUpdater.UPDATE_ORDER[this.idx.get()] == skipDirection) {
-+            // Canvas end
-+                this.idx.getAndIncrement();
-             }
-         }
- 
-         @Override
-         public boolean runNext(Level level) {
--            Direction direction = NeighborUpdater.UPDATE_ORDER[this.idx++];
-+            // Canvas start
-+            int currentIndex = this.idx.getAndIncrement();
-+
-+            if (currentIndex >= NeighborUpdater.UPDATE_ORDER.length) {
-+                return false; // Prevent out-of-bounds access
-+            }
-+
-+            Direction direction = NeighborUpdater.UPDATE_ORDER[currentIndex];
-+            // Canvas end
-             BlockPos blockPos = this.sourcePos.relative(direction);
-             BlockState blockState = level.getBlockState(blockPos);
-             Orientation orientation = null;
-@@ -134,11 +_,13 @@
-             }
- 
-             NeighborUpdater.executeUpdate(level, blockState, blockPos, this.sourceBlock, orientation, false, this.sourcePos); // Paper - Add source block to BlockPhysicsEvent
--            if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
--                this.idx++;
-+            // Canvas start - atomic
-+            if (this.idx.get() < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx.get()] == this.skipDirection) {
-+                this.idx.getAndIncrement();
-+            // Canvas end
-             }
- 
--            return this.idx < NeighborUpdater.UPDATE_ORDER.length;
-+            return this.idx.get() < NeighborUpdater.UPDATE_ORDER.length; // Canvas - atomic
+@@ -142,11 +_,11 @@
          }
      }
  
+-    interface NeighborUpdates {
++    public interface NeighborUpdates { // Canvas - public
+         boolean runNext(Level level);
+     }
+ 
+-    record ShapeUpdate(Direction direction, BlockState neighborState, BlockPos pos, BlockPos neighborPos, int updateFlags, int updateLimit)
++    public record ShapeUpdate(Direction direction, BlockState neighborState, BlockPos pos, BlockPos neighborPos, int updateFlags, int updateLimit) // Canvas - public
+         implements CollectingNeighborUpdater.NeighborUpdates {
+         @Override
+         public boolean runNext(Level level) {
+@@ -155,7 +_,7 @@
+         }
+     }
+ 
+-    record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates {
++    public record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates { // Canvas - public
+         @Override
+         public boolean runNext(Level level) {
+             BlockState blockState = level.getBlockState(this.pos);

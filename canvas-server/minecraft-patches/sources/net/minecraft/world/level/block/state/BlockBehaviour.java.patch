@@ -1,22 +1,33 @@
 --- a/net/minecraft/world/level/block/state/BlockBehaviour.java
 +++ b/net/minecraft/world/level/block/state/BlockBehaviour.java
-@@ -3,6 +_,8 @@
+@@ -3,6 +_,9 @@
  import com.mojang.serialization.Codec;
  import com.mojang.serialization.MapCodec;
  import com.mojang.serialization.codecs.RecordCodecBuilder;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.event.ShapeUpdateEvent;
 +import io.canvasmc.canvas.util.TPSCalculator;
  import it.unimi.dsi.fastutil.objects.Reference2ObjectArrayMap;
  import java.util.Arrays;
  import java.util.Collections;
-@@ -27,6 +_,7 @@
+@@ -26,7 +_,9 @@
+ import net.minecraft.network.protocol.game.DebugPackets;
  import net.minecraft.resources.DependantName;
  import net.minecraft.resources.ResourceKey;
++import net.minecraft.server.MinecraftServer;
  import net.minecraft.server.level.ServerLevel;
 +import net.minecraft.server.level.ServerPlayer;
  import net.minecraft.tags.FluidTags;
  import net.minecraft.tags.TagKey;
  import net.minecraft.util.Mth;
+@@ -83,6 +_,7 @@
+ import net.minecraft.world.phys.shapes.CollisionContext;
+ import net.minecraft.world.phys.shapes.Shapes;
+ import net.minecraft.world.phys.shapes.VoxelShape;
++import org.bukkit.craftbukkit.block.data.CraftBlockData;
+ 
+ public abstract class BlockBehaviour implements FeatureElement {
+     protected static final Direction[] UPDATE_SHAPE_ORDER = new Direction[]{
 @@ -346,13 +_,21 @@
      protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
      }
@@ -41,16 +52,47 @@
          }
      }
  
-@@ -883,7 +_,11 @@
+@@ -883,7 +_,24 @@
          }
  
          public void entityInside(Level level, BlockPos pos, Entity entity) {
 -            this.getBlock().entityInside(this.asState(), level, pos, entity);
-+            // Canvas start - ensure not air
++            // Canvas start - debug crash info
 +            BlockState state = this.asState();
-+            if (state.isAir()) return;
-+            this.getBlock().entityInside(state, level, pos, entity);
++            try {
++                // we don't want air
++                if (state.isAir() || state.is(Blocks.AIR) || state.is(Blocks.VOID_AIR) || state.is(Blocks.CAVE_AIR)) {
++                    MinecraftServer.LOGGER.warn("Caught 'entityInside' that attempted to tick air");
++                    return;
++                }
++                // ensure we don't mismatch
++                if (!state.is(this.getBlock())) {
++                    MinecraftServer.LOGGER.warn("Caught 'entityInside' that attempted to tick when 'asState' and internal 'block' did not match");
++                    return;
++                }
++                this.getBlock().entityInside(state, level, pos, entity);
++            } catch (Throwable thrown) {
++                MinecraftServer.LOGGER.warn("BlockState entityInside handle failed! STATE : '{}' | POSITION : '{}' | ENTITY : '{}'", state, pos, entity, thrown);
++            }
 +            // Canvas end
          }
  
          public VoxelShape getEntityInsideCollisionShape(Level level, BlockPos pos) {
+@@ -928,7 +_,16 @@
+             BlockState neighborState,
+             RandomSource random
+         ) {
+-            return this.getBlock().updateShape(this.asState(), level, scheduledTickAccess, pos, direction, neighborPos, neighborState, random);
++            // Canvas start - ShapeUpdateEvent
++            CraftBlockData provided = this.createCraftBlockData();
++            ShapeUpdateEvent blockShapeEvent = new ShapeUpdateEvent(provided);
++            boolean canceled = !blockShapeEvent.callEvent();
++            provided = (CraftBlockData) blockShapeEvent.getBlock();
++            if (canceled) {
++                return provided.getState();
++            }
++            return this.getBlock().updateShape(provided.getState(), level, scheduledTickAccess, pos, direction, neighborPos, neighborState, random);
++            // Canvas end
+         }
+ 
+         public boolean isPathfindable(PathComputationType type) {

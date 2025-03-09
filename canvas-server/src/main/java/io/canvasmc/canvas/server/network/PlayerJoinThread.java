@@ -2,9 +2,11 @@ package io.canvasmc.canvas.server.network;
 
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.command.ThreadedTickDiagnosis;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportedException;
 import net.minecraft.network.Connection;
@@ -35,7 +37,7 @@ public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThr
     }
 
     public void stopAcceptingConnections() {
-        this.running = false;
+        this.ticking = false;
     }
 
     public void run() {
@@ -82,5 +84,14 @@ public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThr
 
     public ServerTickRateManager tickRateManager() {
         return MinecraftServer.getServer().tickRateManager();
+    }
+
+    @Override
+    public net.kyori.adventure.text.@NotNull Component debugInfo() {
+        return net.kyori.adventure.text.Component.text()
+            .append(net.kyori.adventure.text.Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
+            .append(net.kyori.adventure.text.Component.text("Actively Processing: ", ThreadedTickDiagnosis.PRIMARY))
+            .append(net.kyori.adventure.text.Component.text(this.activeConnections.size(), ThreadedTickDiagnosis.INFORMATION))
+            .build();
     }
 }

@@ -26,15 +26,11 @@ public class ThreadedTracker {
         new LinkedBlockingQueue<>(),
         new NamedAgnosticThreadFactory<>("entity_tracker", TrackerThread::new, Thread.NORM_PRIORITY - 2)
     );
-    public static ThreadedTracker INSTANCE;
+    public static ThreadedTracker INSTANCE = new ThreadedTracker(Config.INSTANCE.entityTracking.enableThreadedTracking);
     private final boolean enableThreading;
 
     ThreadedTracker(boolean enableThreading) {
         this.enableThreading = enableThreading;
-    }
-
-    public static void init() {
-        INSTANCE = new ThreadedTracker(Config.INSTANCE.entityTracking.enableThreadedTracking);
     }
 
     public static ThreadPoolExecutor getProcessor() {

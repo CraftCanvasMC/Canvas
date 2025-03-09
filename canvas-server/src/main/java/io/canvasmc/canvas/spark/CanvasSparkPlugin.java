@@ -1,6 +1,5 @@
 package io.canvasmc.canvas.spark;
 
-import io.canvasmc.canvas.Config;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;

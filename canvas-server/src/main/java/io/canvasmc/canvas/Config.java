@@ -1,6 +1,5 @@
 package io.canvasmc.canvas;
 
-import ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickConstants;
 import io.canvasmc.canvas.config.AnnotationBasedYamlSerializer;
 import io.canvasmc.canvas.config.ConfigHandlers;
 import io.canvasmc.canvas.config.ConfigSerializer;
@@ -21,6 +20,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import net.minecraft.Util;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.goal.Goal;
 import org.apache.logging.log4j.LogManager;
@@ -151,19 +152,6 @@ public class Config {
                 "so that the executor for chunk senders uses a virtual thread pool"
             })
             public boolean useVirtualThreadExecutorForChunkSenders = false;
-
-            @Comment(value = {
-                "With how chunks are loaded and generated with Canvas, chunk",
-                "loading is much faster, causing the server to spam the",
-                "client with a ton of packets when they first load in. This",
-                "allows the server to rate-limit the amount of chunk sends per tick",
-                "allowing a smoother ping when sending chunks on join",
-                "",
-                "Default is -1 to disable the rate limit",
-                "Disabling this is highly not recommended, this spam-sent hundreds",
-                "of chunks per tick to the client when developing chunk loading optimizations"
-            })
-            public int rateLimitChunkSends = -1;
         }
 
         @Comment(value = {
@@ -448,12 +436,6 @@ public class Config {
     public boolean disableLeafDecay = false;
 
     @Comment(value = {
-        "Moves player joining to an isolated queue-thread, severely reducing",
-        "lag when players are joining, due to blocking tasks now being handled off any tickloops"
-    })
-    public boolean asyncPlayerJoining = true;
-
-    @Comment(value = {
         "Allows configurability of the distance of which certain objects need to be from a player",
         "to tick, like chunks, block entities, etc. This can cause major behavior changes."
     })
@@ -534,6 +516,12 @@ public class Config {
     })
     public List<String> blacklistedCriterionTriggers = new ArrayList<>();
 
+    @Comment(value = {
+        "Broadcasts the \"server is lagging, running X ticks behind\" message from console",
+        "to all operators on the server"
+    })
+    public boolean broadcastServerTicksBehindToOps = false;
+
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         ConfigurationUtils.extractKeys(configClass);
         return new AnnotationBasedYamlSerializer<>(SerializationBuilder.<T>newBuilder()
@@ -557,6 +545,7 @@ public class Config {
     }
 
     public static Config init() {
+        long startNanos = Util.getNanos();
         ConfigurationManager.register(Config.class, Config::buildSerializer);
         System.setProperty("com.ishland.c2me.opts.natives_math.duringGameInit", "true");
         boolean configured = INSTANCE.chunks.nativeAccelerationEnabled;
@@ -567,8 +556,6 @@ public class Config {
                 t.printStackTrace();
             }
         }
-        ThreadedTracker.init();
-        ChunkSendingExecutor.init();
         for (final GoalMask goalMask : INSTANCE.entityGoalMasks) {
             try {
                 //noinspection unchecked
@@ -588,6 +575,7 @@ public class Config {
             LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
             COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
         }
+        LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
         return INSTANCE;
     }
 

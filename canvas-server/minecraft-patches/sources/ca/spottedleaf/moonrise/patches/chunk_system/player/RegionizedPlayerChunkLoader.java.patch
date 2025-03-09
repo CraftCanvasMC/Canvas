@@ -12,27 +12,33 @@
  import it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap;
  import it.unimi.dsi.fastutil.longs.LongArrayList;
  import it.unimi.dsi.fastutil.longs.LongComparator;
-@@ -38,7 +_,7 @@
- import net.minecraft.world.level.chunk.status.ChunkStatus;
+@@ -39,6 +_,7 @@
  import net.minecraft.world.level.levelgen.BelowZeroRetrogen;
  import java.lang.invoke.VarHandle;
--import java.util.ArrayDeque;
+ import java.util.ArrayDeque;
 +import java.util.concurrent.ConcurrentLinkedDeque;
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicLong;
  import java.util.function.Function;
-@@ -195,13 +_,20 @@
+@@ -194,14 +_,26 @@
+ 
          final PlayerChunkLoaderData loader = new PlayerChunkLoaderData(this.world, player);
  
-         ((ChunkSystemServerPlayer)player).moonrise$setChunkLoader(loader);
+-        ((ChunkSystemServerPlayer)player).moonrise$setChunkLoader(loader);
 +        // Canvas start
++        // ((ChunkSystemServerPlayer)player).moonrise$setChunkLoader(loader); // move down
 +        int viewDistance = DistanceUtils.resolveViewDistance(this.world);
-+        player.moonrise$getChunkLoader().updateClientChunkRadius(viewDistance - 1);
++        loader.updateClientChunkRadius(viewDistance - 1);
 +
 +        int simulationDistance = DistanceUtils.resolveSimulationDistance(this.world);
-+        player.moonrise$getChunkLoader().updateClientSimulationDistance(simulationDistance - 1);
-+        // Canvas end
++        loader.updateClientSimulationDistance(simulationDistance - 1);
          loader.add();
++        // ensure everything is ready before we mark the chunk loader in the player
++        // this helps prevent a race condition where another thread is requesting
++        // data from the chunk loader, and it hasn't finished init yet.
++        // to fix this, we init before setting the chunk loader inside the player object
++        player.moonrise$setChunkLoader(loader);
++        // Canvas end
      }
  
      public void updatePlayer(final ServerPlayer player) {
@@ -72,7 +78,7 @@
          {
              this.chunkTicketStage.defaultReturnValue(CHUNK_TICKET_STAGE_NONE);
          }
-@@ -380,10 +_,19 @@
+@@ -380,17 +_,28 @@
              final int centerX = PlayerChunkLoaderData.this.lastChunkX;
              final int centerZ = PlayerChunkLoaderData.this.lastChunkZ;
  
@@ -90,8 +96,41 @@
 +            }
 +            // Canvas end
          };
-         private final LongHeapPriorityQueue sendQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
-         private final LongHeapPriorityQueue tickingQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
+-        private final LongHeapPriorityQueue sendQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
+-        private final LongHeapPriorityQueue tickingQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
+-        private final LongHeapPriorityQueue generatingQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
+-        private final LongHeapPriorityQueue genQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
+-        private final LongHeapPriorityQueue loadingQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
+-        private final LongHeapPriorityQueue loadQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
++        // Canvas start - private -> public
++        public final LongHeapPriorityQueue sendQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
++        public final LongHeapPriorityQueue tickingQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
++        public final LongHeapPriorityQueue generatingQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
++        public final LongHeapPriorityQueue genQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
++        public final LongHeapPriorityQueue loadingQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
++        public final LongHeapPriorityQueue loadQueue = new LongHeapPriorityQueue(CLOSEST_MANHATTAN_DIST);
++        // Canvas end
+ 
+         private volatile boolean removed;
+ 
+@@ -411,7 +_,7 @@
+             this.delayedTicketOps.addLast(op);
+         }
+ 
+-        private void sendChunk(final int chunkX, final int chunkZ) {
++        public void sendChunk(final int chunkX, final int chunkZ) { // Canvas - private -> public
+             if (this.sentChunks.add(CoordinateUtils.getChunkKey(chunkX, chunkZ))) {
+                 ((ChunkSystemChunkHolder)((ChunkSystemServerLevel)this.world).moonrise$getChunkTaskScheduler().chunkHolderManager
+                         .getChunkHolder(chunkX, chunkZ).vanillaChunkHolder).moonrise$addReceivedChunk(this.player);
+@@ -425,7 +_,7 @@
+             throw new IllegalStateException();
+         }
+ 
+-        private void sendUnloadChunk(final int chunkX, final int chunkZ) {
++        public void sendUnloadChunk(final int chunkX, final int chunkZ) { // Canvas - private -> public
+             if (!this.sentChunks.remove(CoordinateUtils.getChunkKey(chunkX, chunkZ))) {
+                 return;
+             }
 @@ -486,7 +_,7 @@
              }
  
@@ -184,7 +223,7 @@
              // try to pull sending chunks
 -            final long maxSends = Math.max(0L, Math.min(MAX_RATE, Integer.MAX_VALUE)); // note: no logic to track concurrent sends
 -            final int maxSendsThisTick = Math.min((int)this.chunkSendLimiter.takeAllocation(time, sendRate, maxSends), this.sendQueue.size());
-+            final int maxSendsThisTick = Config.INSTANCE.chunks.chunkSending.rateLimitChunkSends == -1 ? this.sendQueue.size() : Config.INSTANCE.chunks.chunkSending.rateLimitChunkSends; // Canvas - optimize moonrise
++            final int maxSendsThisTick = this.sendQueue.size(); // Canvas - optimize moonrise
              // we do not return sends that we took from the allocation back because we want to limit the max send rate, not target it
              for (int i = 0; i < maxSendsThisTick; ++i) {
 +                if (this.sendQueue.isEmpty()) break; // Canvas - optimize moonrise
@@ -211,6 +250,15 @@
              TickThread.ensureTickThread(this.player, "Cannot update player asynchronously");
              if (this.removed) {
                  throw new IllegalStateException("Updating removed player chunk loader");
+@@ -1058,7 +_,7 @@
+             this.flushDelayedTicketOps();
+         }
+ 
+-        void remove() {
++        synchronized void remove() { // Canvas - synchronized
+             TickThread.ensureTickThread(this.player, "Cannot add player asynchronously");
+             if (this.removed) {
+                 throw new IllegalStateException("Removing removed player chunk loader");
 @@ -1086,7 +_,7 @@
          }
  

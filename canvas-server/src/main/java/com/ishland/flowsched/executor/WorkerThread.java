@@ -1,8 +1,8 @@
 package com.ishland.flowsched.executor;
 
+import ca.spottedleaf.moonrise.common.util.TickThread;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
-import ca.spottedleaf.moonrise.common.util.TickThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

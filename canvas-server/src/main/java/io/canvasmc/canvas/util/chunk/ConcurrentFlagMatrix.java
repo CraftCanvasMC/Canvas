@@ -1,7 +1,7 @@
 package io.canvasmc.canvas.util.chunk;
 
-import net.minecraft.world.level.levelgen.structure.structures.WoodlandMansionPieces;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import net.minecraft.world.level.levelgen.structure.structures.WoodlandMansionPieces;
 
 public class ConcurrentFlagMatrix extends WoodlandMansionPieces.SimpleGrid {
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();

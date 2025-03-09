@@ -10,5 +10,6 @@ public final class CanvasCommands {
         SimulationDistanceCommand.register(dispatcher);
         ViewDistanceCommand.register(dispatcher);
         TickCommand.register(dispatcher);
+        ResendChunksCommand.register(dispatcher);
     }
 }

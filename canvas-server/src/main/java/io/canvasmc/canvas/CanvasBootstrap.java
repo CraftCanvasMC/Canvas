@@ -1,15 +1,7 @@
 package io.canvasmc.canvas;
 
 import com.mojang.logging.LogUtils;
-import io.papermc.paper.PaperBootstrap;
 import io.papermc.paper.ServerBuildInfo;
-import joptsimple.OptionParser;
-import joptsimple.OptionSet;
-import joptsimple.util.PathConverter;
-import net.minecraft.SharedConstants;
-import net.minecraft.server.Eula;
-import org.bukkit.craftbukkit.CraftServer;
-import org.bukkit.craftbukkit.Main;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
@@ -20,6 +12,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import joptsimple.OptionParser;
+import joptsimple.OptionSet;
+import joptsimple.util.PathConverter;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Eula;
+import org.bukkit.craftbukkit.CraftServer;
+import org.bukkit.craftbukkit.Main;
 
 public class CanvasBootstrap {
     private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();

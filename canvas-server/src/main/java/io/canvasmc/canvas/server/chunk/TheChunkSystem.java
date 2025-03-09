@@ -5,23 +5,22 @@ import ca.spottedleaf.concurrentutil.util.Priority;
 import com.ishland.flowsched.executor.ExecutorManager;
 import com.ishland.flowsched.executor.WorkerThread;
 import io.canvasmc.canvas.util.ThreadBuilder;
+import java.lang.reflect.Array;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicLong;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.lang.reflect.Array;
-import java.util.Arrays;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class TheChunkSystem extends ExecutorManager {
-    private final Logger LOGGER;
+    protected final Logger LOGGER;
     private final String name;
     private boolean shutdown;
 
     private final TheChunkSystem.COWArrayList<TheChunkSystem.ExecutorGroup> executors = new TheChunkSystem.COWArrayList<>(TheChunkSystem.ExecutorGroup.class);
 
     public TheChunkSystem(final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
-        super(workerThreadCount, threadInitializer, 16);
+        super(workerThreadCount, threadInitializer, ChunkPriorityManager.MAX_PRIORITY);
         LOGGER = LoggerFactory.getLogger("TheChunkSystem/"  + name);
         this.name = name;
         LOGGER.info("Initialized new ChunkSystem with {} allocated threads", workerThreadCount);

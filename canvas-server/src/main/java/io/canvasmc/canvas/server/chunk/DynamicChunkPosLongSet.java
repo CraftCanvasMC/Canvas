@@ -1,10 +1,10 @@
 package io.canvasmc.canvas.server.chunk;
 
-import org.jetbrains.annotations.NotNull;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Set;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * <h2>DynamicChunkPosLongSet</h2>
@@ -22,7 +22,7 @@ import java.util.Set;
  * <ul>
  *     <li><h6>Quadratic Probing</h6> If a collision occurs, the algorithm searches using
  *         <code>index = (index + probe * probe) & mask</code>, minimizing clustering.</li>
- *     <li><h6>Resizing Strategy</h6> If the load factor exceeds 25%, the table size is doubled.</li>
+ *     <li><h6>Resizing Strategy</h6> If the load factor exceeds 50%, the table size is doubled.</li>
  *     <li><h6>Cache Mechanism</h6> The last checked key is stored for faster consecutive queries.</li>
  *     <li><h6>Open Addressing</h6> No linked structures; all data is stored directly in an array.</li>
  * </ul>
@@ -46,7 +46,7 @@ public class DynamicChunkPosLongSet implements Set<Long> {
         this.table = new long[capacity];
         Arrays.fill(this.table, EMPTY_KEY);
         this.size = 0;
-        this.threshold = capacity >> 2;
+        this.threshold = capacity >> 1;
     }
 
     private int indexFor(long key) {
