@@ -80,7 +80,7 @@
      }
  
      private ChunkAccess syncLoad(final int chunkX, final int chunkZ, final ChunkStatus toStatus) {
-+        if (Config.INSTANCE.debugSyncload && MinecraftServer.getThreadedServer().hasStarted()) LOGGER.warn("a call to syncload was caught! if this is a plugin, DONT USE THIS. this causes major performance issues", new Throwable()); // Canvas - deprecate syncload
++        if (Config.INSTANCE.debugSyncload && MinecraftServer.getThreadedServer().hasStarted()) LOGGER.warn("syncload caught", new Throwable()); // Canvas - deprecate syncload
          final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler chunkTaskScheduler = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler();
          final CompletableFuture<ChunkAccess> completable = new CompletableFuture<>();
 +        // Canvas start - chunk priority override
@@ -90,11 +90,30 @@
          chunkTaskScheduler.scheduleChunkLoad(
              chunkX, chunkZ, toStatus, true, ca.spottedleaf.concurrentutil.util.Priority.BLOCKING,
              completable::complete
-@@ -119,6 +_,7 @@
+@@ -112,13 +_,24 @@
+             );
          }
  
-         final ChunkAccess ret = completable.join();
-+        this.level.getPriorityManager().blockingOverride.remove(chunkPos); // Canvas - chunk priority override
++        ChunkAccess ret = null; // Canvas
+         if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ)) {
+             ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.pushChunkWait(this.level, chunkX, chunkZ);
+-            this.mainThreadProcessor.managedBlock(completable::isDone);
++            // Canvas start - rewrite wait
++            while (true) {
++                if (completable.isDone()) {
++                    ret = completable.join();
++                    break;
++                }
++                ret = getChunk(chunkX, chunkZ, toStatus, false);
++                if (ret != null) break;
++            }
++            // Canvas end
+             ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.popChunkWait();
++            this.level.getPriorityManager().blockingOverride.remove(chunkPos); // Canvas - chunk priority override
+         }
+ 
+-        final ChunkAccess ret = completable.join();
++        // Canvas - rewrite wait
          if (ret == null) {
              throw new IllegalStateException("Chunk not loaded when requested");
          }
@@ -249,7 +268,7 @@
      private void tickChunks() {
          long gameTime = this.level.getGameTime();
          long l = gameTime - this.lastInhabitedUpdate;
-@@ -519,31 +_,100 @@
+@@ -519,31 +_,77 @@
                      this.shuffleRandom.setSeed(this.level.random.nextLong());
                      if (!this.level.paperConfig().entities.spawning.perPlayerMobSpawns) Util.shuffle(list, this.shuffleRandom); // Paper - Optional per player mob spawns; do not need this when per-player is enabled
                      // Paper end - chunk tick iteration optimisation
@@ -257,35 +276,12 @@
 +                    if (Config.INSTANCE.chunks.regionized.enableRegionizedChunkTicking) {
 +                        List<LevelChunk>[] regions = splitChunksIntoRegions(list);
 +                        this.tickingRegionsCount = regions.length;
-+                        CountDownLatch latch = new CountDownLatch(this.tickingRegionsCount);
-+
-+                        try {
-+                            ForkJoinPool.managedBlock(new ForkJoinPool.ManagedBlocker() {
-+                                @Override
-+                                public boolean block() throws InterruptedException {
-+                                    for (List<LevelChunk> region : regions) {
-+                                        if (region == null) continue;
-+                                        REGION_EXECUTOR.execute(() -> {
-+                                            try {
-+                                                tickChunks(profilerFiller, l, region);
-+                                            } finally {
-+                                                latch.countDown();
-+                                            }
-+                                        });
-+                                    }
-+
-+                                    latch.await();
-+                                    return true;
-+                                }
-+
-+                                @Override
-+                                public boolean isReleasable() {
-+                                    return latch.getCount() == 0;
-+                                }
-+                            });
-+                        } catch (InterruptedException e) {
-+                            throw new RuntimeException("interrupted managed block for region ticking", e);
++                        List<CompletableFuture<Void>> regionTicks = new ObjectArrayList<>();
++                        for (final List<LevelChunk> region : regions) {
++                            regionTicks.add(CompletableFuture.runAsync(() -> tickChunks(profilerFiller, l, region), REGION_EXECUTOR));
 +                        }
++                        CompletableFuture<Void> regionTick = CompletableFuture.allOf(regionTicks.toArray(new CompletableFuture[0]));
++                        this.mainThreadProcessor.managedBlock(regionTick::isDone);
 +                    } else {
                      this.tickChunks(profilerFiller, l, list);
 +                    }
@@ -358,11 +354,12 @@
  
          final ServerChunkCache.ChunkAndHolder[] raw = tickingChunks.getRawDataUnchecked();
          final int size = tickingChunks.size();
-+        this.lastTickingChunksCount = size; // Canvas - last ticking chunks count
++        this.lastTickingChunksCount = raw.length; // Canvas - last ticking chunks count
  
          final ChunkMap chunkMap = this.chunkMap;
  
-         for (int i = 0; i < size; ++i) {
+-        for (int i = 0; i < size; ++i) {
++        for (int i = 0; i < raw.length; ++i) { // Canvas - use length
              final ServerChunkCache.ChunkAndHolder chunkAndHolder = raw[i];
 +            if (chunkAndHolder == null) continue; // Canvas - caution ref lists
              final LevelChunk levelChunk = chunkAndHolder.chunk();

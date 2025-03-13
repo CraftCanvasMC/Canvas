@@ -210,10 +210,6 @@ tasks.register<Jar>("createMojmapClipboardJar") {
                     clipboardClass.copyTo(targetFile, overwrite = true)
                 }
 
-            tempDir.walkTopDown()
-                .filter { it.isFile && it.relativeTo(tempDir).path.startsWith(oldPackagePath) }
-                .forEach { it.delete() }
-
             tempDir.walkBottomUp()
                 .filter { it.isDirectory && it.listFiles().isNullOrEmpty() }
                 .forEach { it.delete() }

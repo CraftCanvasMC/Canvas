@@ -8,6 +8,7 @@ import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.logging.Level;
@@ -19,17 +20,22 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Eula;
 import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.craftbukkit.Main;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Unmodifiable;
 
 public class CanvasBootstrap {
+    public static final Instant BOOT_TIME = Instant.now();
     private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 
     public static OptionSet bootstrap(String[] args) {
         System.setProperty("java.util.logging.manager", "io.papermc.paper.log.CustomLogManager");
         final String warnWhenLegacyFormattingDetected = String.join(".", "net", "kyori", "adventure", "text", "warnWhenLegacyFormattingDetected");
-        if (false && System.getProperty(warnWhenLegacyFormattingDetected) == null) {
+        if (false) {
             System.setProperty(warnWhenLegacyFormattingDetected, String.valueOf(true));
         }
-        if (System.getProperty("jdk.nio.maxCachedBufferSize") == null) System.setProperty("jdk.nio.maxCachedBufferSize", "262144"); // Paper - cap per-thread NIO cache size; https://www.evanjones.ca/java-bytebuffer-leak.html
+        if (System.getProperty("jdk.nio.maxCachedBufferSize") == null)
+            System.setProperty("jdk.nio.maxCachedBufferSize", "262144"); // Paper - cap per-thread NIO cache size; https://www.evanjones.ca/java-bytebuffer-leak.html
         OptionParser parser = new OptionParser() {
             {
                 this.acceptsAll(asList("?", "help"), "Show the help");
@@ -137,7 +143,7 @@ public class CanvasBootstrap {
                 acceptsAll(asList("add-plugin", "add-extra-plugin-jar"), "Specify paths to extra plugin jars to be loaded in addition to those in the plugins folder. This argument can be specified multiple times, once for each extra plugin jar path.")
                     .withRequiredArg()
                     .ofType(File.class)
-                    .defaultsTo(new File[] {})
+                    .defaultsTo(new File[]{})
                     .describedAs("Jar file");
                 acceptsAll(asList("purpur", "purpur-settings"), "File for purpur settings")
                     .withRequiredArg()
@@ -184,7 +190,7 @@ public class CanvasBootstrap {
                     System.exit(70);
                 }
 
-                System.err.println("Unsupported Java detected ("+ javaVersionName + "), but the check was skipped. Proceed with caution! ");
+                System.err.println("Unsupported Java detected (" + javaVersionName + "), but the check was skipped. Proceed with caution! ");
             }
 
             try {
@@ -225,11 +231,12 @@ public class CanvasBootstrap {
         return options;
     }
 
-    private static List<String> asList(String... params) {
+    @Contract(pure = true)
+    private static @NotNull List<String> asList(String... params) {
         return Arrays.asList(params);
     }
 
-    private static List<String> getStartupVersionMessages() {
+    private static @NotNull @Unmodifiable List<String> getStartupVersionMessages() {
         final String javaSpecVersion = System.getProperty("java.specification.version");
         final String javaVmName = System.getProperty("java.vm.name");
         final String javaVmVersion = System.getProperty("java.vm.version");

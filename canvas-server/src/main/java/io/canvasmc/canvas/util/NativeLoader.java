@@ -27,6 +27,7 @@ public class NativeLoader {
     public static final ISATarget currentMachineTarget;
     private static final Logger LOGGER = LoggerFactory.getLogger(NativeLoader.class);
     private static final Arena arena = Arena.ofAuto();
+
     static {
         String libName = String.format("%s-%s-%s", NORMALIZED_OS, NORMALIZED_ARCH, System.mapLibraryName("c2me-opts-natives-math"));
         lookup = load0(libName);
@@ -51,7 +52,8 @@ public class NativeLoader {
                 } else {
                     // Override not set, use normal
                     target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];
-                    while (!target.isNativelySupported()) target = (ISATarget) ISATarget.getInstance().getEnumConstants()[target.ordinal() - 1];
+                    while (!target.isNativelySupported())
+                        target = (ISATarget) ISATarget.getInstance().getEnumConstants()[target.ordinal() - 1];
                 }
                 currentMachineTarget = target;
                 LOGGER.info("Detected maximum supported ISA target: {}", currentMachineTarget);

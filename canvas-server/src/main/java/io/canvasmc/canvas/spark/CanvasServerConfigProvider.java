@@ -29,16 +29,17 @@ import org.jetbrains.annotations.Nullable;
 public class CanvasServerConfigProvider extends ServerConfigProvider {
     private static final Map<String, ConfigParser> FILES;
     private static final Collection<String> HIDDEN_PATHS;
+
     static {
         ImmutableMap.Builder<String, ConfigParser> filesBuilder = ImmutableMap.builder();
         filesBuilder.put("server.properties", PropertiesConfigParser.INSTANCE)
-                    .put("bukkit.yml", YamlConfigParser.INSTANCE)
-                    .put("spigot.yml", YamlConfigParser.INSTANCE)
-                    .put("paper.yml", YamlConfigParser.INSTANCE)
-                    .put("paper/", SplitYamlConfigParser.INSTANCE)
-                    .put("purpur.yml", YamlConfigParser.INSTANCE)
-                    .put("pufferfish.yml", YamlConfigParser.INSTANCE)
-                    .put("canvas_server.yml", YamlConfigParser.INSTANCE);
+            .put("bukkit.yml", YamlConfigParser.INSTANCE)
+            .put("spigot.yml", YamlConfigParser.INSTANCE)
+            .put("paper.yml", YamlConfigParser.INSTANCE)
+            .put("paper/", SplitYamlConfigParser.INSTANCE)
+            .put("purpur.yml", YamlConfigParser.INSTANCE)
+            .put("pufferfish.yml", YamlConfigParser.INSTANCE)
+            .put("canvas_server.yml", YamlConfigParser.INSTANCE);
 
         for (String config : getSystemPropertyList("spark.serverconfigs.extra")) {
             filesBuilder.put(config, YamlConfigParser.INSTANCE);
@@ -46,20 +47,20 @@ public class CanvasServerConfigProvider extends ServerConfigProvider {
 
         ImmutableSet.Builder<String> hiddenPaths = ImmutableSet.builder();
         hiddenPaths.add("database")
-                   .add("settings.bungeecord-addresses")
-                   .add("settings.velocity-support.secret")
-                   .add("proxies.velocity.secret")
-                   .add("server-ip")
-                   .add("motd")
-                   .add("resource-pack")
-                   .add("rcon<dot>password")
-                   .add("rcon<dot>ip")
-                   .add("level-seed")
-                   .add("world-settings.*.feature-seeds")
-                   .add("world-settings.*.seed-*")
-                   .add("feature-seeds")
-                   .add("seed-*")
-                   .addAll(getSystemPropertyList("spark.serverconfigs.hiddenpaths"));
+            .add("settings.bungeecord-addresses")
+            .add("settings.velocity-support.secret")
+            .add("proxies.velocity.secret")
+            .add("server-ip")
+            .add("motd")
+            .add("resource-pack")
+            .add("rcon<dot>password")
+            .add("rcon<dot>ip")
+            .add("level-seed")
+            .add("world-settings.*.feature-seeds")
+            .add("world-settings.*.seed-*")
+            .add("feature-seeds")
+            .add("seed-*")
+            .addAll(getSystemPropertyList("spark.serverconfigs.hiddenpaths"));
         FILES = filesBuilder.build();
         HIDDEN_PATHS = hiddenPaths.build();
     }

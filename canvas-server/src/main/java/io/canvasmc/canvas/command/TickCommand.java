@@ -1,8 +1,5 @@
 package io.canvasmc.canvas.command;
 
-import static net.minecraft.commands.Commands.argument;
-import static net.minecraft.commands.Commands.literal;
-
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -29,6 +26,9 @@ import net.minecraft.server.ServerTickRateManager;
 import net.minecraft.util.thread.BlockableEventLoop;
 import org.bukkit.command.CommandSender;
 import org.jetbrains.annotations.NotNull;
+
+import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 public class TickCommand {
     private static final float MAX_TICKRATE = 1_000_000F; // 1mil

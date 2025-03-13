@@ -5,6 +5,7 @@ import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.command.ThreadedTickDiagnosis;
 import io.canvasmc.canvas.entity.SleepingBlockEntity;
+import io.canvasmc.canvas.server.AbstractTick;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 import io.canvasmc.canvas.server.ThreadedServer;
@@ -12,7 +13,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,7 +21,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
@@ -40,7 +39,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.redstone.CollectingNeighborUpdater;
 import net.minecraft.world.level.redstone.NeighborUpdater;
 import org.apache.commons.lang3.tuple.MutablePair;
@@ -59,6 +57,7 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPre = new ConcurrentLinkedQueue<>();
     protected final ServerTickRateManager tickRateManager;
     protected final CraftScheduler bukkitScheduler;
+    private long emptyTicks = 0L;
 
     public MinecraftServerWorld(final String name, final String debugName) {
         super(name, debugName, (r, n, self) -> new LevelThread(ThreadedServer.SERVER_THREAD_GROUP, r, n, self));
@@ -92,6 +91,29 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
         }
     }
 
+    @Override
+    public long blockTick(final long tickSection, final @NotNull AbstractTick tick) {
+        // pretick, check if empty and should sleep
+        MinecraftServer server = MinecraftServer.getServer();
+        int i = server.pauseWhileEmptySeconds() * 20;
+        if (Config.INSTANCE.emptySleepPerWorlds && i > 0) {
+            if (this.level().players().isEmpty() && !this.tickRateManager.isSprinting() && server.pluginsBlockingSleep.isEmpty()) {
+                this.emptyTicks++;
+            } else {
+                this.emptyTicks = 0;
+            }
+
+            if (this.emptyTicks >= i) {
+                if (this.emptyTicks == i) {
+                    LOGGER.info("Level empty for {} seconds, pausing", server.pauseWhileEmptySeconds());
+                    this.sleep();
+                    this.emptyTicks = 0;
+                }
+            }
+        }
+        return super.blockTick(tickSection, tick);
+    }
+
     public ServerLevel level() {
         return (ServerLevel) this;
     }
@@ -109,11 +131,6 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
     @Override
     public void scheduleOnThread(final Runnable runnable) {
         this.scheduleOnMain(runnable);
-    }
-
-    @Override
-    public boolean isTicking() {
-        return this.ticking;
     }
 
     @Override
@@ -171,6 +188,11 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
         });
         this.managedBlock(finished::get);
         return retVal.get();
+    }
+
+    @Override
+    public boolean isTicking() {
+        return super.isTicking() && this.tickCount >= 1;
     }
 
     @Override
@@ -232,7 +254,9 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
     private @NotNull Component doNeighborInfo() {
         TextComponent.@NotNull Builder root = text();
         ServerLevel world = this.level();
-        NeighborUpdater updater = world.neighborUpdater;
+        // TODO - debug info for threadlocals
+        /*
+        NeighborUpdater updater = world.neighborUpdater.get();
         if (updater instanceof CollectingNeighborUpdater collectingNeighborUpdater) {
             List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>(collectingNeighborUpdater.addedThisLayer);
             Deque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>(collectingNeighborUpdater.stack);
@@ -332,10 +356,11 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
         } else {
             root.append(Component.text("World NeighborUpdater not instanceof CollectingNeighborUpdater", TextColor.color(239, 35, 58)));
         }
+         */
         return root.build();
     }
 
-    private @NotNull Map<Class<? extends CollectingNeighborUpdater.NeighborUpdates>, Integer> buildNeighborCounts(@NotNull Iterable<CollectingNeighborUpdater.NeighborUpdates> updates) {
+    /* private @NotNull Map<Class<? extends CollectingNeighborUpdater.NeighborUpdates>, Integer> buildNeighborCounts(@NotNull Iterable<CollectingNeighborUpdater.NeighborUpdates> updates) {
         Map<Class<? extends CollectingNeighborUpdater.NeighborUpdates>, Integer> retVal = new HashMap<>();
         for (final CollectingNeighborUpdater.NeighborUpdates neighborUpdate : updates) {
             if (!retVal.containsKey(neighborUpdate.getClass())) {
@@ -344,7 +369,7 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop<LevelThread,
             retVal.put(neighborUpdate.getClass(), retVal.get(neighborUpdate.getClass()) + 1);
         }
         return retVal;
-    }
+    } */
 
     private @NotNull Component doTileEntityInfo() {
         TextComponent.@NotNull Builder root = text();

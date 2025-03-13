@@ -16,7 +16,6 @@ import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerTickRateManager;
 import org.jetbrains.annotations.NotNull;
-import org.spigotmc.WatchdogThread;
 
 public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThread> {
     private static PlayerJoinThread INSTANCE = null;
@@ -30,6 +29,7 @@ public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThr
             tickThread.setUncaughtExceptionHandler((_, exception) -> LOGGER.error("Uncaught exception in player join thread", exception));
         });
         INSTANCE = this;
+        LOGGER.info("Loaded PlayerJoinThread to server context");
     }
 
     public static PlayerJoinThread getInstance() {
@@ -41,7 +41,6 @@ public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThr
     }
 
     public void run() {
-        this.lastWatchdogTick = WatchdogThread.monotonicMillis();
         Iterator<Connection> iterator = this.activeConnections.iterator();
 
         while (iterator.hasNext()) {
@@ -93,5 +92,10 @@ public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThr
             .append(net.kyori.adventure.text.Component.text("Actively Processing: ", ThreadedTickDiagnosis.PRIMARY))
             .append(net.kyori.adventure.text.Component.text(this.activeConnections.size(), ThreadedTickDiagnosis.INFORMATION))
             .build();
+    }
+
+    @Override
+    public boolean shouldSleep() {
+        return false;
     }
 }

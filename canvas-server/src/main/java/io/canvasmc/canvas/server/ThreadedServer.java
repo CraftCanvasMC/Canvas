@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.server;
 
 import com.google.common.collect.Sets;
+import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
@@ -49,23 +50,24 @@ public class ThreadedServer implements ThreadedBukkitServer {
             throw new RuntimeException("Unable to spin world '" + level.getName() + "'!", throwable);
         }
     };
+    protected final Set<AbstractTickLoop<?, ?>> loops;
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
-    private final MinecraftServer server;
+    private final DedicatedServer server;
     public ThreadedEntityScheduler entityScheduler;
+    public MultiWatchdogThread.ThreadEntry watchdogEntry;
     private long tickSection;
     private boolean started = false;
-    protected final Set<AbstractTickLoop<?,?>> loops;
 
-    public ThreadedServer(MinecraftServer server) {
+    public ThreadedServer(DedicatedServer server) {
         this.server = server;
         this.loops = Collections.synchronizedSet(Sets.newLinkedHashSet());
     }
 
     public static Long @NotNull [] getLevelIds() {
         return MinecraftServer.getThreadedServer().getAllLevels().stream()
-                              .map(MinecraftServerWorld::getRunningThread)
-                              .map(Thread::threadId)
-                              .toList().toArray(new Long[0]);
+            .map(MinecraftServerWorld::getRunningThread)
+            .map(Thread::threadId)
+            .toList().toArray(new Long[0]);
     }
 
     @Override
@@ -117,6 +119,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public void spin() {
         try {
             MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
+            MultiLoopThreadDumper.REGISTRY.add("ls_wg "); // add linear-scaling world-gen workers
             ThreadedBukkitServer.setInstance(this);
 
             if (!server.initServer()) {
@@ -151,12 +154,14 @@ public class ThreadedServer implements ThreadedBukkitServer {
             LOGGER.info("Running delayed init tasks");
             this.server.server.getScheduler().mainThreadHeartbeat();
 
-            final long actualDoneTimeMs = System.currentTimeMillis() - org.bukkit.craftbukkit.Main.BOOT_TIME.toEpochMilli();
+            final long actualDoneTimeMs = System.currentTimeMillis() - CanvasBootstrap.BOOT_TIME.toEpochMilli();
             LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1000.00D));
             this.server.server.spark.enableBeforePlugins();
-            org.spigotmc.WatchdogThread.tick();
+            this.watchdogEntry = MultiWatchdogThread.register(new MultiWatchdogThread.ThreadEntry(this.server.serverThread, "main thread", "Server", this.server::isTicking, () -> false));
+            this.watchdogEntry.doTick();
 
-            org.spigotmc.WatchdogThread.hasStarted = true;
+            MultiWatchdogThread.hasStarted = true;
+            //noinspection removal
             Arrays.fill(this.server.recentTps, 20);
             tickSection = Util.getNanos();
             if (io.papermc.paper.configuration.GlobalConfiguration.isFirstStart) {
@@ -179,7 +184,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
                 LOGGER.info("Purpur: Running startup commands specified in purpur.yml.");
                 for (final String startupCommand : org.purpurmc.purpur.PurpurConfig.startupCommands) {
                     LOGGER.info("Purpur: Running the following command: \"{}\"", startupCommand);
-                    ((DedicatedServer) this.server).handleConsoleInput(startupCommand, this.server.createCommandSourceStack());
+                    this.server.handleConsoleInput(startupCommand, this.server.createCommandSourceStack());
                 }
             }
 
@@ -187,6 +192,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
                 tickSection = this.getServer().tick(tickSection);
             }
         } catch (Throwable throwable2) {
+            //noinspection removal
             if (throwable2 instanceof ThreadDeath) {
                 MinecraftServer.LOGGER.error("Main thread terminated by WatchDog due to hard crash", throwable2);
                 return;
@@ -221,7 +227,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     private boolean areAllWorldsTicking() {
         for (final ServerLevel level : this.server.getAllLevels()) {
-            if (level.checkInitialised.get() != ServerLevel.WORLD_INIT_CHECKED) {
+            if (!level.isTicking()) {
                 return false;
             }
         }
@@ -254,14 +260,14 @@ public class ThreadedServer implements ThreadedBukkitServer {
         return accessors;
     }
 
-	public Set<AbstractTickLoop<?, ?>> getTickLoops() {
+    public Set<AbstractTickLoop<?, ?>> getTickLoops() {
         return this.loops;
-	}
+    }
 
-	public void markPrepareHalt() {
+    public void markPrepareHalt() {
         // mark all threads to stop ticking.
         for (final AbstractTickLoop<?, ?> loop : this.loops) {
             loop.stopSpin(false);
         }
-	}
+    }
 }

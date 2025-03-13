@@ -11,7 +11,8 @@ public final class ThreadLocalRandomSource implements BitRandomSource {
 
     private final PositionalRandomFactory positionalRandomFactory = new ThreadLocalRandomPositionalRandomFactory();
 
-    private ThreadLocalRandomSource() {}
+    private ThreadLocalRandomSource() {
+    }
 
     @Override
     public int next(final int bits) {

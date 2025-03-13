@@ -3,7 +3,7 @@
 @@ -1,9 +_,11 @@
  package net.minecraft.world.ticks;
  
-+import io.netty.util.internal.ConcurrentSet;
++import com.google.common.collect.Sets;
  import it.unimi.dsi.fastutil.longs.Long2LongMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMaps;
  import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
@@ -12,17 +12,25 @@
  import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMap.Entry;
  import it.unimi.dsi.fastutil.objects.ObjectIterator;
-@@ -16,6 +_,9 @@
+@@ -11,11 +_,17 @@
+ import java.util.ArrayDeque;
+ import java.util.ArrayList;
+ import java.util.Comparator;
++import java.util.Iterator;
+ import java.util.List;
+ import java.util.LongSummaryStatistics;
++import java.util.Map;
  import java.util.PriorityQueue;
  import java.util.Queue;
  import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
 +import java.util.concurrent.ConcurrentLinkedQueue;
 +import java.util.concurrent.PriorityBlockingQueue;
 +import java.util.concurrent.atomic.AtomicInteger;
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -32,17 +_,22 @@
+@@ -32,17 +_,29 @@
      private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (levelChunkTicks, levelChunkTicks1) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER
          .compare(levelChunkTicks.peek(), levelChunkTicks1.peek());
      private final LongPredicate tickCheck;
@@ -30,15 +38,21 @@
 -    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongOpenHashMap(), map -> map.defaultReturnValue(Long.MAX_VALUE));
 -    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
 -    private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
--    private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
++    // Canvas start - threadsafe
++    // LevelTicks can be accessed ANYWHERE. these *must* be threadsafe
++    // if it's not, crashes occur EVERYWHERE...
++    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
++    // shockingly, we don't actually need to implement code for a
++    // custom default return value we don't fetch anything that doesn't
++    // already exist, so we can easily swap to a ConcurrentHashMap
++    private final Map<Long, Long> nextTickForContainer = new ConcurrentHashMap<>(); // Util.make(, map -> map.defaultReturnValue(Long.MAX_VALUE));
++    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityBlockingQueue<>(11, CONTAINER_DRAIN_ORDER);
++    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedQueue<>();
++    private final AtomicInteger toRunThisTickCount = new AtomicInteger(0);
+     private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
 -    private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
-+    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>()); // Canvas
-+    private final Long2LongMap nextTickForContainer = Util.make(Long2LongMaps.synchronize(new Long2LongOpenHashMap()), map -> map.defaultReturnValue(Long.MAX_VALUE)); // Canvas - synchronize
-+    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityBlockingQueue<>(11, CONTAINER_DRAIN_ORDER); // Canvas
-+    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedQueue<>(); // Canvas
-+    private final AtomicInteger toRunThisTickCount = new AtomicInteger(0); // Canvas
-+    private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>(); // Canvas
-+    private final Set<ScheduledTick<?>> toRunThisTickSet = new ConcurrentSet<>(); // Canvas
++    private final Set<ScheduledTick<?>> toRunThisTickSet = Sets.newConcurrentHashSet();
++    // Canvas end
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (levelChunkTicks, scheduledTick) -> {
          if (scheduledTick.equals(levelChunkTicks.peek())) {
              this.updateContainerScheduling(scheduledTick);
@@ -51,26 +65,6 @@
  
      public LevelTicks(LongPredicate tickCheck) {
          this.tickCheck = tickCheck;
-@@ -53,7 +_,9 @@
-         this.allContainers.put(packedChunkPos, chunkTicks);
-         ScheduledTick<T> scheduledTick = chunkTicks.peek();
-         if (scheduledTick != null) {
-+            synchronized (this.nextTickForContainer) { // Canvas
-             this.nextTickForContainer.put(packedChunkPos, scheduledTick.triggerTick());
-+            } // Canvas
-         }
- 
-         chunkTicks.setOnTickAdded(this.chunkScheduleUpdater);
-@@ -62,7 +_,9 @@
-     public void removeContainer(ChunkPos chunkPos) {
-         long packedChunkPos = chunkPos.toLong();
-         LevelChunkTicks<T> levelChunkTicks = this.allContainers.remove(packedChunkPos);
-+        synchronized (this.nextTickForContainer) { // Canvas
-         this.nextTickForContainer.remove(packedChunkPos);
-+        } // Canvas
-         if (levelChunkTicks != null) {
-             levelChunkTicks.setOnTickAdded(null);
-         }
 @@ -84,7 +_,7 @@
          profilerFiller.push("collect");
          this.collectTicks(gameTime, maxAllowedTicks, profilerFiller);
@@ -80,37 +74,30 @@
          this.runCollectedTicks(ticker);
          profilerFiller.popPush("cleanup");
          this.cleanupAfterTick();
-@@ -99,6 +_,7 @@
+@@ -99,12 +_,15 @@
      }
  
      private void sortContainersToTick(long gameTime) {
-+        synchronized (this.nextTickForContainer) { // Canvas
-         ObjectIterator<Entry> objectIterator = Long2LongMaps.fastIterator(this.nextTickForContainer);
- 
+-        ObjectIterator<Entry> objectIterator = Long2LongMaps.fastIterator(this.nextTickForContainer);
+-
++        // Canvas start - concurrent
++        // this is really the only thing that is incompatible with Long2Long and ConcurrentHashMap
++        // so we rewrite this to be compatible.
++        Iterator<Map.Entry<Long, Long>> objectIterator = this.nextTickForContainer.entrySet().iterator();
          while (objectIterator.hasNext()) {
-@@ -122,6 +_,7 @@
-                 }
-             }
-         }
-+        } // Canvas
-     }
- 
-     private void drainContainers(long gameTime, int maxAllowedTicks) {
-@@ -148,7 +_,9 @@
-     }
- 
-     private void updateContainerScheduling(ScheduledTick<T> tick) {
-+        synchronized (this.nextTickForContainer) { // Canvas
-         this.nextTickForContainer.put(ChunkPos.asLong(tick.pos()), tick.triggerTick());
-+        } // Canvas
-     }
- 
-     private void drainFromCurrentContainer(Queue<LevelChunkTicks<T>> containersToTick, LevelChunkTicks<T> levelChunkTicks, long gameTime, int maxAllowedTicks) {
-@@ -171,16 +_,19 @@
-     }
+-            Entry entry = objectIterator.next();
+-            long longKey = entry.getLongKey();
+-            long longValue = entry.getLongValue();
++            Map.Entry<Long, Long> entry = objectIterator.next();
++            long longKey = entry.getKey();
++            long longValue = entry.getValue();
++        // Canvas end
+             if (longValue <= gameTime) {
+                 LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(longKey);
+                 if (levelChunkTicks == null) {
+@@ -172,15 +_,17 @@
  
      private void scheduleForThisTick(ScheduledTick<T> tick) {
-+        if (tick == null) return; // Canvas - technically this is nullable.
          this.toRunThisTick.add(tick);
 +        this.toRunThisTickCount.incrementAndGet(); // Canvas
      }
@@ -135,19 +122,3 @@
          this.containersToTick.clear();
          this.alreadyRunThisTick.clear();
          this.toRunThisTickSet.clear();
-@@ -233,6 +_,7 @@
-     }
- 
-     public void clearArea(BoundingBox area) {
-+        synchronized (this.nextTickForContainer) { // Canvas
-         Predicate<ScheduledTick<T>> predicate = scheduledTick -> area.isInside(scheduledTick.pos());
-         this.forContainersInArea(area, (pos, container) -> {
-             ScheduledTick<T> scheduledTick = container.peek();
-@@ -248,6 +_,7 @@
-         });
-         this.alreadyRunThisTick.removeIf(predicate);
-         this.toRunThisTick.removeIf(predicate);
-+        } // Canvas
-     }
- 
-     public void copyArea(BoundingBox area, Vec3i offset) {

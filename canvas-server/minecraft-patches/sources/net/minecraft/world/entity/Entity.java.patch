@@ -21,12 +21,13 @@
  import java.util.HashSet;
  import java.util.List;
  import java.util.Locale;
-@@ -23,11 +_,13 @@
+@@ -23,11 +_,14 @@
  import java.util.Optional;
  import java.util.Set;
  import java.util.UUID;
 +import java.util.concurrent.CopyOnWriteArrayList;
  import java.util.concurrent.atomic.AtomicInteger;
++import java.util.concurrent.atomic.AtomicReference;
  import java.util.function.BiConsumer;
  import java.util.function.Predicate;
  import java.util.stream.Stream;
@@ -60,6 +61,20 @@
  import net.minecraft.world.level.material.PushReaction;
  import net.minecraft.world.level.portal.PortalShape;
  import net.minecraft.world.level.portal.TeleportTransition;
+@@ -137,6 +_,13 @@
+ 
+ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess, ScoreHolder, ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity, ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity {  // Paper - rewrite chunk system // Paper - optimise entity tracker
+     public static javax.script.ScriptEngine scriptEngine = new javax.script.ScriptEngineManager().getEngineByName("rhino"); // Purpur - Configurable entity base attributes
++    // Canvas start
++    public static final AtomicReference<Runnable> POSITION_UPDATE_CATCH = new AtomicReference<>();
++    public void pollPositionUpdates() {
++        Runnable catched = POSITION_UPDATE_CATCH.getAndSet(null);
++        if (catched != null) catched.run();
++    }
++    // Canvas end
+     // CraftBukkit start
+     private static final int CURRENT_LEVEL = 2;
+     public boolean preserveMotion = true; // Paper - Fix Entity Teleportation and cancel velocity if teleported; keep initial motion on first setPositionRotation
 @@ -145,7 +_,7 @@
      }
  
@@ -142,51 +157,23 @@
  
      public void inactiveTick() {
      }
-@@ -1389,8 +_,14 @@
+@@ -381,7 +_,7 @@
+     private int sectionX = Integer.MIN_VALUE;
+     private int sectionY = Integer.MIN_VALUE;
+     private int sectionZ = Integer.MIN_VALUE;
+-    private boolean updatingSectionStatus;
++    private volatile boolean updatingSectionStatus; // Canvas - volatile
+ 
+     @Override
+     public final boolean moonrise$isHardColliding() {
+@@ -446,6 +_,7 @@
+     @Override
+     public final void moonrise$setUpdatingSectionStatus(final boolean to) {
+         this.updatingSectionStatus = to;
++        if (!to) pollPositionUpdates(); // Canvas
      }
  
-     protected BlockPos getOnPos(float yOffset) {
-+        // Canvas start
-+        int i = Mth.floor(this.position.x);
-+        int j = Mth.floor(this.position.y - (double) yOffset);
-+        int k = Mth.floor(this.position.z);
-+        BlockPos fallback = new BlockPos(i, j, k);
-+        // Canvas end
-         if (this.mainSupportingBlockPos.isPresent() && this.level().getChunkIfLoadedImmediately(this.mainSupportingBlockPos.get()) != null) { // Paper - ensure no loads
--            BlockPos blockPos = this.mainSupportingBlockPos.get();
-+            BlockPos blockPos = this.mainSupportingBlockPos.orElse(fallback); // Canvas - fallback
-             if (!(yOffset > 1.0E-5F)) {
-                 return blockPos;
-             } else {
-@@ -1402,10 +_,7 @@
-                     : blockPos;
-             }
-         } else {
--            int floor = Mth.floor(this.position.x);
--            int floor1 = Mth.floor(this.position.y - yOffset);
--            int floor2 = Mth.floor(this.position.z);
--            return new BlockPos(floor, floor1, floor2);
-+            return fallback; // Canvas - fallback
-         }
-     }
- 
-@@ -1662,7 +_,15 @@
-                         return;
-                     }
- 
--                    BlockState blockState = this.level().getBlockState(blockPos);
-+                    // Canvas start - prevent syncload
-+                    BlockState blockState;
-+                    @Nullable LevelChunk possiblyLoaded = this.level.getChunkIfLoaded(this.chunkPosition.x, this.chunkPosition.z);
-+                    if (possiblyLoaded != null) {
-+                        blockState = possiblyLoaded.getBlockState(blockPos);
-+                    } else {
-+                        continue;
-+                    }
-+                    // Canvas end
-                     if (!blockState.isAir() && set.add(blockPos.asLong())) {
-                         try {
-                             VoxelShape entityInsideCollisionShape = blockState.getEntityInsideCollisionShape(this.level(), blockPos);
+     @Override
 @@ -1955,11 +_,23 @@
                  && abstractBoat.getBoundingBox().minY <= eyeY
          )) {
@@ -221,7 +208,15 @@
      }
  
      public void moveTo(Vec3 vec) {
-@@ -3870,6 +_,11 @@
+@@ -3331,6 +_,7 @@
+                     TeleportTransition portalDestination = this.portalProcess.getPortalDestination(serverLevel, this);
+                     if (portalDestination != null) {
+                         ServerLevel level = portalDestination.newLevel();
++                        level.wake(); // Canvas - wake the thread if sleeping
+                         if (this instanceof ServerPlayer // CraftBukkit - always call event for players
+                             || (level != null && (level.dimension() == serverLevel.dimension() || this.canTeleport(serverLevel, level)))) { // CraftBukkit
+                             this.teleport(portalDestination);
+@@ -3870,6 +_,12 @@
      }
  
      private Entity teleportCrossDimension(ServerLevel level, TeleportTransition teleportTransition) {
@@ -229,6 +224,7 @@
 +        if (this instanceof ServerPlayer player) {
 +            player.serverLevel().notifyNewConnection(player.connection.connection);
 +        }
++        this.level.wake(); // wake if sleeping
 +        // Canvas end
          List<Entity> passengers = this.getPassengers();
          List<Entity> list = new ArrayList<>(passengers.size());
@@ -242,25 +238,37 @@
      }
  
      public ChunkPos chunkPosition() {
-@@ -4835,6 +_,18 @@
-         this.setPosRaw(x, y, z, false);
+@@ -4836,12 +_,19 @@
      }
      public final void setPosRaw(double x, double y, double z, boolean forceBoundingBoxUpdate) {
-+        // Canvas start - ensure section status is caught
-+        if (this.updatingSectionStatus) {
-+            final double fx = x;
-+            final double fy = y;
-+            final double fz = z;
-+            ((ServerLevel)this.level()).chunkSource.mainThreadProcessor.schedule(() -> {
-+                this.setPosRaw(fx, fy, fz, forceBoundingBoxUpdate);
-+            });
-+            return;
-+        }
-+        // Canvas end
-+        // Paper end - Block invalid positions and bounding box
          // Paper start - rewrite chunk system
++        boolean schedule = false; // Canvas
          if (this.updatingSectionStatus) {
-             LOGGER.error(
+-            LOGGER.error(
++            // Canvas start
++            // instead of erroring and stopping, what if we retry for when
++            // the slice is ready to be updated again. we return this already
++            // so why dont we just update later?
++            /* LOGGER.error(
+                 "Refusing to update position for entity " + this + " to position " + new Vec3(x, y, z)
+                     + " since it is processing a section status update", new Throwable()
+             );
+-            return;
++            return; */
++            schedule = true;
++            // Canvas end
+         }
+         // Paper end - rewrite chunk system
+         if (!checkPosition(this, x, y, z)) {
+@@ -4873,7 +_,7 @@
+                 }
+             }
+ 
+-            this.levelCallback.onMove();
++            if (schedule) {POSITION_UPDATE_CATCH.set(() -> this.levelCallback.onMove());} else this.levelCallback.onMove(); // Canvas
+         }
+         // Paper start - Block invalid positions and bounding box; don't allow desync of pos and AABB
+         // hanging has its own special logic
 @@ -4976,7 +_,7 @@
      public final void setRemoved(Entity.RemovalReason removalReason, org.bukkit.event.entity.EntityRemoveEvent.Cause cause) {
          // Paper start - rewrite chunk system

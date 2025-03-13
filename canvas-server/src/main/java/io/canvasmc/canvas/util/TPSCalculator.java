@@ -40,9 +40,9 @@ public class TPSCalculator {
 
     public double getAverageTPS() {
         return tpsHistory.stream()
-                         .mapToDouble(Double::doubleValue)
-                         .average()
-                         .orElse(0.1);
+            .mapToDouble(Double::doubleValue)
+            .average()
+            .orElse(0.1);
     }
 
     public double getTPS() {

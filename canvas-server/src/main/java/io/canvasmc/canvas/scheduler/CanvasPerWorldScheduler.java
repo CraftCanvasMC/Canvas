@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.folia;
+package io.canvasmc.canvas.scheduler;
 
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.Validate;
@@ -49,8 +49,8 @@ public final class CanvasPerWorldScheduler implements RegionScheduler {
     private void scheduleInternal(final CanvasPerWorldScheduler.GlobalScheduledTask task, final long delay) {
         // note: delay > 0
         synchronized (this.stateLock) {
-            ServerLevel level = ((CraftWorld)task.world).getHandle();
-            this.tasksByDeadline.computeIfAbsent(level, (_) -> new Long2ObjectOpenHashMap<>()).computeIfAbsent(level.tickCount + delay, (final long keyInMap) -> {
+            ServerLevel level = ((CraftWorld) task.world).getHandle();
+            tasksByDeadline.computeIfAbsent(level, (_) -> new Long2ObjectOpenHashMap<>()).computeIfAbsent(level.tickCount + delay, (final long keyInMap) -> {
                 return new ArrayList<>();
             }).add(task);
         }
@@ -124,19 +124,17 @@ public final class CanvasPerWorldScheduler implements RegionScheduler {
 
     private final class GlobalScheduledTask implements ScheduledTask, Runnable {
 
-        private static final int STATE_IDLE                = 0;
-        private static final int STATE_EXECUTING           = 1;
+        private static final int STATE_IDLE = 0;
+        private static final int STATE_EXECUTING = 1;
         private static final int STATE_EXECUTING_CANCELLED = 2;
-        private static final int STATE_FINISHED            = 3;
-        private static final int STATE_CANCELLED           = 4;
-
+        private static final int STATE_FINISHED = 3;
+        private static final int STATE_CANCELLED = 4;
+        private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(CanvasPerWorldScheduler.GlobalScheduledTask.class, "state", int.class);
         private final Plugin plugin;
         private final World world;
         private final long repeatDelay; // in ticks
         private Consumer<ScheduledTask> run;
         private volatile int state;
-
-        private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(CanvasPerWorldScheduler.GlobalScheduledTask.class, "state", int.class);
 
         private GlobalScheduledTask(final Plugin plugin, World world, final long repeatDelay, final Consumer<ScheduledTask> run) {
             this.plugin = plugin;
@@ -145,16 +143,16 @@ public final class CanvasPerWorldScheduler implements RegionScheduler {
             this.run = run;
         }
 
-        private final int getStateVolatile() {
-            return (int)STATE_HANDLE.get(this);
+        private int getStateVolatile() {
+            return (int) STATE_HANDLE.get(this);
         }
 
-        private final int compareAndExchangeStateVolatile(final int expect, final int update) {
-            return (int)STATE_HANDLE.compareAndExchange(this, expect, update);
-        }
-
-        private final void setStateVolatile(final int value) {
+        private void setStateVolatile(final int value) {
             STATE_HANDLE.setVolatile(this, value);
+        }
+
+        private int compareAndExchangeStateVolatile(final int expect, final int update) {
+            return (int) STATE_HANDLE.compareAndExchange(this, expect, update);
         }
 
         @Override
@@ -197,7 +195,7 @@ public final class CanvasPerWorldScheduler implements RegionScheduler {
 
         @Override
         public CancelledState cancel() {
-            for (int curr = this.getStateVolatile();;) {
+            for (int curr = this.getStateVolatile(); ; ) {
                 switch (curr) {
                     case STATE_IDLE: {
                         if (STATE_IDLE == (curr = this.compareAndExchangeStateVolatile(STATE_IDLE, STATE_CANCELLED))) {

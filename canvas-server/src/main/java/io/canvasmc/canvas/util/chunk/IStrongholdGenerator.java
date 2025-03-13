@@ -5,8 +5,8 @@ import net.minecraft.world.level.levelgen.structure.structures.StrongholdPieces;
 public interface IStrongholdGenerator {
     ThreadLocal<Class<? extends StrongholdPieces.StrongholdPiece>> getActivePieceTypeThreadLocal();
 
-    public static class Holder {
-        public static final IStrongholdGenerator INSTANCE = (IStrongholdGenerator)(new StrongholdPieces());
+    class Holder {
+        public static final IStrongholdGenerator INSTANCE = (IStrongholdGenerator) (new StrongholdPieces());
 
         public Holder() {
         }

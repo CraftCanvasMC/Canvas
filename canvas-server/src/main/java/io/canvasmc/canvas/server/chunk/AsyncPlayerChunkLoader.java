@@ -175,6 +175,7 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
                     }
                 }
                 level.moonrise$getPlayerChunkLoader().tick();
+                level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
                 chunkSource.broadcastChangedChunks(profilerFiller);
                 chunkSource.runDistanceManagerUpdates();
                 chunkSource.chunkMap.tick(hasTimeLeft, true);
@@ -183,6 +184,7 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
             MinecraftServer.getServer().getAllLevels().forEach((level -> {
                 level.moonrise$getPlayerChunkLoader().tick();
                 level.getChunkSource().pollTask();
+                level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
             }));
         }
         if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
@@ -213,7 +215,7 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
             int blockTicking = 0;
             int entityTicking = 0;
 
-            for (final NewChunkHolder holder : ((ChunkSystemServerLevel)world).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolders()) {
+            for (final NewChunkHolder holder : ((ChunkSystemServerLevel) world).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolders()) {
                 final NewChunkHolder.ChunkCompletion completion = holder.getLastChunkCompletion();
                 final ChunkAccess chunk = completion == null ? null : completion.chunk();
 
@@ -284,7 +286,7 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPl
             int protoChunk = 0;
             int fullChunk = 0;
 
-            for (final NewChunkHolder holder : ((ChunkSystemServerLevel)world).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolders()) {
+            for (final NewChunkHolder holder : ((ChunkSystemServerLevel) world).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolders()) {
                 final NewChunkHolder.ChunkCompletion completion = holder.getLastChunkCompletion();
                 final ChunkAccess chunk = completion == null ? null : completion.chunk();
 

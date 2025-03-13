@@ -95,7 +95,7 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
             this.data = new long[(this.size + entriesPerLong - 1) / entriesPerLong];
             for (int i = 0; i < this.size; i++) {
                 this.data[i / entriesPerLong] |= entries.get(i)
-                                                        .compress(this.xBits, this.yBits, this.zBits, this.stateBits) << ((i % entriesPerLong) * this.bitsPerEntry);
+                    .compress(this.xBits, this.yBits, this.zBits, this.stateBits) << ((i % entriesPerLong) * this.bitsPerEntry);
             }
         } else {
             this.data = EMPTY_DATA;

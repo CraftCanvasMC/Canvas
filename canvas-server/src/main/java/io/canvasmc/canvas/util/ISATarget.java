@@ -12,8 +12,11 @@ public interface ISATarget {
             default -> null;
         };
     }
+
     int ordinal();
+
     String getSuffix();
+
     boolean isNativelySupported();
 
 }

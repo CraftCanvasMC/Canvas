@@ -11,7 +11,8 @@ public final class SimpleThreadLocalRandomSource implements BitRandomSource {
 
     private final PositionalRandomFactory positionalRandomFactory = new SimpleThreadLocalRandomPositionalRandomFactory();
 
-    private SimpleThreadLocalRandomSource() {}
+    private SimpleThreadLocalRandomSource() {
+    }
 
     @Override
     public int next(final int bits) {
@@ -30,8 +31,8 @@ public final class SimpleThreadLocalRandomSource implements BitRandomSource {
         }
 
         // https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
-        final long value = (long)this.nextInt() & 0xFFFFFFFFL;
-        return (int)((value * (long)bound) >>> Integer.SIZE);
+        final long value = (long) this.nextInt() & 0xFFFFFFFFL;
+        return (int) ((value * (long) bound) >>> Integer.SIZE);
     }
 
     @Override

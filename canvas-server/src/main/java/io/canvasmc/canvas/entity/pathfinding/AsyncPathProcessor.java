@@ -43,7 +43,8 @@ public class AsyncPathProcessor {
      * @param afterProcessing a consumer to be called
      */
     public static void awaitProcessing(@Nullable Path path, final @NotNull Level level, Consumer<@Nullable Path> afterProcessing) {
-        if (!(level instanceof ServerLevel serverLevel)) throw new IllegalArgumentException("Level must be a ServerLevel to execute processing.");
+        if (!(level instanceof ServerLevel serverLevel))
+            throw new IllegalArgumentException("Level must be a ServerLevel to execute processing.");
         if (path != null && !path.isProcessed() && path instanceof AsyncPath asyncPath) {
             asyncPath.postProcessing(() -> {
                 if (Config.INSTANCE.pathfinding.useThreadedWorldForScheduling && MinecraftServer.getThreadedServer().hasStarted()) {

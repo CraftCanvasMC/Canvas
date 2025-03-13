@@ -51,7 +51,7 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
 
     @Override
     public boolean executeTask() {
-        for (;;) {
+        for (; ; ) {
             final Map.Entry<ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder, Boolean> firstEntry = this.tasks.pollFirstEntry();
             if (firstEntry != null) {
                 final ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder task = firstEntry.getKey();
@@ -114,36 +114,11 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
 
             return Long.compare(t1.id, t2.id);
         };
-
-        private static final class Holder {
-            private final ChunkSystemTaskQueue.PrioritisedQueuedTask task;
-            private final int priority;
-            private final long subOrder;
-            private final long id;
-
-            private volatile boolean removed;
-            private static final VarHandle REMOVED_HANDLE = ConcurrentUtil.getVarHandle(ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder.class, "removed", boolean.class);
-
-            private Holder(final ChunkSystemTaskQueue.PrioritisedQueuedTask task, final int priority, final long subOrder,
-                           final long id) {
-                this.task = task;
-                this.priority = priority;
-                this.subOrder = subOrder;
-                this.id = id;
-            }
-
-            public boolean markRemoved() {
-                return !(boolean)REMOVED_HANDLE.getAndSet((ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder)this, (boolean)true);
-            }
-        }
-
         private final long id;
         private final Runnable execute;
-
         private Priority priority;
         private long subOrder;
         private ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder holder;
-
         public PrioritisedQueuedTask(final Runnable execute, final Priority priority, final long subOrder) {
             if (!Priority.isValidPriority(priority)) {
                 throw new IllegalArgumentException("Invalid priority " + priority);
@@ -174,7 +149,7 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
                 this.holder = new Holder(this, this.priority.priority, this.subOrder, this.id);
 
                 ChunkSystemTaskQueue.this.scheduledTasks.getAndIncrement();
-                ChunkSystemTaskQueue.this.chunkSystem.schedule(this.holder.task.execute, this.priority.priority);
+                ChunkSystemTaskQueue.this.chunkSystem.schedule(this.holder.task.execute, this.priority.isHigherOrEqualPriority(Priority.BLOCKING) ? ChunkPriorityManager.BLOCKING : this.priority.priority);
             }
 
             if (ChunkSystemTaskQueue.this.isShutdown()) {
@@ -400,6 +375,27 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
                 }
 
                 return true;
+            }
+        }
+
+        private static final class Holder {
+            private static final VarHandle REMOVED_HANDLE = ConcurrentUtil.getVarHandle(ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder.class, "removed", boolean.class);
+            private final ChunkSystemTaskQueue.PrioritisedQueuedTask task;
+            private final int priority;
+            private final long subOrder;
+            private final long id;
+            private volatile boolean removed;
+
+            private Holder(final ChunkSystemTaskQueue.PrioritisedQueuedTask task, final int priority, final long subOrder,
+                           final long id) {
+                this.task = task;
+                this.priority = priority;
+                this.subOrder = subOrder;
+                this.id = id;
+            }
+
+            public boolean markRemoved() {
+                return !(boolean) REMOVED_HANDLE.getAndSet((ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder) this, (boolean) true);
             }
         }
     }

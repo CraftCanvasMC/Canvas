@@ -15,13 +15,12 @@ import org.slf4j.LoggerFactory;
 public class TheChunkSystem extends ExecutorManager {
     protected final Logger LOGGER;
     private final String name;
-    private boolean shutdown;
-
     private final TheChunkSystem.COWArrayList<TheChunkSystem.ExecutorGroup> executors = new TheChunkSystem.COWArrayList<>(TheChunkSystem.ExecutorGroup.class);
+    private boolean shutdown;
 
     public TheChunkSystem(final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
         super(workerThreadCount, threadInitializer, ChunkPriorityManager.MAX_PRIORITY);
-        LOGGER = LoggerFactory.getLogger("TheChunkSystem/"  + name);
+        LOGGER = LoggerFactory.getLogger("TheChunkSystem/" + name);
         this.name = name;
         LOGGER.info("Initialized new ChunkSystem with {} allocated threads", workerThreadCount);
     }
@@ -68,7 +67,7 @@ public class TheChunkSystem extends ExecutorManager {
     public TheChunkSystem.ExecutorGroup createExecutorGroup() {
         synchronized (this) {
             if (this.shutdown) {
-                throw new IllegalStateException("Queue is shutdown: " + this.toString());
+                throw new IllegalStateException("Queue is shutdown: " + this);
             }
 
             final TheChunkSystem.ExecutorGroup ret = new TheChunkSystem.ExecutorGroup();
@@ -76,6 +75,56 @@ public class TheChunkSystem extends ExecutorManager {
             this.executors.add(ret);
 
             return ret;
+        }
+    }
+
+    private static final class COWArrayList<E> {
+
+        private volatile E[] array;
+
+        public COWArrayList(final Class<E> clazz) {
+            this.array = (E[]) Array.newInstance(clazz, 0);
+        }
+
+        public E[] getArray() {
+            return this.array;
+        }
+
+        public void add(final E element) {
+            synchronized (this) {
+                final E[] array = this.array;
+
+                final E[] copy = Arrays.copyOf(array, array.length + 1);
+                copy[array.length] = element;
+
+                this.array = copy;
+            }
+        }
+
+        public boolean remove(final E element) {
+            synchronized (this) {
+                final E[] array = this.array;
+                int index = -1;
+                for (int i = 0, len = array.length; i < len; ++i) {
+                    if (array[i] == element) {
+                        index = i;
+                        break;
+                    }
+                }
+
+                if (index == -1) {
+                    return false;
+                }
+
+                final E[] copy = (E[]) Array.newInstance(array.getClass().getComponentType(), array.length - 1);
+
+                System.arraycopy(array, 0, copy, 0, index);
+                System.arraycopy(array, index + 1, copy, index, (array.length - 1) - index);
+
+                this.array = copy;
+            }
+
+            return true;
         }
     }
 
@@ -331,56 +380,6 @@ public class TheChunkSystem extends ExecutorManager {
                     return false;
                 }
             }
-        }
-    }
-
-    private static final class COWArrayList<E> {
-
-        private volatile E[] array;
-
-        public COWArrayList(final Class<E> clazz) {
-            this.array = (E[]) Array.newInstance(clazz, 0);
-        }
-
-        public E[] getArray() {
-            return this.array;
-        }
-
-        public void add(final E element) {
-            synchronized (this) {
-                final E[] array = this.array;
-
-                final E[] copy = Arrays.copyOf(array, array.length + 1);
-                copy[array.length] = element;
-
-                this.array = copy;
-            }
-        }
-
-        public boolean remove(final E element) {
-            synchronized (this) {
-                final E[] array = this.array;
-                int index = -1;
-                for (int i = 0, len = array.length; i < len; ++i) {
-                    if (array[i] == element) {
-                        index = i;
-                        break;
-                    }
-                }
-
-                if (index == -1) {
-                    return false;
-                }
-
-                final E[] copy = (E[])Array.newInstance(array.getClass().getComponentType(), array.length - 1);
-
-                System.arraycopy(array, 0, copy, 0, index);
-                System.arraycopy(array, index + 1, copy, index, (array.length - 1) - index);
-
-                this.array = copy;
-            }
-
-            return true;
         }
     }
 }

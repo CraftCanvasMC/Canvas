@@ -12,7 +12,7 @@
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.entity.tnt.TNTMergeManager;
 +import io.canvasmc.canvas.Config;
-+import io.canvasmc.canvas.folia.CanvasPerWorldScheduler;
++import io.canvasmc.canvas.scheduler.CanvasPerWorldScheduler;
 +import io.canvasmc.canvas.server.chunk.ChunkPriorityManager;
 +import io.canvasmc.canvas.server.level.distance.command.DistanceUtils;
 +import io.canvasmc.canvas.util.SimpleThreadLocalRandomSource;
@@ -128,12 +128,22 @@
  import org.slf4j.Logger;
  
  public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLevel, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel, ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevelReader, ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickServerLevel { // Paper - rewrite chunk system // Paper - chunk tick iteration
-@@ -179,12 +_,15 @@
+@@ -179,12 +_,25 @@
      private static final Logger LOGGER = LogUtils.getLogger();
      private static final int EMPTY_TIME_NO_TICK = 300;
      private static final int MAX_SCHEDULED_TICKS_PER_TICK = 65536;
 -    final List<ServerPlayer> players = Lists.newArrayList();
-+    final List<ServerPlayer> players = Lists.newCopyOnWriteArrayList(); // Canvas
++    // Canvas start - use concurrent - add empty world sleeping
++    final List<ServerPlayer> players = new CopyOnWriteArrayList<>() {
++        @Override
++        public boolean add(final ServerPlayer player) {
++            if (ServerLevel.this.isSleeping()) {
++                ServerLevel.this.wake();
++            }
++            return super.add(player);
++        }
++    };
++    // Canvas end
      public final ServerChunkCache chunkSource;
      private final MinecraftServer server;
      public final net.minecraft.world.level.storage.PrimaryLevelData serverLevelData; // CraftBukkit - type
@@ -249,7 +259,7 @@
      }
  
      // Paper start
-@@ -733,8 +_,155 @@
+@@ -733,8 +_,117 @@
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -266,7 +276,6 @@
 +    public static final int WORLD_INIT_NOT_CHECKED = 0;
 +    public static final int WORLD_INIT_CHECKING = 1;
 +    public static final int WORLD_INIT_CHECKED = 2;
-+    public final java.util.concurrent.atomic.AtomicInteger checkInitialised = new java.util.concurrent.atomic.AtomicInteger(WORLD_INIT_NOT_CHECKED);
 +
 +    public void notifyNewConnection(Connection connection) {
 +        synchronized (lock) {
@@ -277,29 +286,6 @@
 +        synchronized (lock)  {
 +            activeConnections.remove(connection);
 +        }
-+    }
-+
-+    private boolean tickEmptyLevel() {
-+        if (this.server.isEmptyTickSkipping()) {
-+            return true;
-+        }
-+        int serverEmptySecondsLimit = this.server.pauseWhileEmptySeconds() * 20;
-+        if (serverEmptySecondsLimit > 0 && Config.INSTANCE.emptySleepPerWorlds) {
-+            if (this.players.isEmpty() && !this.tickRateManager.isSprinting() && this.server.pluginsBlockingSleep.isEmpty()) {
-+                ++this.emptyTicks;
-+            } else {
-+                this.emptyTicks = 0;
-+            }
-+
-+            if (this.emptyTicks >= serverEmptySecondsLimit) {
-+                if (this.emptyTicks == serverEmptySecondsLimit) {
-+                    MinecraftServer.LOGGER.info("Level empty for {} seconds, pausing", this.server.pauseWhileEmptySeconds());
-+                }
-+                this.bukkitScheduler.mainThreadHeartbeat();
-+                return true;
-+            }
-+        }
-+        return false;
 +    }
 +
 +    protected void tickConnection() {
@@ -360,24 +346,10 @@
 +    }
 +
 +    public void worldtick(BooleanSupplier hasTimeLeft, int tickCount) {
-+        if (checkInitialised.get() != ServerLevel.WORLD_INIT_CHECKED) {
-+            synchronized (checkInitialised) {
-+                if (checkInitialised.compareAndSet(ServerLevel.WORLD_INIT_NOT_CHECKED, ServerLevel.WORLD_INIT_CHECKING)) {
-+                    LOGGER.info("Initialising world '{}' before ticking...", this.getWorld().getName());
-+                    this.server.initWorld(this, this.serverLevelData, this.server.getWorldData(), this.serverLevelData.worldGenOptions());
-+                    checkInitialised.set(ServerLevel.WORLD_INIT_CHECKED);
-+                    LOGGER.info("Initialised world '{}'", this.getWorld().getName());
-+                }
-+            }
-+        }
 +        this.handlingTick = true;
 +        this.tickRateManager.tick();
 +        this.tickConnection();
 +
-+        if (this.tickEmptyLevel()) {
-+            this.handlingTick = false;
-+            return;
-+        }
 +        this.tpsCalculator.doTick();
 +        this.bukkitScheduler.mainThreadHeartbeat();
 +
@@ -782,7 +754,7 @@
              }
          }
          } // Paper - option to disable pathfinding updates
-@@ -1811,13 +_,13 @@
+@@ -1811,29 +_,29 @@
  
      @Override
      public void updateNeighborsAt(BlockPos pos, Block block) {
@@ -794,10 +766,30 @@
      @Override
      public void updateNeighborsAt(BlockPos pos, Block block, @Nullable Orientation orientation) {
 -        if (captureBlockStates) { return; } // Paper - Cancel all physics during placement
+-        this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, null, orientation);
 +        if (captureBlockStates.get()) { return; } // Paper - Cancel all physics during placement // Canvas - atomic
-         this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, null, orientation);
++        this.neighborUpdater.get().updateNeighborsAtExceptFromFacing(pos, block, null, orientation); // Canvas - threadlocal
      }
  
+     @Override
+     public void updateNeighborsAtExceptFromFacing(BlockPos pos, Block block, Direction facing, @Nullable Orientation orientation) {
+-        this.neighborUpdater.updateNeighborsAtExceptFromFacing(pos, block, facing, orientation);
++        this.neighborUpdater.get().updateNeighborsAtExceptFromFacing(pos, block, facing, orientation); // Canvas - threadlocal
+     }
+ 
+     @Override
+     public void neighborChanged(BlockPos pos, Block block, @Nullable Orientation orientation) {
+-        this.neighborUpdater.neighborChanged(pos, block, orientation);
++        this.neighborUpdater.get().neighborChanged(pos, block, orientation); // Canvas - threadlocal
+     }
+ 
+     @Override
+     public void neighborChanged(BlockState state, BlockPos pos, Block block, @Nullable Orientation orientation, boolean movedByPiston) {
+-        this.neighborUpdater.neighborChanged(state, pos, block, orientation, movedByPiston);
++        this.neighborUpdater.get().neighborChanged(state, pos, block, orientation, movedByPiston); // Canvas - threadlocal
+     }
+ 
+     @Override
 @@ -2158,8 +_,8 @@
      }
  

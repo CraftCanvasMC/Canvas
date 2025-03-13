@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import java.util.stream.Collectors;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -8,8 +9,6 @@ import net.minecraft.server.network.PlayerChunkSender;
 import net.minecraft.world.level.ChunkPos;
 import org.bukkit.Chunk;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.stream.Collectors;
 
 import static net.minecraft.commands.Commands.literal;
 

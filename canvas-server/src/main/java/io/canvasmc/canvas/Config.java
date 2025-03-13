@@ -259,9 +259,6 @@ public class Config {
         public int goalTickDelay = 0;
     }
 
-    @Comment("Enable the server watchdog")
-    public boolean enableWatchdog = true;
-
     @Comment("Lag compensation related configurations. Improves the player experience when TPS is low")
     public LagCompensation lagCompensation = new LagCompensation();
     public static class LagCompensation {

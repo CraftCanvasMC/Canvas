@@ -107,7 +107,7 @@ public class CanvasSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     public Stream<PaperCommandSender> getCommandSenders() {
         return Stream.concat(this.server.getOnlinePlayers().stream(), Stream.of(this.server.getConsoleSender()))
-                     .map((x$0) -> new PaperCommandSender(x$0));
+            .map((x$0) -> new PaperCommandSender(x$0));
     }
 
     public void executeAsync(Runnable task) {
@@ -154,9 +154,9 @@ public class CanvasSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     public Collection<SourceMetadata> getKnownSources() {
         return SourceMetadata.gather(Arrays.asList(this.server.getPluginManager().getPlugins()), Plugin::getName, (plugin) -> plugin.getPluginMeta()
-                                                                                                                                    .getVersion(), (plugin) -> String.join(", ", plugin.getPluginMeta()
-                                                                                                                                                                                       .getAuthors()), (plugin) -> plugin.getPluginMeta()
-                                                                                                                                                                                                                         .getDescription());
+            .getVersion(), (plugin) -> String.join(", ", plugin.getPluginMeta()
+            .getAuthors()), (plugin) -> plugin.getPluginMeta()
+            .getDescription());
     }
 
     public PlayerPingProvider createPlayerPingProvider() {

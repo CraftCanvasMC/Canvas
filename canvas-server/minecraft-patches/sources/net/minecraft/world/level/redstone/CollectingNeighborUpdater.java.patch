@@ -1,100 +1,36 @@
 --- a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
 +++ b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
-@@ -3,7 +_,11 @@
- import com.mojang.logging.LogUtils;
- import java.util.ArrayDeque;
- import java.util.ArrayList;
-+import java.util.Collections;
-+import java.util.Deque;
- import java.util.List;
-+import java.util.NoSuchElementException;
-+import java.util.concurrent.LinkedBlockingDeque;
- import javax.annotation.Nullable;
- import net.minecraft.core.BlockPos;
- import net.minecraft.core.Direction;
-@@ -17,8 +_,8 @@
-     private static final Logger LOGGER = LogUtils.getLogger();
-     private final Level level;
-     private final int maxChainedNeighborUpdates;
--    private final ArrayDeque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>();
--    private final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
-+    public final Deque<CollectingNeighborUpdater.NeighborUpdates> stack = new LinkedBlockingDeque<>(); // Canvas - LinkedBlockingDeque
-+    public final List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = Collections.synchronizedList(new ArrayList<>()); // Canvas - synchronized
-     private int count = 0;
- 
-     public CollectingNeighborUpdater(Level level, int maxChainedNeighborUpdates) {
-@@ -68,19 +_,22 @@
-     private void runUpdates() {
-         try {
-             while (!this.stack.isEmpty() || !this.addedThisLayer.isEmpty()) {
-+                try { // Canvas
-                 for (int i = this.addedThisLayer.size() - 1; i >= 0; i--) {
-                     this.stack.push(this.addedThisLayer.get(i));
-                 }
- 
-                 this.addedThisLayer.clear();
--                CollectingNeighborUpdater.NeighborUpdates neighborUpdates = this.stack.peek();
-+                CollectingNeighborUpdater.NeighborUpdates neighborUpdates = this.stack.pop(); // Canvas - pop
-+                if (neighborUpdates == null) continue; // Canvas
- 
-                 while (this.addedThisLayer.isEmpty()) {
-                     if (!neighborUpdates.runNext(this.level)) {
--                        this.stack.pop();
-+                        // this.stack.pop(); // Canvas - move pop up
-                         break;
-                     }
-                 }
-+                } catch (NoSuchElementException ignored) {} // Canvas
+@@ -121,7 +_,7 @@
+         public boolean runNext(Level level) {
+             Direction direction = NeighborUpdater.UPDATE_ORDER[this.idx++];
+             BlockPos blockPos = this.sourcePos.relative(direction);
+-            BlockState blockState = level.getBlockState(blockPos);
++            BlockState blockState = level.getBlockStateIfLoaded(blockPos); if (blockState != null) { // Canvas
+             Orientation orientation = null;
+             if (level.enabledFeatures().contains(FeatureFlags.REDSTONE_EXPERIMENTS)) {
+                 if (this.orientation == null) {
+@@ -134,6 +_,7 @@
              }
-         } finally {
-             this.stack.clear();
-@@ -89,7 +_,7 @@
-         }
-     }
  
--    record FullNeighborUpdate(BlockState state, BlockPos pos, Block block, @Nullable Orientation orientation, boolean movedByPiston)
-+    public record FullNeighborUpdate(BlockState state, BlockPos pos, Block block, @Nullable Orientation orientation, boolean movedByPiston) // Canvas - public
+             NeighborUpdater.executeUpdate(level, blockState, blockPos, this.sourceBlock, orientation, false, this.sourcePos); // Paper - Add source block to BlockPhysicsEvent
++            } // Canvas
+             if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
+                 this.idx++;
+             }
+@@ -150,6 +_,7 @@
          implements CollectingNeighborUpdater.NeighborUpdates {
          @Override
          public boolean runNext(Level level) {
-@@ -98,14 +_,14 @@
++            if (level.getChunkIfLoaded(this.pos) == null) return false; // Canvas
+             NeighborUpdater.executeShapeUpdate(level, this.direction, this.pos, this.neighborPos, this.neighborState, this.updateFlags, this.updateLimit);
+             return false;
          }
-     }
- 
--    static final class MultiNeighborUpdate implements CollectingNeighborUpdater.NeighborUpdates {
-+    public static final class MultiNeighborUpdate implements CollectingNeighborUpdater.NeighborUpdates { // Canvas - public
-         private final BlockPos sourcePos;
--        private final Block sourceBlock;
-+        public final Block sourceBlock; // Canvas - private -> public
-         @Nullable
-         private Orientation orientation;
-         @Nullable
-         private final Direction skipDirection;
--        private int idx = 0;
-+        private volatile int idx = 0; // Canvas - volatile
- 
-         MultiNeighborUpdate(BlockPos sourcePos, Block sourceBlock, @Nullable Orientation orientation, @Nullable Direction skipDirection) {
-             this.sourcePos = sourcePos;
-@@ -142,11 +_,11 @@
-         }
-     }
- 
--    interface NeighborUpdates {
-+    public interface NeighborUpdates { // Canvas - public
-         boolean runNext(Level level);
-     }
- 
--    record ShapeUpdate(Direction direction, BlockState neighborState, BlockPos pos, BlockPos neighborPos, int updateFlags, int updateLimit)
-+    public record ShapeUpdate(Direction direction, BlockState neighborState, BlockPos pos, BlockPos neighborPos, int updateFlags, int updateLimit) // Canvas - public
-         implements CollectingNeighborUpdater.NeighborUpdates {
+@@ -158,7 +_,7 @@
+     record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates {
          @Override
          public boolean runNext(Level level) {
-@@ -155,7 +_,7 @@
+-            BlockState blockState = level.getBlockState(this.pos);
++            BlockState blockState = level.getBlockStateIfLoaded(this.pos); if (blockState == null) return false; // Canvas
+             NeighborUpdater.executeUpdate(level, blockState, this.pos, this.block, this.orientation, false);
+             return false;
          }
-     }
- 
--    record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates {
-+    public record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates { // Canvas - public
-         @Override
-         public boolean runNext(Level level) {
-             BlockState blockState = level.getBlockState(this.pos);

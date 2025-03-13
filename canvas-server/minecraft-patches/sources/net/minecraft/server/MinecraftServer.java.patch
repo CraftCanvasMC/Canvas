@@ -8,13 +8,14 @@
  import com.mojang.authlib.GameProfile;
  import com.mojang.authlib.GameProfileRepository;
  import com.mojang.authlib.minecraft.MinecraftSessionService;
-@@ -13,6 +_,14 @@
+@@ -13,6 +_,15 @@
  import com.mojang.jtracy.DiscontinuousFrame;
  import com.mojang.jtracy.TracyClient;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.Config;
 +import io.canvasmc.canvas.server.AbstractTickLoop;
 +import io.canvasmc.canvas.server.AverageTickTimeAccessor;
++import io.canvasmc.canvas.server.MultiWatchdogThread;
 +import io.canvasmc.canvas.server.ThreadedServer;
 +import io.canvasmc.canvas.server.level.TickRateManagerInstance;
 +import io.canvasmc.canvas.server.network.PlayerJoinThread;
@@ -47,6 +48,14 @@
  import net.minecraft.network.protocol.PacketType;
  import net.minecraft.network.protocol.game.ClientboundChangeDifficultyPacket;
  import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
+@@ -81,6 +_,7 @@
+ import net.minecraft.resources.ResourceKey;
+ import net.minecraft.resources.ResourceLocation;
+ import net.minecraft.server.bossevents.CustomBossEvents;
++import net.minecraft.server.dedicated.DedicatedServer;
+ import net.minecraft.server.level.DemoMode;
+ import net.minecraft.server.level.PlayerRespawnLogic;
+ import net.minecraft.server.level.ServerChunkCache;
 @@ -136,6 +_,7 @@
  import net.minecraft.world.entity.player.Player;
  import net.minecraft.world.flag.FeatureFlagSet;
@@ -167,7 +176,7 @@
 -        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> atomicReference.get().runServer(), "Server thread");
 +        // Canvas start - Threaded Dimensions
 +        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> {
-+            THREADED_SERVER = new ThreadedServer(atomicReference.get());
++            THREADED_SERVER = new ThreadedServer((DedicatedServer) atomicReference.get());
 +            THREADED_SERVER.spin();
 +        }, "Server thread");
 +        // Canvas end
@@ -223,7 +232,7 @@
 +                    );
 +                }
 +            }
-+            // this.initWorld(serverLevel, primaryLevelData, this.worldData, worldOptions); // move to first tick of MinecraftServerWorld
++            this.initWorld(serverLevel, primaryLevelData, this.worldData, worldOptions); // move to first tick of MinecraftServerWorld
 +            // Canvas end
  
              // Paper - Put world into worldlist before initing the world; move up
@@ -254,7 +263,7 @@
      private boolean hasLoggedStop = false; // Paper - Debugging
      private final Object stopLock = new Object();
      public final boolean hasStopped() {
-@@ -994,6 +_,53 @@
+@@ -994,16 +_,62 @@
              if (this.hasStopped) return;
              this.hasStopped = true;
          }
@@ -307,8 +316,10 @@
 +        // Canvas end
          if (!hasLoggedStop && isDebugging()) io.papermc.paper.util.TraceUtil.dumpTraceForThread("Server stopped"); // Paper - Debugging
          shutdownThread = Thread.currentThread(); // Paper - Improved watchdog support
-         org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
-@@ -1002,8 +_,7 @@
+-        org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
++        MultiWatchdogThread.doStop(); // Paper - Improved watchdog support // Canvas - rewrite watchdog
+         // CraftBukkit end
+         if (this.metricsRecorder.isRecording()) {
              this.cancelRecordingMetrics();
          }
  
@@ -519,7 +530,7 @@
          Optional<Path> optional = Optional.of(this.getFile("server-icon.png"))
              .filter(path -> Files.isRegularFile(path))
              .or(() -> this.storageSource.getIconFile().filter(path -> Files.isRegularFile(path)));
-@@ -1531,6 +_,14 @@
+@@ -1531,8 +_,16 @@
          return false;
      }
  
@@ -532,9 +543,26 @@
 +
 +    // Canvas end
      public void tickServer(BooleanSupplier hasTimeLeft) {
-         org.spigotmc.WatchdogThread.tick(); // Spigot
+-        org.spigotmc.WatchdogThread.tick(); // Spigot
++        getThreadedServer().watchdogEntry.doTick(); // Spigot // Canvas - rewrite watchdog
          long nanos = Util.getNanos();
-@@ -1556,19 +_,24 @@
+         int i = this.pauseWhileEmptySeconds() * 20;
+         this.removeDisabledPluginsBlockingSleep(); // Paper - API to allow/disallow tick sleeping
+@@ -1547,6 +_,13 @@
+                 this.server.spark.tickStart(); // Paper - spark
+                 if (this.emptyTicks == i) {
+                     LOGGER.info("Server empty for {} seconds, pausing", this.pauseWhileEmptySeconds());
++                    // Canvas start
++                    Set<AbstractTickLoop<?, ?>> loops = getThreadedServer().getTickLoops();
++                    LOGGER.info("Notifying {} tick-loops of pause", loops.size());
++                    for (final AbstractTickLoop<?, ?> loop : loops) {
++                        loop.sleep();
++                    }
++                    // Canvas end
+                     this.autoSave();
+                 }
+ 
+@@ -1556,19 +_,33 @@
                  while ((task = this.processQueue.poll()) != null) {
                      task.run();
                  }
@@ -553,6 +581,15 @@
 +                emptyTickSleeping = true; // Canvas
                  return;
              }
++            // Canvas start
++            else if (emptyTickSleeping) {
++                Set<AbstractTickLoop<?, ?>> loops = getThreadedServer().getTickLoops();
++                LOGGER.info("Waking {} tick-loops from pause state", loops.size());
++                for (final AbstractTickLoop<?, ?> loop : loops) {
++                    loop.wake();
++                }
++            }
++            // Canvas end
          }
  
 +        emptyTickSleeping = false; // Canvas
@@ -786,22 +823,21 @@
          return 0;
      }
  
-@@ -2918,13 +_,17 @@
+@@ -2918,13 +_,16 @@
      // Paper start - Add tick times API and /mspt command
      public static class TickTimes {
          private final long[] times;
-+        private final long intervalNs; // Canvas - utilization
-+        private int index = 0; // Canvas - utilization
++        private final long intervalNs; // Canvas - expand tick times
  
          public TickTimes(int length) {
              times = new long[length];
-+            this.intervalNs = 50 * 1_000_000 ; // Canvas - utilization - ms -> nanos -- ms * 1_000_000
++            this.intervalNs = 50 * 1_000_000 ; // Canvas - expand tick times - ms -> nanos -- ms * 1_000_000
          }
  
 -        void add(int index, long time) {
 +        public void add(int index, long time) { // Canvas - public
              times[index % times.length] = time;
-+            index++; // Canvas - utilization
++            index++; // Canvas - expand tick times
          }
  
          public long[] getTimes() {
@@ -809,7 +845,7 @@
              }
              return ((double) total / (double) times.length) * 1.0E-6D;
          }
-+        // Canvas start - utilization
++        // Canvas start - expand tick times
 +
 +        public double getUtilization() {
 +            long totalExecutionTime = 0L;

@@ -45,6 +45,9 @@ public final class Main {
                 return jsonContent.split("\"id\": \"")[1].split("\"")[0];
             };
             new PatcherBuilder().start(versionProvider);
+            if (Boolean.getBoolean("paperclip.patchonly")) {
+                System.exit(0);
+            }
             new LibraryLoader().start(versionProvider);
             if (mainClassName == null || mainClassName.isEmpty()) {
                 System.out.println("Empty main class specified, exiting");

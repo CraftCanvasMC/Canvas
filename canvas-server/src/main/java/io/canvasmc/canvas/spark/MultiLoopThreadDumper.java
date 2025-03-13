@@ -12,8 +12,8 @@ import org.jetbrains.annotations.NotNull;
 
 public final class MultiLoopThreadDumper implements ThreadDumper {
     public static final ConcurrentLinkedQueue<String> REGISTRY = new ConcurrentLinkedQueue<>();
-    private final ThreadFinder threadFinder = new ThreadFinder();
     private static final int STACK_TRACE_DEPTH = 10;
+    private final ThreadFinder threadFinder = new ThreadFinder();
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
@@ -28,10 +28,10 @@ public final class MultiLoopThreadDumper implements ThreadDumper {
     @Override
     public ThreadInfo @NotNull [] dumpThreads(ThreadMXBean threadBean) {
         return this.threadFinder.getThreads()
-                                .filter(thread -> isThreadIncluded(thread.threadId(), thread.getName()))
-                                .map(thread -> threadBean.getThreadInfo(thread.threadId(), STACK_TRACE_DEPTH))
-                                .filter(Objects::nonNull)
-                                .toArray(ThreadInfo[]::new);
+            .filter(thread -> isThreadIncluded(thread.threadId(), thread.getName()))
+            .map(thread -> threadBean.getThreadInfo(thread.threadId(), STACK_TRACE_DEPTH))
+            .filter(Objects::nonNull)
+            .toArray(ThreadInfo[]::new);
     }
 
     @Override
@@ -39,8 +39,8 @@ public final class MultiLoopThreadDumper implements ThreadDumper {
         ThreadInfo[] threads = dumpThreads(ManagementFactory.getThreadMXBean());
 
         return SparkSamplerProtos.SamplerMetadata.ThreadDumper.newBuilder()
-                                                              .setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC)
-                                                              .addAllPatterns(REGISTRY)
-                                                              .build();
+            .setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC)
+            .addAllPatterns(REGISTRY)
+            .build();
     }
 }

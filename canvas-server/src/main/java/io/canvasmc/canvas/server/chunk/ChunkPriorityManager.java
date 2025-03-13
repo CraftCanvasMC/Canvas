@@ -2,16 +2,16 @@ package io.canvasmc.canvas.server.chunk;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
-import java.util.*;
-import java.util.concurrent.*;
 
 public class ChunkPriorityManager {
     public static int IDLE = 1;
-    public static int MAX_PRIORITY = MoonriseConstants.MAX_VIEW_DISTANCE + 2;
-    public static int BLOCKING = MAX_PRIORITY - 1;
+    public static int MAX_PRIORITY = Math.max(MoonriseConstants.MAX_VIEW_DISTANCE + 2, Priority.BLOCKING.priority + 2);
+    public static int BLOCKING = Math.max(MAX_PRIORITY - 1, Priority.BLOCKING.priority);
     public final List<ChunkPos> blockingOverride = new CopyOnWriteArrayList<>() {
         @Override
         public boolean contains(final Object o) {

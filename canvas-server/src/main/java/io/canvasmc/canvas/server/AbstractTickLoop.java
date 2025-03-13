@@ -26,9 +26,9 @@ import net.minecraft.util.thread.ReentrantBlockableEventLoop;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.spigotmc.WatchdogThread;
 
 public abstract class AbstractTickLoop<T extends TickThread, S> extends ReentrantBlockableEventLoop<TickTask> {
+    public static final Object SLEEP_HANDLE = new Object();
     public final Logger LOGGER;
     public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
     public final MinecraftServer.RollingAverage tps10s = new MinecraftServer.RollingAverage(10);
@@ -40,7 +40,6 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
     public final MinecraftServer.TickTimes tickTimes60s = new MinecraftServer.TickTimes(1200);
     private final String debugName;
     private final TickThreadConstructor<T, S> constructor;
-    public volatile long lastWatchdogTick;
     public int tickCount;
     public boolean waitingForNextTick;
     public long nextTickTimeNanos;
@@ -50,21 +49,23 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
     public boolean lagging = false;
     public boolean prepared = false;
     public int currentTick;
+    public long lastTickNanos = Util.getNanos();
     protected Thread owner;
     protected volatile boolean running = false;
     protected volatile boolean ticking = false;
+    protected long tickSection = 0;
+    protected long lastTick = 0;
+    protected long preTickNanos = 0L;
+    protected long postTickNanos = 0L;
     private volatile boolean shutdown = false;
-    private long tickSection = 0;
     private long lastOverloadWarningNanos;
     private long taskExecutionStartNanos;
-    private long lastTick = 0;
     private long lastNanoTickTime = 0L;
-    private long preTickNanos = 0L;
-    private long postTickNanos = 0L;
-    public long lastTickNanos = Util.getNanos();
     private Consumer<T> threadModifier = null;
     private Runnable preBlockStart = null;
     private BooleanSupplier dependencyResolution;
+    private volatile boolean isSleeping = false;
+    private MultiWatchdogThread.ThreadEntry watchdogEntry;
 
     public AbstractTickLoop(final String name, final String debugName) {
         //noinspection unchecked
@@ -76,11 +77,10 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
         LOGGER = LoggerFactory.getLogger(name);
         this.debugName = debugName;
         this.constructor = constructor;
-        WatchdogThread.registerWatcher(this);
         MinecraftServer.getThreadedServer().loops.add(this);
     }
 
-    public static @NotNull AbstractTickLoop<?,?> getByName(String name) {
+    public static @NotNull AbstractTickLoop<?, ?> getByName(String name) {
         for (final AbstractTickLoop<?, ?> loop : MinecraftServer.getThreadedServer().loops) {
             if (loop.name().equalsIgnoreCase(name)) {
                 return loop;
@@ -110,6 +110,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
             this.threadModifier.accept(thread);
         }
         MultiLoopThreadDumper.REGISTRY.add(thread.getName());
+        this.watchdogEntry = MultiWatchdogThread.register(new MultiWatchdogThread.ThreadEntry(thread, this.debugName, this.name(), this::isTicking, this::isSleeping));
         thread.start();
         return thread;
     }
@@ -118,7 +119,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
         try {
             this.running = true;
             this.owner = Thread.currentThread();
-            this.lastWatchdogTick = WatchdogThread.monotonicMillis();
+            this.watchdogEntry.doTick();
             if (this.preBlockStart != null) {
                 this.preBlockStart.run();
             }
@@ -141,7 +142,9 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
     public void stopSpin(boolean waitUntilComplete) {
         this.ticking = false;
         this.shutdown = true;
-        this.closeSpin();
+        if (this.isSleeping) {
+            this.wake();
+        }
         LockSupport.unpark(this.owner); // unpark just incase
         if (waitUntilComplete) {
             Thread currentThread = Thread.currentThread();
@@ -170,6 +173,29 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
     }
 
     public long blockTick(long tickSection, final @NotNull AbstractTick tick) {
+        if (isSleeping) {
+            synchronized (SLEEP_HANDLE) {
+                while (isSleeping) {
+                    try {
+                        LOGGER.info("Pausing tick-loop '{}'", this.debugName);
+                        SLEEP_HANDLE.wait();
+                        this.watchdogEntry.doTick(); // tick watchdog
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException("sleep was interrupted!", e);
+                    }
+                }
+            }
+            LOGGER.info("Waking tick-loop '{}'", this.debugName);
+            // check shutdown if we were woken by spin stop
+            if (this.shutdown) {
+                return tickSection;
+            }
+            // cleanup post-sleep. if we don't do this it does the following:
+            // - warn overload
+            // - watchdog will be mad... very mad...
+            this.nextTickTimeNanos = Util.getNanos();
+            this.lastOverloadWarningNanos = this.nextTickTimeNanos;
+        }
         long currentTime;
         long i;
 
@@ -220,7 +246,7 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
 
         this.lastTickNanos = Util.getNanos();
         this.preTickNanos = this.lastTickNanos;
-        this.lastWatchdogTick = WatchdogThread.monotonicMillis();
+        this.watchdogEntry.doTick();
         tick.process(flag ? () -> false : this::haveTime, tickCount++);
         long totalProcessNanos = Util.getNanos() - currentTime;
         this.tickTimes5s.add(this.tickCount, totalProcessNanos);
@@ -332,8 +358,8 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
 
     public abstract ServerTickRateManager tickRateManager();
 
-    public long getLastWatchdogTick() {
-        return lastWatchdogTick;
+    public MultiWatchdogThread.ThreadEntry getWatchdogEntry() {
+        return watchdogEntry;
     }
 
     public boolean isRunning() {
@@ -350,8 +376,32 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
 
     public @NotNull Component debugInfo() {
         return Component.empty();
-    };
+    }
 
-    public void closeSpin() {
+    public void sleep() {
+        // make sure we can sleep and aren't sleeping already
+        if (!shouldSleep() || isSleeping) return;
+        synchronized (SLEEP_HANDLE) {
+            this.watchdogEntry.doTick(); // tick watchdog before pause
+            isSleeping = true;
+        }
+    }
+
+    public void wake() {
+        // don't wake if we aren't sleeping
+        if (!isSleeping) return;
+        synchronized (SLEEP_HANDLE) {
+            this.watchdogEntry.doTick(); // tick watchdog before we unfreeze so we don't kill the server when it wakes
+            isSleeping = false;
+            SLEEP_HANDLE.notifyAll();
+        }
+    }
+
+    public boolean isSleeping() {
+        return isSleeping;
+    }
+
+    public boolean shouldSleep() {
+        return true;
     }
 }

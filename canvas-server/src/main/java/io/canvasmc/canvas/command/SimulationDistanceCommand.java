@@ -45,7 +45,7 @@ public final class SimulationDistanceCommand {
 
         for (ServerPlayer spe : level.players()) {
             spe.moonrise$getChunkLoader()
-               .updateClientSimulationDistance(simDist == 0 ? level.getServer().getPlayerList().getSimulationDistance() : simDist - 1);
+                .updateClientSimulationDistance(simDist == 0 ? level.getServer().getPlayerList().getSimulationDistance() : simDist - 1);
         }
 
         level.getChunkSource().setSimulationDistance(simDist == 0 ? level.getServer().getPlayerList().getSimulationDistance() : simDist - 1);

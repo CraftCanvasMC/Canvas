@@ -44,6 +44,7 @@ public class ThreadedEntityScheduler extends AbstractTickLoop<TickThread, Thread
 
     public void tickEntities() {
         for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+            if (level.isSleeping()) continue;
             level.tickEntities(true);
         }
     }
