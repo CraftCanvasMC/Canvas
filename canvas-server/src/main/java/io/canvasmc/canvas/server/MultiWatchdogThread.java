@@ -43,6 +43,7 @@ public class MultiWatchdogThread extends TickThread {
     private long timeoutTime;
     private boolean restart;
     private volatile boolean stopping;
+    private String BREAK = "------------------------------";
 
     private MultiWatchdogThread(long timeoutTime, boolean restart) {
         super("MutliLoop Watchdog Thread");
@@ -100,7 +101,6 @@ public class MultiWatchdogThread extends TickThread {
 
     @Override
     public void run() {
-        String BREAK = "------------------------------";
         String brandName = ServerBuildInfo.buildInfo().brandName();
         String importantBrandName = brandName.toUpperCase(Locale.ROOT);
         String repository = "https://github.com/CraftCanvasMC/Canvas/";
@@ -135,24 +135,7 @@ public class MultiWatchdogThread extends TickThread {
                         LOGGER.error("Be sure to include ALL relevant console errors and Minecraft crash reports");
                         LOGGER.error("{} version: {}", brandName, Bukkit.getServer().getVersion());
 
-                        if (Level.lastPhysicsProblem != null) {
-                            LOGGER.error(BREAK);
-                            LOGGER.error("During the run of the server, a physics stackoverflow was supressed");
-                            LOGGER.error("near {}", Level.lastPhysicsProblem);
-                        }
-
-                        if (CraftServer.excessiveVelEx != null) {
-                            LOGGER.error(BREAK);
-                            LOGGER.error("During the run of the server, a plugin set an excessive velocity on an entity");
-                            LOGGER.error("This may be the cause of the issue, or it may be entirely unrelated");
-                            LOGGER.error(CraftServer.excessiveVelEx.getMessage());
-                            for (StackTraceElement stack : CraftServer.excessiveVelEx.getStackTrace()) {
-                                LOGGER.error("\t\t{}", stack);
-                            }
-                        }
-
-                        LOGGER.error(BREAK);
-                        LOGGER.error("Active Chunk Workers {}", MoonriseCommon.WORKER_POOL.getAliveThreads());
+                        logOverflow();
                     } else {
                         LOGGER.error("--- DO NOT REPORT THIS TO {} - THIS IS NOT A BUG OR A CRASH  - {} ---", importantBrandName, Bukkit.getServer().getVersion());
                         LOGGER.error("The {} has not responded for {} seconds! Creating thread dump", threadEntry.informalName, (currentTime - threadEntry.lastTick) / 1000);
@@ -229,6 +212,7 @@ public class MultiWatchdogThread extends TickThread {
                 } else {
                     LOGGER.error("Unknown tick-loop, '{}' has not responded in {}s", tick.handle.toString(), totalElapsedS);
                 }
+                logOverflow();
 
                 dumpThread(ManagementFactory.getThreadMXBean().getThreadInfo(tick.thread.threadId(), Integer.MAX_VALUE));
             }
@@ -240,6 +224,26 @@ public class MultiWatchdogThread extends TickThread {
                 this.interrupt();
             }
         }
+    }
+
+    private void logOverflow() {
+        if (Level.lastPhysicsProblem != null) {
+            LOGGER.error(BREAK);
+            LOGGER.error("During the run of the server, a physics stackoverflow was supressed");
+            LOGGER.error("near {}", Level.lastPhysicsProblem);
+        }
+
+        if (CraftServer.excessiveVelEx != null) {
+            LOGGER.error(BREAK);
+            LOGGER.error("During the run of the server, a plugin set an excessive velocity on an entity");
+            LOGGER.error("This may be the cause of the issue, or it may be entirely unrelated");
+            LOGGER.error(CraftServer.excessiveVelEx.getMessage());
+            for (StackTraceElement stack : CraftServer.excessiveVelEx.getStackTrace()) {
+                LOGGER.error("\t\t{}", stack);
+            }
+        }
+        LOGGER.error(BREAK);
+        LOGGER.error("Active Chunk Workers {}", MoonriseCommon.WORKER_POOL.getAliveThreads());
     }
 
     public void dock(final RunningTick tick) {
