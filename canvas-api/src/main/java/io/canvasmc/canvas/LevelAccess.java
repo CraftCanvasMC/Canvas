@@ -1,10 +1,11 @@
 package io.canvasmc.canvas;
 
+import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import org.bukkit.World;
 import org.bukkit.scheduler.BukkitScheduler;
 import java.util.concurrent.Callable;
 
-public interface LevelAccess {
+public interface LevelAccess extends WrappedTickLoop {
     /**
      * Gets the Bukkit {@link World}
      * @return the world associated with this {@link LevelAccess} instance

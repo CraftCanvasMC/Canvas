@@ -2,21 +2,17 @@ package io.canvasmc.canvas.util;
 
 import io.canvasmc.canvas.Config;
 import io.netty.util.internal.SystemPropertyUtil;
-import java.io.InputStream;
-import java.lang.foreign.Arena;
-import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.Linker;
-import java.lang.foreign.SymbolLookup;
-import java.lang.foreign.ValueLayout;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Locale;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.InputStream;
+import java.lang.foreign.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 
 public class NativeLoader {
 
@@ -33,7 +29,7 @@ public class NativeLoader {
         lookup = load0(libName);
         if (lookup == null) {
             currentMachineTarget = null;
-            Config.INSTANCE.chunks.nativeAccelerationEnabled = false;
+            Config.INSTANCE.chunks.nativeAcceleration.nativeAccelerationEnabled = false;
             LOGGER.warn("Disabling native math optimization(C2ME/Canvas) due to unsupported platform.");
         } else {
             try {
@@ -44,11 +40,11 @@ public class NativeLoader {
                         ValueLayout.JAVA_INT,
                         ValueLayout.JAVA_BOOLEAN
                     )
-                ).invokeExact(Config.INSTANCE.chunks.allowAVX512);
+                ).invokeExact(Config.INSTANCE.chunks.nativeAcceleration.allowAVX512);
                 ISATarget target;
-                if (Config.INSTANCE.chunks.isaTargetLevelOverride != -1) {
+                if (Config.INSTANCE.chunks.nativeAcceleration.isaTargetLevelOverride != -1) {
                     // Use override set by configuration
-                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[Config.INSTANCE.chunks.isaTargetLevelOverride];
+                    target = (ISATarget) ISATarget.getInstance().getEnumConstants()[Config.INSTANCE.chunks.nativeAcceleration.isaTargetLevelOverride];
                 } else {
                     // Override not set, use normal
                     target = (ISATarget) ISATarget.getInstance().getEnumConstants()[level];

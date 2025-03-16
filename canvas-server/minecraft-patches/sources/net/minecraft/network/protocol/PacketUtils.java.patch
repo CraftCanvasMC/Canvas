@@ -1,9 +1,10 @@
 --- a/net/minecraft/network/protocol/PacketUtils.java
 +++ b/net/minecraft/network/protocol/PacketUtils.java
-@@ -2,11 +_,14 @@
+@@ -2,25 +_,34 @@
  
  import com.mojang.logging.LogUtils;
  import javax.annotation.Nullable;
++import io.canvasmc.canvas.server.AbstractTickLoop;
 +import io.canvasmc.canvas.server.network.PlayerJoinThread;
  import net.minecraft.CrashReport;
  import net.minecraft.CrashReportCategory;
@@ -13,9 +14,12 @@
  import net.minecraft.server.RunningOnDifferentThreadException;
 +import net.minecraft.server.TickTask;
  import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.network.ServerConfigurationPacketListenerImpl;
++import net.minecraft.server.network.ServerGamePacketListenerImpl;
++import net.minecraft.server.network.ServerLoginPacketListenerImpl;
  import net.minecraft.util.thread.BlockableEventLoop;
  import org.slf4j.Logger;
-@@ -14,12 +_,14 @@
+ 
  public class PacketUtils {
      private static final Logger LOGGER = LogUtils.getLogger();
  
@@ -23,14 +27,44 @@
 -        ensureRunningOnSameThread(packet, processor, level.getServer());
 +    // Canvas start
 +    public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T processor, ServerLevel executor) throws RunningOnDifferentThreadException {
-+        ensureRunningOnSameThread(packet, processor, (BlockableEventLoop<TickTask>) executor);
++        ensureRunningOnSameThread(packet, processor, executor.getServer());
      }
  
--    public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T processor, BlockableEventLoop<?> executor) throws RunningOnDifferentThreadException {
+     public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T processor, BlockableEventLoop<?> executor) throws RunningOnDifferentThreadException {
 -        if (!executor.isSameThread()) {
-+    public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T processor, BlockableEventLoop<TickTask> executor) throws RunningOnDifferentThreadException {
-+        if (!MinecraftServer.getServer().isSameThread()) { // Run on main
+-            executor.executeIfPossible(() -> {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) {
++            Runnable run = () -> {
 +    // Canvas end
-             executor.executeIfPossible(() -> {
                  packetProcessing.push(processor); // Paper - detailed watchdog information
                  try { // Paper - detailed watchdog information
+                 if (processor instanceof net.minecraft.server.network.ServerCommonPacketListenerImpl serverCommonPacketListener && serverCommonPacketListener.processedDisconnect) return; // Paper - Don't handle sync packets for kicked players
+@@ -43,7 +_,27 @@
+                     packetProcessing.pop();
+                 }
+                 // Paper end - detailed watchdog information
+-            });
++            // Canvas start
++            };
++            if (processor instanceof ServerGamePacketListenerImpl gamePacketListener) {
++                // schedule to the player task scheduler, as this is run on whatever
++                // level thread it's currently on, so we don't need to manage rescheduling
++                // to a different level if we transfer mid-handle
++                gamePacketListener.player.getBukkitEntity().taskScheduler.schedule(
++                    (_) -> {
++                        run.run();
++                    }, null, 1L
++                );
++            } else if (processor instanceof ServerConfigurationPacketListenerImpl configurationPacketListener) {
++                // handle on async join thread
++                PlayerJoinThread.getInstance().scheduleOnMain(run);
++            } else if (processor instanceof ServerLoginPacketListenerImpl loginPacketListener) {
++                // handle on async join thread
++                PlayerJoinThread.getInstance().scheduleOnMain(run);
++            } else {
++                throw new UnsupportedOperationException("Unknown listener: " + processor);
++            }
++            // Canvas end
+             throw RunningOnDifferentThreadException.RUNNING_ON_DIFFERENT_THREAD;
+         }
+     }

@@ -21,12 +21,12 @@ import org.jetbrains.annotations.NotNull;
 public class ThreadedTracker {
     private static final ThreadPoolExecutor processor = new ThreadPoolExecutor(
         1,
-        Config.INSTANCE.entityTracking.maxProcessors,
-        Config.INSTANCE.entityTracking.keepAlive, TimeUnit.SECONDS,
+        Config.INSTANCE.entities.entityTracking.maxProcessors,
+        Config.INSTANCE.entities.entityTracking.keepAlive, TimeUnit.SECONDS,
         new LinkedBlockingQueue<>(),
         new NamedAgnosticThreadFactory<>("entity_tracker", TrackerThread::new, Thread.NORM_PRIORITY - 2)
     );
-    public static ThreadedTracker INSTANCE = new ThreadedTracker(Config.INSTANCE.entityTracking.enableThreadedTracking);
+    public static ThreadedTracker INSTANCE = new ThreadedTracker(Config.INSTANCE.entities.entityTracking.enableThreadedTracking);
     private final boolean enableThreading;
 
     ThreadedTracker(boolean enableThreading) {

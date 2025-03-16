@@ -42,11 +42,13 @@ public class SynchronizedCodec<A> implements Codec<A> {
 
     class ManagedLocker implements ForkJoinPool.ManagedBlocker {
         boolean hasLock = false;
+
         public boolean block() {
             if (!hasLock)
                 lock.lock();
             return true;
         }
+
         public boolean isReleasable() {
             return hasLock || (hasLock = lock.tryLock());
         }

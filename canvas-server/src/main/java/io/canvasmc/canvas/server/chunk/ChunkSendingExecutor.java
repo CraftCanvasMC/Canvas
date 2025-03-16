@@ -11,13 +11,7 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 
 public class ChunkSendingExecutor {
-    private static final ExecutorService SERVICE = Config.INSTANCE.chunks.chunkSending.asyncChunkSending ?
-        Config.INSTANCE.chunks.chunkSending.useVirtualThreadExecutorForChunkSenders ?
-            Executors.newVirtualThreadPerTaskExecutor() :
-            Executors.newFixedThreadPool(
-                Config.INSTANCE.chunks.chunkSending.asyncChunkSendingThreadCount,
-                new NamedAgnosticThreadFactory<>("chunk_sending", TickThread::new, Thread.NORM_PRIORITY)
-            ) : null;
+    private static final ExecutorService SERVICE = Executors.newVirtualThreadPerTaskExecutor();
 
     public static void execute(Runnable runnable, ServerLevel level) {
         runnable = wrapRunnable(runnable, level);

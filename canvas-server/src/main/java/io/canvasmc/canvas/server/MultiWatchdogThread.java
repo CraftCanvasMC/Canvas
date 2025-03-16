@@ -2,15 +2,21 @@ package io.canvasmc.canvas.server;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseCommon;
 import ca.spottedleaf.moonrise.common.util.TickThread;
+import io.canvasmc.canvas.scheduler.TickLoopScheduler;
+import io.canvasmc.canvas.server.level.MinecraftServerWorld;
 import io.papermc.paper.FeatureHooks;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.configuration.GlobalConfiguration;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MonitorInfo;
 import java.lang.management.ThreadInfo;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.Level;
@@ -23,15 +29,17 @@ import org.spigotmc.AsyncCatcher;
 import org.spigotmc.RestartCommand;
 import org.spigotmc.SpigotConfig;
 
-// heavily modified version of the WatchdogThread class allowing multi-registration of threads
+// heavily modified version of the WatchdogThread class allowing multi-registration
+// of threads through dedicated registration and docking/undocking
 public class MultiWatchdogThread extends TickThread {
     public static final boolean DISABLE_WATCHDOG = Boolean.getBoolean("disable.watchdog");
     public static final Logger LOGGER = LoggerFactory.getLogger("Watchdog");
     private static final Queue<ThreadEntry> REGISTRY = new ConcurrentLinkedQueue<>();
     public static volatile boolean hasStarted;
-    private static MultiWatchdogThread instance;
+    public static MultiWatchdogThread WATCHDOG;
     private final long earlyWarningEvery;
     private final long earlyWarningDelay;
+    private final LinkedHashSet<RunningTick> ticks = new LinkedHashSet<>();
     private long timeoutTime;
     private boolean restart;
     private volatile boolean stopping;
@@ -49,22 +57,24 @@ public class MultiWatchdogThread extends TickThread {
     }
 
     public static void doStart(int timeoutTime, boolean restart) {
-        if (MultiWatchdogThread.instance == null) {
+        if (MultiWatchdogThread.WATCHDOG == null) {
             if (timeoutTime <= 0) timeoutTime = 300;
-            MultiWatchdogThread.instance = new MultiWatchdogThread(timeoutTime * 1000L, restart);
-            MultiWatchdogThread.instance.start();
+            MultiWatchdogThread.WATCHDOG = new MultiWatchdogThread(timeoutTime * 1000L, restart);
+            MultiWatchdogThread.WATCHDOG.start();
         } else {
-            MultiWatchdogThread.instance.timeoutTime = timeoutTime * 1000L;
-            MultiWatchdogThread.instance.restart = restart;
+            MultiWatchdogThread.WATCHDOG.timeoutTime = timeoutTime * 1000L;
+            MultiWatchdogThread.WATCHDOG.restart = restart;
         }
     }
 
     public static void doStop() {
-        if (MultiWatchdogThread.instance != null) {
-            MultiWatchdogThread.instance.stopping = true;
+        if (MultiWatchdogThread.WATCHDOG != null) {
+            MultiWatchdogThread.WATCHDOG.stopping = true;
         }
     }
 
+    // specifically for dedicated threads, not schedulable tasks.
+    // for schedulables, use the 'RunningTick' api
     public static ThreadEntry register(ThreadEntry entry) {
         REGISTRY.add(entry);
         return entry;
@@ -175,6 +185,7 @@ public class MultiWatchdogThread extends TickThread {
                             server.abnormalExit = true;
                             server.safeShutdown(false, this.restart);
                             try {
+                                //noinspection BusyWait
                                 Thread.sleep(1000);
                             } catch (InterruptedException e) {
                                 e.printStackTrace();
@@ -188,11 +199,74 @@ public class MultiWatchdogThread extends TickThread {
                 }
             }
 
+            if (MinecraftServer.getServer().hasStopped()) {
+                continue;
+            }
+
+            final List<RunningTick> ticks;
+            synchronized (this.ticks) {
+                if (this.ticks.isEmpty()) {
+                    continue;
+                }
+                ticks = new ArrayList<>(this.ticks);
+            }
+
+            final long now = System.nanoTime();
+
+            for (final RunningTick tick : ticks) {
+                final long elapsed = now - tick.lastPrint;
+                if (elapsed <= TimeUnit.SECONDS.toNanos(5L)) {
+                    continue;
+                }
+                tick.lastPrint = now;
+
+                final double totalElapsedS = (double) (now - tick.start) / 1.0E9;
+
+                if (tick.handle instanceof MinecraftServerWorld world) {
+                    LOGGER.error("Tick handle for world '{}' has not responded in {}s:", world.getWorld().getName(), totalElapsedS);
+                } else if (tick.handle instanceof AbstractTickLoop abstractLoop) {
+                    LOGGER.error("Tick-loop '{}' has not responded in {}s:", abstractLoop.getFormalName(), totalElapsedS);
+                } else {
+                    LOGGER.error("Unknown tick-loop, '{}' has not responded in {}s", tick.handle.toString(), totalElapsedS);
+                }
+
+                dumpThread(ManagementFactory.getThreadMXBean().getThreadInfo(tick.thread.threadId(), Integer.MAX_VALUE));
+            }
+
             try {
+                //noinspection BusyWait
                 sleep(1000);
             } catch (InterruptedException ex) {
                 this.interrupt();
             }
+        }
+    }
+
+    public void dock(final RunningTick tick) {
+        synchronized (this.ticks) {
+            this.ticks.add(tick);
+        }
+    }
+
+    public void undock(final RunningTick tick) {
+        synchronized (this.ticks) {
+            this.ticks.remove(tick);
+        }
+    }
+
+    public static final class RunningTick {
+
+        public final long start;
+        public final TickLoopScheduler.AbstractTick handle;
+        public final Thread thread;
+
+        private long lastPrint;
+
+        public RunningTick(final long start, final TickLoopScheduler.AbstractTick handle, final Thread thread) {
+            this.start = start;
+            this.handle = handle;
+            this.thread = thread;
+            this.lastPrint = start;
         }
     }
 

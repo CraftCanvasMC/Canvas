@@ -25,18 +25,8 @@ public class ThreadedTickDiagnosis {
     public static final TextColor INFORMATION = TextColor.color(145, 198, 243);
     public static final TextColor LIST = TextColor.color(33, 97, 188);
     public static final Component NEW_LINE = Component.text("\n");
-    public static final ThreadLocal<DecimalFormat> THREE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0.000");
-    });
-    public static final ThreadLocal<DecimalFormat> TWO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0.00");
-    });
-    public static final ThreadLocal<DecimalFormat> ONE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0.0");
-    });
-    public static final ThreadLocal<DecimalFormat> NO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0");
-    });
+    public static final ThreadLocal<DecimalFormat> TWO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
+    public static final ThreadLocal<DecimalFormat> ONE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
     public static final TextColor ORANGE = TextColor.color(255, 165, 0);
 
     public static boolean dump(@NotNull final CommandSender sender) {
@@ -71,7 +61,7 @@ public class ThreadedTickDiagnosis {
             .append(Component.text("All TickLoops", HEADER, TextDecoration.BOLD))
             .append(NEW_LINE)
         );
-        for (final AbstractTickLoop<?, ?> tickLoop : server.getTickLoops()) {
+        for (final AbstractTickLoop tickLoop : server.getTickLoops()) {
             String location = "[" + tickLoop.location() + "]";
             double mspt5s = tickLoop.tickTimes5s.getAverage();
             double tps5s = tickLoop.tps5s.getAverage();
@@ -84,13 +74,13 @@ public class ThreadedTickDiagnosis {
                     .clickEvent(ClickEvent.callback((audience) -> {
                         audience.sendMessage(
                             Component.text()
-                                .append(Component.text(tickLoop.name(), HEADER, TextDecoration.BOLD))
+                                .append(Component.text(tickLoop.getName(), HEADER, TextDecoration.BOLD))
                                 .build()
                         );
                         audience.sendMessage(tickLoop.debugInfo());
                     }))
                     .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text()
-                        .append(Component.text(tickLoop.name(), HEADER, TextDecoration.BOLD))
+                        .append(Component.text(tickLoop.getName(), HEADER, TextDecoration.BOLD))
                         .append(Component.text(" debug info", PRIME_ALT))
                         .build()))
                 )

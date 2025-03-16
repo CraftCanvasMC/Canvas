@@ -1,6 +1,12 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -6,16 +_,20 @@
+@@ -1,21 +_,26 @@
+ package net.minecraft.world.entity;
+ 
++import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.EntityLookup;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Iterables;
+ import com.google.common.collect.Lists;
  import com.google.common.collect.Sets;
  import com.google.common.collect.ImmutableList.Builder;
  import com.mojang.logging.LogUtils;
@@ -61,20 +67,6 @@
  import net.minecraft.world.level.material.PushReaction;
  import net.minecraft.world.level.portal.PortalShape;
  import net.minecraft.world.level.portal.TeleportTransition;
-@@ -137,6 +_,13 @@
- 
- public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess, ScoreHolder, ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity, ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity {  // Paper - rewrite chunk system // Paper - optimise entity tracker
-     public static javax.script.ScriptEngine scriptEngine = new javax.script.ScriptEngineManager().getEngineByName("rhino"); // Purpur - Configurable entity base attributes
-+    // Canvas start
-+    public static final AtomicReference<Runnable> POSITION_UPDATE_CATCH = new AtomicReference<>();
-+    public void pollPositionUpdates() {
-+        Runnable catched = POSITION_UPDATE_CATCH.getAndSet(null);
-+        if (catched != null) catched.run();
-+    }
-+    // Canvas end
-     // CraftBukkit start
-     private static final int CURRENT_LEVEL = 2;
-     public boolean preserveMotion = true; // Paper - Fix Entity Teleportation and cancel velocity if teleported; keep initial motion on first setPositionRotation
 @@ -145,7 +_,7 @@
      }
  
@@ -140,12 +132,12 @@
 +        return entityType.cachedLocation();
 +    }
 +
-+    public Config.EntityMask getMask() {
++    public Config.Entities.EntityMask getMask() {
 +        EntityType<?> entityType = this.getType();
 +        if (entityType.isCachedMask()) {
 +            return entityType.getMask();
 +        }
-+        for (final Config.EntityMask entityMask : Config.INSTANCE.entityMasks) {
++        for (final Config.Entities.EntityMask entityMask : Config.INSTANCE.entities.entityMasks) {
 +            if (entityMask.type.equals(getTypeLocation().toString())) {
 +                entityType.cacheMask(entityMask);
 +                break;
@@ -166,14 +158,31 @@
  
      @Override
      public final boolean moonrise$isHardColliding() {
-@@ -446,6 +_,7 @@
-     @Override
-     public final void moonrise$setUpdatingSectionStatus(final boolean to) {
-         this.updatingSectionStatus = to;
-+        if (!to) pollPositionUpdates(); // Canvas
+@@ -1389,6 +_,12 @@
      }
  
-     @Override
+     protected BlockPos getOnPos(float yOffset) {
++        // Canvas start
++        int i = Mth.floor(this.position.x);
++        int j = Mth.floor(this.position.y - (double) yOffset);
++        int k = Mth.floor(this.position.z);
++        BlockPos fallback = new BlockPos(i, j, k);
++        // Canvas end
+         if (this.mainSupportingBlockPos.isPresent() && this.level().getChunkIfLoadedImmediately(this.mainSupportingBlockPos.get()) != null) { // Paper - ensure no loads
+             BlockPos blockPos = this.mainSupportingBlockPos.get();
+             if (!(yOffset > 1.0E-5F)) {
+@@ -1402,10 +_,7 @@
+                     : blockPos;
+             }
+         } else {
+-            int floor = Mth.floor(this.position.x);
+-            int floor1 = Mth.floor(this.position.y - yOffset);
+-            int floor2 = Mth.floor(this.position.z);
+-            return new BlockPos(floor, floor1, floor2);
++            return fallback; // Canvas
+         }
+     }
+ 
 @@ -1955,11 +_,23 @@
                  && abstractBoat.getBoundingBox().minY <= eyeY
          )) {
@@ -238,37 +247,42 @@
      }
  
      public ChunkPos chunkPosition() {
-@@ -4836,12 +_,19 @@
+@@ -4834,17 +_,27 @@
+     public final void setPosRaw(double x, double y, double z) {
+         this.setPosRaw(x, y, z, false);
      }
++    public boolean updatingPos = false; // Canvas
      public final void setPosRaw(double x, double y, double z, boolean forceBoundingBoxUpdate) {
          // Paper start - rewrite chunk system
-+        boolean schedule = false; // Canvas
++        // Canvas start
++        if (this.levelCallback instanceof EntityLookup.EntityCallback) {
++            synchronized (((EntityLookup.EntityCallback) this.levelCallback).callbackLock) {
++                updatingPos = true;
++            }
++        }
++        // Canvas end
          if (this.updatingSectionStatus) {
--            LOGGER.error(
-+            // Canvas start
-+            // instead of erroring and stopping, what if we retry for when
-+            // the slice is ready to be updated again. we return this already
-+            // so why dont we just update later?
-+            /* LOGGER.error(
+             LOGGER.error(
                  "Refusing to update position for entity " + this + " to position " + new Vec3(x, y, z)
                      + " since it is processing a section status update", new Throwable()
              );
--            return;
-+            return; */
-+            schedule = true;
-+            // Canvas end
++            updatingPos = false; // Canvas
+             return;
          }
          // Paper end - rewrite chunk system
          if (!checkPosition(this, x, y, z)) {
-@@ -4873,7 +_,7 @@
-                 }
-             }
- 
--            this.levelCallback.onMove();
-+            if (schedule) {POSITION_UPDATE_CATCH.set(() -> this.levelCallback.onMove());} else this.levelCallback.onMove(); // Canvas
++            updatingPos = false; // Canvas
+             return;
          }
-         // Paper start - Block invalid positions and bounding box; don't allow desync of pos and AABB
-         // hanging has its own special logic
+         // Paper end - Block invalid positions and bounding box
+@@ -4880,6 +_,7 @@
+         if (!(this instanceof net.minecraft.world.entity.decoration.HangingEntity) && (forceBoundingBoxUpdate || this.position.x != x || this.position.y != y || this.position.z != z)) {
+             this.setBoundingBox(this.makeBoundingBox());
+         }
++        updatingPos = false; // Canvas
+         // Paper end - Block invalid positions and bounding box
+     }
+ 
 @@ -4976,7 +_,7 @@
      public final void setRemoved(Entity.RemovalReason removalReason, org.bukkit.event.entity.EntityRemoveEvent.Cause cause) {
          // Paper start - rewrite chunk system
@@ -278,16 +292,3 @@
              return;
          }
          // Paper end - rewrite chunk system
-@@ -4996,6 +_,12 @@
-         this.onRemoval(removalReason);
-         // Paper start - Folia schedulers
-         if (!(this instanceof ServerPlayer) && removalReason != RemovalReason.CHANGED_DIMENSION && !alreadyRemoved) {
-+            // Canvas start
-+            if (this.getBukkitEntity().taskScheduler.retired) {
-+                LOGGER.warn("Entity {} already retired(possibly being removed from another thread). Ignoring call.");
-+                return;
-+            }
-+            // Canvas end
-             // Players need to be special cased, because they are regularly removed from the world
-             this.retireScheduler();
-         }

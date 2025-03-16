@@ -1,258 +1,189 @@
 package io.canvasmc.canvas.server;
 
-import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.locks.LockSupport;
+import io.canvasmc.canvas.RollingAverage;
+import io.canvasmc.canvas.TickTimes;
+import io.canvasmc.canvas.scheduler.TickLoopScheduler;
+import io.canvasmc.canvas.scheduler.WrappedTickLoop;
+import java.nio.file.Path;
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
-import java.util.function.Function;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.minecraft.CrashReport;
+import net.minecraft.CrashReportCategory;
+import net.minecraft.ReportType;
+import net.minecraft.ReportedException;
 import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerTickRateManager;
 import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.TimeUtil;
-import net.minecraft.util.debugchart.SampleLogger;
-import net.minecraft.util.debugchart.TpsDebugDimensions;
-import net.minecraft.util.thread.ReentrantBlockableEventLoop;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public abstract class AbstractTickLoop<T extends TickThread, S> extends ReentrantBlockableEventLoop<TickTask> {
+import static io.canvasmc.canvas.scheduler.TickLoopScheduler.TIME_BETWEEN_TICKS;
+
+public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick implements WrappedTickLoop {
     public static final Object SLEEP_HANDLE = new Object();
+    public final MinecraftServer server;
     public final Logger LOGGER;
-    public final MinecraftServer.RollingAverage tps5s = new MinecraftServer.RollingAverage(5);
-    public final MinecraftServer.RollingAverage tps10s = new MinecraftServer.RollingAverage(10);
-    public final MinecraftServer.RollingAverage tps15s = new MinecraftServer.RollingAverage(15);
-    public final MinecraftServer.RollingAverage tps1m = new MinecraftServer.RollingAverage(60);
-    public final MinecraftServer.TickTimes tickTimes5s = new MinecraftServer.TickTimes(100);
-    public final MinecraftServer.TickTimes tickTimes10s = new MinecraftServer.TickTimes(200);
-    public final MinecraftServer.TickTimes tickTimes15s = new MinecraftServer.TickTimes(300);
-    public final MinecraftServer.TickTimes tickTimes60s = new MinecraftServer.TickTimes(1200);
-    private final String debugName;
-    private final TickThreadConstructor<T, S> constructor;
+    public final RollingAverage tps5s = new RollingAverage(5);
+    public final RollingAverage tps10s = new RollingAverage(10);
+    public final RollingAverage tps15s = new RollingAverage(15);
+    public final RollingAverage tps1m = new RollingAverage(60);
+    public final TickTimes tickTimes5s = new TickTimes(100);
+    public final TickTimes tickTimes10s = new TickTimes(200);
+    public final TickTimes tickTimes15s = new TickTimes(300);
+    public final TickTimes tickTimes60s = new TickTimes(1200);
+    protected final String name;
+    protected final String debugName;
     public int tickCount;
-    public boolean waitingForNextTick;
     public long nextTickTimeNanos;
-    public long idleTimeNanos;
     public boolean mayHaveDelayedTasks;
     public long delayedTasksMaxNextTickTimeNanos;
     public boolean lagging = false;
     public boolean prepared = false;
     public int currentTick;
     public long lastTickNanos = Util.getNanos();
-    protected Thread owner;
     protected volatile boolean running = false;
     protected volatile boolean ticking = false;
     protected long tickSection = 0;
     protected long lastTick = 0;
     protected long preTickNanos = 0L;
     protected long postTickNanos = 0L;
-    private volatile boolean shutdown = false;
-    private long lastOverloadWarningNanos;
-    private long taskExecutionStartNanos;
-    private long lastNanoTickTime = 0L;
-    private Consumer<T> threadModifier = null;
-    private Runnable preBlockStart = null;
-    private BooleanSupplier dependencyResolution;
-    private volatile boolean isSleeping = false;
-    private MultiWatchdogThread.ThreadEntry watchdogEntry;
+    protected long lastOverloadWarningNanos;
+    protected long lastNanoTickTime = 0L;
+    protected volatile boolean isSleeping = false;
+    protected boolean wasSleeping = false;
+    private volatile boolean processingTick = false;
 
-    public AbstractTickLoop(final String name, final String debugName) {
-        //noinspection unchecked
-        this(name, debugName, (r, n, _) -> (T) new TickThread(r, n));
-    }
-
-    public AbstractTickLoop(final String name, final String debugName, TickThreadConstructor<T, S> constructor) {
-        super(name);
-        LOGGER = LoggerFactory.getLogger(name);
+    public AbstractTickLoop(final String formalName, final String debugName) {
+        super();
+        LOGGER = LoggerFactory.getLogger(formalName);
+        this.name = formalName;
         this.debugName = debugName;
-        this.constructor = constructor;
+        this.server = MinecraftServer.getServer();
         MinecraftServer.getThreadedServer().loops.add(this);
     }
 
-    public static @NotNull AbstractTickLoop<?, ?> getByName(String name) {
-        for (final AbstractTickLoop<?, ?> loop : MinecraftServer.getThreadedServer().loops) {
-            if (loop.name().equalsIgnoreCase(name)) {
+    public static @NotNull AbstractTickLoop getByName(String name) {
+        for (final AbstractTickLoop loop : MinecraftServer.getThreadedServer().loops) {
+            if (loop.name.equalsIgnoreCase(name)) {
                 return loop;
             }
         }
         throw new IllegalArgumentException("Unable to locate AbstractTickLoop of state '" + name + "'");
     }
 
-    public void setThreadModifier(Consumer<T> threadModifier) {
-        this.threadModifier = threadModifier;
+    public synchronized void scheduleToPool() {
+        if (this.running) return;
+        this.running = true;
+        this.prepared = true;
+        tickSection = Util.getNanos();
+        nextTickTimeNanos = Util.getNanos();
+        this.setScheduledStart(System.nanoTime() + TIME_BETWEEN_TICKS);
+        TickLoopScheduler.getInstance().scheduler.schedule(this);
     }
 
-    public void setPreBlockStart(Runnable preBlockStart) {
-        this.preBlockStart = preBlockStart;
-    }
-
-    public T start(Function<S, AbstractTick> tick) {
-        return this.start(tick, () -> MinecraftServer.getServer().isTicking());
-    }
-
-    public T start(Function<S, AbstractTick> tick, BooleanSupplier dependencyResolution) {
-        this.dependencyResolution = dependencyResolution;
-        //noinspection unchecked
-        S thisAsS = (S) this;
-        T thread = this.constructor.construct(() -> this.spin(tick.apply(thisAsS)), this.name(), thisAsS);
-        if (this.threadModifier != null) {
-            this.threadModifier.accept(thread);
-        }
-        MultiLoopThreadDumper.REGISTRY.add(thread.getName());
-        this.watchdogEntry = MultiWatchdogThread.register(new MultiWatchdogThread.ThreadEntry(thread, this.debugName, this.name(), this::isTicking, this::isSleeping));
-        thread.start();
-        return thread;
-    }
-
-    public void spin(AbstractTick consumer) {
-        try {
-            this.running = true;
-            this.owner = Thread.currentThread();
-            this.watchdogEntry.doTick();
-            if (this.preBlockStart != null) {
-                this.preBlockStart.run();
-            }
-            this.prepared = true;
-
-            this.managedBlock(this.dependencyResolution);
-            ticking = true;
-
-            tickSection = Util.getNanos();
-            nextTickTimeNanos = Util.getNanos();
-            while (ticking) {
-                this.tickSection = blockTick(tickSection, consumer);
-            }
-        } catch (Throwable throwable) {
-            TickLoopConstantsUtils.hardCrashCatch(throwable);
-        }
-
-    }
-
-    public void stopSpin(boolean waitUntilComplete) {
-        this.ticking = false;
-        this.shutdown = true;
-        if (this.isSleeping) {
-            this.wake();
-        }
-        LockSupport.unpark(this.owner); // unpark just incase
-        if (waitUntilComplete) {
-            Thread currentThread = Thread.currentThread();
-            if (currentThread.equals(this.getRunningThread())) {
-                this.running = false;
-                return;
-            }
-            try {
-                CompletableFuture<Void> killThreadFuture = CompletableFuture.runAsync(() -> {
-                    try {
-                        this.getRunningThread().join();
-                    } catch (Throwable e) {
-                        throw new RuntimeException("Server encountered an unexpected exception when waiting for tick-loop to terminate!", e);
-                    }
-                });
-                killThreadFuture.get(30, TimeUnit.SECONDS);
-            } catch (TimeoutException timeoutException) {
-                LOGGER.error("Timed out waiting for {} to terminate, force-killing.", this.debugName);
-                this.getRunningThread().interrupt();
-            } catch (InterruptedException | ExecutionException e) {
-                throw new RuntimeException(e);
-            }
-        }
-        // we mark not running later on, since technically the thread is still alive
+    public void stopSpin() {
         this.running = false;
+        this.prepared = false;
     }
 
-    public long blockTick(long tickSection, final @NotNull AbstractTick tick) {
+    @Override
+    public boolean blockTick() {
+        long startNanos;
+        long nanosecondsOverload;
+        if (shutdown) {
+            return false;
+        }
         if (isSleeping) {
             synchronized (SLEEP_HANDLE) {
-                while (isSleeping) {
-                    try {
-                        LOGGER.info("Pausing tick-loop '{}'", this.debugName);
-                        SLEEP_HANDLE.wait();
-                        this.watchdogEntry.doTick(); // tick watchdog
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException("sleep was interrupted!", e);
-                    }
-                }
+                if (!wasSleeping) LOGGER.info("Pausing tick-loop '{}'", this.debugName);
+                wasSleeping = true;
+                this.nextTickTimeNanos = Util.getNanos();
+                this.lastOverloadWarningNanos = this.nextTickTimeNanos;
+                startNanos = Util.getNanos();
+                tickTps(startNanos);
+                tickMspt(startNanos);
+                return true;
             }
+        } else if (wasSleeping) {
+            wasSleeping = false;
             LOGGER.info("Waking tick-loop '{}'", this.debugName);
-            // check shutdown if we were woken by spin stop
-            if (this.shutdown) {
-                return tickSection;
-            }
-            // cleanup post-sleep. if we don't do this it does the following:
-            // - warn overload
-            // - watchdog will be mad... very mad...
-            this.nextTickTimeNanos = Util.getNanos();
-            this.lastOverloadWarningNanos = this.nextTickTimeNanos;
         }
-        long currentTime;
-        long i;
+        ticking = true;
+        if (processingTick) {
+            // another thread is running this tick, hard-crash, now.
+            Throwable throwable = new RuntimeException("recursive tick call detected");
+            MinecraftServer.LOGGER.error("Encountered an unexpected exception", throwable);
+            CrashReport crashReport = MinecraftServer.constructOrExtractCrashReport(throwable);
+            CrashReportCategory crashReportCategory = crashReport.addCategory("TickLoop");
+            crashReportCategory.setDetail("FormalName", this.name);
+            crashReportCategory.setDetail("DebugName", this.debugName);
+            crashReportCategory.setDetail("TickCount", this.tickCount);
+            crashReportCategory.setDetail("CurrentThread", this.owner);
+            crashReportCategory.setDetail("LastThread", this.lastOwningThread);
+            MinecraftServer server = MinecraftServer.getServer();
+
+            server.fillSystemReport(crashReport.getSystemReport());
+            Path path = server.getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
+
+            if (crashReport.saveToFile(path, ReportType.CRASH)) {
+                MinecraftServer.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
+            } else {
+                MinecraftServer.LOGGER.error("We were unable to save this crash report to disk.");
+            }
+            server.onServerCrash(crashReport);
+            this.retire();
+            server.notifyStop = true;
+            return false;
+        }
+        processingTick = true;
+        int processedPolledCount = 0;
+        while (this.pollInternal() && !shutdown) processedPolledCount++;
 
         if (tickRateManager().isSprinting() && tickRateManager().checkShouldSprintThisTick()) {
-            i = 0L;
+            nanosecondsOverload = 0L;
             this.nextTickTimeNanos = Util.getNanos();
             this.lastOverloadWarningNanos = this.nextTickTimeNanos;
         } else {
-            i = tickRateManager().nanosecondsPerTick();
-            long j = Util.getNanos() - this.nextTickTimeNanos;
+            nanosecondsOverload = tickRateManager().nanosecondsPerTick();
+            long diff = Util.getNanos() - this.nextTickTimeNanos;
 
-            if (j > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * i && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * i) {
-                long k = j / i;
+            if (diff > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * nanosecondsOverload && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * nanosecondsOverload) {
+                long ticksBehind = diff / nanosecondsOverload;
 
-                if (MinecraftServer.getServer().server.getWarnOnOverload()) {
-                    MinecraftServer.LOGGER.warn("Can't keep up! Is the {} overloaded? Running {}ms or {} ticks behind", this.debugName, j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k);
+                if (server.server.getWarnOnOverload()) {
+                    MinecraftServer.LOGGER.warn("Can't keep up! Is the {} overloaded? Running {}ms or {} ticks behind", this.debugName, diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind);
                     if (Config.INSTANCE.broadcastServerTicksBehindToOps) {
-                        for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
+                        for (final ServerPlayer player : server.getPlayerList().players) {
                             if (player.getBukkitEntity().isOp()) {
-                                player.getBukkitEntity().sendMessage(Component.text(String.format("Can't keep up! Is the %s overloaded? Running %sms or %s ticks behind", this.debugName, j / TimeUtil.NANOSECONDS_PER_MILLISECOND, k), TextColor.color(255, 161, 14), TextDecoration.BOLD));
+                                player.getBukkitEntity().sendMessage(Component.text(String.format("Can't keep up! Is the %s overloaded? Running %sms or %s ticks behind", this.debugName, diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind), TextColor.color(255, 161, 14), TextDecoration.BOLD));
                             }
                         }
                     }
                 }
-                this.nextTickTimeNanos += k * i;
+                this.nextTickTimeNanos += ticksBehind * nanosecondsOverload;
                 this.lastOverloadWarningNanos = this.nextTickTimeNanos;
             }
         }
 
-        currentTime = Util.getNanos();
-        if (++currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
-            final long diff = currentTime - tickSection;
-            final java.math.BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
-            tps5s.add(currentTps, diff);
-            tps1m.add(currentTps, diff);
-            tps15s.add(currentTps, diff);
-            tps10s.add(currentTps, diff);
+        startNanos = Util.getNanos();
+        tickTps(startNanos);
 
-            lagging = tps5s.getAverage() < org.purpurmc.purpur.PurpurConfig.laggingThreshold;
-            tickSection = currentTime;
-        }
+        boolean doesntHaveTime = nanosecondsOverload == 0L;
 
-        boolean flag = i == 0L;
-
-        lastTick = currentTime;
-        postTickNanos = i;
-        this.nextTickTimeNanos += i;
+        lastTick = startNanos;
+        postTickNanos = nanosecondsOverload;
+        this.nextTickTimeNanos += nanosecondsOverload;
 
         this.lastTickNanos = Util.getNanos();
         this.preTickNanos = this.lastTickNanos;
-        this.watchdogEntry.doTick();
-        tick.process(flag ? () -> false : this::haveTime, tickCount++);
-        long totalProcessNanos = Util.getNanos() - currentTime;
-        this.tickTimes5s.add(this.tickCount, totalProcessNanos);
-        this.tickTimes10s.add(this.tickCount, totalProcessNanos);
-        this.tickTimes15s.add(this.tickCount, totalProcessNanos);
-        this.tickTimes60s.add(this.tickCount, totalProcessNanos);
+        this.blockTick(doesntHaveTime ? () -> false : this::haveTime, tickCount++);
 
         this.lastNanoTickTime = Util.getNanos() - preTickNanos;
 
@@ -262,73 +193,46 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
             this.nextTickTimeNanos = lastTick + postTickNanos;
             this.delayedTasksMaxNextTickTimeNanos = nextTickTimeNanos;
         }
-        this.lastTickNanos = Util.getNanos();
-        this.startMeasuringTaskExecutionTime();
-        this.waitUntilNextTick();
-        this.finishMeasuringTaskExecutionTime();
-        return tickSection;
+        tickMspt(startNanos);
+        processingTick = false;
+        return this.running; // respect if the tick retired the loop
     }
 
-    private void startMeasuringTaskExecutionTime() {
-        if (MinecraftServer.getServer().isTickTimeLoggingEnabled()) {
-            this.taskExecutionStartNanos = Util.getNanos();
-            this.idleTimeNanos = 0L;
+    private void tickMspt(long start) {
+        long totalProcessNanos = Util.getNanos() - start;
+        this.tickTimes5s.add(this.tickCount, totalProcessNanos);
+        this.tickTimes10s.add(this.tickCount, totalProcessNanos);
+        this.tickTimes15s.add(this.tickCount, totalProcessNanos);
+        this.tickTimes60s.add(this.tickCount, totalProcessNanos);
+    }
+
+    private void tickTps(long start) {
+        if (++currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
+            final long diff = start - tickSection;
+            final java.math.BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
+            tps5s.add(currentTps, diff);
+            tps1m.add(currentTps, diff);
+            tps15s.add(currentTps, diff);
+            tps10s.add(currentTps, diff);
+
+            lagging = tps5s.getAverage() < org.purpurmc.purpur.PurpurConfig.laggingThreshold;
+            tickSection = start;
         }
-
     }
 
-    private void finishMeasuringTaskExecutionTime() {
-        if (MinecraftServer.getServer().isTickTimeLoggingEnabled()) {
-            SampleLogger samplelogger = MinecraftServer.getServer().getTickTimeLogger();
-
-            samplelogger.logPartialSample(Util.getNanos() - this.taskExecutionStartNanos - this.idleTimeNanos, TpsDebugDimensions.SCHEDULED_TASKS.ordinal());
-            samplelogger.logPartialSample(this.idleTimeNanos, TpsDebugDimensions.IDLE.ordinal());
-        }
-
-    }
-
-    @Override
-    public @VisibleAfterSpin @NotNull Thread getRunningThread() {
-        return this.owner;
-    }
+    protected abstract void blockTick(BooleanSupplier hasTimeLeft, int tickCount);
 
     @Override
     public void managedBlock(@NotNull BooleanSupplier stopCondition) {
-        super.managedBlock(() -> MinecraftServer.throwIfFatalException() && stopCondition.getAsBoolean());
+        server.managedBlock(() -> MinecraftServer.throwIfFatalException() && stopCondition.getAsBoolean());
     }
 
     public double getNanoSecondsFromLastTick() {
         return this.lastNanoTickTime;
     }
 
-    protected void waitUntilNextTick() {
-        this.runAllTasks();
-        this.waitingForNextTick = true;
-
-        try {
-            this.managedBlock(() -> this.shutdown || !this.haveTime());
-        } finally {
-            this.waitingForNextTick = false;
-        }
-
-    }
-
-    @Override
-    public void waitForTasks() {
-        boolean flag = MinecraftServer.getServer().isTickTimeLoggingEnabled();
-        long i = flag ? Util.getNanos() : 0L;
-        long j = this.waitingForNextTick ? this.nextTickTimeNanos - Util.getNanos() : 100000L;
-
-        LockSupport.parkNanos(name(), j);
-        if (flag) {
-            this.idleTimeNanos += Util.getNanos() - i;
-        }
-
-    }
-
-    @Override
     public @NotNull TickTask wrapRunnable(@NotNull Runnable runnable) {
-        if (MinecraftServer.getServer().hasStopped && Thread.currentThread().equals(MinecraftServer.getServer().shutdownThread)) {
+        if (server.hasStopped && Thread.currentThread().equals(server.shutdownThread)) {
             runnable.run();
             runnable = () -> {
             };
@@ -336,72 +240,136 @@ public abstract class AbstractTickLoop<T extends TickThread, S> extends Reentran
         return new TickTask(this.tickCount, runnable);
     }
 
-    protected boolean shouldRun(@NotNull TickTask ticktask) {
-        return ticktask.getTick() + 3 < this.tickCount || this.haveTime();
-    }
-
     protected boolean haveTime() {
-        return MinecraftServer.getServer().forceTicks || this.runningTask() || Util.getNanos() < (this.mayHaveDelayedTasks ? this.delayedTasksMaxNextTickTimeNanos : this.nextTickTimeNanos);
+        return server.forceTicks || Util.getNanos() < (this.mayHaveDelayedTasks ? this.delayedTasksMaxNextTickTimeNanos : this.nextTickTimeNanos);
     }
 
-    @Override
-    public boolean pollTask() {
-        boolean flag = this.pollInternal();
-
-        this.mayHaveDelayedTasks = flag;
-        return flag;
-    }
-
-    public boolean pollInternal() {
-        return super.pollTask();
-    }
-
-    public abstract ServerTickRateManager tickRateManager();
-
-    public MultiWatchdogThread.ThreadEntry getWatchdogEntry() {
-        return watchdogEntry;
+    public ServerTickRateManager tickRateManager() {
+        return server.tickRateManager();
     }
 
     public boolean isRunning() {
         return running;
     }
 
+    @Override
     public boolean isTicking() {
         return this.ticking;
     }
 
     public String location() {
-        return this.debugName;
+        return this.getDebugName();
     }
 
+    @Override
     public @NotNull Component debugInfo() {
         return Component.empty();
     }
 
+    @Override
     public void sleep() {
         // make sure we can sleep and aren't sleeping already
         if (!shouldSleep() || isSleeping) return;
         synchronized (SLEEP_HANDLE) {
-            this.watchdogEntry.doTick(); // tick watchdog before pause
             isSleeping = true;
         }
     }
 
+    @Override
     public void wake() {
         // don't wake if we aren't sleeping
         if (!isSleeping) return;
         synchronized (SLEEP_HANDLE) {
-            this.watchdogEntry.doTick(); // tick watchdog before we unfreeze so we don't kill the server when it wakes
             isSleeping = false;
-            SLEEP_HANDLE.notifyAll();
         }
     }
 
+    @Override
     public boolean isSleeping() {
         return isSleeping;
     }
 
+    @Override
     public boolean shouldSleep() {
         return true;
+    }
+
+    public Thread getRunningThread() {
+        return this.owner;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+
+    @Override
+    public String getFormalName() {
+        return getName();
+    }
+
+    @Override
+    public String getDebugName() {
+        return debugName;
+    }
+
+    @Override
+    public Logger getLogger() {
+        return LOGGER;
+    }
+
+    @Override
+    public RollingAverage getTps1m() {
+        return tps1m;
+    }
+
+    @Override
+    public RollingAverage getTps5s() {
+        return tps5s;
+    }
+
+    @Override
+    public RollingAverage getTps10s() {
+        return tps10s;
+    }
+
+    @Override
+    public RollingAverage getTps15s() {
+        return tps15s;
+    }
+
+    @Override
+    public TickTimes getTickTimes5s() {
+        return tickTimes5s;
+    }
+
+    @Override
+    public TickTimes getTickTimes10s() {
+        return tickTimes10s;
+    }
+
+    @Override
+    public TickTimes getTickTimes15s() {
+        return tickTimes15s;
+    }
+
+    @Override
+    public TickTimes getTickTimes60s() {
+        return tickTimes60s;
+    }
+
+    @Override
+    public int getTickCount() {
+        return tickCount;
+    }
+
+    @Override
+    public void pushTask(final Runnable task) {
+        this.scheduleOnMain(task);
+    }
+
+    @Override
+    public void retire() {
+        TickLoopScheduler.getInstance().scheduler.tryRetire(this);
+        stopSpin();
     }
 }

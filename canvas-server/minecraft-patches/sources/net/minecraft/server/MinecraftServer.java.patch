@@ -8,11 +8,12 @@
  import com.mojang.authlib.GameProfile;
  import com.mojang.authlib.GameProfileRepository;
  import com.mojang.authlib.minecraft.MinecraftSessionService;
-@@ -13,6 +_,15 @@
+@@ -13,6 +_,16 @@
  import com.mojang.jtracy.DiscontinuousFrame;
  import com.mojang.jtracy.TracyClient;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 +import io.canvasmc.canvas.server.AbstractTickLoop;
 +import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 +import io.canvasmc.canvas.server.MultiWatchdogThread;
@@ -32,11 +33,12 @@
  import java.util.List;
  import java.util.Locale;
  import java.util.Map;
-@@ -43,6 +_,7 @@
+@@ -43,6 +_,8 @@
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.Executor;
  import java.util.concurrent.RejectedExecutionException;
 +import java.util.concurrent.Executors;
++import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicReference;
  import java.util.concurrent.locks.LockSupport;
  import java.util.function.BooleanSupplier;
@@ -89,6 +91,14 @@
      private static final int OVERLOADED_TICKS_WARNING_INTERVAL = 100;
      private static final long STATUS_EXPIRE_TIME_NANOS = 5L * TimeUtil.NANOSECONDS_PER_SECOND;
      private static final long PREPARE_LEVELS_DEFAULT_DELAY_NANOS = 10L * TimeUtil.NANOSECONDS_PER_MILLISECOND;
+@@ -199,6 +_,7 @@
+     public LevelStorageSource.LevelStorageAccess storageSource;
+     public final PlayerDataStorage playerDataStorage;
+     private final List<Runnable> tickables = Lists.newArrayList();
++    public boolean notifyStop;
+     private MetricsRecorder metricsRecorder = InactiveMetricsRecorder.INSTANCE;
+     private Consumer<ProfileResults> onMetricsRecordingStopped = results -> this.stopRecordingMetrics();
+     private Consumer<Path> onMetricsRecordingFinished = path -> {};
 @@ -209,19 +_,19 @@
      private ServerConnectionListener connection;
      public final ChunkProgressListenerFactory progressListenerFactory;
@@ -182,7 +192,7 @@
 +        // Canvas end
          thread.setUncaughtExceptionHandler((thread1, exception) -> LOGGER.error("Uncaught exception in server thread", exception));
 -        thread.setPriority(Thread.NORM_PRIORITY+2); // Paper - Perf: Boost priority
-+        thread.setPriority(Config.INSTANCE.tickLoopThreadPriority); // Paper - Perf: Boost priority // Canvas - match config
++        thread.setPriority(Config.INSTANCE.ticking.tickLoopThreadPriority); // Paper - Perf: Boost priority // Canvas - match config
          if (Runtime.getRuntime().availableProcessors() > 4) {
              thread.setPriority(8);
          }
@@ -263,30 +273,26 @@
      private boolean hasLoggedStop = false; // Paper - Debugging
      private final Object stopLock = new Object();
      public final boolean hasStopped() {
-@@ -994,16 +_,62 @@
+@@ -994,16 +_,58 @@
              if (this.hasStopped) return;
              this.hasStopped = true;
          }
 +        // Canvas start - Threaded Dimensions
 +        ThreadedServer.LOGGER.info("Halting tick-loops");
++        ThreadedServer.LOGGER.info("Awaiting scheduler termination for 60s...");
 +        long startNanos = Util.getNanos();
 +        ThreadedServer threadedServer = MinecraftServer.getThreadedServer();
 +        // cleanup tick-loops, ensure all are terminated.
 +        threadedServer.markPrepareHalt(); // notify to threads we are halting
-+        for (final AbstractTickLoop<?, ?> tickLoop : threadedServer.getTickLoops()) {
-+            if (tickLoop.getRunningThread() == null) {
-+                LOGGER.warn("Running thread for tick-loop '{}' was null when shutting down!", tickLoop.name());
-+                continue;
-+            }
-+            if (tickLoop.getRunningThread().isAlive()) {
-+                // if thread is still running, wait for them
-+                tickLoop.stopSpin(true);
-+            }
++        if (TickLoopScheduler.getInstance().scheduler.halt(true, TimeUnit.SECONDS.toNanos(60L))) {
++            ThreadedServer.LOGGER.info("Scheduler halted");
++        } else {
++            ThreadedServer.LOGGER.warn("Scheduler did not terminate within 60s, proceeding with shutdown anyways");
++            TickLoopScheduler.getInstance().dumpAliveThreadTraces("Did not shut down in time");
 +        }
 +        long nanoTickTime = Util.getNanos() - startNanos;
 +        ThreadedServer.LOGGER.info("Successfully halted all tick-loops in {}ms", (nanoTickTime / 1_000_000));
 +
-+        PlayerJoinThread.getInstance().stopAcceptingConnections();
 +        for (ServerPlayer player : this.playerList.players) {
 +            if (player.isDeadOrDying() || (player.isRemoved() && player.getRemovalReason() == net.minecraft.world.entity.Entity.RemovalReason.KILLED)) {
 +                this.playerList.respawn(player, false, net.minecraft.world.entity.Entity.RemovalReason.KILLED, PlayerRespawnEvent.RespawnReason.DEATH);
@@ -530,7 +536,7 @@
          Optional<Path> optional = Optional.of(this.getFile("server-icon.png"))
              .filter(path -> Files.isRegularFile(path))
              .or(() -> this.storageSource.getIconFile().filter(path -> Files.isRegularFile(path)));
-@@ -1531,8 +_,16 @@
+@@ -1531,8 +_,17 @@
          return false;
      }
  
@@ -544,6 +550,7 @@
 +    // Canvas end
      public void tickServer(BooleanSupplier hasTimeLeft) {
 -        org.spigotmc.WatchdogThread.tick(); // Spigot
++        if (this.notifyStop) this.stopServer(); // Canvas
 +        getThreadedServer().watchdogEntry.doTick(); // Spigot // Canvas - rewrite watchdog
          long nanos = Util.getNanos();
          int i = this.pauseWhileEmptySeconds() * 20;
@@ -553,9 +560,9 @@
                  if (this.emptyTicks == i) {
                      LOGGER.info("Server empty for {} seconds, pausing", this.pauseWhileEmptySeconds());
 +                    // Canvas start
-+                    Set<AbstractTickLoop<?, ?>> loops = getThreadedServer().getTickLoops();
++                    Set<AbstractTickLoop> loops = getThreadedServer().getTickLoops();
 +                    LOGGER.info("Notifying {} tick-loops of pause", loops.size());
-+                    for (final AbstractTickLoop<?, ?> loop : loops) {
++                    for (final AbstractTickLoop loop : loops) {
 +                        loop.sleep();
 +                    }
 +                    // Canvas end
@@ -583,9 +590,9 @@
              }
 +            // Canvas start
 +            else if (emptyTickSleeping) {
-+                Set<AbstractTickLoop<?, ?>> loops = getThreadedServer().getTickLoops();
++                Set<AbstractTickLoop> loops = getThreadedServer().getTickLoops();
 +                LOGGER.info("Waking {} tick-loops from pause state", loops.size());
-+                for (final AbstractTickLoop<?, ?> loop : loops) {
++                for (final AbstractTickLoop loop : loops) {
 +                    loop.wake();
 +                }
 +            }

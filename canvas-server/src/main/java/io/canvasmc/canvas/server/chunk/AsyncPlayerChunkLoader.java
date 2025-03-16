@@ -1,7 +1,6 @@
 package io.canvasmc.canvas.server.chunk;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseCommon;
-import ca.spottedleaf.moonrise.common.util.TickThread;
 import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel;
 import ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
@@ -14,7 +13,6 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.ServerTickRateManager;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -39,22 +37,17 @@ import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.SECONDARY;
 import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.TWO_DECIMAL_PLACES;
 import static net.kyori.adventure.text.Component.text;
 
-public class AsyncPlayerChunkLoader extends AbstractTickLoop<TickThread, AsyncPlayerChunkLoader> {
+public class AsyncPlayerChunkLoader extends AbstractTickLoop {
     public static AsyncPlayerChunkLoader INSTANCE;
 
     public AsyncPlayerChunkLoader(final String name, final String debugName) {
         super(name, debugName);
-        this.setThreadModifier((tickThread) -> {
-            tickThread.setName(this.name());
-            tickThread.setPriority(Config.INSTANCE.tickLoopThreadPriority);
-            tickThread.setUncaughtExceptionHandler((_, exception) -> LOGGER.error("Uncaught exception in player join thread", exception));
-        });
         INSTANCE = this;
     }
 
     @Override
-    public ServerTickRateManager tickRateManager() {
-        return MinecraftServer.getServer().tickRateManager();
+    protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
+        this.tick(hasTimeLeft);
     }
 
     @Override

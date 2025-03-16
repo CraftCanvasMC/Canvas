@@ -145,7 +145,8 @@
 +    };
 +    // Canvas end
      public final ServerChunkCache chunkSource;
-     private final MinecraftServer server;
+-    private final MinecraftServer server;
++    // private final MinecraftServer server; // Canvas - clashes with super
      public final net.minecraft.world.level.storage.PrimaryLevelData serverLevelData; // CraftBukkit - type
 +    public final ChunkHolderManager.LevelHolderData chunkHolderData; // Canvas
 +    public ItemStack ominousBanner; // Canvas
@@ -234,6 +235,15 @@
  
          if (val <= 0) {
              throw new IllegalStateException("Negative counter");
+@@ -597,7 +_,7 @@
+         this.uuid = org.bukkit.craftbukkit.util.WorldUUID.getUUID(levelStorageAccess.levelDirectory.path().toFile());
+         // CraftBukkit end
+         this.tickTime = tickTime;
+-        this.server = server;
++        // this.server = server; // Canvas - clashes with super
+         // Purpur start - Allow toggling special MobSpawners per world
+         this.customSpawners = new ArrayList<>();
+         if (purpurConfig.phantomSpawning) {
 @@ -689,6 +_,7 @@
          // Paper start - rewrite chunk system
          this.moonrise$setEntityLookup(new ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup((ServerLevel)(Object)this, ((ServerLevel)(Object)this).new EntityCallbacks()));
@@ -332,7 +342,6 @@
 +    }
 +
 +    public void tickPlayerList() {
-+        if (!Config.INSTANCE.runPlayerListTickOnIndependentLevel) return;
 +        if (++this.sendAllPlayerInfoIn > 600) {
 +            for (int i = 0; i < this.players.size(); ++i) {
 +                final ServerPlayer target = this.players.get(i);
@@ -353,13 +362,14 @@
 +        this.tpsCalculator.doTick();
 +        this.bukkitScheduler.mainThreadHeartbeat();
 +
-+        ((CanvasPerWorldScheduler) this.server.server.getRegionScheduler()).tick(this); // Canvas - folia regionized support
++        // tick the "region" scheduler
++        ((CanvasPerWorldScheduler) this.server.server.getRegionScheduler()).tick(this);
 +        for (final Entity entity : this.getEntities().getAll()) {
 +            if (entity.isRemoved()) {
 +                continue;
 +            }
 +            final org.bukkit.craftbukkit.entity.CraftEntity bukkit = entity.getBukkitEntityRaw();
-+            if (bukkit != null && !bukkit.taskScheduler.retired) { // Canvas - ensure not retired
++            if (bukkit != null) {
 +                bukkit.taskScheduler.executeTick();
 +            }
 +        }
@@ -440,7 +450,7 @@
                          if (!entity.isRemoved()) {
                              if (!tickRateManager.isEntityFrozen(entity)) {
                                  profilerFiller.push("checkDespawn");
-@@ -841,21 +_,83 @@
+@@ -841,21 +_,75 @@
                              }
                          }
                      }
@@ -468,20 +478,12 @@
 +            player.connection.resumeFlushing();
 +        }
 +        explosionDensityCache.clear();
-+        this.runAllTasks();
 +        // Canvas end
 +    }
 +    // Canvas start - threaded entity ticking
 +
 +    public void tickEntities(boolean isThreaded) {
-+        if (Config.INSTANCE.threadedEntityTicking && !isThreaded) {
-+            for (final ServerPlayer player : this.players) {
-+                entityTick(player);
-+            }
-+            return;
-+        }
 +        this.entityTickList.forEach((entity) -> {
-+            if (isThreaded && entity instanceof ServerPlayer) return; // Dont tick players threaded, that's still on Level.
 +            if (Config.CHECK_ENTITY_MASKS && Config.COMPILED_ENTITY_MASK_LOCATIONS.contains(entity.getTypeLocation())) {
 +                int lived = entity.tickCount;
 +                if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
@@ -790,17 +792,19 @@
      }
  
      @Override
-@@ -2158,8 +_,8 @@
+@@ -2157,10 +_,10 @@
+         return this.server.getRecipeManager();
      }
  
-     @Override
--    public TickRateManager tickRateManager() {
--        return this.server.tickRateManager();
-+    public ServerTickRateManager tickRateManager() { // Canvas
-+        return this.tickRateManager; // Canvas
-     }
+-    @Override
++    /* @Override // Canvas start - clashes with super
+     public TickRateManager tickRateManager() {
+         return this.server.tickRateManager();
+-    }
++    } */ // Canvas end
  
      @Override
+     public boolean noSave() {
 @@ -2419,7 +_,7 @@
          CsvOutput csvOutput = CsvOutput.builder().addColumn("x").addColumn("y").addColumn("z").addColumn("type").build(output);
  
@@ -850,7 +854,7 @@
  
      public void onStructureStartsAvailable(ChunkAccess chunk) {
 -        this.server.execute(() -> this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts()));
-+        ((BlockableEventLoop<?>) (MinecraftServer.getThreadedServer().hasStarted() ? this : this.server)).execute(() -> this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts())); // Canvas
++        this.structureCheck.onStructureLoad(chunk.getPos(), chunk.getAllStarts());
      }
  
      public PathTypeCache getPathTypeCache() {
@@ -901,7 +905,13 @@
          // Paper end - rewrite chunk system
      }
  
-@@ -2658,6 +_,35 @@
+@@ -2653,11 +_,41 @@
+     // Paper start - optimize redstone (Alternate Current)
+     @Override
+     public alternate.current.wire.WireHandler getWireHandler() {
++        if (!Thread.currentThread().equals(this.owner)) throw new RuntimeException("wtf?");
+         return wireHandler;
+     }
      // Paper end - optimize redstone (Alternate Current)
  
      final class EntityCallbacks implements LevelCallback<Entity> {

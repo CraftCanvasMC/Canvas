@@ -2,18 +2,14 @@ package io.canvasmc.canvas.server;
 
 import com.google.common.collect.Sets;
 import io.canvasmc.canvas.CanvasBootstrap;
-import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
-import io.canvasmc.canvas.entity.ThreadedEntityScheduler;
-import io.canvasmc.canvas.server.level.LevelThread;
-import io.canvasmc.canvas.server.level.MinecraftServerWorld;
-import io.canvasmc.canvas.server.network.PlayerJoinThread;
+import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
+import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -21,7 +17,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
@@ -40,20 +35,10 @@ import org.slf4j.LoggerFactory;
 
 public class ThreadedServer implements ThreadedBukkitServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
-    public static final long MAX_NANOSECONDS_FOR_TICK_FRAME = 50_000_000;
-    public static final ThreadGroup SERVER_THREAD_GROUP = new ThreadGroup("ServerThreadGroup");
     public static BooleanSupplier SHOULD_KEEP_TICKING;
-    public static Function<ServerLevel, LevelThread> LEVEL_SPINNER = (level) -> {
-        try {
-            return level.start((self) -> self::worldtick, () -> MinecraftServer.getServer().isTicking());
-        } catch (Throwable throwable) {
-            throw new RuntimeException("Unable to spin world '" + level.getName() + "'!", throwable);
-        }
-    };
-    protected final Set<AbstractTickLoop<?, ?>> loops;
+    protected final Set<AbstractTickLoop> loops;
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final DedicatedServer server;
-    public ThreadedEntityScheduler entityScheduler;
     public MultiWatchdogThread.ThreadEntry watchdogEntry;
     private long tickSection;
     private boolean started = false;
@@ -61,28 +46,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public ThreadedServer(DedicatedServer server) {
         this.server = server;
         this.loops = Collections.synchronizedSet(Sets.newLinkedHashSet());
-    }
-
-    public static Long @NotNull [] getLevelIds() {
-        return MinecraftServer.getThreadedServer().getAllLevels().stream()
-            .map(MinecraftServerWorld::getRunningThread)
-            .map(Thread::threadId)
-            .toList().toArray(new Long[0]);
-    }
-
-    @Override
-    public boolean isLevelThread(long id) {
-        for (final Long levelId : getLevelIds()) {
-            if (levelId == id) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    @Override
-    public boolean isLevelThread(final Thread thread) {
-        return thread instanceof LevelThread;
     }
 
     @Override
@@ -93,6 +56,11 @@ public class ThreadedServer implements ThreadedBukkitServer {
     @Override
     public LevelAccess getLevelAccess(final World world) {
         return ((CraftWorld) world).getHandle();
+    }
+
+    @Override
+    public MultithreadedTickScheduler getScheduler() {
+        return TickLoopScheduler.getInstance();
     }
 
     @Override
@@ -108,10 +76,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
         return started;
     }
 
-    public long getTickSection() {
-        return tickSection;
-    }
-
     public MinecraftServer getServer() {
         return server;
     }
@@ -120,32 +84,14 @@ public class ThreadedServer implements ThreadedBukkitServer {
         try {
             MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             MultiLoopThreadDumper.REGISTRY.add("ls_wg "); // add linear-scaling world-gen workers
+            MultiLoopThreadDumper.REGISTRY.add("tick scheduler");
             ThreadedBukkitServer.setInstance(this);
 
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
-            // we have a "dependency hierarchy" for tick-loops, meaning each
-            // tick-loop depends on a certain part of the server before it
-            // can start ticking
-            // the dependency tree goes as such:
-            // - CHUNK_LOADER
-            // - MAIN
-            // - WORLD
-            // - ENTITY (if applicable)
-            // - JOIN
-            // this ensures we don't create race conditions where say entities
-            // tick before the world has booted, or the join thread is accepting
-            // connections before the server is fully loaded. the likelihood
-            // of this is unlikely, but we ensure its built like this to avoid
-            // any sort of race condition from occurring
-            if (Config.INSTANCE.threadedEntityTicking) {
-                final ThreadedEntityScheduler entityScheduler = new ThreadedEntityScheduler("EntityScheduler", "entity scheduler");
-                this.entityScheduler = entityScheduler;
-                entityScheduler.start((self) -> (_, _) -> self.tickEntities(), this::areAllWorldsTicking);
-            }
-            PlayerJoinThread.getInstance().start((self) -> (_, _) -> self.run(), () -> Config.INSTANCE.threadedEntityTicking ? this.entityScheduler.isTicking() : this.areAllWorldsTicking());
+            TickLoopScheduler.start();
             this.started = true;
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
@@ -155,7 +101,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
             this.server.server.getScheduler().mainThreadHeartbeat();
 
             final long actualDoneTimeMs = System.currentTimeMillis() - CanvasBootstrap.BOOT_TIME.toEpochMilli();
-            LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1000.00D));
+            LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1_000.00D));
             this.server.server.spark.enableBeforePlugins();
             this.watchdogEntry = MultiWatchdogThread.register(new MultiWatchdogThread.ThreadEntry(this.server.serverThread, "main thread", "Server", this.server::isTicking, () -> false));
             this.watchdogEntry.doTick();
@@ -225,15 +171,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
         }
     }
 
-    private boolean areAllWorldsTicking() {
-        for (final ServerLevel level : this.server.getAllLevels()) {
-            if (!level.isTicking()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     public void loadLevel(@NotNull ServerLevel level) {
         this.levels.add(level);
     }
@@ -244,30 +181,21 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public void stopLevel(@NotNull ServerLevel level) {
         this.levels.remove(level);
-        level.stopSpin(false);
+        level.stopSpin();
     }
 
     public Collection<ServerLevel> getAllLevels() {
         return MinecraftServer.getServer().levels.values();
     }
 
-    public List<AverageTickTimeAccessor> getTickTimeAccessors() {
-        List<AverageTickTimeAccessor> accessors = new ArrayList<>(getThreadedWorlds());
-        accessors.add(MinecraftServer.getServer());
-        if (Config.INSTANCE.threadedEntityTicking) {
-            accessors.add(entityScheduler);
-        }
-        return accessors;
-    }
-
-    public Set<AbstractTickLoop<?, ?>> getTickLoops() {
+    public Set<AbstractTickLoop> getTickLoops() {
         return this.loops;
     }
 
     public void markPrepareHalt() {
         // mark all threads to stop ticking.
-        for (final AbstractTickLoop<?, ?> loop : this.loops) {
-            loop.stopSpin(false);
+        for (final AbstractTickLoop loop : this.loops) {
+            loop.stopSpin();
         }
     }
 }

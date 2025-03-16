@@ -21,8 +21,8 @@ import org.jetbrains.annotations.Nullable;
 public class AsyncPathProcessor {
     private static final Executor pathProcessingExecutor = new ThreadPoolExecutor(
         1,
-        Config.INSTANCE.pathfinding.maxProcessors,
-        Config.INSTANCE.pathfinding.keepAlive, TimeUnit.SECONDS,
+        Config.INSTANCE.entities.pathfinding.maxProcessors,
+        Config.INSTANCE.entities.pathfinding.keepAlive, TimeUnit.SECONDS,
         new LinkedBlockingQueue<>(),
         new ThreadFactoryBuilder()
             .setNameFormat("pathfinding")
@@ -47,9 +47,9 @@ public class AsyncPathProcessor {
             throw new IllegalArgumentException("Level must be a ServerLevel to execute processing.");
         if (path != null && !path.isProcessed() && path instanceof AsyncPath asyncPath) {
             asyncPath.postProcessing(() -> {
-                if (Config.INSTANCE.pathfinding.useThreadedWorldForScheduling && MinecraftServer.getThreadedServer().hasStarted()) {
+                if (MinecraftServer.getThreadedServer().hasStarted()) {
                     // Schedule on level instead of main.
-                    serverLevel.schedule(serverLevel.wrapRunnable(() -> afterProcessing.accept(path)));
+                    serverLevel.scheduleOnThread(serverLevel.wrapRunnable(() -> afterProcessing.accept(path)));
                     return;
                 }
                 MinecraftServer.getServer().scheduleOnMain(() -> afterProcessing.accept(path));

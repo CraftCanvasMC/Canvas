@@ -9,7 +9,6 @@ public final class CanvasCommands {
     public static void register(@NotNull CommandDispatcher<CommandSourceStack> dispatcher) {
         SimulationDistanceCommand.register(dispatcher);
         ViewDistanceCommand.register(dispatcher);
-        TickCommand.register(dispatcher);
         ResendChunksCommand.register(dispatcher);
     }
 }

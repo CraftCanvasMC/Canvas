@@ -1,11 +1,10 @@
 package io.canvasmc.canvas.server.network;
 
-import ca.spottedleaf.moonrise.common.util.TickThread;
-import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.command.ThreadedTickDiagnosis;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.BooleanSupplier;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportedException;
@@ -14,26 +13,25 @@ import net.minecraft.network.PacketSendListener;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.ServerTickRateManager;
 import org.jetbrains.annotations.NotNull;
 
-public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThread> {
+public class PlayerJoinThread extends AbstractTickLoop {
     private static PlayerJoinThread INSTANCE = null;
     private final ConcurrentLinkedQueue<Connection> activeConnections = new ConcurrentLinkedQueue<>();
 
     public PlayerJoinThread(final String name, final String debugName) {
         super(name, debugName);
-        this.setThreadModifier((tickThread) -> {
-            tickThread.setName(this.name());
-            tickThread.setPriority(Config.INSTANCE.tickLoopThreadPriority);
-            tickThread.setUncaughtExceptionHandler((_, exception) -> LOGGER.error("Uncaught exception in player join thread", exception));
-        });
         INSTANCE = this;
         LOGGER.info("Loaded PlayerJoinThread to server context");
     }
 
     public static PlayerJoinThread getInstance() {
         return INSTANCE;
+    }
+
+    @Override
+    protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
+        this.run();
     }
 
     public void stopAcceptingConnections() {
@@ -79,10 +77,6 @@ public class PlayerJoinThread extends AbstractTickLoop<TickThread, PlayerJoinThr
 
     public void setPhase(@NotNull Connection connection, ConnectionHandlePhases phase) {
         connection.setPhase(phase);
-    }
-
-    public ServerTickRateManager tickRateManager() {
-        return MinecraftServer.getServer().tickRateManager();
     }
 
     @Override

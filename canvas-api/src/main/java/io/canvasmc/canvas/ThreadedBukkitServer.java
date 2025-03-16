@@ -1,5 +1,6 @@
 package io.canvasmc.canvas;
 
+import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
 import org.bukkit.World;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Unmodifiable;
@@ -29,12 +30,10 @@ public interface ThreadedBukkitServer {
         }
     }
 
-    boolean isLevelThread(long id);
-    boolean isLevelThread(Thread thread);
-
     @Unmodifiable
     List<World> getWorlds();
     LevelAccess getLevelAccess(World world);
+    MultithreadedTickScheduler getScheduler();
 
     void scheduleOnMain(Runnable runnable);
 }

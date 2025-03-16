@@ -39,7 +39,7 @@
  import net.minecraft.FileUtil;
  import net.minecraft.Util;
  import net.minecraft.core.BlockPos;
-@@ -50,13 +_,15 @@
+@@ -50,13 +_,14 @@
  import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
  import net.minecraft.world.level.storage.DimensionDataStorage;
  import net.minecraft.world.level.storage.LevelStorageSource;
@@ -53,7 +53,6 @@
      private final ServerLevel level;
 -    public final Thread mainThread;
 +    public Thread mainThread; // Canvas - mutable
-+    public static final Executor REGION_EXECUTOR = Executors.newFixedThreadPool(Config.INSTANCE.chunks.regionized.executorThreadCount, new NamedAgnosticThreadFactory<>("region_ticking", TickThread::new, Config.INSTANCE.chunks.regionized.executorThreadPriority)); // Canvas - Regionized Chunk Ticking
      final ThreadedLevelLightEngine lightEngine;
      public final ServerChunkCache.MainThreadExecutor mainThreadProcessor;
      public final ChunkMap chunkMap;
@@ -76,11 +75,8 @@
      // Paper end
      // Paper start - rewrite chunk system
  
-@@ -98,8 +_,13 @@
-     }
- 
+@@ -100,6 +_,10 @@
      private ChunkAccess syncLoad(final int chunkX, final int chunkZ, final ChunkStatus toStatus) {
-+        if (Config.INSTANCE.debugSyncload && MinecraftServer.getThreadedServer().hasStarted()) LOGGER.warn("syncload caught", new Throwable()); // Canvas - deprecate syncload
          final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler chunkTaskScheduler = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler();
          final CompletableFuture<ChunkAccess> completable = new CompletableFuture<>();
 +        // Canvas start - chunk priority override
@@ -90,33 +86,14 @@
          chunkTaskScheduler.scheduleChunkLoad(
              chunkX, chunkZ, toStatus, true, ca.spottedleaf.concurrentutil.util.Priority.BLOCKING,
              completable::complete
-@@ -112,13 +_,24 @@
-             );
-         }
- 
-+        ChunkAccess ret = null; // Canvas
-         if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level, chunkX, chunkZ)) {
+@@ -116,6 +_,7 @@
              ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.pushChunkWait(this.level, chunkX, chunkZ);
--            this.mainThreadProcessor.managedBlock(completable::isDone);
-+            // Canvas start - rewrite wait
-+            while (true) {
-+                if (completable.isDone()) {
-+                    ret = completable.join();
-+                    break;
-+                }
-+                ret = getChunk(chunkX, chunkZ, toStatus, false);
-+                if (ret != null) break;
-+            }
-+            // Canvas end
+             this.mainThreadProcessor.managedBlock(completable::isDone);
              ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler.popChunkWait();
 +            this.level.getPriorityManager().blockingOverride.remove(chunkPos); // Canvas - chunk priority override
          }
  
--        final ChunkAccess ret = completable.join();
-+        // Canvas - rewrite wait
-         if (ret == null) {
-             throw new IllegalStateException("Chunk not loaded when requested");
-         }
+         final ChunkAccess ret = completable.join();
 @@ -134,6 +_,14 @@
          final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder currentChunk = chunkHolderManager.getChunkHolder(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(chunkX, chunkZ));
  
@@ -188,52 +165,7 @@
          // Paper end - rewrite chunk system
      }
  
-@@ -479,28 +_,75 @@
-     }
-     // CraftBukkit end
- 
-+    // Canvas Start - Regionized chunk ticking
-+    private List<LevelChunk>[] splitChunksIntoRegions(List<LevelChunk> chunks) {
-+        int size = chunks.size();
-+        IdentityHashMap<LevelChunk, Boolean> chunkSet = new IdentityHashMap<>(size);
-+
-+        for (LevelChunk chunk : chunks) {
-+            chunkSet.put(chunk, Boolean.TRUE);
-+        }
-+
-+        List<List<LevelChunk>> groups = new ObjectArrayList<>(size >> 3);
-+        LevelChunk[] stack = new LevelChunk[size];
-+        int stackPointer = 0;
-+
-+        for (LevelChunk chunk : chunks) {
-+            if (chunkSet.remove(chunk) == null) continue;
-+
-+            List<LevelChunk> group = new ObjectArrayList<>(64);
-+            stack[stackPointer++] = chunk;
-+
-+            while (stackPointer > 0) {
-+                LevelChunk current = stack[--stackPointer];
-+                group.add(current);
-+
-+                for (int i = 0; i < 8; i++) {
-+                    LevelChunk neighbor = getChunk(current.locX + DX[i], current.locZ + DZ[i], false);
-+                    if (neighbor == null || chunkSet.remove(neighbor) == null) continue;
-+                    stack[stackPointer++] = neighbor;
-+                }
-+            }
-+
-+            groups.add(group);
-+        }
-+
-+        return groups.toArray(new List[0]);
-+    }
-+
-+    // dfs directions
-+    private static final int[] DX = {1, -1, 0, 0, 1, -1, -1, 1};
-+    private static final int[] DZ = {0, 0, 1, -1, 1, 1, -1, -1};
-+
-+    // Canvas End
-     @Override
+@@ -483,20 +_,25 @@
      public void tick(BooleanSupplier hasTimeLeft, boolean tickChunks) {
          ProfilerFiller profilerFiller = Profiler.get();
          profilerFiller.push("purge");
@@ -263,32 +195,7 @@
          profilerFiller.pop();
          this.clearCache();
      }
- 
-+    public volatile int tickingRegionsCount = 0; // Canvas
-     private void tickChunks() {
-         long gameTime = this.level.getGameTime();
-         long l = gameTime - this.lastInhabitedUpdate;
-@@ -519,31 +_,77 @@
-                     this.shuffleRandom.setSeed(this.level.random.nextLong());
-                     if (!this.level.paperConfig().entities.spawning.perPlayerMobSpawns) Util.shuffle(list, this.shuffleRandom); // Paper - Optional per player mob spawns; do not need this when per-player is enabled
-                     // Paper end - chunk tick iteration optimisation
-+                    // Canvas start - Regionized Chunk Ticking
-+                    if (Config.INSTANCE.chunks.regionized.enableRegionizedChunkTicking) {
-+                        List<LevelChunk>[] regions = splitChunksIntoRegions(list);
-+                        this.tickingRegionsCount = regions.length;
-+                        List<CompletableFuture<Void>> regionTicks = new ObjectArrayList<>();
-+                        for (final List<LevelChunk> region : regions) {
-+                            regionTicks.add(CompletableFuture.runAsync(() -> tickChunks(profilerFiller, l, region), REGION_EXECUTOR));
-+                        }
-+                        CompletableFuture<Void> regionTick = CompletableFuture.allOf(regionTicks.toArray(new CompletableFuture[0]));
-+                        this.mainThreadProcessor.managedBlock(regionTick::isDone);
-+                    } else {
-                     this.tickChunks(profilerFiller, l, list);
-+                    }
-+                    // Canvas end
-                     profilerFiller.pop();
-                 } finally {
-                     list.clear();
+@@ -526,24 +_,57 @@
                  }
              }
  
@@ -297,7 +204,7 @@
              profilerFiller.pop();
          }
 +        // Canvas start
-+        if (Config.INSTANCE.enableAsyncSpawning) {
++        if (Config.INSTANCE.entities.enableAsyncSpawning) {
 +            for (ServerPlayer player : this.level.players) {
 +                for (int ii = 0; ii < ServerPlayer.MOBCATEGORY_TOTAL_ENUMS; ii++) {
 +                    player.mobCounts[ii] = 0;
@@ -381,7 +288,7 @@
          // Paper start - Optional per player mob spawns
          NaturalSpawner.SpawnState spawnState;
          if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
-+            if (!Config.INSTANCE.enableAsyncSpawning) { // Canvas
++            if (!Config.INSTANCE.entities.enableAsyncSpawning) { // Canvas
              // re-set mob counts
              for (ServerPlayer player : this.level.players) {
                  // Paper start - per player mob spawning backoff
@@ -420,7 +327,7 @@
              levelChunk.incrementInhabitedTime(timeInhabited);
 -            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot
 -                NaturalSpawner.spawnForChunk(this.level, levelChunk, spawnState, filteredSpawningCategories);
-+            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && (!Config.INSTANCE.enableAsyncSpawning || spawnCountsReady.get()) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot // Canvas
++            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && (!Config.INSTANCE.entities.enableAsyncSpawning || spawnCountsReady.get()) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot // Canvas
 +                NaturalSpawner.spawnForChunk(this.level, levelChunk, lastSpawnState, filteredSpawningCategories); // Canvas
              }
  
