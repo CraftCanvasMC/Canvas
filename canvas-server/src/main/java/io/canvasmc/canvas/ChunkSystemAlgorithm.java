@@ -24,9 +24,9 @@ public enum ChunkSystemAlgorithm {
         if (workerThreads <= 0) {
             workerThreads = defaultWorkerThreads;
         }
-        return new Pair<>(workerThreads, 1);
+        return new Pair<>(workerThreads, Math.max(1, configIoThreads));
     }),
-    C2ME_AGGRESSIVE((configWorkerThreads, _) -> {
+    C2ME_AGGRESSIVE((configWorkerThreads, configIoThreads) -> {
         String expression = """
             
                 max(
@@ -41,9 +41,9 @@ public enum ChunkSystemAlgorithm {
                 )
             \040""";
         int eval = configWorkerThreads <= 0 ? tryEvaluateExpression(expression) : configWorkerThreads;
-        return new Pair<>(eval, 1);
+        return new Pair<>(eval, Math.max(1, configIoThreads));
     }),
-    C2ME((configWorkerThreads, _) -> {
+    C2ME((configWorkerThreads, configIoThreads) -> {
         String expression = """
             
                 max(
@@ -61,7 +61,7 @@ public enum ChunkSystemAlgorithm {
                 )
             \040""";
         int eval = configWorkerThreads <= 0 ? tryEvaluateExpression(expression) : configWorkerThreads;
-        return new Pair<>(eval, 1);
+        return new Pair<>(eval, Math.max(1, configIoThreads));
     });
 
     private final BiFunction<Integer, Integer, Pair<Integer, Integer>> eval;

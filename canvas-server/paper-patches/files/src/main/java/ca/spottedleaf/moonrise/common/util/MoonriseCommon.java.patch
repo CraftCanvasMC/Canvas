@@ -12,7 +12,7 @@
  import org.slf4j.Logger;
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicInteger;
-@@ -12,89 +_,46 @@
+@@ -12,83 +_,64 @@
  
      private static final Logger LOGGER = LogUtils.getClassLogger();
  
@@ -59,12 +59,41 @@
 -        final int ioThreads = Math.max(1, configIoThreads);
 -
 -        WORKER_POOL.adjustThreadCount(workerThreads);
--        IO_POOL.adjustThreadCount(ioThreads);
--
++    // Canvas start - rewrite moonrise executor
++    public static TheChunkSystem WORKER_POOL;
++    public static TheChunkSystem.ExecutorGroup PARALLEL_GEN_GROUP;
++    public static TheChunkSystem.ExecutorGroup RADIUS_AWARE_GROUP;
++    public static TheChunkSystem.ExecutorGroup LOAD_GROUP;
++
++    public static void init(final int configWorkerThreads, final int configIoThreads) {
++        ChunkSystemAlgorithm algorithm = Config.INSTANCE.chunks.chunkWorkerAlgorithm;
++        int workerThreads = algorithm.evalWorkers(configWorkerThreads, configIoThreads);
++        int ioThreads = algorithm.evalIO(configWorkerThreads, configIoThreads);
++
++        WORKER_POOL = buildChunkSystem(workerThreads);
++
++        PARALLEL_GEN_GROUP = MoonriseCommon.WORKER_POOL.createExecutorGroup();
++        RADIUS_AWARE_GROUP = MoonriseCommon.WORKER_POOL.createExecutorGroup();
++        LOAD_GROUP = MoonriseCommon.WORKER_POOL.createExecutorGroup();
++
+         IO_POOL.adjustThreadCount(ioThreads);
++        LOGGER.info("Running LS ChunkSystem with {} worker threads and {} io threads", workerThreads, ioThreads);
++    }
+ 
 -        LOGGER.info(PlatformHooks.get().getBrand() + " is using " + workerThreads + " worker threads, " + ioThreads + " I/O threads");
--    }
--
--    public static final PrioritisedThreadPool IO_POOL = new PrioritisedThreadPool(
++    private static @NotNull TheChunkSystem buildChunkSystem(int workerThreads) {
++        return new TheChunkSystem(workerThreads, new ThreadBuilder() {
++            @Override
++            public void accept(final Thread thread) {
++                thread.setPriority(Config.INSTANCE.chunks.threadPoolPriority);
++                thread.setDaemon(true);
++                thread.setUncaughtExceptionHandler((thread1, throwable) -> LOGGER.error("Uncaught exception in thread {}", thread1.getName(), throwable));
++                thread.setName("ls_wg worker #" + getAndIncrementId());
++            }
++        }, "ls_wg");
+     }
+ 
+     public static final PrioritisedThreadPool IO_POOL = new PrioritisedThreadPool(
 -            new Consumer<>() {
 -                private final AtomicInteger idGenerator = new AtomicInteger();
 -
@@ -79,46 +108,26 @@
 -                        }
 -                    });
 -                }
--            }
--    );
--    public static final long IO_QUEUE_HOLD_TIME = (long)(100.0e6); // 100ms
--    public static final PrioritisedThreadPool.ExecutorGroup CLIENT_PROFILER_IO_GROUP = IO_POOL.createExecutorGroup(CLIENT_DIVISION, 0);
--    public static final PrioritisedThreadPool.ExecutorGroup SERVER_REGION_IO_GROUP = IO_POOL.createExecutorGroup(SERVER_DIVISION, 0);
-+    // Canvas start - rewrite moonrise executor
-+    public static TheChunkSystem WORKER_POOL;
-+    public static TheChunkSystem.ExecutorGroup PARALLEL_GEN_GROUP;
-+    public static TheChunkSystem.ExecutorGroup RADIUS_AWARE_GROUP;
-+    public static TheChunkSystem.ExecutorGroup LOAD_GROUP;
-+
-+    public static void init(final int configWorkerThreads, final int configIoThreads) {
-+        ChunkSystemAlgorithm algorithm = Config.INSTANCE.chunks.chunkWorkerAlgorithm;
-+        int workerThreads = algorithm.evalWorkers(configWorkerThreads, configIoThreads);
-+        int ioThreads = algorithm.evalIO(configWorkerThreads, configIoThreads);
-+
-+        WORKER_POOL = buildChunkSystem(workerThreads, "ls_wg worker", "ChunkLoader");
-+        IO_POOL = buildChunkSystem(ioThreads, "ls_wg i/o worker", "Chunk I/O");
-+
-+        PARALLEL_GEN_GROUP = MoonriseCommon.WORKER_POOL.createExecutorGroup();
-+        RADIUS_AWARE_GROUP = MoonriseCommon.WORKER_POOL.createExecutorGroup();
-+        LOAD_GROUP = MoonriseCommon.WORKER_POOL.createExecutorGroup();
-+
-+        SERVER_REGION_IO_GROUP = IO_POOL.createExecutorGroup();
-+    }
-+
-+    private static @NotNull TheChunkSystem buildChunkSystem(int workerThreads, String workerName, String systemName) {
-+        return new TheChunkSystem(workerThreads, new ThreadBuilder() {
++        new Consumer<>() {
++            private final AtomicInteger idGenerator = new AtomicInteger();
 +            @Override
 +            public void accept(final Thread thread) {
-+                thread.setPriority(Config.INSTANCE.chunks.threadPoolPriority);
 +                thread.setDaemon(true);
-+                thread.setUncaughtExceptionHandler((thread1, throwable) -> LOGGER.error("Uncaught exception in thread {}", thread1.getName(), throwable));
-+                thread.setName(workerName + " #" + getAndIncrementId());
-+            }
-+        }, systemName);
-+    }
-+
-+    public static TheChunkSystem IO_POOL;
-+    public static TheChunkSystem.ExecutorGroup SERVER_REGION_IO_GROUP;
++                thread.setName(PlatformHooks.get().getBrand() + " I/O Worker #" + this.idGenerator.getAndIncrement());
++                thread.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
++                    @Override
++                    public void uncaughtException(final Thread thread, final Throwable throwable) {
++                        LOGGER.error("Uncaught exception in thread " + thread.getName(), throwable);
++                    }
++                });
+             }
++        }
+     );
+     public static final long IO_QUEUE_HOLD_TIME = (long)(100.0e6); // 100ms
+-    public static final PrioritisedThreadPool.ExecutorGroup CLIENT_PROFILER_IO_GROUP = IO_POOL.createExecutorGroup(CLIENT_DIVISION, 0);
+-    public static final PrioritisedThreadPool.ExecutorGroup SERVER_REGION_IO_GROUP = IO_POOL.createExecutorGroup(SERVER_DIVISION, 0);
++    // Canvas
++    public static final PrioritisedThreadPool.ExecutorGroup SERVER_REGION_IO_GROUP = IO_POOL.createExecutorGroup(1, 0);
  
      public static void haltExecutors() {
 -        MoonriseCommon.WORKER_POOL.shutdown(false);
@@ -128,15 +137,10 @@
 -            MoonriseCommon.WORKER_POOL.halt(false);
 -        }
 -
--        MoonriseCommon.IO_POOL.shutdown(false);
--        LOGGER.info("Awaiting termination of I/O pool for up to 60s...");
--        if (!MoonriseCommon.IO_POOL.join(TimeUnit.SECONDS.toMillis(60L))) {
--            LOGGER.error("I/O pool did not shut down in time!");
--            MoonriseCommon.IO_POOL.halt(false);
--        }
++        // Canvas start
++        LOGGER.info("Terminating ChunkSystem...");
 +        MoonriseCommon.WORKER_POOL.shutdown();
-+        MoonriseCommon.IO_POOL.shutdown();
-+    // Canvas end
-     }
- 
-     private MoonriseCommon() {}
++        // Canvas end
+         MoonriseCommon.IO_POOL.shutdown(false);
+         LOGGER.info("Awaiting termination of I/O pool for up to 60s...");
+         if (!MoonriseCommon.IO_POOL.join(TimeUnit.SECONDS.toMillis(60L))) {

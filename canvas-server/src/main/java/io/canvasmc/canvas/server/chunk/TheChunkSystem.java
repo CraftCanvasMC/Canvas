@@ -22,7 +22,7 @@ public class TheChunkSystem extends ExecutorManager {
         super(workerThreadCount, threadInitializer, ChunkPriorityManager.MAX_PRIORITY);
         LOGGER = LoggerFactory.getLogger("TheChunkSystem/" + name);
         this.name = name;
-        LOGGER.info("Initialized new ChunkSystem with {} allocated threads", workerThreadCount);
+        LOGGER.info("Initialized new ChunkSystem '{}' with {} allocated threads", name, workerThreadCount);
     }
 
     public int getAliveThreads() {

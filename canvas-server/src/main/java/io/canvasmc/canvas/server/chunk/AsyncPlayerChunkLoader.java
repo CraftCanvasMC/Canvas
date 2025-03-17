@@ -55,7 +55,7 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop {
         int moonriseWorkers = MoonriseCommon.WORKER_POOL.getCoreThreads().length;
         int activeWorkers = MoonriseCommon.WORKER_POOL.getAliveThreads();
         int moonriseIOWorkers = MoonriseCommon.IO_POOL.getCoreThreads().length;
-        int activeIOWorkers = MoonriseCommon.IO_POOL.getAliveThreads();
+        int activeIOWorkers = MoonriseCommon.IO_POOL.getAliveThreads().length;
 
         final long currTime = System.nanoTime();
         final double genRate = ChunkFullTask.genRate(currTime);
@@ -182,9 +182,6 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop {
         }
         if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
             MoonriseCommon.WORKER_POOL.wakeup();
-        }
-        if (MoonriseCommon.IO_POOL.hasPendingTasks()) {
-            MoonriseCommon.IO_POOL.wakeup();
         }
     }
 
