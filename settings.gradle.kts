@@ -34,7 +34,7 @@ if (!file(".git").exists()) {
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 rootProject.name = "canvas"
-for (name in listOf("canvas-api", "canvas-server", "canvas-api-generator", "clipboard")) {
+for (name in listOf("canvas-api", "canvas-server", "canvas-api-generator")) {
     val projName = name.lowercase(Locale.ENGLISH)
     include(projName)
     findProject(":$projName")!!.projectDir = file(name)
