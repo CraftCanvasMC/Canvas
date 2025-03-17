@@ -169,7 +169,7 @@ tasks.register("buildPublisherJar") {
     doLast {
         val buildNumber = System.getenv("BUILD_NUMBER") ?: "local"
 
-        val paperclipJarTask = tasks.getByName("createMojmapClipboardJar")
+        val paperclipJarTask = project(":canvas-server").tasks.getByName("createMojmapPaperclipJar")
         val outputJar = paperclipJarTask.outputs.files.singleFile
         val outputDir = outputJar.parentFile
 

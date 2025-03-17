@@ -12,9 +12,11 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
@@ -36,7 +38,7 @@ import org.slf4j.LoggerFactory;
 public class ThreadedServer implements ThreadedBukkitServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
     public static BooleanSupplier SHOULD_KEEP_TICKING;
-    protected final Set<AbstractTickLoop> loops;
+    protected final Queue<AbstractTickLoop> loops;
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final DedicatedServer server;
     public MultiWatchdogThread.ThreadEntry watchdogEntry;
@@ -45,7 +47,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public ThreadedServer(DedicatedServer server) {
         this.server = server;
-        this.loops = Collections.synchronizedSet(Sets.newLinkedHashSet());
+        this.loops = new ConcurrentLinkedQueue<>();
     }
 
     @Override
@@ -189,7 +191,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
     }
 
     public Set<AbstractTickLoop> getTickLoops() {
-        return this.loops;
+        return new HashSet<>(this.loops);
     }
 
     public void markPrepareHalt() {
