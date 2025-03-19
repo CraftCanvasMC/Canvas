@@ -5,7 +5,6 @@ import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel
 import ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask;
-import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -27,14 +26,14 @@ import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.jetbrains.annotations.NotNull;
 
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.HEADER;
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.INFORMATION;
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.LIST;
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.NEW_LINE;
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.PRIMARY;
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.PRIME_ALT;
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.SECONDARY;
-import static io.canvasmc.canvas.command.ThreadedTickDiagnosis.TWO_DECIMAL_PLACES;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.HEADER;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.INFORMATION;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.LIST;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.NEW_LINE;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.PRIMARY;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.PRIME_ALT;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.SECONDARY;
+import static io.canvasmc.canvas.command.ThreadedServerHealthDump.TWO_DECIMAL_PLACES;
 import static net.kyori.adventure.text.Component.text;
 
 public class AsyncPlayerChunkLoader extends AbstractTickLoop {
@@ -161,16 +160,9 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop {
         if (MinecraftServer.getThreadedServer().hasStarted()) {
             for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
                 ServerChunkCache chunkSource = level.getChunkSource();
-                if (level.tickRateManager().runsNormally() || level.spigotConfig.unloadFrozenChunks) {
-                    if (chunkSource.ticksSinceLastPurgeStaleTicketsCall++ > Config.INSTANCE.ticksBetweenPurgeStaleTickets) {
-                        chunkSource.distanceManager.purgeStaleTickets();
-                        chunkSource.ticksSinceLastPurgeStaleTicketsCall = 0;
-                    }
-                }
                 level.moonrise$getPlayerChunkLoader().tick();
                 level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
                 chunkSource.broadcastChangedChunks(profilerFiller);
-                chunkSource.runDistanceManagerUpdates();
                 chunkSource.chunkMap.tick(hasTimeLeft, true);
             }
         } else {

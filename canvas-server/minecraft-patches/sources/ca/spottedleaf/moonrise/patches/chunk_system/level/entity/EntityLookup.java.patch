@@ -62,110 +62,32 @@
          }
      }
  
-@@ -227,8 +_,11 @@
+@@ -397,7 +_,7 @@
+         return Visibility.fromFullChunkStatus(entityStatus == null ? FullChunkStatus.INACCESSIBLE : entityStatus);
+     }
+ 
+-    protected boolean addEntity(final Entity entity, final boolean fromDisk, final boolean event) {
++    protected synchronized boolean addEntity(final Entity entity, final boolean fromDisk, final boolean event) { // Canvas - synchronized
+         final BlockPos pos = entity.blockPosition();
+         final int sectionX = pos.getX() >> 4;
+         final int sectionY = Mth.clamp(pos.getY() >> 4, WorldUtil.getMinSection(this.world), WorldUtil.getMaxSection(this.world));
+@@ -460,7 +_,7 @@
+         return slices == null || !slices.isPreventingStatusUpdates();
+     }
+ 
+-    protected void removeEntity(final Entity entity) {
++    protected synchronized void removeEntity(final Entity entity) { // Canvas - synchronized
+         final int sectionX = ((ChunkSystemEntity)entity).moonrise$getSectionX();
+         final int sectionY = ((ChunkSystemEntity)entity).moonrise$getSectionY();
+         final int sectionZ = ((ChunkSystemEntity)entity).moonrise$getSectionZ();
+@@ -510,7 +_,7 @@
          }
      }
  
-+    private ConcurrentLinkedQueue<Runnable> statusChangesQue = new ConcurrentLinkedQueue<>(); // Canvas
-+    private final Object lock = new Object(); // Canvas
-     public void entityStatusChange(final Entity entity, final ChunkEntitySlices slices, final Visibility oldVisibility, final Visibility newVisibility, final boolean moved,
-                                    final boolean created, final boolean destroyed) {
-+        synchronized (lock) { // Canvas - sync-lock
-         this.checkThread(entity, "Entity status change must only happen on the main thread");
- 
-         if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
-@@ -322,8 +_,14 @@
-         } finally {
-             if (slices != null) {
-                 slices.stopPreventingStatusUpdates(false);
-+                // Canvas start
-+                ConcurrentLinkedQueue<Runnable> clone = new ConcurrentLinkedQueue<>(statusChangesQue);
-+                statusChangesQue.clear();
-+                clone.forEach(Runnable::run);
-+                // Canvas end
-             }
-         }
-+        } // Canvas
-     }
- 
-     public void chunkStatusChange(final int x, final int z, final FullChunkStatus newStatus) {
-@@ -474,10 +_,18 @@
-             LOGGER.warn("Cannot remove entity " + entity + " from null entity slices (" + sectionX + "," + sectionZ + ")");
-         } else {
-             if (slices.isPreventingStatusUpdates()) {
--                throw new IllegalStateException("Attempting to remove entity " + entity + " from entity slices (" + sectionX + "," + sectionZ + ") that is receiving status updates");
-+                // Canvas start
-+               ((ServerLevel)entity.level()).scheduleOnMain(() -> {
-+                    removeEntity(entity);
-+                });
-+                return;
-+                // throw new IllegalStateException("Attempting to remove entity " + entity + " from entity slices (" + sectionX + "," + sectionZ + ") that is receiving status updates");
-+                // Canvas end
-             }
-             if (!slices.removeEntity(entity, sectionY)) {
-+                if (shouldWarn(entity)) { // Canvas
-                 LOGGER.warn("Failed to remove entity " + entity + " from entity slices (" + sectionX + "," + sectionZ + ")");
-+                } // Canvas
-             }
-         }
-         ((ChunkSystemEntity)entity).moonrise$setSectionX(Integer.MIN_VALUE);
-@@ -487,7 +_,9 @@
- 
-         Entity currentlyMapped;
-         if ((currentlyMapped = this.entityById.remove(entity.getId(), entity)) != entity) {
-+            if (shouldWarn(entity)) { // Canvas
-             LOGGER.warn("Failed to remove entity " + entity + " by id, current entity mapped: " + currentlyMapped);
-+            } // Canvas
-         }
- 
-         Entity[] currentlyMappedArr = new Entity[1];
-@@ -502,15 +_,23 @@
-         });
- 
-         if (currentlyMappedArr[0] != entity) {
-+            if (shouldWarn(entity)) { // Canvas
-             LOGGER.warn("Failed to remove entity " + entity + " by uuid, current entity mapped: " + currentlyMappedArr[0]);
-+            } // Canvas
-         }
- 
-         if (slices != null && slices.isEmpty()) {
-             this.onEmptySlices(sectionX, sectionZ);
-         }
-     }
--
 -    protected ChunkEntitySlices moveEntity(final Entity entity) {
-+    // Canvas start
-+
-+    public boolean shouldWarn(Entity entity) {
-+        return !(entity instanceof ItemEntity itemEntity) || !itemEntity.getItem().is(Items.AIR);
-+    }
-+    // Canvas end
-+
-+    protected synchronized ChunkEntitySlices moveEntity(final Entity entity) { // Canvas
++    protected synchronized ChunkEntitySlices moveEntity(final Entity entity) { // Canvas - synchronized
          // ensure we own the entity
          this.checkThread(entity, "Cannot move entity off-main");
- 
-@@ -532,10 +_,10 @@
-         // ensure the old section is owned by this tick thread
-         this.checkThread(sectionX, sectionZ, "Cannot move entity off-main");
- 
--        final ChunkEntitySlices old = this.getChunk(sectionX, sectionZ);
-+        final @Nullable ChunkEntitySlices old = this.getChunk(sectionX, sectionZ); // Canvas
-         final ChunkEntitySlices slices = this.getOrCreateChunk(newSectionX, newSectionZ);
- 
--        if (!old.removeEntity(entity, sectionY)) {
-+        if (old == null || !old.removeEntity(entity, sectionY)) { // Canvas
-             LOGGER.warn("Could not remove entity " + entity + " from its old chunk section (" + sectionX + "," + sectionY + "," + sectionZ + ") since it was not contained in the section");
-         }
- 
-@@ -547,7 +_,7 @@
-         ((ChunkSystemEntity)entity).moonrise$setSectionY(newSectionY);
-         ((ChunkSystemEntity)entity).moonrise$setSectionZ(newSectionZ);
- 
--        if (old.isEmpty()) {
-+        if (old == null || old.isEmpty()) { // Canvas
-             this.onEmptySlices(sectionX, sectionZ);
-         }
  
 @@ -950,9 +_,10 @@
          }

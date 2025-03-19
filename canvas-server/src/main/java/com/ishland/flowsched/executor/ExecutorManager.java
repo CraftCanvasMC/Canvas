@@ -1,5 +1,6 @@
 package com.ishland.flowsched.executor;
 
+import ca.spottedleaf.concurrentutil.util.Priority;
 import com.ishland.flowsched.structs.DynamicPriorityQueue;
 import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
@@ -31,18 +32,7 @@ public class ExecutorManager {
      * @param threadInitializer the thread initializer.
      */
     public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer) {
-        this(workerThreadCount, threadInitializer, 64);
-    }
-
-    /**
-     * Creates a new executor manager.
-     *
-     * @param workerThreadCount the number of worker threads.
-     * @param threadInitializer the thread initializer.
-     * @param priorityCount the number of priorities.
-     */
-    public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer, int priorityCount) {
-        globalWorkQueue = new DynamicPriorityQueue<>(priorityCount);
+        globalWorkQueue = new DynamicPriorityQueue<>();
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
             final WorkerThread thread = new WorkerThread(this);
@@ -171,7 +161,7 @@ public class ExecutorManager {
      * @param runnable the runnable.
      * @param priority the priority.
      */
-    public void schedule(Runnable runnable, int priority) {
+    public void schedule(Runnable runnable, Priority priority) {
         this.schedule(new SimpleTask(runnable, priority));
     }
 
@@ -181,7 +171,7 @@ public class ExecutorManager {
      * @param priority the priority.
      * @return the executor.
      */
-    public Executor executor(int priority) {
+    public Executor executor(Priority priority) {
         return runnable -> this.schedule(runnable, priority);
     }
 

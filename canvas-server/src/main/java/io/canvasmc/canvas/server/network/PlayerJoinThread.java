@@ -1,6 +1,6 @@
 package io.canvasmc.canvas.server.network;
 
-import io.canvasmc.canvas.command.ThreadedTickDiagnosis;
+import io.canvasmc.canvas.command.ThreadedServerHealthDump;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -82,9 +82,9 @@ public class PlayerJoinThread extends AbstractTickLoop {
     @Override
     public net.kyori.adventure.text.@NotNull Component debugInfo() {
         return net.kyori.adventure.text.Component.text()
-            .append(net.kyori.adventure.text.Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(net.kyori.adventure.text.Component.text("Actively Processing: ", ThreadedTickDiagnosis.PRIMARY))
-            .append(net.kyori.adventure.text.Component.text(this.activeConnections.size(), ThreadedTickDiagnosis.INFORMATION))
+            .append(net.kyori.adventure.text.Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(net.kyori.adventure.text.Component.text("Actively Processing: ", ThreadedServerHealthDump.PRIMARY))
+            .append(net.kyori.adventure.text.Component.text(this.activeConnections.size(), ThreadedServerHealthDump.INFORMATION))
             .build();
     }
 

@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import static io.canvasmc.canvas.scheduler.TickLoopScheduler.TIME_BETWEEN_TICKS;
 
-public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick implements WrappedTickLoop {
+public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick implements WrappedTickLoop, Comparable<AbstractTickLoop> {
     public static final Object SLEEP_HANDLE = new Object();
     public final MinecraftServer server;
     public final Logger LOGGER;
@@ -59,6 +59,7 @@ public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick im
     protected volatile boolean isSleeping = false;
     protected boolean wasSleeping = false;
     private volatile boolean processingTick = false;
+    private long startNanos;
 
     public AbstractTickLoop(final String formalName, final String debugName) {
         super();
@@ -66,6 +67,7 @@ public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick im
         this.name = formalName;
         this.debugName = debugName;
         this.server = MinecraftServer.getServer();
+        this.startNanos = System.nanoTime();
         MinecraftServer.getThreadedServer().loops.add(this);
     }
 
@@ -371,5 +373,10 @@ public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick im
     public void retire() {
         TickLoopScheduler.getInstance().scheduler.tryRetire(this);
         stopSpin();
+    }
+
+    @Override
+    public int compareTo(@NotNull final AbstractTickLoop o) {
+        return Long.compare(this.startNanos, o.startNanos);
     }
 }

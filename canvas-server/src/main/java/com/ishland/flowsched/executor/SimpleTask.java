@@ -1,13 +1,14 @@
 package com.ishland.flowsched.executor;
 
+import ca.spottedleaf.concurrentutil.util.Priority;
 import java.util.Objects;
 
 public class SimpleTask implements Task {
 
     private final Runnable wrapped;
-    private final int priority;
+    private final Priority priority;
 
-    public SimpleTask(Runnable wrapped, int priority) {
+    public SimpleTask(Runnable wrapped, Priority priority) {
         this.wrapped = Objects.requireNonNull(wrapped);
         this.priority = priority;
     }
@@ -32,7 +33,7 @@ public class SimpleTask implements Task {
     }
 
     @Override
-    public int priority() {
+    public Priority priority() {
         return this.priority;
     }
 }

@@ -149,7 +149,7 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
                 this.holder = new Holder(this, this.priority.priority, this.subOrder, this.id);
 
                 ChunkSystemTaskQueue.this.scheduledTasks.getAndIncrement();
-                ChunkSystemTaskQueue.this.chunkSystem.schedule(this.holder.task.execute, this.priority.isHigherOrEqualPriority(Priority.BLOCKING) ? ChunkPriorityManager.BLOCKING : this.priority.priority);
+                ChunkSystemTaskQueue.this.chunkSystem.schedule(this.holder.task.execute, this.priority);
             }
 
             if (ChunkSystemTaskQueue.this.isShutdown()) {

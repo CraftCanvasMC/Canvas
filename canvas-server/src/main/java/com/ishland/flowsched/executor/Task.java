@@ -1,5 +1,7 @@
 package com.ishland.flowsched.executor;
 
+import ca.spottedleaf.concurrentutil.util.Priority;
+
 public interface Task {
 
     void run(Runnable releaseLocks);
@@ -8,6 +10,6 @@ public interface Task {
 
     LockToken[] lockTokens();
 
-    int priority();
+    Priority priority();
 
 }

@@ -19,7 +19,7 @@ public class TheChunkSystem extends ExecutorManager {
     private boolean shutdown;
 
     public TheChunkSystem(final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
-        super(workerThreadCount, threadInitializer, ChunkPriorityManager.MAX_PRIORITY);
+        super(workerThreadCount, threadInitializer);
         LOGGER = LoggerFactory.getLogger("TheChunkSystem/" + name);
         this.name = name;
         LOGGER.info("Initialized new ChunkSystem '{}' with {} allocated threads", name, workerThreadCount);
@@ -159,7 +159,7 @@ public class TheChunkSystem extends ExecutorManager {
         }
 
         public final class ThreadPoolExecutor implements PrioritisedExecutor {
-            // only use this method for building tasks. nothing else
+            // only use this field for building tasks. nothing else
             private final ChunkSystemTaskQueue taskBuilder = new ChunkSystemTaskQueue(TheChunkSystem.this);
             private volatile boolean halt;
 

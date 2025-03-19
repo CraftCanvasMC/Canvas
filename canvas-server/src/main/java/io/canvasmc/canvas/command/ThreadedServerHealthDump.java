@@ -1,10 +1,14 @@
 package io.canvasmc.canvas.command;
 
+import io.canvasmc.canvas.CanvasBootstrap;
+import io.canvasmc.canvas.TickTimes;
+import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.ServerBuildInfoImpl;
 import java.text.DecimalFormat;
+import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -17,7 +21,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.jetbrains.annotations.NotNull;
 
-public class ThreadedTickDiagnosis {
+public class ThreadedServerHealthDump {
     public static final TextColor HEADER = TextColor.color(79, 164, 240);
     public static final TextColor PRIMARY = TextColor.color(48, 145, 237);
     public static final TextColor PRIME_ALT = TextColor.color(48, 157, 240);
@@ -32,7 +36,35 @@ public class ThreadedTickDiagnosis {
     public static boolean dump(@NotNull final CommandSender sender) {
         ThreadedServer server = MinecraftServer.getThreadedServer();
         int build = ServerBuildInfo.buildInfo().buildNumber().orElse(-1);
+        final int maxThreadCount = TickLoopScheduler.getInstance().scheduler.getThreads().length;
+        double totalUtil = 0.0;
+        final double minTps;
+        final double medianTps;
+        final double maxTps;
+        final DoubleArrayList allTps = new DoubleArrayList();
+        for (final AbstractTickLoop tickLoop : server.getTickLoops()) {
+            TickTimes timings15 = tickLoop.getTickTimes15s();
+            allTps.add(tickLoop.getTps15s().getAverage());
+            totalUtil += timings15.getUtilization();
+        }
+
+        allTps.sort(null);
+        if (!allTps.isEmpty()) {
+            minTps = allTps.getDouble(0);
+            maxTps = allTps.getDouble(allTps.size() - 1);
+
+            final int middle = allTps.size() >> 1;
+            if ((allTps.size() & 1) == 0) {
+                medianTps = (allTps.getDouble(middle - 1) + allTps.getDouble(middle)) / 2.0;
+            } else {
+                medianTps = allTps.getDouble(middle);
+            }
+        } else {
+            minTps = medianTps = maxTps = 20.0;
+        }
+
         TextComponent.@NotNull Builder root = Component.text();
+        final boolean experimental = ServerBuildInfoImpl.IS_EXPERIMENTAL;
         root.append(
             Component.text()
                 .append(Component.text("Server Tick Report", HEADER, TextDecoration.BOLD))
@@ -41,12 +73,23 @@ public class ThreadedTickDiagnosis {
                 .append(Component.text("Build Info: ", PRIMARY))
                 .append(Component.text(ServerBuildInfo.buildInfo().brandName() + "-", INFORMATION))
                 .append(
-                    build == -1 ? Component.text("LOCAL", TextColor.color(250, 40, 80))
+                    CanvasBootstrap.RUNNING_IN_IDE ? Component.text("IDE", TextColor.color(230, 65, 170), TextDecoration.BOLD) : (build == -1 ? Component.text("local", TextColor.color(250, 40, 80))
                         .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text("Running local/dev build, possibly unstable", TextColor.color(250, 40, 80))))
-                        : Component.text(build, ServerBuildInfoImpl.IS_EXPERIMENTAL ? TextColor.color(255, 119, 6) : INFORMATION)
-                        .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, ServerBuildInfoImpl.IS_EXPERIMENTAL ?
-                            Component.text("Experimental build, use with caution", TextColor.color(255, 119, 6)) : Component.text("Stable build", INFORMATION)))
+                        : Component.text(build, experimental ? TextColor.color(255, 119, 6) : INFORMATION)
+                        .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, experimental ?
+                            Component.text("Experimental build, use with caution", TextColor.color(255, 119, 6)) : Component.text("Stable build", INFORMATION))))
                 )
+                .append(NEW_LINE)
+                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                .append(Component.text("Git Info: ", PRIMARY))
+                .append(Component.text(ServerBuildInfo.buildInfo().gitBranch().orElse("unknown-branch") + ":" + ServerBuildInfo.buildInfo().gitCommit().orElse("unknown-commit"), INFORMATION))
+                .append(NEW_LINE)
+                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                .append(Component.text("Utilization: ", PRIMARY))
+                .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil), getColourForMSPT((totalUtil / ((double)(maxThreadCount * 100))) * 50.0)))
+                .append(Component.text("% / ", PRIMARY))
+                .append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION))
+                .append(Component.text("%", PRIMARY))
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("Online Players: ", PRIMARY))
@@ -56,17 +99,28 @@ public class ThreadedTickDiagnosis {
                 .append(Component.text("Total TickLoops: ", PRIMARY))
                 .append(Component.text(server.getTickLoops().size(), INFORMATION))
                 .append(NEW_LINE)
+                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                .append(Component.text("Lowest Loop TPS: ", PRIMARY))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps), getColourForTPS(minTps)))
+                .append(NEW_LINE)
+                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                .append(Component.text("Median Loop TPS: ", PRIMARY))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps), getColourForTPS(medianTps)))
+                .append(NEW_LINE)
+                .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                .append(Component.text("Highest Loop TPS: ", PRIMARY))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps), getColourForTPS(maxTps)))
+                .append(NEW_LINE)
         );
         root.append(Component.text()
             .append(Component.text("All TickLoops", HEADER, TextDecoration.BOLD))
             .append(NEW_LINE)
         );
-        for (final AbstractTickLoop tickLoop : server.getTickLoops()) {
+        for (final AbstractTickLoop tickLoop : server.getTickLoops().stream().sorted(AbstractTickLoop::compareTo).toList()) {
             String location = "[" + tickLoop.location() + "]";
             double mspt5s = tickLoop.tickTimes5s.getAverage();
             double tps5s = tickLoop.tps5s.getAverage();
             double util = tickLoop.tickTimes5s.getUtilization();
-            // TODO - `isHandlingTick` and `lastRespondTime`
             Component head = Component.text()
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("TickLoop of ", PRIMARY))

@@ -25,6 +25,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 
 public class CanvasBootstrap {
+    public static boolean RUNNING_IN_IDE = false;
     public static final Instant BOOT_TIME = Instant.now();
     private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
 

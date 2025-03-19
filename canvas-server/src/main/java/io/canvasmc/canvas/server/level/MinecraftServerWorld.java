@@ -3,7 +3,7 @@ package io.canvasmc.canvas.server.level;
 import com.google.common.collect.Maps;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
-import io.canvasmc.canvas.command.ThreadedTickDiagnosis;
+import io.canvasmc.canvas.command.ThreadedServerHealthDump;
 import io.canvasmc.canvas.entity.SleepingBlockEntity;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.AverageTickTimeAccessor;
@@ -203,38 +203,38 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
     @Override
     public @NotNull Component debugInfo() {
         TextComponent.Builder basic = Component.text()
-            .append(Component.text("Basic Information", ThreadedTickDiagnosis.HEADER, TextDecoration.BOLD))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
-            .append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("Pending Block Ticks: ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text(this.level().getBlockTicks().count(), ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
-            .append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("Pending Fluid Ticks: ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text(this.level().getFluidTicks().count(), ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
-            .append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("Local Players: ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text(this.level().players().size(), ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
-            .append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("Local Entities: ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text(this.level().entityTickList.entities.size(), ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
-            .append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("Ticking Chunks: ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text(this.level().getChunkSource().lastTickingChunksCount, ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE);
-        basic.append(Component.text("Tile Entities", ThreadedTickDiagnosis.HEADER, TextDecoration.BOLD))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
+            .append(Component.text("Basic Information", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
+            .append(ThreadedServerHealthDump.NEW_LINE)
+            .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("Pending Block Ticks: ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text(this.level().getBlockTicks().count(), ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE)
+            .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("Pending Fluid Ticks: ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text(this.level().getFluidTicks().count(), ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE)
+            .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("Local Players: ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text(this.level().players().size(), ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE)
+            .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("Local Entities: ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text(this.level().entityTickList.entities.size(), ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE)
+            .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("Ticking Chunks: ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text(this.level().getChunkSource().lastTickingChunksCount, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE);
+        basic.append(Component.text("Tile Entities", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
+            .append(ThreadedServerHealthDump.NEW_LINE)
             .append(doTileEntityInfo())
-            .append(ThreadedTickDiagnosis.NEW_LINE);
-        basic.append(Component.text("Entities", ThreadedTickDiagnosis.HEADER, TextDecoration.BOLD))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
+            .append(ThreadedServerHealthDump.NEW_LINE);
+        basic.append(Component.text("Entities", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
+            .append(ThreadedServerHealthDump.NEW_LINE)
             .append(doEntityInfo())
-            .append(ThreadedTickDiagnosis.NEW_LINE);
-        basic.append(Component.text("Neighbor Updates", ThreadedTickDiagnosis.HEADER, TextDecoration.BOLD))
-            .append(ThreadedTickDiagnosis.NEW_LINE)
+            .append(ThreadedServerHealthDump.NEW_LINE);
+        basic.append(Component.text("Neighbor Updates", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
+            .append(ThreadedServerHealthDump.NEW_LINE)
             .append(doNeighborInfo());
         return basic.build();
     }
@@ -282,18 +282,18 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
         }
 
         Map<Class<? extends CollectingNeighborUpdater.NeighborUpdates>, Integer> stackMap = buildNeighborCounts(stack);
-        root.append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("Stack Count: ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text(stackMap.values().stream().mapToInt(Integer::intValue).sum(), ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE);
+        root.append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("Stack Count: ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text(stackMap.values().stream().mapToInt(Integer::intValue).sum(), ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE);
         stackMap.forEach((clazz, count) -> root.append(Component.text("    "))
-            .append(Component.text("| " + clazz.getSimpleName() + ": ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text(count, ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE));
+            .append(Component.text("| " + clazz.getSimpleName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE));
         blockUpdateCounts.forEach((location, count) -> root.append(Component.text("    "))
-            .append(Component.text("\\ " + location.toDebugFileName() + ": ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text(count, ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE));
+            .append(Component.text("\\ " + location.toDebugFileName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE));
 
         blockUpdateCounts.clear();
         for (final CollectingNeighborUpdater.NeighborUpdates neighborUpdates : addedThisLayer) {
@@ -329,18 +329,18 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
         }
 
         stackMap = buildNeighborCounts(addedThisLayer);
-        root.append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("AddedThisLayer Count: ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text(stackMap.values().stream().mapToInt(Integer::intValue).sum(), ThreadedTickDiagnosis.PRIMARY))
-            .append(ThreadedTickDiagnosis.NEW_LINE);
+        root.append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("AddedThisLayer Count: ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text(stackMap.values().stream().mapToInt(Integer::intValue).sum(), ThreadedServerHealthDump.PRIMARY))
+            .append(ThreadedServerHealthDump.NEW_LINE);
         stackMap.forEach((clazz, count) -> root.append(Component.text("    "))
-            .append(Component.text("| " + clazz.getSimpleName() + ": ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text(count, ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE));
+            .append(Component.text("| " + clazz.getSimpleName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE));
         blockUpdateCounts.forEach((location, count) -> root.append(Component.text("    "))
-            .append(Component.text("\\ " + location.toDebugFileName() + ": ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text(count, ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE));
+            .append(Component.text("\\ " + location.toDebugFileName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE));
         return root.build();
     }
 
@@ -358,11 +358,11 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
     private @NotNull Component doTileEntityInfo() {
         TextComponent.@NotNull Builder root = text();
         ServerLevel world = this.level();
-        root.append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("World ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text("[" + world.dimension().location().toDebugFileName() + "]", ThreadedTickDiagnosis.INFORMATION))
-            .append(Component.text(":", ThreadedTickDiagnosis.PRIMARY))
-            .append(ThreadedTickDiagnosis.NEW_LINE);
+        root.append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("World ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text("[" + world.dimension().location().toDebugFileName() + "]", ThreadedServerHealthDump.INFORMATION))
+            .append(Component.text(":", ThreadedServerHealthDump.PRIMARY))
+            .append(ThreadedServerHealthDump.NEW_LINE);
         String filter = "*";
         final String cleanfilter = filter.replace("?", ".?").replace("*", ".*?");
         Set<ResourceLocation> names = BuiltInRegistries.BLOCK_ENTITY_TYPE.keySet().stream()
@@ -402,55 +402,55 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
 
         if (info.isEmpty()) {
             root.append(text("    No entities found.", RED))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+                .append(ThreadedServerHealthDump.NEW_LINE);
             return root.build();
         }
 
         int count = info.stream().mapToInt(Pair::getRight).sum();
         int nonTickingCount = nonEntityTicking.values().stream().mapToInt(Integer::intValue).sum();
-        root.append(Component.text("    Total Ticking: ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text((count - nonTickingCount), ThreadedTickDiagnosis.INFORMATION))
-            .append(Component.text(", Total Non-Ticking: ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text(nonTickingCount, ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE);
+        root.append(Component.text("    Total Ticking: ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text((count - nonTickingCount), ThreadedServerHealthDump.INFORMATION))
+            .append(Component.text(", Total Non-Ticking: ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text(nonTickingCount, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE);
 
         if (highest.get() != null) {
             BlockPos blockPos = highest.get().getMiddleBlockPosition(90);
             root.append(Component.text("    "))
-                .append(Component.text("[Teleport to most populated ChunkPos]", ThreadedTickDiagnosis.SECONDARY)
+                .append(Component.text("[Teleport to most populated ChunkPos]", ThreadedServerHealthDump.SECONDARY)
                     .clickEvent(ClickEvent.runCommand("/execute in " + world.dimension().location() + " run teleport @s " + blockPos.getX() + " " + blockPos.getY() + " " + blockPos.getZ())))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+                .append(ThreadedServerHealthDump.NEW_LINE);
         }
 
         info.forEach(e -> {
             int nonTicking = nonEntityTicking.getOrDefault(e.getKey(), 0);
             root.append(Component.text("       "))
-                .append(Component.text((e.getValue() - nonTicking), ThreadedTickDiagnosis.INFORMATION))
-                .append(Component.text(" (", ThreadedTickDiagnosis.PRIME_ALT))
-                .append(Component.text(nonTicking, ThreadedTickDiagnosis.INFORMATION))
-                .append(Component.text(") : ", ThreadedTickDiagnosis.PRIME_ALT))
-                .append(Component.text(e.getKey().toDebugFileName(), ThreadedTickDiagnosis.INFORMATION))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+                .append(Component.text((e.getValue() - nonTicking), ThreadedServerHealthDump.INFORMATION))
+                .append(Component.text(" (", ThreadedServerHealthDump.PRIME_ALT))
+                .append(Component.text(nonTicking, ThreadedServerHealthDump.INFORMATION))
+                .append(Component.text(") : ", ThreadedServerHealthDump.PRIME_ALT))
+                .append(Component.text(e.getKey().toDebugFileName(), ThreadedServerHealthDump.INFORMATION))
+                .append(ThreadedServerHealthDump.NEW_LINE);
         });
 
         if (highest.get() != null) {
-            root.append(Component.text("    Chunk with highest ticking block entities: ", ThreadedTickDiagnosis.PRIME_ALT))
-                .append(Component.text(highest + " (" + highestCount + " entities)", ThreadedTickDiagnosis.INFORMATION))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+            root.append(Component.text("    Chunk with highest ticking block entities: ", ThreadedServerHealthDump.PRIME_ALT))
+                .append(Component.text(highest + " (" + highestCount + " entities)", ThreadedServerHealthDump.INFORMATION))
+                .append(ThreadedServerHealthDump.NEW_LINE);
         }
 
-        return root.append(Component.text("* First number is ticking entities, second number is non-ticking entities", ThreadedTickDiagnosis.PRIMARY))
+        return root.append(Component.text("* First number is ticking entities, second number is non-ticking entities", ThreadedServerHealthDump.PRIMARY))
             .build();
     }
 
     private @NotNull Component doEntityInfo() {
         TextComponent.@NotNull Builder root = text();
         ServerLevel world = level();
-        root.append(Component.text(" - ", ThreadedTickDiagnosis.LIST, TextDecoration.BOLD))
-            .append(Component.text("World ", ThreadedTickDiagnosis.PRIMARY))
-            .append(Component.text("[" + world.dimension().location().toDebugFileName() + "]", ThreadedTickDiagnosis.INFORMATION))
-            .append(Component.text(":", ThreadedTickDiagnosis.PRIMARY))
-            .append(ThreadedTickDiagnosis.NEW_LINE);
+        root.append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("World ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text("[" + world.dimension().location().toDebugFileName() + "]", ThreadedServerHealthDump.INFORMATION))
+            .append(Component.text(":", ThreadedServerHealthDump.PRIMARY))
+            .append(ThreadedServerHealthDump.NEW_LINE);
 
         String filter = "*";
         final String cleanfilter = filter.replace("?", ".?").replace("*", ".*?");
@@ -490,43 +490,43 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
 
         if (info.isEmpty()) {
             root.append(text("    No entities found.", RED))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+                .append(ThreadedServerHealthDump.NEW_LINE);
             return root.build();
         }
 
         int count = info.stream().mapToInt(Pair::getRight).sum();
         int nonTickingCount = nonEntityTicking.values().stream().mapToInt(Integer::intValue).sum();
-        root.append(Component.text("    Total Ticking: ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text((count - nonTickingCount), ThreadedTickDiagnosis.INFORMATION))
-            .append(Component.text(", Total Non-Ticking: ", ThreadedTickDiagnosis.PRIME_ALT))
-            .append(Component.text(nonTickingCount, ThreadedTickDiagnosis.INFORMATION))
-            .append(ThreadedTickDiagnosis.NEW_LINE);
+        root.append(Component.text("    Total Ticking: ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text((count - nonTickingCount), ThreadedServerHealthDump.INFORMATION))
+            .append(Component.text(", Total Non-Ticking: ", ThreadedServerHealthDump.PRIME_ALT))
+            .append(Component.text(nonTickingCount, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE);
 
         if (highest.get() != null) {
             BlockPos blockPos = highest.get().getMiddleBlockPosition(90);
             root.append(Component.text("    "))
-                .append(Component.text("[Teleport to most populated ChunkPos]", ThreadedTickDiagnosis.SECONDARY)
+                .append(Component.text("[Teleport to most populated ChunkPos]", ThreadedServerHealthDump.SECONDARY)
                     .clickEvent(ClickEvent.runCommand("/execute in " + world.dimension().location() + " run teleport @s " + blockPos.getX() + " " + blockPos.getY() + " " + blockPos.getZ())))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+                .append(ThreadedServerHealthDump.NEW_LINE);
         }
 
         info.forEach(e -> {
             int nonTicking = nonEntityTicking.getOrDefault(e.getKey(), 0);
             root.append(Component.text("       "))
-                .append(Component.text((e.getValue() - nonTicking), ThreadedTickDiagnosis.INFORMATION))
-                .append(Component.text(" (", ThreadedTickDiagnosis.PRIME_ALT))
-                .append(Component.text(nonTicking, ThreadedTickDiagnosis.INFORMATION))
-                .append(Component.text(") : ", ThreadedTickDiagnosis.PRIME_ALT))
-                .append(Component.text(e.getKey().toDebugFileName(), ThreadedTickDiagnosis.INFORMATION))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+                .append(Component.text((e.getValue() - nonTicking), ThreadedServerHealthDump.INFORMATION))
+                .append(Component.text(" (", ThreadedServerHealthDump.PRIME_ALT))
+                .append(Component.text(nonTicking, ThreadedServerHealthDump.INFORMATION))
+                .append(Component.text(") : ", ThreadedServerHealthDump.PRIME_ALT))
+                .append(Component.text(e.getKey().toDebugFileName(), ThreadedServerHealthDump.INFORMATION))
+                .append(ThreadedServerHealthDump.NEW_LINE);
         });
 
         if (highest.get() != null) {
-            root.append(Component.text("    Chunk with highest ticking entities: ", ThreadedTickDiagnosis.PRIME_ALT))
-                .append(Component.text(highest + " (" + highestCount + " entities)", ThreadedTickDiagnosis.INFORMATION))
-                .append(ThreadedTickDiagnosis.NEW_LINE);
+            root.append(Component.text("    Chunk with highest ticking entities: ", ThreadedServerHealthDump.PRIME_ALT))
+                .append(Component.text(highest + " (" + highestCount + " entities)", ThreadedServerHealthDump.INFORMATION))
+                .append(ThreadedServerHealthDump.NEW_LINE);
         }
-        return root.append(Component.text("* First number is ticking entities, second number is non-ticking entities", ThreadedTickDiagnosis.PRIMARY))
+        return root.append(Component.text("* First number is ticking entities, second number is non-ticking entities", ThreadedServerHealthDump.PRIMARY))
             .build();
     }
 }
