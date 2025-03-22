@@ -43,12 +43,12 @@ public class Config {
             "Sets the thread priority for tick loop threads",
             "",
             "The default uses the algorithm bellow to match the main thread calculations for thread priority:",
-            "- priority = availableProcessors > 4 ? 8 : NORM_PRIORITY + 2",
+            "- priority = availableProcessors > 4 ? 10 : NORM_PRIORITY + 2",
             "",
             "References:",
             "- https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html#setPriority(int)"
         })
-        public int tickLoopThreadPriority = Runtime.getRuntime().availableProcessors() > 4 ? 8 : Thread.NORM_PRIORITY + 2;
+        public int tickLoopThreadPriority = Runtime.getRuntime().availableProcessors() > 4 ? 10 : Thread.NORM_PRIORITY + 2;
 
         @Comment("Defines the amount of threads allocated to the tick scheduler")
         public int allocatedSchedulerThreadCount;

@@ -67,6 +67,14 @@
  import net.minecraft.world.level.material.PushReaction;
  import net.minecraft.world.level.portal.PortalShape;
  import net.minecraft.world.level.portal.TeleportTransition;
+@@ -133,6 +_,7 @@
+ import net.minecraft.world.scores.PlayerTeam;
+ import net.minecraft.world.scores.ScoreHolder;
+ import net.minecraft.world.scores.Team;
++import org.agrona.collections.ObjectHashSet;
+ import org.slf4j.Logger;
+ 
+ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess, ScoreHolder, ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity, ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity {  // Paper - rewrite chunk system // Paper - optimise entity tracker
 @@ -145,7 +_,7 @@
      }
  
@@ -85,15 +93,18 @@
  
      public org.bukkit.craftbukkit.entity.CraftEntity getBukkitEntity() {
          if (this.bukkitEntity == null) {
-@@ -260,7 +_,7 @@
+@@ -260,9 +_,9 @@
      public int tickCount;
      private int remainingFireTicks = -this.getFireImmuneTicks();
      public boolean wasTouchingWater;
 -    protected Object2DoubleMap<TagKey<Fluid>> fluidHeight = new Object2DoubleArrayMap<>(2);
 +    protected Object2DoubleMap<TagKey<Fluid>> fluidHeight = Object2DoubleMaps.synchronize(new Object2DoubleArrayMap<>(2)); // Canvas - synchronize
      protected boolean wasEyeInWater;
-     private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
+-    private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
++    private final Set<TagKey<Fluid>> fluidOnEyes = new ObjectHashSet<>(); // Canvas - agrona
      public int invulnerableTime;
+     protected boolean firstTick = true;
+     protected final SynchedEntityData entityData;
 @@ -293,7 +_,7 @@
      protected UUID uuid; // Purpur - Add toggle for RNG manipulation
      protected String stringUUID; // Purpur - Add toggle for RNG manipulation
@@ -183,6 +194,44 @@
          }
      }
  
+@@ -1660,10 +_,19 @@
+                 for (BlockPos blockPos : BlockGetter.boxTraverseBlocks(vec3, vec31, aabb)) {
+                     if (!this.isAlive()) {
+                         return;
++                    // Canvas start - optimize iteration
++                    }
++                    long blockKey = blockPos.asLong();
++                    if (!set.add(blockKey)) {
++                        continue;
+                     }
+ 
+-                    BlockState blockState = this.level().getBlockState(blockPos);
+-                    if (!blockState.isAir() && set.add(blockPos.asLong())) {
++                    BlockState blockState = this.level.getBlockState(blockPos);
++                    if (blockState.isAir()) {
++                        continue;
++                    }
++                    if (true) { // - we just did these checks, so this is already true
++                    // Canvas end
+                         try {
+                             VoxelShape entityInsideCollisionShape = blockState.getEntityInsideCollisionShape(this.level(), blockPos);
+                             if (entityInsideCollisionShape != Shapes.block()
+@@ -1921,11 +_,14 @@
+     }
+ 
+     protected boolean updateInWaterStateAndDoFluidPushing() {
++        if (!this.fluidHeight.isEmpty()) { // Canvas - don't clear if empty already
+         this.fluidHeight.clear();
++        } // Canvas
+         this.updateInWaterStateAndDoWaterCurrentPushing();
+         double d = this.level().dimensionType().ultraWarm() ? 0.007 : 0.0023333333333333335;
++        boolean isInWater = this.isInWater(); if (isInWater) return true; // Canvas - why check for lava if we are already in water
+         boolean flag = this.updateFluidHeightAndDoFluidPushing(FluidTags.LAVA, d);
+-        return this.isInWater() || flag;
++        return isInWater || flag; // Canvas
+     }
+ 
+     public void updateInWaterStateAndDoWaterCurrentPushing() { // Purpur - Movement options for armor stands - package-private -> public - TODO: use AT file
 @@ -1955,11 +_,23 @@
                  && abstractBoat.getBoundingBox().minY <= eyeY
          )) {

@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.server;
 
 import io.canvasmc.canvas.CanvasBootstrap;
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
@@ -40,8 +41,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
     protected final Queue<AbstractTickLoop> loops;
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final DedicatedServer server;
-    public MultiWatchdogThread.ThreadEntry watchdogEntry;
-    private long tickSection;
+    protected long tickSection;
     private boolean started = false;
 
     public ThreadedServer(DedicatedServer server) {
@@ -101,11 +101,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
             LOGGER.info("Running delayed init tasks");
             this.server.server.getScheduler().mainThreadHeartbeat();
 
-            final long actualDoneTimeMs = System.currentTimeMillis() - CanvasBootstrap.BOOT_TIME.toEpochMilli();
-            LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1_000.00D));
             this.server.server.spark.enableBeforePlugins();
-            this.watchdogEntry = MultiWatchdogThread.register(new MultiWatchdogThread.ThreadEntry(this.server.serverThread, "main thread", "Server", this.server::isTicking, () -> false));
-            this.watchdogEntry.doTick();
 
             MultiWatchdogThread.hasStarted = true;
             //noinspection removal
@@ -135,9 +131,16 @@ public class ThreadedServer implements ThreadedBukkitServer {
                 }
             }
 
-            while (this.server.isRunning()) {
-                tickSection = this.getServer().tick(tickSection);
-            }
+            // build main thread tick and init the scheduler
+            MainThreadTick mainThreadHeartBeat = new MainThreadTick("Main", "main-thread", this);
+            mainThreadHeartBeat.scheduleToPool(); // prepare the scheduler
+            // we can now exit the init thread, since
+            // we run all tick-loops in the scheduler
+            // system, so we don't need to keep this
+            // as a dedicated thread.
+            LOGGER.info("Exiting boot thread...");
+            final long actualDoneTimeMs = System.currentTimeMillis() - CanvasBootstrap.BOOT_TIME.toEpochMilli();
+            LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1_000.00D));
         } catch (Throwable throwable2) {
             //noinspection removal
             if (throwable2 instanceof ThreadDeath) {
@@ -157,18 +160,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
             }
 
             this.server.onServerCrash(crashreport);
-        } finally {
-            try {
-                this.server.stopped = true;
-                this.server.stopServer();
-            } catch (Throwable throwable3) {
-                MinecraftServer.LOGGER.error("Exception stopping the server", throwable3);
-            } finally {
-                if (this.server.services.profileCache() != null) {
-                    this.server.services.profileCache().clearExecutor();
-                }
-            }
-
         }
     }
 
