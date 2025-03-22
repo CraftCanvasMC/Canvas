@@ -131,16 +131,11 @@ public class ThreadedServer implements ThreadedBukkitServer {
                 }
             }
 
-            // build main thread tick and init the scheduler
-            MainThreadTick mainThreadHeartBeat = new MainThreadTick("Main", "main-thread", this);
-            mainThreadHeartBeat.scheduleToPool(); // prepare the scheduler
-            // we can now exit the init thread, since
-            // we run all tick-loops in the scheduler
-            // system, so we don't need to keep this
-            // as a dedicated thread.
-            LOGGER.info("Exiting boot thread...");
             final long actualDoneTimeMs = System.currentTimeMillis() - CanvasBootstrap.BOOT_TIME.toEpochMilli();
             LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1_000.00D));
+            while (this.server.isRunning()) {
+                tickSection = this.getServer().tick(tickSection);
+            }
         } catch (Throwable throwable2) {
             //noinspection removal
             if (throwable2 instanceof ThreadDeath) {
@@ -160,6 +155,18 @@ public class ThreadedServer implements ThreadedBukkitServer {
             }
 
             this.server.onServerCrash(crashreport);
+        } finally {
+            try {
+                this.server.stopped = true;
+                this.server.stopServer();
+            } catch (Throwable throwable3) {
+                MinecraftServer.LOGGER.error("Exception stopping the server", throwable3);
+            } finally {
+                if (this.server.services.profileCache() != null) {
+                    this.server.services.profileCache().clearExecutor();
+                }
+            }
+
         }
     }
 
