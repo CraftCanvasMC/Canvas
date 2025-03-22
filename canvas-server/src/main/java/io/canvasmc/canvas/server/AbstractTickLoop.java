@@ -13,7 +13,6 @@ import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportType;
-import net.minecraft.ReportedException;
 import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerTickRateManager;
@@ -59,7 +58,7 @@ public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick im
     protected volatile boolean isSleeping = false;
     protected boolean wasSleeping = false;
     private volatile boolean processingTick = false;
-    private long startNanos;
+    private final long startNanos;
 
     public AbstractTickLoop(final String formalName, final String debugName) {
         super();

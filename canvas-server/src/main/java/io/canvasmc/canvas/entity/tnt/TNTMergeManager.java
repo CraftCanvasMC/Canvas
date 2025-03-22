@@ -12,10 +12,12 @@ public class TNTMergeManager {
     public static final Map<Level, AtomicInteger> tntCount = new ConcurrentHashMap<>();
 
     public static void onEntityUnload(@NotNull Entity entity) {
-        if (entity.getType() == EntityType.TNT) tntCount.computeIfAbsent(entity.level(), (_) -> new AtomicInteger(0)).decrementAndGet();
+        if (entity.getType() == EntityType.TNT)
+            tntCount.computeIfAbsent(entity.level(), (_) -> new AtomicInteger(0)).decrementAndGet();
     }
 
     public static void onEntityLoad(@NotNull Entity entity) {
-        if (entity.getType() == EntityType.TNT) tntCount.computeIfAbsent(entity.level(), (_) -> new AtomicInteger(0)).incrementAndGet();
+        if (entity.getType() == EntityType.TNT)
+            tntCount.computeIfAbsent(entity.level(), (_) -> new AtomicInteger(0)).incrementAndGet();
     }
 }

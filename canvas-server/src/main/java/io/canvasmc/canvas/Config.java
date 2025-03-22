@@ -67,7 +67,6 @@ public class Config {
         public boolean emptySleepPerWorlds = true;
     }
 
-    @Comment("Chunk related config options")
     public Chunks chunks = new Chunks();
     public static class Chunks {
 
@@ -182,9 +181,7 @@ public class Config {
 
         public TNT tnt = new TNT();
         public static class TNT {
-            public boolean enableFasterTntOptimization = true;
             public boolean explosionNoBlockDamage = false;
-            public double tntRandomRange = -1;
 
             @Comment(value = {
                 "Enables 'merge tnt logic', which makes it so that nearby tnt are merged together,",

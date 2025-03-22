@@ -43,7 +43,7 @@ public class MultiWatchdogThread extends TickThread {
     private long timeoutTime;
     private boolean restart;
     private volatile boolean stopping;
-    private String BREAK = "------------------------------";
+    private final String BREAK = "------------------------------";
 
     private MultiWatchdogThread(long timeoutTime, boolean restart) {
         super("MutliLoop Watchdog Thread");

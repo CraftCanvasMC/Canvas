@@ -181,6 +181,15 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
     }
 
     @Override
+    public void wake() {
+        // only wake the world if it has players
+        // if it doesn't then why wake it...?
+        if (!this.level().players().isEmpty()) {
+            super.wake();
+        }
+    }
+
+    @Override
     public boolean isTicking() {
         return super.isTicking() && this.tickCount >= 1;
     }

@@ -7,8 +7,8 @@ import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.ServerBuildInfoImpl;
-import java.text.DecimalFormat;
 import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
+import java.text.DecimalFormat;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -86,7 +86,7 @@ public class ThreadedServerHealthDump {
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("Utilization: ", PRIMARY))
-                .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil), getColourForMSPT((totalUtil / ((double)(maxThreadCount * 100))) * 50.0)))
+                .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil), getColourForMSPT((totalUtil / ((double) (maxThreadCount * 100))) * 50.0)))
                 .append(Component.text("% / ", PRIMARY))
                 .append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION))
                 .append(Component.text("%", PRIMARY))

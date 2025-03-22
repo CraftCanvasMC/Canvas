@@ -21,7 +21,7 @@ public final class Int2ObjectConcurrentHashMap<V> implements Int2ObjectMap<V> {
         if (initialCapacity < 0) {
             throw new IllegalArgumentException("Initial capacity cannot be negative: " + initialCapacity);
         }
-        this.backing = new ConcurrentHashMap<>(initialCapacity);
+        this.backing = new ConcurrentHashMap<>(initialCapacity, 0.9F);
     }
 
     public Int2ObjectConcurrentHashMap(Map<Integer, V> map) {

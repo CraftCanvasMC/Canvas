@@ -179,12 +179,23 @@
      private final StructureManager structureManager;
      private final StructureCheck structureCheck;
      private final boolean tickTime;
-@@ -218,6 +_,11 @@
+@@ -218,6 +_,22 @@
      public boolean hasEntityMoveEvent; // Paper - Add EntityMoveEvent
      private final alternate.current.wire.WireHandler wireHandler = new alternate.current.wire.WireHandler(this); // Paper - optimize redstone (Alternate Current)
      public boolean hasRidableMoveEvent = false; // Purpur - Ridables
 +    // Canvas start - Threaded Dimensions
-+    private int emptyTicks;
++    // we add a lock on entity callbacks because plugins,
++    // commands, etc, can execute on any thread.
++    // because of this, the entity lookup updates are no
++    // longer stable or safe. to combat this, we add
++    // a lock on entity move/remove/add per level
++    // which essentially makes it so that only 1
++    // entity per level can be moved/removed/added
++    // at a time. while this is ungodly stupid, this
++    // is the only way to do this reliably, given that
++    // we can't lock per chunk(if the entity is moving
++    // into a new chunk, then it won't lock on the new chunk)
++    public final Object entityLevelCallbackLock = new Object();
 +    private int sendAllPlayerInfoIn;
 +    public TPSCalculator tpsCalculator = new TPSCalculator();
 +    // Canvas end
@@ -431,32 +442,37 @@
          }
  
          this.handlingTick = false;
-@@ -816,9 +_,15 @@
+@@ -816,46 +_,74 @@
              }
  
              io.papermc.paper.entity.activation.ActivationRange.activateEntities(this); // Paper - EAR
 -            this.entityTickList
 -                .forEach(
 -                    entity -> {
-+            /* // Canvas start // - threaded entity ticking
-+            for (final Entity entity : this.entityTickList.entities) {
-+                if (Config.shouldCheckMasks && Config.COMPILED_LOCATIONS.contains(entity.getTypeLocation())) {
-+                    int lived = entity.tickCount;
-+                    if (!entity.getMask().shouldTick || lived % entity.getMask().tickRate != 0) {
-+                        continue;
-+                    }
-+                }
-+            // Canvas end
-                         if (!entity.isRemoved()) {
-                             if (!tickRateManager.isEntityFrozen(entity)) {
-                                 profilerFiller.push("checkDespawn");
-@@ -841,21 +_,75 @@
-                             }
-                         }
-                     }
+-                        if (!entity.isRemoved()) {
+-                            if (!tickRateManager.isEntityFrozen(entity)) {
+-                                profilerFiller.push("checkDespawn");
+-                                entity.checkDespawn();
+-                                profilerFiller.pop();
+-                                if (true) { // Paper - rewrite chunk system
+-                                    Entity vehicle = entity.getVehicle();
+-                                    if (vehicle != null) {
+-                                        if (!vehicle.isRemoved() && vehicle.hasPassenger(entity)) {
+-                                            return;
+-                                        }
+-
+-                                        entity.stopRiding();
+-                                    }
+-
+-                                    profilerFiller.push("tick");
+-                                    this.guardEntityTick(this::tickNonPassenger, entity);
+-                                    profilerFiller.pop();
+-                                }
+-                            }
+-                        }
+-                    }
 -                );
-+            */ // Canvas // - threaded entity ticking
-+            this.tickEntities(false); // Canvas - threaded entity ticking
++            this.tickEntities(); // Canvas - optimize entity ticking
              profilerFiller.pop();
 -            this.tickBlockEntities();
 +            this.tickBlockEntities(profilerFiller);
@@ -480,9 +496,9 @@
 +        explosionDensityCache.clear();
 +        // Canvas end
 +    }
-+    // Canvas start - threaded entity ticking
++    // Canvas start - optimized entity ticking
 +
-+    public void tickEntities(boolean isThreaded) {
++    public void tickEntities() {
 +        this.entityTickList.forEach((entity) -> {
 +            if (Config.CHECK_ENTITY_MASKS && Config.COMPILED_ENTITY_MASK_LOCATIONS.contains(entity.getTypeLocation())) {
 +                int lived = entity.tickCount;

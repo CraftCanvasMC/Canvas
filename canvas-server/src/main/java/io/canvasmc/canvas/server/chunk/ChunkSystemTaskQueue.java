@@ -119,6 +119,7 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
         private Priority priority;
         private long subOrder;
         private ChunkSystemTaskQueue.PrioritisedQueuedTask.Holder holder;
+
         public PrioritisedQueuedTask(final Runnable execute, final Priority priority, final long subOrder) {
             if (!Priority.isValidPriority(priority)) {
                 throw new IllegalArgumentException("Invalid priority " + priority);

@@ -1,6 +1,5 @@
 package io.canvasmc.canvas.server;
 
-import com.google.common.collect.Sets;
 import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;

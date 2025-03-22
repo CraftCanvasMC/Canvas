@@ -13,8 +13,8 @@ public class ExecutorManager {
 
     public final DynamicPriorityQueue<Task> globalWorkQueue; // Canvas - private -> protected
     protected final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>(); // Canvas - private -> protected
-    final Object workerMonitor = new Object();
     protected final WorkerThread[] workerThreads; // Canvas - private -> protected
+    final Object workerMonitor = new Object();
 
     /**
      * Creates a new executor manager.
@@ -22,7 +22,8 @@ public class ExecutorManager {
      * @param workerThreadCount the number of worker threads.
      */
     public ExecutorManager(int workerThreadCount) {
-        this(workerThreadCount, thread -> {});
+        this(workerThreadCount, thread -> {
+        });
     }
 
     /**
@@ -77,6 +78,7 @@ public class ExecutorManager {
 
     /**
      * Release the locks held by the given task.
+     *
      * @param task the task.
      */
     void releaseLocks(Task task) {
@@ -111,6 +113,7 @@ public class ExecutorManager {
 
     /**
      * Polls an executable task from the global work queue.
+     *
      * @return the task, or {@code null} if no task is executable.
      */
     Task pollExecutableTask() {
@@ -134,6 +137,7 @@ public class ExecutorManager {
 
     /**
      * Schedules a task.
+     *
      * @param task the task.
      */
     public void schedule(Task task) {

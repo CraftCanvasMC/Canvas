@@ -1,8 +1,6 @@
 package io.canvasmc.canvas.server.chunk;
 
-import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.util.NamedAgnosticThreadFactory;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import net.minecraft.server.MinecraftServer;
