@@ -26,7 +26,7 @@ public final class ThreadLocalRandomSource implements BitRandomSource {
 
     @Override
     public int nextInt(final int bound) {
-        return ThreadLocalRandom.current().nextInt(bound);
+        return ThreadLocalRandom.current().nextInt(Math.abs(bound));
     }
 
     @Override
