@@ -5,6 +5,8 @@ import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.command.ThreadedServerHealthDump;
 import io.canvasmc.canvas.entity.SleepingBlockEntity;
+import io.canvasmc.canvas.region.ServerRegions;
+import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 import java.util.ArrayDeque;
@@ -20,7 +22,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -83,6 +87,8 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
 
     @Override
     protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
+        int processedPolledCount = 0;
+        while (this.pollInternal() && !shutdown) processedPolledCount++;
         MinecraftServer server = MinecraftServer.getServer();
         int i = server.pauseWhileEmptySeconds() * 20;
         if (Config.INSTANCE.ticking.emptySleepPerWorlds && i > 0) {
@@ -211,28 +217,53 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
 
     @Override
     public @NotNull Component debugInfo() {
+        final List<ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>> regions =
+            new ArrayList<>();
+        this.level().regioniser.computeForAllRegions((Consumer<ThreadedRegionizer.ThreadedRegion>) regions::add);
         TextComponent.Builder basic = Component.text()
             .append(Component.text("Basic Information", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
-            .append(ThreadedServerHealthDump.NEW_LINE)
+            .append(ThreadedServerHealthDump.NEW_LINE);
+        int pendingBlock = 0;
+        int pendingFluid = 0;
+        int localPlayers = 0;
+        int localEntities = 0;
+        if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            pendingBlock += this.level().getBlockTicks().count();
+            pendingFluid += this.level().getFluidTicks().count();
+            localPlayers += this.level().getLocalPlayers().size();
+            localEntities += ServerRegions.getTickData(this.level()).getLocalEntitiesCopy().length;
+        } else {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : regions) {
+                pendingBlock += region.getData().tickData.getBlockLevelTicks().count();
+                pendingFluid += region.getData().tickData.getFluidLevelTicks().count();
+                localPlayers += region.getData().tickData.getLocalPlayers().size();
+                localEntities += region.getData().tickData.getLocalEntitiesCopy().length;
+            }
+        }
+        basic
             .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
             .append(Component.text("Pending Block Ticks: ", ThreadedServerHealthDump.PRIMARY))
-            .append(Component.text(this.level().getBlockTicks().count(), ThreadedServerHealthDump.INFORMATION))
+            .append(Component.text(pendingBlock, ThreadedServerHealthDump.INFORMATION))
             .append(ThreadedServerHealthDump.NEW_LINE)
             .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
             .append(Component.text("Pending Fluid Ticks: ", ThreadedServerHealthDump.PRIMARY))
-            .append(Component.text(this.level().getFluidTicks().count(), ThreadedServerHealthDump.INFORMATION))
+            .append(Component.text(pendingFluid, ThreadedServerHealthDump.INFORMATION))
             .append(ThreadedServerHealthDump.NEW_LINE)
             .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
             .append(Component.text("Local Players: ", ThreadedServerHealthDump.PRIMARY))
-            .append(Component.text(this.level().players().size(), ThreadedServerHealthDump.INFORMATION))
+            .append(Component.text(localPlayers, ThreadedServerHealthDump.INFORMATION))
             .append(ThreadedServerHealthDump.NEW_LINE)
             .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
             .append(Component.text("Local Entities: ", ThreadedServerHealthDump.PRIMARY))
-            .append(Component.text(this.level().entityTickList.entities.size(), ThreadedServerHealthDump.INFORMATION))
-            .append(ThreadedServerHealthDump.NEW_LINE)
-            .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text(localEntities, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE);
+        basic.append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
             .append(Component.text("Ticking Chunks: ", ThreadedServerHealthDump.PRIMARY))
             .append(Component.text(this.level().getChunkSource().lastTickingChunksCount, ThreadedServerHealthDump.INFORMATION))
+            .append(ThreadedServerHealthDump.NEW_LINE)
+            .append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
+            .append(Component.text("Regions: ", ThreadedServerHealthDump.PRIMARY))
+            .append(Component.text(regions.size(), ThreadedServerHealthDump.INFORMATION))
             .append(ThreadedServerHealthDump.NEW_LINE);
         basic.append(Component.text("Tile Entities", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
             .append(ThreadedServerHealthDump.NEW_LINE)
@@ -254,7 +285,7 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
         List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
         Deque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>();
         Map<ResourceLocation, Integer> blockUpdateCounts = new HashMap<>();
-        for (final CollectingNeighborUpdater updater : CollectingNeighborUpdater.COLLECTED_COLLECTING_NEIGHBOR_UPDATERS.get(world)) {
+        for (final CollectingNeighborUpdater updater : CollectingNeighborUpdater.COLLECTED_COLLECTING_NEIGHBOR_UPDATERS.getOrDefault(world, List.of())) {
             addedThisLayer.addAll(updater.addedThisLayer);
             stack.addAll(updater.stack);
         }
@@ -473,7 +504,7 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
         final AtomicReference<ChunkPos> highest = new AtomicReference<>();
         final AtomicInteger highestCount = new AtomicInteger();
 
-        world.getAllEntities().forEach(e -> {
+        world.getAllRegionizedEntities().forEach(e -> {
             ResourceLocation key = EntityType.getKey(e.getType());
             MutablePair<Integer, Map<ChunkPos, Integer>> info = list.computeIfAbsent(key, k -> MutablePair.of(0, Maps.newHashMap()));
             ChunkPos chunk = e.chunkPosition();

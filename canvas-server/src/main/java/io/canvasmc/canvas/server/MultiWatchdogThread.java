@@ -198,7 +198,7 @@ public class MultiWatchdogThread extends TickThread {
 
             for (final RunningTick tick : ticks) {
                 final long elapsed = now - tick.lastPrint;
-                if (elapsed <= TimeUnit.SECONDS.toNanos(5L)) {
+                if (elapsed <= TimeUnit.SECONDS.toNanos(2L)) {
                     continue;
                 }
                 tick.lastPrint = now;

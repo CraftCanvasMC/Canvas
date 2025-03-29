@@ -46,6 +46,8 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop {
 
     @Override
     protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
+        int processedPolledCount = 0;
+        while (this.pollInternal() && !shutdown) processedPolledCount++;
         this.tick(hasTimeLeft);
     }
 
@@ -157,20 +159,12 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop {
 
     public void tick(BooleanSupplier hasTimeLeft) {
         ProfilerFiller profilerFiller = Profiler.get();
-        if (MinecraftServer.getThreadedServer().hasStarted()) {
-            for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-                ServerChunkCache chunkSource = level.getChunkSource();
-                level.moonrise$getPlayerChunkLoader().tick();
-                level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
-                chunkSource.broadcastChangedChunks(profilerFiller);
-                chunkSource.chunkMap.tick(hasTimeLeft, true);
-            }
-        } else {
-            MinecraftServer.getServer().getAllLevels().forEach((level -> {
-                level.moonrise$getPlayerChunkLoader().tick();
-                level.getChunkSource().pollTask();
-                level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
-            }));
+        for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+            ServerChunkCache chunkSource = level.getChunkSource();
+            level.moonrise$getPlayerChunkLoader().tick();
+            level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
+            chunkSource.broadcastChangedChunks(profilerFiller);
+            chunkSource.chunkMap.tick(hasTimeLeft, true);
         }
         if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
             MoonriseCommon.WORKER_POOL.wakeup();

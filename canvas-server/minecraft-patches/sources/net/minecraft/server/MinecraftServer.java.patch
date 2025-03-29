@@ -1,14 +1,6 @@
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -6,6 +_,7 @@
- import com.google.common.collect.Lists;
- import com.google.common.collect.Maps;
- import com.google.common.collect.Sets;
-+import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
- import com.mojang.authlib.GameProfile;
- import com.mojang.authlib.GameProfileRepository;
- import com.mojang.authlib.minecraft.MinecraftSessionService;
-@@ -13,6 +_,16 @@
+@@ -13,6 +_,15 @@
  import com.mojang.jtracy.DiscontinuousFrame;
  import com.mojang.jtracy.TracyClient;
  import com.mojang.logging.LogUtils;
@@ -19,7 +11,6 @@
 +import io.canvasmc.canvas.server.MultiWatchdogThread;
 +import io.canvasmc.canvas.server.ThreadedServer;
 +import io.canvasmc.canvas.server.level.TickRateManagerInstance;
-+import io.canvasmc.canvas.server.network.PlayerJoinThread;
 +import io.canvasmc.canvas.util.TPSCalculator;
 +import io.canvasmc.canvas.util.AsyncProcessor;
  import it.unimi.dsi.fastutil.longs.LongIterator;
@@ -33,10 +24,11 @@
  import java.util.List;
  import java.util.Locale;
  import java.util.Map;
-@@ -43,6 +_,8 @@
+@@ -42,7 +_,8 @@
+ import java.util.Map.Entry;
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.Executor;
- import java.util.concurrent.RejectedExecutionException;
+-import java.util.concurrent.RejectedExecutionException;
 +import java.util.concurrent.Executors;
 +import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicReference;
@@ -58,7 +50,14 @@
  import net.minecraft.server.level.DemoMode;
  import net.minecraft.server.level.PlayerRespawnLogic;
  import net.minecraft.server.level.ServerChunkCache;
-@@ -136,6 +_,7 @@
+@@ -129,13 +_,13 @@
+ import net.minecraft.util.profiling.metrics.storage.MetricsPersister;
+ import net.minecraft.util.thread.ReentrantBlockableEventLoop;
+ import net.minecraft.world.Difficulty;
+-import net.minecraft.world.RandomSequences;
+ import net.minecraft.world.entity.ai.village.VillageSiege;
+ import net.minecraft.world.entity.npc.CatSpawner;
+ import net.minecraft.world.entity.npc.WanderingTraderSpawner;
  import net.minecraft.world.entity.player.Player;
  import net.minecraft.world.flag.FeatureFlagSet;
  import net.minecraft.world.flag.FeatureFlags;
@@ -66,6 +65,22 @@
  import net.minecraft.world.item.alchemy.PotionBrewing;
  import net.minecraft.world.item.crafting.RecipeManager;
  import net.minecraft.world.level.ChunkPos;
+@@ -150,7 +_,6 @@
+ import net.minecraft.world.level.biome.BiomeManager;
+ import net.minecraft.world.level.block.Block;
+ import net.minecraft.world.level.block.entity.FuelValues;
+-import net.minecraft.world.level.border.BorderChangeListener;
+ import net.minecraft.world.level.border.WorldBorder;
+ import net.minecraft.world.level.chunk.storage.ChunkIOErrorReporter;
+ import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+@@ -161,7 +_,6 @@
+ import net.minecraft.world.level.levelgen.WorldOptions;
+ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
+ import net.minecraft.world.level.storage.CommandStorage;
+-import net.minecraft.world.level.storage.DerivedLevelData;
+ import net.minecraft.world.level.storage.DimensionDataStorage;
+ import net.minecraft.world.level.storage.LevelData;
+ import net.minecraft.world.level.storage.LevelResource;
 @@ -171,18 +_,21 @@
  import net.minecraft.world.level.storage.WorldData;
  import net.minecraft.world.phys.Vec2;
@@ -196,7 +211,7 @@
          if (Runtime.getRuntime().availableProcessors() > 4) {
              thread.setPriority(8);
          }
-@@ -324,16 +_,16 @@
+@@ -324,19 +_,19 @@
      }
  
      // Paper start - rewrite chunk system
@@ -215,8 +230,40 @@
 +    public static final long MAX_CHUNK_EXEC_TIME = 1000L; // 1us // Canvas - private -> public
 +    public static final long TASK_EXECUTION_FAILURE_BACKOFF = 5L * 1000L; // 5us // Canvas - private -> public
  
-     private long lastMidTickExecute;
-     private long lastMidTickExecuteFailure;
+-    private long lastMidTickExecute;
+-    private long lastMidTickExecuteFailure;
++    private final ThreadLocal<Long> lastMidTickExecute = ThreadLocal.withInitial(() -> 0L); // Canvas - threadlocal
++    private final ThreadLocal<Long> lastMidTickExecuteFailure = ThreadLocal.withInitial(() -> 0L); // Canvas - threadlocal
+ 
+     private boolean tickMidTickTasks() {
+         // give all worlds a fair chance at by targeting them all.
+@@ -361,7 +_,7 @@
+     @Override
+     public final void moonrise$executeMidTickTasks() {
+         final long startTime = System.nanoTime();
+-        if ((startTime - this.lastMidTickExecute) <= CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME || (startTime - this.lastMidTickExecuteFailure) <= TASK_EXECUTION_FAILURE_BACKOFF) {
++        if ((startTime - this.lastMidTickExecute.get()) <= CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME || (startTime - this.lastMidTickExecuteFailure.get()) <= TASK_EXECUTION_FAILURE_BACKOFF) { // Canvas - threadlocal
+             // it's shown to be bad to constantly hit the queue (chunk loads slow to a crawl), even if no tasks are executed.
+             // so, backoff to prevent this
+             return;
+@@ -374,7 +_,7 @@
+ 
+             if (!moreTasks || diff >= MAX_CHUNK_EXEC_TIME) {
+                 if (!moreTasks) {
+-                    this.lastMidTickExecuteFailure = currTime;
++                    this.lastMidTickExecuteFailure.set(currTime); // Canvas - threadlocal
+                 }
+ 
+                 // note: negative values reduce the time
+@@ -387,7 +_,7 @@
+                 final double overuseCount = (double)overuse/(double)MAX_CHUNK_EXEC_TIME;
+                 final long extraSleep = (long)Math.round(overuseCount*CHUNK_TASK_QUEUE_BACKOFF_MIN_TIME);
+ 
+-                this.lastMidTickExecute = currTime + extraSleep;
++                this.lastMidTickExecute.set(currTime + extraSleep); // Canvas - threadlocal
+                 return;
+             }
+         }
 @@ -480,7 +_,7 @@
          dataStorage.computeIfAbsent(this.getScoreboard().dataFactory(), "scoreboard");
      }

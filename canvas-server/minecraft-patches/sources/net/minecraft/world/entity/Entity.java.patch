@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -1,21 +_,26 @@
+@@ -1,21 +_,27 @@
  package net.minecraft.world.entity;
  
 +import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.EntityLookup;
@@ -11,6 +11,7 @@
  import com.google.common.collect.ImmutableList.Builder;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.region.ServerRegions;
 +import io.canvasmc.canvas.util.ThreadLocalRandomSource;
  import it.unimi.dsi.fastutil.floats.FloatArraySet;
  import it.unimi.dsi.fastutil.floats.FloatArrays;
@@ -27,13 +28,14 @@
  import java.util.HashSet;
  import java.util.List;
  import java.util.Locale;
-@@ -23,11 +_,14 @@
+@@ -23,11 +_,15 @@
  import java.util.Optional;
  import java.util.Set;
  import java.util.UUID;
 +import java.util.concurrent.CopyOnWriteArrayList;
  import java.util.concurrent.atomic.AtomicInteger;
 +import java.util.concurrent.atomic.AtomicReference;
++import java.util.concurrent.locks.ReentrantLock;
  import java.util.function.BiConsumer;
  import java.util.function.Predicate;
  import java.util.stream.Stream;
@@ -114,19 +116,19 @@
      private final double[] pistonDeltas = new double[]{0.0, 0.0, 0.0};
      private long pistonDeltasGameTime;
      protected EntityDimensions dimensions;
-@@ -306,15 +_,17 @@
+@@ -306,15 +_,18 @@
      private int lastCrystalSoundPlayTick;
      public boolean hasVisualFire;
      @Nullable
--    private BlockState inBlockState = null;
++    // Canvas start
+     private BlockState inBlockState = null;
 -    private final List<Entity.Movement> movementThisTick = new ArrayList<>();
 -    private final Set<BlockState> blocksInside = new ReferenceArraySet<>();
 -    private final LongSet visitedBlocks = new LongOpenHashSet();
-+    // Canvas start
-+    private volatile BlockState inBlockState = null; // volatile
 +    private final List<Entity.Movement> movementThisTick = Collections.synchronizedList(new ArrayList<>());
 +    private final Set<BlockState> blocksInside = Sets.newConcurrentHashSet();
 +    private final LongSet visitedBlocks = LongSets.synchronize(new LongOpenHashSet());
++    private final ReentrantLock inBlockAndMovementLock = new ReentrantLock(); // Canvas - Threaded Regions
 +    // Canvas end
      // CraftBukkit start
      public boolean forceDrops;
@@ -169,6 +171,66 @@
  
      public void inactiveTick() {
      }
+@@ -381,7 +_,7 @@
+     private int sectionX = Integer.MIN_VALUE;
+     private int sectionY = Integer.MIN_VALUE;
+     private int sectionZ = Integer.MIN_VALUE;
+-    private boolean updatingSectionStatus;
++    private volatile boolean updatingSectionStatus; // Canvas - volatile
+ 
+     @Override
+     public final boolean moonrise$isHardColliding() {
+@@ -549,6 +_,20 @@
+     }
+     // Purpur end - copied from Mob - API for any mob to burn daylight
+ 
++    // Canvas start - Threaded Regions
++    public void updateTicks(long fromTickOffset, long fromRedstoneTimeOffset) {
++        if (this.activatedTick != Integer.MIN_VALUE) {
++            this.activatedTick += fromTickOffset;
++        }
++        if (this.activatedImmunityTick != Integer.MIN_VALUE) {
++            this.activatedImmunityTick += fromTickOffset;
++        }
++        if (this.pistonDeltasGameTime != Long.MIN_VALUE) {
++            this.pistonDeltasGameTime += fromRedstoneTimeOffset;
++        }
++    }
++
++    // Canvas end
+     public Entity(EntityType<?> entityType, Level level) {
+         this.type = entityType;
+         this.level = level;
+@@ -684,7 +_,7 @@
+     public void resendPossiblyDesyncedEntityData(net.minecraft.server.level.ServerPlayer player) {
+         if (player.getBukkitEntity().canSee(this.getBukkitEntity())) {
+             ServerLevel world = (net.minecraft.server.level.ServerLevel)this.level();
+-            net.minecraft.server.level.ChunkMap.TrackedEntity tracker = world == null ? null : world.getChunkSource().chunkMap.entityMap.get(this.getId());
++            net.minecraft.server.level.ChunkMap.TrackedEntity tracker = this.moonrise$getTrackedEntity(); // Canvas - Threaded Regions
+             if (tracker == null) {
+                 return;
+             }
+@@ -860,7 +_,9 @@
+         ProfilerFiller profilerFiller = Profiler.get();
+         profilerFiller.push("entityBaseTick");
+         if (firstTick && this instanceof net.minecraft.world.entity.NeutralMob neutralMob) neutralMob.tickInitialPersistentAnger(level); // Paper - Prevent entity loading causing async lookups
++        this.inBlockAndMovementLock.lock(); // Canvas - Threaded Regions
+         this.inBlockState = null;
++        this.inBlockAndMovementLock.unlock(); // Canvas - Threaded Regions
+         if (this.isPassenger() && this.getVehicle().isRemoved()) {
+             this.stopRiding();
+         }
+@@ -1133,8 +_,8 @@
+         } else {
+             this.wasOnFire = this.isOnFire();
+             if (type == MoverType.PISTON) {
+-                this.activatedTick = Math.max(this.activatedTick, MinecraftServer.currentTick + 20); // Paper - EAR 2
+-                this.activatedImmunityTick = Math.max(this.activatedImmunityTick, MinecraftServer.currentTick + 20);   // Paper - EAR 2
++                this.activatedTick = Math.max(this.activatedTick, ServerRegions.getCurrentTick(this.level.level()) + 20); // Paper - EAR 2 // Canvas - Threaded Regions
++                this.activatedImmunityTick = Math.max(this.activatedImmunityTick, ServerRegions.getCurrentTick(this.level.level()) + 20);   // Paper - EAR 2 // Canvas - Threaded Regions
+                 movement = this.limitPistonMovement(movement);
+                 if (movement.equals(Vec3.ZERO)) {
+                     return;
 @@ -1389,6 +_,12 @@
      }
  
@@ -194,6 +256,15 @@
          }
      }
  
+@@ -1433,7 +_,7 @@
+         if (pos.lengthSqr() <= 1.0E-7) {
+             return pos;
+         } else {
+-            long gameTime = this.level().getGameTime();
++            long gameTime = this.level().getRedstoneGameTime(); // Canvas - Threaded Regions
+             if (gameTime != this.pistonDeltasGameTime) {
+                 Arrays.fill(this.pistonDeltas, 0.0);
+                 this.pistonDeltasGameTime = gameTime;
 @@ -1660,10 +_,19 @@
                  for (BlockPos blockPos : BlockGetter.boxTraverseBlocks(vec3, vec31, aabb)) {
                      if (!this.isAlive()) {
@@ -257,15 +328,6 @@
          }
      }
  
-@@ -2090,7 +_,7 @@
-         this.yo = y;
-         this.zo = d1;
-         this.setPos(d, y, d1);
--        if (this.valid) this.level.getChunk((int) Math.floor(this.getX()) >> 4, (int) Math.floor(this.getZ()) >> 4); // CraftBukkit
-+        // Canvas - don't load chunks to move entity
-     }
- 
-     public void moveTo(Vec3 vec) {
 @@ -2888,7 +_,13 @@
  
          for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
@@ -302,20 +364,56 @@
          List<Entity> passengers = this.getPassengers();
          List<Entity> list = new ArrayList<>(passengers.size());
          this.ejectPassengers();
-@@ -4739,7 +_,7 @@
+@@ -4735,11 +_,18 @@
+     }
+ 
+     public BlockState getInBlockState() {
++        this.inBlockAndMovementLock.lock(); // Canvas - Threaded Regions
+         if (this.inBlockState == null) {
              this.inBlockState = this.level().getBlockState(this.blockPosition());
          }
  
--        return this.inBlockState;
-+        return this.inBlockState == null ? Blocks.AIR.defaultBlockState() : this.inBlockState; // Canvas - ensure not null
++        // Canvas start - Threaded Regions
++        try {
+         return this.inBlockState;
++        } finally {
++            this.inBlockAndMovementLock.unlock();
++        }
++        // Canvas end
      }
  
      public ChunkPos chunkPosition() {
+@@ -4836,6 +_,7 @@
+     }
+     public final void setPosRaw(double x, double y, double z, boolean forceBoundingBoxUpdate) {
+         // Paper start - rewrite chunk system
++        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level.level()); data.entityLevelCallbackLock.lock(); // Canvas - Threaded Regions
+         if (this.updatingSectionStatus) {
+             LOGGER.error(
+                 "Refusing to update position for entity " + this + " to position " + new Vec3(x, y, z)
+@@ -4867,7 +_,9 @@
+             int floor2 = Mth.floor(z);
+             if (floor != this.blockPosition.getX() || floor1 != this.blockPosition.getY() || floor2 != this.blockPosition.getZ()) {
+                 this.blockPosition = new BlockPos(floor, floor1, floor2);
++                this.inBlockAndMovementLock.lock(); // Canvas - Threaded Regions
+                 this.inBlockState = null;
++                this.inBlockAndMovementLock.unlock(); // Canvas - Threaded Regions
+                 if (SectionPos.blockToSectionCoord(floor) != this.chunkPosition.x || SectionPos.blockToSectionCoord(floor2) != this.chunkPosition.z) {
+                     this.chunkPosition = new ChunkPos(this.blockPosition);
+                 }
+@@ -4880,6 +_,7 @@
+         if (!(this instanceof net.minecraft.world.entity.decoration.HangingEntity) && (forceBoundingBoxUpdate || this.position.x != x || this.position.y != y || this.position.z != z)) {
+             this.setBoundingBox(this.makeBoundingBox());
+         }
++        data.entityLevelCallbackLock.unlock(); // Canvas - Threaded Regions
+         // Paper end - Block invalid positions and bounding box
+     }
+ 
 @@ -4975,6 +_,7 @@
      @Override
      public final void setRemoved(Entity.RemovalReason removalReason, org.bukkit.event.entity.EntityRemoveEvent.Cause cause) {
          // Paper start - rewrite chunk system
-+        synchronized (((ServerLevel) this.level).entityLevelCallbackLock) { // Canvas - sync-lock
++        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level.level()); try {data.entityLevelCallbackLock.lock(); // Canvas - Threaded Regions
          if (!((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this.level).moonrise$getEntityLookup().canRemoveEntity((Entity)(Object)this)) {
              LOGGER.warn("Entity " + this + " is currently prevented from being removed from the world since it is processing section status updates", new Throwable());
              return;
@@ -323,7 +421,7 @@
              // Players need to be special cased, because they are regularly removed from the world
              this.retireScheduler();
          }
-+        } // Canvas - sync-lock
++        } finally {data.entityLevelCallbackLock.unlock();} // Canvas - Threaded Regions
          // Paper end - Folia schedulers
      }
  

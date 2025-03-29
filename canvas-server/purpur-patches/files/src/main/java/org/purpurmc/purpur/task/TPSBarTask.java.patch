@@ -1,13 +1,21 @@
 --- a/src/main/java/org/purpurmc/purpur/task/TPSBarTask.java
 +++ b/src/main/java/org/purpurmc/purpur/task/TPSBarTask.java
-@@ -4,14 +_,31 @@
+@@ -1,18 +_,40 @@
+ package org.purpurmc.purpur.task;
+ 
++import io.canvasmc.canvas.region.ChunkRegion;
++import io.canvasmc.canvas.region.ServerRegions;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
+ import net.kyori.adventure.bossbar.BossBar;
  import net.kyori.adventure.text.Component;
  import net.kyori.adventure.text.minimessage.MiniMessage;
  import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
++import org.bukkit.craftbukkit.entity.CraftPlayer;
  import org.purpurmc.purpur.PurpurConfig;
- import org.bukkit.Bukkit;
+-import org.bukkit.Bukkit;
  import org.bukkit.entity.Player;
 +import java.util.HashMap;
 +import java.util.Map;
@@ -32,8 +40,10 @@
 +    };
 +    // Canvas end
      private int tick = 0;
++    private final RegionBarTask regionBarTask = new RegionBarTask(); // Canvas - Threaded Regions
  
      public static TPSBarTask instance() {
+         if (instance == null) {
 @@ -23,60 +_,72 @@
  
      @Override
@@ -200,3 +210,137 @@
              color = PurpurConfig.commandTPSBarTextColorMedium;
          } else {
              color = PurpurConfig.commandTPSBarTextColorLow;
+@@ -139,4 +_,133 @@
+     public enum FillMode {
+         TPS, MSPT, PING
+     }
++    // Canvas start - Threaded Regions
++
++    public static class RegionBarTask extends BossBarTask {
++        private static org.purpurmc.purpur.task.TPSBarTask.RegionBarTask instance;
++        private int tick = 0;
++
++        public static org.purpurmc.purpur.task.TPSBarTask.RegionBarTask instance() {
++            if (instance == null) {
++                instance = new org.purpurmc.purpur.task.TPSBarTask.RegionBarTask();
++            }
++            return instance;
++        }
++
++        @Override
++        BossBar createBossBar() {
++            return BossBar.bossBar(Component.text(""), 0.0F, instance().getBossBarColor(null), PurpurConfig.commandTPSBarProgressOverlay);
++        }
++
++        @Override
++        void updateBossBar(BossBar bossbar, Player player) {
++            ServerPlayer serverPlayer = ((CraftPlayer) player).getHandle();
++            ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> chunkRegion = serverPlayer.serverLevel().regioniser.getRegionAtUnsynchronised(serverPlayer.chunkPosition().x, serverPlayer.chunkPosition().z);
++            if (chunkRegion == null) {
++                return;
++            }
++
++            bossbar.progress(getBossBarProgress(chunkRegion.getData().tickHandle));
++            bossbar.color(getBossBarColor(chunkRegion.getData().tickHandle));
++            bossbar.name(MiniMessage.miniMessage().deserialize("<gray>Region TPS<yellow>:</yellow> <tps> Region MSPT<yellow>:</yellow> <mspt> Ping<yellow>:</yellow> <ping>ms",
++                Placeholder.component("tps", getTPSColor(chunkRegion.getData().tickHandle)),
++                Placeholder.component("mspt", getMSPTColor(chunkRegion.getData().tickHandle)),
++                Placeholder.component("ping", getPingColor(player.getPing()))
++            ));
++        }
++
++        @Override
++        public void run() {
++            if (++tick < PurpurConfig.commandTPSBarTickInterval || tick < MinecraftServer.getServer().tickRateManager().tickrate()) {
++                return;
++            }
++            tick = 0;
++            super.run();
++        }
++
++        private float getBossBarProgress(ChunkRegion region) {
++            if (PurpurConfig.commandTPSBarProgressFillMode == org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT) {
++                return Math.max(Math.min(((float) region.tickTimes5s.getAverage()) / 50.0F, 1.0F), 0.0F);
++            } else {
++                return Math.max(Math.min(((float) region.tps5s.getAverage()) / 20.0F, 1.0F), 0.0F);
++            }
++        }
++
++        private BossBar.Color getBossBarColor(ChunkRegion chunkRegion) {
++            return BossBar.Color.BLUE;
++        }
++
++        private boolean isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, ChunkRegion chunkRegion) {
++            return isGood(mode, 0, chunkRegion);
++        }
++
++        private boolean isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, int ping, ChunkRegion chunkRegion) {
++            if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT) {
++                return chunkRegion.tickTimes5s.getAverage() < 40;
++            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS) {
++                return chunkRegion.tps5s.getAverage() >= 19;
++            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.PING) {
++                return ping < 100;
++            } else {
++                return false;
++            }
++        }
++
++        private boolean isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, ChunkRegion chunkRegion) {
++            return isMedium(mode, 0, chunkRegion);
++        }
++
++        private boolean isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, int ping, ChunkRegion chunkRegion) {
++            if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT) {
++                return chunkRegion.tickTimes5s.getAverage() < 50;
++            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS) {
++                return chunkRegion.tps5s.getAverage() >= 15;
++            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.PING) {
++                return ping < 200;
++            } else {
++                return false;
++            }
++        }
++
++        private Component getTPSColor(ChunkRegion chunkRegion) {
++            String color;
++            if (isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS, chunkRegion)) {
++                color = PurpurConfig.commandTPSBarTextColorGood;
++            } else if (isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS, chunkRegion)) {
++                color = PurpurConfig.commandTPSBarTextColorMedium;
++            } else {
++                color = PurpurConfig.commandTPSBarTextColorLow;
++            }
++            return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", chunkRegion.tps5s.getAverage())));
++        }
++
++        private Component getMSPTColor(ChunkRegion chunkRegion) {
++            String color;
++            if (isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT, chunkRegion)) {
++                color = PurpurConfig.commandTPSBarTextColorGood;
++            } else if (isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT, chunkRegion)) {
++                color = PurpurConfig.commandTPSBarTextColorMedium;
++            } else {
++                color = PurpurConfig.commandTPSBarTextColorLow;
++            }
++            return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", chunkRegion.tickTimes5s.getAverage())));
++        }
++
++        private Component getPingColor(int ping) {
++            String color;
++            if (isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode.PING, ping, null)) {
++                color = PurpurConfig.commandTPSBarTextColorGood;
++            } else if (isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode.PING, ping, null)) {
++                color = PurpurConfig.commandTPSBarTextColorMedium;
++            } else {
++                color = PurpurConfig.commandTPSBarTextColorLow;
++            }
++            return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%s", ping)));
++        }
++
++        public enum FillMode {
++            TPS, MSPT, PING
++        }
++    }
++    // Canvas end
+ }

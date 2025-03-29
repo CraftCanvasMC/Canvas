@@ -144,8 +144,6 @@ public abstract class AbstractTickLoop extends TickLoopScheduler.AbstractTick im
             return false;
         }
         processingTick = true;
-        int processedPolledCount = 0;
-        while (this.pollInternal() && !shutdown) processedPolledCount++;
 
         if (tickRateManager().isSprinting() && tickRateManager().checkShouldSprintThisTick()) {
             nanosecondsOverload = 0L;

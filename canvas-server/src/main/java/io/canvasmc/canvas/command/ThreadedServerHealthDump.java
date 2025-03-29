@@ -1,14 +1,20 @@
 package io.canvasmc.canvas.command;
 
 import io.canvasmc.canvas.CanvasBootstrap;
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.TickTimes;
+import io.canvasmc.canvas.region.ChunkRegion;
+import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.ServerBuildInfoImpl;
+import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.List;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -17,8 +23,11 @@ import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.util.HSVLike;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.command.CommandSender;
+import org.bukkit.craftbukkit.CraftWorld;
 import org.jetbrains.annotations.NotNull;
 
 public class ThreadedServerHealthDump {
@@ -33,7 +42,7 @@ public class ThreadedServerHealthDump {
     public static final ThreadLocal<DecimalFormat> ONE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
     public static final TextColor ORANGE = TextColor.color(255, 165, 0);
 
-    public static boolean dump(@NotNull final CommandSender sender) {
+    public static boolean dump(@NotNull final CommandSender sender, boolean regionDump) {
         ThreadedServer server = MinecraftServer.getThreadedServer();
         int build = ServerBuildInfo.buildInfo().buildNumber().orElse(-1);
         final int maxThreadCount = TickLoopScheduler.getInstance().scheduler.getThreads().length;
@@ -113,10 +122,11 @@ public class ThreadedServerHealthDump {
                 .append(NEW_LINE)
         );
         root.append(Component.text()
-            .append(Component.text("All TickLoops", HEADER, TextDecoration.BOLD))
+            .append(Component.text("All " + (regionDump ? "Regions" : "TickLoops"), HEADER, TextDecoration.BOLD))
             .append(NEW_LINE)
         );
         for (final AbstractTickLoop tickLoop : server.getTickLoops().stream().sorted(AbstractTickLoop::compareTo).toList()) {
+            if (regionDump) continue;
             String location = "[" + tickLoop.location() + "]";
             double mspt5s = tickLoop.tickTimes5s.getAverage();
             double tps5s = tickLoop.tps5s.getAverage();
@@ -152,6 +162,40 @@ public class ThreadedServerHealthDump {
 
                 .build();
             root.append(head);
+        }
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing && regionDump) {
+            final List<ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>> regions =
+                new ArrayList<>();
+
+            for (final World bukkitWorld : Bukkit.getWorlds()) {
+                final ServerLevel world = ((CraftWorld)bukkitWorld).getHandle();
+                world.regioniser.computeForAllRegions(regions::add);
+            }
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : regions) {
+                ChunkRegion tickHandle = region.getData().tickHandle;
+                String location = "Region at " + tickHandle.world.location() + "|" + region.getCenterChunk();
+                double mspt5s = tickHandle.tickTimes5s.getAverage();
+                double tps5s = tickHandle.tps5s.getAverage();
+                double util = tickHandle.tickTimes5s.getUtilization();
+                Component head = Component.text()
+                    .append(Component.text(" - ", LIST, TextDecoration.BOLD))
+                    .append(Component.text("TickLoop of ", PRIMARY))
+                    .append(Component.text(location, INFORMATION))
+                    .append(NEW_LINE)
+
+                    .append(Component.text()
+                        .append(Component.text("    5s: ", PRIMARY, TextDecoration.BOLD))
+                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(util), getColourForMSPT((util / 100) * 50.0)))
+                        .append(Component.text("% util at ", PRIMARY))
+                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt5s), getColourForMSPT(mspt5s)))
+                        .append(Component.text(" MSPT at ", PRIMARY))
+                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps5s), getColourForTPS(tps5s)))
+                        .append(Component.text(" TPS", PRIMARY)))
+                    .append(NEW_LINE)
+
+                    .build();
+                root.append(head);
+            }
         }
         sender.sendMessage(root.build());
         return true;

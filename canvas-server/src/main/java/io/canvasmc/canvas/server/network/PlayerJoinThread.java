@@ -31,6 +31,8 @@ public class PlayerJoinThread extends AbstractTickLoop {
 
     @Override
     protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
+        int processedPolledCount = 0;
+        while (this.pollInternal() && !shutdown) processedPolledCount++;
         this.run();
     }
 

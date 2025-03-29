@@ -1,0 +1,101 @@
+--- a/net/minecraft/world/level/block/RedStoneWireBlock.java
++++ b/net/minecraft/world/level/block/RedStoneWireBlock.java
+@@ -5,10 +_,12 @@
+ import com.mojang.serialization.MapCodec;
+ import java.util.Map;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.region.ServerRegions;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.core.particles.DustParticleOptions;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.util.ARGB;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+@@ -91,7 +_,7 @@
+     private static final float PARTICLE_DENSITY = 0.2F;
+     private final BlockState crossState;
+     private final RedstoneWireEvaluator evaluator = new DefaultRedstoneWireEvaluator(this);
+-    public boolean shouldSignal = true;
++    public final ThreadLocal<Boolean> shouldSignal = ThreadLocal.withInitial(() -> true); // Canvas - threadlocal
+ 
+     @Override
+     public MapCodec<RedStoneWireBlock> codec() {
+@@ -236,8 +_,9 @@
+         BlockPos.MutableBlockPos mutableBlockPos = new BlockPos.MutableBlockPos();
+ 
+         for (Direction direction : Direction.Plane.HORIZONTAL) {
++            BlockState currState; mutableBlockPos.setWithOffset(pos, direction); // Canvas - block updates in unloaded chunks
+             RedstoneSide redstoneSide = state.getValue(PROPERTY_BY_DIRECTION.get(direction));
+-            if (redstoneSide != RedstoneSide.NONE && !level.getBlockState(mutableBlockPos.setWithOffset(pos, direction)).is(this)) {
++            if (redstoneSide != RedstoneSide.NONE && (currState = (level instanceof net.minecraft.server.level.ServerLevel ? null : level.getBlockStateIfLoaded(mutableBlockPos.setWithOffset(pos, direction)))) != null && !currState.is(this)) { // Canvas - block updates in unloaded chunks
+                 mutableBlockPos.move(Direction.DOWN);
+                 BlockState blockState = level.getBlockState(mutableBlockPos);
+                 if (blockState.is(this)) {
+@@ -293,6 +_,11 @@
+     // Paper start - Optimize redstone (Eigencraft)
+     // The bulk of the new functionality is found in RedstoneWireTurbo.java
+     io.papermc.paper.redstone.RedstoneWireTurbo turbo = new io.papermc.paper.redstone.RedstoneWireTurbo(this);
++    // Canvas start - Threaded Regions
++    private io.papermc.paper.redstone.RedstoneWireTurbo getTurbo(Level world) {
++        return ServerRegions.getTickData((ServerLevel) world).turbo;
++    }
++    // Canvas end
+ 
+     /*
+      * Modified version of pre-existing updateSurroundingRedstone, which is called from
+@@ -308,7 +_,7 @@
+             if (orientation != null) {
+                 source = pos.relative(orientation.getFront().getOpposite());
+             }
+-            turbo.updateSurroundingRedstone(worldIn, pos, state, source);
++            getTurbo(worldIn).updateSurroundingRedstone(worldIn, pos, state, source); // Canvas - Threaded Regions
+             return;
+         }
+         updatePowerStrength(worldIn, pos, state, orientation, blockAdded);
+@@ -336,7 +_,7 @@
+                 // [Space Walker] suppress shape updates and emit those manually to
+                 // bypass the new neighbor update stack.
+                 if (level.setBlock(pos, state, Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_CLIENTS)) {
+-                    turbo.updateNeighborShapes(level, pos, state);
++                    getTurbo(level).updateNeighborShapes(level, pos, state); // Canvas - Threaded Regions
+                 }
+             }
+         }
+@@ -353,9 +_,9 @@
+     }
+ 
+     public int getBlockSignal(Level level, BlockPos pos) {
+-        this.shouldSignal = false;
++        this.shouldSignal.set(false); // Canvas - threadlocal
+         int bestNeighborSignal = level.getBestNeighborSignal(pos);
+-        this.shouldSignal = true;
++        this.shouldSignal.set(true); // Canvas - threadlocal
+         return bestNeighborSignal;
+     }
+ 
+@@ -450,12 +_,12 @@
+ 
+     @Override
+     protected int getDirectSignal(BlockState blockState, BlockGetter blockAccess, BlockPos pos, Direction side) {
+-        return !this.shouldSignal ? 0 : blockState.getSignal(blockAccess, pos, side);
++        return !this.shouldSignal.get() ? 0 : blockState.getSignal(blockAccess, pos, side); // Canvas - threadlocal
+     }
+ 
+     @Override
+     protected int getSignal(BlockState blockState, BlockGetter blockAccess, BlockPos pos, Direction side) {
+-        if (this.shouldSignal && side != Direction.DOWN) {
++        if (this.shouldSignal.get() && side != Direction.DOWN) { // Canvas - threadlocal
+             int powerValue = blockState.getValue(POWER);
+             if (powerValue == 0) {
+                 return 0;
+@@ -487,7 +_,7 @@
+ 
+     @Override
+     protected boolean isSignalSource(BlockState state) {
+-        return this.shouldSignal;
++        return this.shouldSignal.get(); // Canvas - threadlocal
+     }
+ 
+     public static int getColorForPower(int power) {

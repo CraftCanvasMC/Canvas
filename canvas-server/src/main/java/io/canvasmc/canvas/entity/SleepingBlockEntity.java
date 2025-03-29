@@ -5,6 +5,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -24,6 +25,14 @@ public interface SleepingBlockEntity {
         public @NotNull String getType() {
             return "<lithium_sleeping>";
         }
+        // Canvas start - Threaded Regions
+
+        @Contract(pure = true)
+        @Override
+        public @Nullable BlockEntity getTileEntity() {
+            return null;
+        }
+        // Canvas end
     };
 
     LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper();

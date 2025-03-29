@@ -4,6 +4,7 @@ import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
+import io.canvasmc.canvas.region.RegionizedTaskQueue;
 import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
 import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
@@ -43,6 +44,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
     private final DedicatedServer server;
     protected long tickSection;
     private boolean started = false;
+    public final RegionizedTaskQueue taskQueue = new RegionizedTaskQueue(); // Threaded Regions
 
     public ThreadedServer(DedicatedServer server) {
         this.server = server;
@@ -92,8 +94,8 @@ public class ThreadedServer implements ThreadedBukkitServer {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
-            TickLoopScheduler.start();
             this.started = true;
+            TickLoopScheduler.start();
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
             this.server.status = this.server.buildServerStatus();
@@ -132,6 +134,8 @@ public class ThreadedServer implements ThreadedBukkitServer {
             }
 
             final long actualDoneTimeMs = System.currentTimeMillis() - CanvasBootstrap.BOOT_TIME.toEpochMilli();
+            List<World> worlds = Bukkit.getServer().getWorlds();
+            LOGGER.info("Booted server with {} worlds {}", worlds.size(), worlds.stream().map(World::getName).collect(Collectors.toSet()));
             LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1_000.00D));
             while (this.server.isRunning()) {
                 tickSection = this.getServer().tick(tickSection);

@@ -8,6 +8,7 @@ import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel
 import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup;
 import ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.util.NamedAgnosticThreadFactory;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -15,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.FullChunkStatus;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import org.jetbrains.annotations.NotNull;
 
@@ -37,10 +39,10 @@ public class ThreadedTracker {
         return processor;
     }
 
-    public void tick(@NotNull ChunkSystemServerLevel chunkSystemServerLevel) {
+    public boolean tick(@NotNull ChunkSystemServerLevel chunkSystemServerLevel) {
         if (this.enableThreading) {
             final NearbyPlayers nearbyPlayers = chunkSystemServerLevel.moonrise$getNearbyPlayers();
-            final Entity[] trackerEntitiesRaw = ((ServerEntityLookup) chunkSystemServerLevel.moonrise$getEntityLookup()).trackerEntities.getRawDataUnchecked();
+            final Entity[] trackerEntitiesRaw = ServerRegions.getTickData((ServerLevel) chunkSystemServerLevel).trackerEntities.getRawDataUnchecked(); // Canvas - Threaded Regions
 
             processor.execute(() -> {
                 for (final Entity entity : trackerEntitiesRaw) {
@@ -53,26 +55,9 @@ public class ThreadedTracker {
                     trackedInstance.serverEntity.sendChanges();
                 }
             });
-        } else {
-            final ServerEntityLookup entityLookup = (ServerEntityLookup) chunkSystemServerLevel.moonrise$getEntityLookup();
-
-            final ReferenceList<Entity> trackerEntities = entityLookup.trackerEntities;
-            final Entity[] trackerEntitiesRaw = trackerEntities.getRawDataUnchecked();
-            for (int i = 0, len = trackerEntities.size(); i < len; ++i) {
-                final Entity entity = trackerEntitiesRaw[i];
-                if (entity == null) continue;
-                final ChunkMap.TrackedEntity tracker = ((EntityTrackerEntity) entity).moonrise$getTrackedEntity();
-                if (tracker == null) {
-                    continue;
-                }
-                tracker.moonrise$tick(((ChunkSystemEntity) entity).moonrise$getChunkData() == null ? null : ((ChunkSystemEntity) entity).moonrise$getChunkData().nearbyPlayers);
-                @Nullable FullChunkStatus chunkStatus = ((ChunkSystemEntity) entity).moonrise$getChunkStatus();
-                if (tracker.moonrise$hasPlayers()
-                    || (chunkStatus != null && chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) {
-                    tracker.serverEntity.sendChanges();
-                }
-            }
+            return true;
         }
+        return false;
     }
 
     public static class TrackerThread extends TickThread {

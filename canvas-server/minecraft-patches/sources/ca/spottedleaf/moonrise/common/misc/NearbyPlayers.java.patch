@@ -22,16 +22,15 @@
  
  public final class NearbyPlayers {
  
-@@ -59,12 +_,13 @@
+@@ -59,12 +_,12 @@
      public static final int GENERAL_REALLY_SMALL_AREA_VIEW_DISTANCE_BLOCKS = (GENERAL_REALLY_SMALL_VIEW_DISTANCE << 4);
  
      private final ServerLevel world;
 -    private final Reference2ReferenceOpenHashMap<ServerPlayer, TrackedPlayer[]> players = new Reference2ReferenceOpenHashMap<>();
 -    private final Long2ReferenceOpenHashMap<TrackedChunk> byChunk = new Long2ReferenceOpenHashMap<>();
 -    private final Long2ReferenceOpenHashMap<ReferenceList<ServerPlayer>>[] directByChunk = new Long2ReferenceOpenHashMap[TOTAL_MAP_TYPES];
-+    private final Object callbackLock = new Object(); // Canvas
-+    private final Reference2ReferenceMap<ServerPlayer, TrackedPlayer[]> players = Reference2ReferenceMaps.synchronize(new Reference2ReferenceOpenHashMap<>()); // Canvas
-+    private final java.util.Map<Long, TrackedChunk> byChunk = new java.util.concurrent.ConcurrentHashMap(); // Canvas
++    private final Reference2ReferenceMap<ServerPlayer, TrackedPlayer[]> players = Reference2ReferenceMaps.synchronize(new Reference2ReferenceOpenHashMap<>()); // Canvas - synchronized
++    private final java.util.Map<Long, TrackedChunk> byChunk = new java.util.concurrent.ConcurrentHashMap<>(); // Canvas - concurrent
 +    private final Long2ReferenceMap<ReferenceList<ServerPlayer>>[] directByChunk = new Long2ReferenceMap[TOTAL_MAP_TYPES]; // Canvas
      {
          for (int i = 0; i < this.directByChunk.length; ++i) {
@@ -40,6 +39,51 @@
          }
      }
  
+@@ -72,7 +_,8 @@
+         this.world = world;
+     }
+ 
+-    public void addPlayer(final ServerPlayer player) {
++    public synchronized void addPlayer(final ServerPlayer player) { // Canvas - synchronized
++        player.npr.set(this); // Canvas - Threaded Regions
+         final TrackedPlayer[] newTrackers = new TrackedPlayer[TOTAL_MAP_TYPES];
+         if (this.players.putIfAbsent(player, newTrackers) != null) {
+             throw new IllegalStateException("Already have player " + player);
+@@ -89,7 +_,8 @@
+         this.tickPlayer(player);
+     }
+ 
+-    public void removePlayer(final ServerPlayer player) {
++    public synchronized void removePlayer(final ServerPlayer player) { // Canvas - synchronized
++        player.npr.set(null); // Canvas - Threaded Regions
+         final TrackedPlayer[] players = this.players.remove(player);
+         if (players == null) {
+             return; // May be called during teleportation before the player is actually placed
+@@ -100,7 +_,7 @@
+         }
+     }
+ 
+-    public void clear() {
++    public synchronized void clear() { // Canvas - synchronized
+         if (this.players.isEmpty()) {
+             return;
+         }
+@@ -110,7 +_,14 @@
+         }
+     }
+ 
+-    public void tickPlayer(final ServerPlayer player) {
++    public synchronized void tickPlayer(final ServerPlayer player) { // Canvas - synchronized
++        // Canvas start - Threaded Regions
++        if (player.npr.get() != this) {
++            // player owned by a diff nearbyplayers ref... what?
++            player.npr.get().removePlayer(player);
++            this.addPlayer(player);
++        }
++        // Canvas end
+         final TrackedPlayer[] players = this.players.get(player);
+         if (players == null) {
+             throw new IllegalStateException("Don't have player " + player);
 @@ -121,7 +_,7 @@
          players[NearbyMapType.GENERAL.ordinal()].update(chunk.x, chunk.z, GENERAL_AREA_VIEW_DISTANCE);
          players[NearbyMapType.GENERAL_SMALL.ordinal()].update(chunk.x, chunk.z, GENERAL_SMALL_VIEW_DISTANCE);
@@ -68,3 +112,25 @@
                  this.nearbyPlayers.directByChunk[idx].put(this.chunkKey, players);
                  players.add(player);
                  return;
+@@ -244,7 +_,7 @@
+                 created.addPlayer(parameter, type);
+                 type.addTo(parameter, NearbyPlayers.this.world, chunkX, chunkZ);
+ 
+-                ((ChunkSystemLevel)NearbyPlayers.this.world).moonrise$requestChunkData(chunkKey).nearbyPlayers = created;
++                // ((ChunkSystemLevel)NearbyPlayers.this.world).moonrise$requestChunkData(chunkKey).nearbyPlayers = created; // Canvas - Threaded Regions
+             }
+         }
+ 
+@@ -263,10 +_,10 @@
+ 
+             if (chunk.isEmpty()) {
+                 NearbyPlayers.this.byChunk.remove(chunkKey);
+-                final ChunkData chunkData = ((ChunkSystemLevel)NearbyPlayers.this.world).moonrise$releaseChunkData(chunkKey);
++                /* final ChunkData chunkData = ((ChunkSystemLevel)NearbyPlayers.this.world).moonrise$releaseChunkData(chunkKey); // Canvas - Threaded Regions
+                 if (chunkData != null) {
+                     chunkData.nearbyPlayers = null;
+-                }
++                } */ // Canvas - Threaded Regions
+             }
+         }
+     }

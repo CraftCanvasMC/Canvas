@@ -34,4 +34,11 @@ public record SleepUntilTimeBlockEntityTickInvoker(BlockEntity sleepingBlockEnti
         //noinspection ConstantConditions
         return BlockEntityType.getKey(this.sleepingBlockEntity.getType()).toString();
     }
+    // Canvas start - Threaded Regions
+
+    @Override
+    public @NotNull BlockEntity getTileEntity() {
+        return this.sleepingBlockEntity;
+    }
+    // Canvas end
 }

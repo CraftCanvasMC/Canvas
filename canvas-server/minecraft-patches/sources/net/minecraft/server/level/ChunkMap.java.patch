@@ -1,6 +1,11 @@
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
-@@ -5,11 +_,19 @@
+@@ -1,15 +_,26 @@
+ package net.minecraft.server.level;
+ 
++import ca.spottedleaf.concurrentutil.util.Priority;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Iterables;
  import com.google.common.collect.Lists;
  import com.google.common.collect.Queues;
  import com.google.common.collect.ImmutableList.Builder;
@@ -10,6 +15,8 @@
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.Config;
 +import io.canvasmc.canvas.entity.tracking.ThreadedTracker;
++import io.canvasmc.canvas.region.ServerRegions;
++import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 +import io.canvasmc.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
 +import io.netty.util.internal.ConcurrentSet;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
@@ -33,20 +40,38 @@
  import java.util.function.BooleanSupplier;
  import java.util.function.Consumer;
  import java.util.function.IntConsumer;
-@@ -129,8 +_,10 @@
+@@ -55,6 +_,7 @@
+ import net.minecraft.network.protocol.Packet;
+ import net.minecraft.network.protocol.game.ClientboundChunksBiomesPacket;
+ import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
++import net.minecraft.server.MinecraftServer;
+ import net.minecraft.server.level.progress.ChunkProgressListener;
+ import net.minecraft.server.network.ServerPlayerConnection;
+ import net.minecraft.util.CsvOutput;
+@@ -128,9 +_,11 @@
+     public final ChunkMap.DistanceManager distanceManager;
      public final AtomicInteger tickingGenerated = new AtomicInteger();  // Paper - public
      private final String storageName;
-     private final PlayerMap playerMap = new PlayerMap();
+-    private final PlayerMap playerMap = new PlayerMap();
 -    public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap = new Int2ObjectOpenHashMap<>();
 -    private final Long2ByteMap chunkTypeCache = new Long2ByteOpenHashMap();
++    // private final PlayerMap playerMap = new PlayerMap(); // Canvas - Threaded Regions
 +    // Canvas start - synchronize / concurrent
-+    public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap = new Int2ObjectConcurrentHashMap<>();
++    // public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap = new Int2ObjectConcurrentHashMap<>(); // Canvas - Threaded Regions
 +    private final Long2ByteMap chunkTypeCache = Long2ByteMaps.synchronize(new Long2ByteOpenHashMap());
 +    // Canvas end
      // Paper - rewrite chunk system
      public int serverViewDistance;
      public final WorldGenContext worldGenContext; // Paper - public
-@@ -251,7 +_,11 @@
+@@ -244,14 +_,18 @@
+ 
+         final int index = entity.getType().getCategory().ordinal();
+         final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> inRange =
+-            this.level.moonrise$getNearbyPlayers().getPlayers(entity.chunkPosition(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
++            this.level.moonrise$getNearbyPlayers(entity.chunkPosition()).getPlayers(entity.chunkPosition(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE); // Canvas - Threaded Regions
+         if (inRange == null) {
+             return;
+         }
  
          final ServerPlayer[] backingSet = inRange.getRawDataUnchecked();
          for (int i = 0, len = inRange.size(); i < len; i++) {
@@ -59,7 +84,14 @@
          }
      }
  
-@@ -268,7 +_,11 @@
+@@ -262,13 +_,17 @@
+         }
+         int idx = mobCategory.ordinal();
+         final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> inRange =
+-            this.level.moonrise$getNearbyPlayers().getPlayersByChunk(chunkX, chunkZ, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
++            this.level.moonrise$getNearbyPlayers(new ChunkPos(chunkX, chunkZ)).getPlayersByChunk(chunkX, chunkZ, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE); // Canvas - Threaded Regions
+         if (inRange == null) {
+             return;
          }
          final ServerPlayer[] backingSet = inRange.getRawDataUnchecked();
          for (int i = 0, len = inRange.size(); i < len; i++) {
@@ -81,7 +113,7 @@
          // Paper start - rewrite chunk system
          final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder holder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
          return holder == null ? null : holder.vanillaChunkHolder;
-@@ -409,12 +_,18 @@
+@@ -409,13 +_,19 @@
          // Paper end - rewrite chunk system
      }
  
@@ -91,18 +123,39 @@
 +        this.tick(hasMoreTime, false);
 +    }
 +
-+    public void tick(BooleanSupplier hasMoreTime, boolean overrideSave) { // protected -> public
++    public void tick(BooleanSupplier hasMoreTime, boolean flag) { // protected -> public
 +    // Canvas end
          ProfilerFiller profilerFiller = Profiler.get();
          profilerFiller.push("poi");
          this.poiManager.tick(hasMoreTime);
          profilerFiller.popPush("chunk_unload");
 -        if (!this.level.noSave()) {
-+        if (overrideSave || !this.level.noSave()) { // Canvas
-             this.processUnloads(hasMoreTime);
+-            this.processUnloads(hasMoreTime);
++        if (flag || !this.level.noSave()) { // Canvas - async chunk loader
++            this.processUnloads(hasMoreTime, flag); // Canvas - async chunk loader
          }
  
-@@ -726,28 +_,7 @@
+         profilerFiller.pop();
+@@ -425,8 +_,10 @@
+         throw new UnsupportedOperationException(); // Paper - rewrite chunk system
+     }
+ 
+-    private void processUnloads(BooleanSupplier hasMoreTime) {
++    private void processUnloads(BooleanSupplier hasMoreTime, boolean flag) {
++        if (!flag) // Canvas - async chunk loader - just process autoSave on chunk loader. unload should be on level(or region)
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.processUnloads(); // Paper - rewrite chunk system
++        else // Canvas - async chunk loader - just process autoSave on chunk loader. unload should be on level(or region)
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.autoSave(); // Paper - rewrite chunk system
+     }
+ 
+@@ -720,40 +_,19 @@
+         double blockRange; // Paper - use from event
+         // Spigot end
+         // Paper start - chunk tick iteration optimisation
+-        final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getNearbyPlayers().getPlayers(
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players = (this.level).moonrise$getNearbyPlayers(chunkPos).getPlayers( // Canvas - Threaded Regions
+             chunkPos, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE
+         );
          if (players == null) {
              return false;
          }
@@ -132,6 +185,13 @@
          // Paper end - chunk tick iteration optimisation
      }
  
+     public List<ServerPlayer> getPlayersCloseForSpawning(ChunkPos chunkPos) {
+         // Paper start - chunk tick iteration optimisation
+-        final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getNearbyPlayers().getPlayers(
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players = (this.level).moonrise$getNearbyPlayers(chunkPos).getPlayers( // Canvas - Threaded Regions
+             chunkPos, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE
+         );
+         if (players == null) {
 @@ -765,10 +_,11 @@
          final ServerPlayer[] raw = players.getRawDataUnchecked();
          final int len = players.size();
@@ -147,28 +207,149 @@
                  if (ret == null) {
                      ret = new ArrayList<>(len - i);
                      ret.add(player);
-@@ -882,7 +_,7 @@
+@@ -797,12 +_,12 @@
+ 
+     void updatePlayerStatus(ServerPlayer player, boolean track) {
+         boolean flag = this.skipPlayer(player);
+-        boolean flag1 = this.playerMap.ignoredOrUnknown(player);
++        // boolean flag1 = this.playerMap.ignoredOrUnknown(player); // Canvas - Threaded Regions
+         if (track) {
+-            this.playerMap.addPlayer(player, flag);
++            // this.playerMap.addPlayer(player, flag); // Canvas - Threaded Regions
+             this.updatePlayerPos(player);
+             if (!flag) {
+-                this.distanceManager.addPlayer(SectionPos.of(player), player);
++                // this.distanceManager.addPlayer(SectionPos.of(player), player); // Canvas - Threaded Regions
+                 ((ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickDistanceManager)this.distanceManager).moonrise$addPlayer(player, SectionPos.of(player)); // Paper - chunk tick iteration optimisation
+             }
+ 
+@@ -810,9 +_,9 @@
+             ca.spottedleaf.moonrise.common.PlatformHooks.get().addPlayerToDistanceMaps(this.level, player); // Paper - rewrite chunk system
+         } else {
+             SectionPos lastSectionPos = player.getLastSectionPos();
+-            this.playerMap.removePlayer(player);
+-            if (!flag1) {
+-                this.distanceManager.removePlayer(lastSectionPos, player);
++            // this.playerMap.removePlayer(player); // Canvas - Threaded Regions
++            if (true) { // Canvas - Threaded Regions
++                // this.distanceManager.removePlayer(lastSectionPos, player); // Canvas - Threaded Regions
+                 ((ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickDistanceManager)this.distanceManager).moonrise$removePlayer(player, SectionPos.of(player)); // Paper - chunk tick iteration optimisation
+             }
+ 
+@@ -830,27 +_,13 @@
+ 
+         SectionPos lastSectionPos = player.getLastSectionPos();
+         SectionPos sectionPos = SectionPos.of(player);
+-        boolean flag = this.playerMap.ignored(player);
++        // boolean flag = this.playerMap.ignored(player); // Canvas - Threaded Regions
+         boolean flag1 = this.skipPlayer(player);
+-        boolean flag2 = lastSectionPos.asLong() != sectionPos.asLong();
+-        if (flag2 || flag != flag1) {
++        // boolean flag2 = lastSectionPos.asLong() != sectionPos.asLong(); // Canvas - Threaded Regions
++        if (true) { // Canvas - Threaded Regions
+             this.updatePlayerPos(player);
+-            ((ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickDistanceManager)this.distanceManager).moonrise$updatePlayer(player, lastSectionPos, sectionPos, flag, flag1); // Paper - chunk tick iteration optimisation
+-            if (!flag) {
+-                this.distanceManager.removePlayer(lastSectionPos, player);
+-            }
+-
+-            if (!flag1) {
+-                this.distanceManager.addPlayer(sectionPos, player);
+-            }
+-
+-            if (!flag && flag1) {
+-                this.playerMap.ignorePlayer(player);
+-            }
+-
+-            if (flag && !flag1) {
+-                this.playerMap.unIgnorePlayer(player);
+-            }
++            ((ca.spottedleaf.moonrise.patches.chunk_tick_iteration.ChunkTickDistanceManager)this.distanceManager).moonrise$updatePlayer(player, lastSectionPos, sectionPos, false, flag1); // Paper - chunk tick iteration optimisation // Canvas - Threaded Regions
++            // Canvas - Threaded Regions
+ 
+             // Paper - rewrite chunk system
+         }
+@@ -880,9 +_,9 @@
+     public void addEntity(Entity entity) {
+         org.spigotmc.AsyncCatcher.catchOp("entity track"); // Spigot
          // Paper start - ignore and warn about illegal addEntity calls instead of crashing server
-         if (!entity.valid || entity.level() != this.level || this.entityMap.containsKey(entity.getId())) {
+-        if (!entity.valid || entity.level() != this.level || this.entityMap.containsKey(entity.getId())) {
++        if (!entity.valid || entity.level() != this.level || entity.moonrise$getTrackedEntity() != null) { // Canvas - Threaded Regions
              LOGGER.error("Illegal ChunkMap::addEntity for world " + this.level.getWorld().getName()
 -                + ": " + entity  + (this.entityMap.containsKey(entity.getId()) ? " ALREADY CONTAINED (This would have crashed your server)" : ""), new Throwable());
-+                + ": " + entity  + (this.entityMap.containsKey(entity.getId()) ? " ALREADY CONTAINED (This would have crashed your server)" : entity.level() != this.level ? " NOT CORRECT LEVEL" : !entity.valid ? " NOT VALID" : ""), new Throwable()); // Canvas - be more specific
++                + ": " + entity  + (entity.moonrise$getTrackedEntity() != null ? " ALREADY CONTAINED (This would have crashed your server)" : entity.level() != this.level ? " NOT CORRECT LEVEL" : !entity.valid ? " NOT VALID" : ""), new Throwable()); // Canvas - be more specific - Threaded Regions
              return;
          }
          // Paper end - ignore and warn about illegal addEntity calls instead of crashing server
-@@ -938,19 +_,27 @@
+@@ -893,22 +_,28 @@
+             i = org.spigotmc.TrackingRange.getEntityTrackingRange(entity, i); // Spigot
+             if (i != 0) {
+                 int updateInterval = type.updateInterval();
+-                if (this.entityMap.containsKey(entity.getId())) {
++                if (entity.moonrise$getTrackedEntity() != null) { // Canvas - Threaded Regions
+                     throw (IllegalStateException)Util.pauseInIde(new IllegalStateException("Entity is already tracked!"));
+                 } else {
+                     ChunkMap.TrackedEntity trackedEntity = new ChunkMap.TrackedEntity(entity, i, updateInterval, type.trackDeltas());
+-                    this.entityMap.put(entity.getId(), trackedEntity);
++                    // this.entityMap.put(entity.getId(), trackedEntity); // Canvas - Threaded Regions
+                     // Paper start - optimise entity tracker
+                     if (((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$getTrackedEntity() != null) {
+                         throw new IllegalStateException("Entity is already tracked");
+                     }
+                     ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$setTrackedEntity(trackedEntity);
+                     // Paper end - optimise entity tracker
+-                    trackedEntity.updatePlayers(this.level.players());
++                    trackedEntity.updatePlayers(this.level.getLocalPlayers(entity.chunkPosition())); // Canvas - Threaded Regions
+                     if (entity instanceof ServerPlayer serverPlayer) {
+                         this.updatePlayerStatus(serverPlayer, true);
+ 
+-                        for (ChunkMap.TrackedEntity trackedEntity1 : this.entityMap.values()) {
++                        // Canvas start - Threaded Regions
++                        for (Entity possible : ServerRegions.getTickData(this.level).getTrackerEntities(entity.chunkPosition())) {
++                            ChunkMap.TrackedEntity trackedEntity1 = possible.moonrise$getTrackedEntity();
++                            if (trackedEntity1 == null) {
++                                continue;
++                            }
++                        // Canvas end
+                             if (trackedEntity1.entity != serverPlayer) {
+                                 trackedEntity1.updatePlayer(serverPlayer);
+                             }
+@@ -924,12 +_,18 @@
+         if (entity instanceof ServerPlayer serverPlayer) {
+             this.updatePlayerStatus(serverPlayer, false);
+ 
+-            for (ChunkMap.TrackedEntity trackedEntity : this.entityMap.values()) {
++            // Canvas start - Threaded Regions
++            for (Entity possible : ServerRegions.getTickData(this.level).getLocalEntities(entity.chunkPosition())) {
++                ChunkMap.TrackedEntity trackedEntity = possible.moonrise$getTrackedEntity();
++                if (trackedEntity == null) {
++                    continue;
++                }
++            // Canvas end
+                 trackedEntity.removePlayer(serverPlayer);
+             }
+         }
+ 
+-        ChunkMap.TrackedEntity trackedEntity1 = this.entityMap.remove(entity.getId());
++        ChunkMap.TrackedEntity trackedEntity1 = entity.moonrise$getTrackedEntity(); // Canvas - Threaded Regions
+         if (trackedEntity1 != null) {
+             trackedEntity1.broadcastRemoved();
+         }
+@@ -938,19 +_,29 @@
  
      // Paper start - optimise entity tracker
      private void newTrackerTick() {
 +        // Canvas start - threaded tracker
-+        if (true) {
-+            ThreadedTracker.INSTANCE.tick(level);
-+            return;
++        if (!Config.INSTANCE.ticking.enableThreadedRegionizing) { // Canvas - Threaded Regions - if threaded regions is disabled, we can run threaded.
++            if (ThreadedTracker.INSTANCE.tick(level)) return; // use normal moonrise tracker if threaded tracking is disabled
 +        }
 +        // Canvas end
          final ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup entityLookup = (ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup)((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getEntityLookup();;
  
-         final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.world.entity.Entity> trackerEntities = entityLookup.trackerEntities;
+-        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.world.entity.Entity> trackerEntities = entityLookup.trackerEntities;
++        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level); // Canvas - Threaded Regions
++        final ca.spottedleaf.moonrise.common.misc.NearbyPlayers nearbyPlayers = this.level.moonrise$getNearbyPlayers(); // Canvas - Threaded Regions
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.world.entity.Entity> trackerEntities = data.trackerEntities; // Canvas - Threaded Regions
          final Entity[] trackerEntitiesRaw = trackerEntities.getRawDataUnchecked();
          for (int i = 0, len = trackerEntities.size(); i < len; ++i) {
              final Entity entity = trackerEntitiesRaw[i];
@@ -178,13 +359,45 @@
                  continue;
              }
 -            ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkData().nearbyPlayers);
-+            ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity cse =  ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity); ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(cse.moonrise$getChunkData() == null ? null : cse.moonrise$getChunkData().nearbyPlayers); // Canvas
++            ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity cse =  ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity);
++            ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition())); // Canvas - Threaded Regions
 +            @Nullable FullChunkStatus chunkStatus = ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus(); // Canvas
              if (((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$hasPlayers()
 -                || ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus().isOrAfter(FullChunkStatus.ENTITY_TICKING)) {
 +                || (chunkStatus != null && chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) { // Canvas
                  tracker.serverEntity.sendChanges();
              }
+         }
+@@ -964,7 +_,7 @@
+             return;
+         }
+         // Paper end - optimise entity tracker
+-        // Paper - rewrite chunk system
++        /* // Paper - rewrite chunk system // Canvas - Threaded Regions
+ 
+         List<ServerPlayer> list = Lists.newArrayList();
+         List<ServerPlayer> list1 = this.level.players();
+@@ -992,18 +_,18 @@
+             for (ChunkMap.TrackedEntity trackedEntity : this.entityMap.values()) {
+                 trackedEntity.updatePlayers(list);
+             }
+-        }
++        } */ // Canvas - Threaded Regions
+     }
+ 
+     public void broadcast(Entity entity, Packet<?> packet) {
+-        ChunkMap.TrackedEntity trackedEntity = this.entityMap.get(entity.getId());
++        ChunkMap.TrackedEntity trackedEntity = entity.moonrise$getTrackedEntity(); // Canvas - Threaded Regions
+         if (trackedEntity != null) {
+             trackedEntity.broadcast(packet);
+         }
+     }
+ 
+     protected void broadcastAndSend(Entity entity, Packet<?> packet) {
+-        ChunkMap.TrackedEntity trackedEntity = this.entityMap.get(entity.getId());
++        ChunkMap.TrackedEntity trackedEntity = entity.moonrise$getTrackedEntity(); // Canvas - Threaded Regions
+         if (trackedEntity != null) {
+             trackedEntity.broadcastAndSend(packet);
          }
 @@ -1080,7 +_,7 @@
          final Entity entity;

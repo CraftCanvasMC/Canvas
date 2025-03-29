@@ -65,6 +65,16 @@ public class Config {
 
         @Comment("Enables each world to have the \"empty server\" logic per world introduced in Minecraft 1.21.4")
         public boolean emptySleepPerWorlds = true;
+
+        @Comment(value = {
+            "Enables threaded regions. Works exactly like Folia in region grouping, but",
+            "works slightly differently in behavior. To prevent issues with plugins, it's",
+            "recommended to use folia-compatible plugins with this option enabled."
+        })
+        public boolean enableThreadedRegionizing = false;
+
+        @Comment("The region chunk shift. Only works with threaded regionizing enabled")
+        public int gridExponent = 4;
     }
 
     public Chunks chunks = new Chunks();
@@ -533,6 +543,10 @@ public class Config {
             }
             LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
             COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
+        }
+        if (INSTANCE.ticking.enableThreadedRegionizing) {
+            INSTANCE.entities.enableAsyncSpawning = false; // incompatible with threaded regions
+            INSTANCE.entities.entityTracking.enableThreadedTracking = false; // incompatible with threaded regions
         }
         LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
         return INSTANCE;

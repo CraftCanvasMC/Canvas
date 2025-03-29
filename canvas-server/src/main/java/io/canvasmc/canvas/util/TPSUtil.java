@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.util;
 
+import io.canvasmc.canvas.region.ServerRegions;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.Nullable;
@@ -30,6 +31,6 @@ public class TPSUtil {
     }
 
     public static double rawTT20(double ticks, @Nullable ServerLevel level) {
-        return ticks == 0 ? 0 : ticks * (level == null ? MinecraftServer.getServer().tpsCalculator.getMostAccurateTPS() : level.tpsCalculator.getMostAccurateTPS()) / MAX_TPS;
+        return ticks == 0 ? 0 : ticks * (level == null ? MinecraftServer.getServer().tpsCalculator.getMostAccurateTPS() : ServerRegions.getTickData(level).tpsCalculator.getMostAccurateTPS()) / MAX_TPS; // Canvas - Threaded Regions
     }
 }

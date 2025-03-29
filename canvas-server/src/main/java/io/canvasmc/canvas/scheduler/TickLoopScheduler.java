@@ -5,6 +5,7 @@ import ca.spottedleaf.concurrentutil.util.TimeUtil;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.event.TickSchedulerInitEvent;
+import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.MultiWatchdogThread;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
@@ -14,6 +15,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.BooleanSupplier;
 import net.kyori.adventure.text.Component;
 import net.minecraft.server.MinecraftServer;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -24,12 +26,13 @@ public class TickLoopScheduler implements MultithreadedTickScheduler {
     public final SchedulerThreadPool scheduler;
 
     TickLoopScheduler(final int threads) {
-        this.scheduler = new SchedulerThreadPool(threads, new NamedAgnosticThreadFactory<>("tick scheduler", TickThread::new, Config.INSTANCE.ticking.tickLoopThreadPriority));
+        if (INSTANCE != null) throw new IllegalStateException("tried to build new scheduler when one was already set");
+        this.scheduler = new SchedulerThreadPool(threads, new NamedAgnosticThreadFactory<>("tick scheduler", ThreadRunner::new, Config.INSTANCE.ticking.tickLoopThreadPriority));
         INSTANCE = this;
     }
 
     public static void start() {
-        TickLoopScheduler loopScheduler = new TickLoopScheduler(Config.INSTANCE.ticking.allocatedSchedulerThreadCount);
+        TickLoopScheduler loopScheduler = getInstance();
         loopScheduler.scheduler.start();
         new TickSchedulerInitEvent().callEvent();
         for (final AbstractTickLoop tickLoop : MinecraftServer.getThreadedServer().getTickLoops()) {
@@ -57,7 +60,7 @@ public class TickLoopScheduler implements MultithreadedTickScheduler {
 
     public static TickLoopScheduler getInstance() {
         if (INSTANCE == null) {
-            start();
+            INSTANCE = new TickLoopScheduler(Config.INSTANCE.ticking.allocatedSchedulerThreadCount);
         }
         return INSTANCE;
     }
@@ -67,6 +70,29 @@ public class TickLoopScheduler implements MultithreadedTickScheduler {
             if (thread.isAlive()) {
                 TraceUtil.dumpTraceForThread(thread, reason);
             }
+        }
+    }
+
+    // Note: only a region can call this
+    public static void setTickingData(ServerRegions.WorldTickData data) {
+        if (!(Thread.currentThread() instanceof ThreadRunner runner)) {
+            throw new RuntimeException("Unable to set ticking data of a non thread-runner");
+        }
+        runner.threadLocalTickData = data;
+    }
+
+    @Contract(pure = true)
+    public static ServerRegions.@Nullable WorldTickData getCurrentTickData() {
+        if (Thread.currentThread() instanceof ThreadRunner runner) {
+            return runner.threadLocalTickData;
+        }
+        return null;
+    }
+
+    public static class ThreadRunner extends TickThread {
+        public volatile ServerRegions.WorldTickData threadLocalTickData;
+        public ThreadRunner(final ThreadGroup group, final Runnable run, final String name) {
+            super(group, run, name);
         }
     }
 
@@ -85,6 +111,8 @@ public class TickLoopScheduler implements MultithreadedTickScheduler {
         AbstractTickLoop tickLoop = new AbstractTickLoop(formalName, debugName) {
             @Override
             protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
+                int processedPolledCount = 0;
+                while (this.pollInternal() && !shutdown) processedPolledCount++;
                 tick.blockTick(this, hasTimeLeft, tickCount);
             }
 
@@ -109,6 +137,7 @@ public class TickLoopScheduler implements MultithreadedTickScheduler {
         protected Thread lastOwningThread;
         protected volatile boolean shutdown = false;
         private boolean hasInitSchedule = false;
+        protected long tickStart = 0L;
 
         public AbstractTick() {
             this.setScheduledStart(System.nanoTime() + TIME_BETWEEN_TICKS);
@@ -120,7 +149,7 @@ public class TickLoopScheduler implements MultithreadedTickScheduler {
             try {
                 this.lastOwningThread = this.owner;
                 this.owner = Thread.currentThread(); // this can change whenever, we update before every single tick
-                final long tickStart = System.nanoTime();
+                tickStart = System.nanoTime();
                 if (!hasInitSchedule) {
                     this.tickSchedule.setLastPeriod(System.nanoTime());
                     hasInitSchedule = true;

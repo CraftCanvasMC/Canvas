@@ -1,10 +1,11 @@
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-@@ -8,6 +_,7 @@
+@@ -8,6 +_,8 @@
  import com.mojang.brigadier.StringReader;
  import com.mojang.brigadier.suggestion.Suggestions;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.region.ServerRegions;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMap.Entry;
  import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
@@ -33,27 +34,17 @@
  import net.minecraft.world.phys.AABB;
  import net.minecraft.world.phys.BlockHitResult;
  import net.minecraft.world.phys.Vec3;
-@@ -316,6 +_,7 @@
-     private boolean waitingForSwitchToConfig;
-     private static final int MAX_SIGN_LINE_LENGTH = Integer.getInteger("Paper.maxSignLength", 80); // Paper - Limit client sign length
-     private final io.papermc.paper.event.packet.ClientTickEndEvent tickEndEvent; // Paper - add client tick end event
-+    public final java.util.concurrent.ConcurrentLinkedQueue<Consumer<ServerPlayer>> pendingPacketProcessing = new java.util.concurrent.ConcurrentLinkedQueue<>(); // Canvas
+@@ -294,8 +_,8 @@
+     // CraftBukkit start - add fields
+     private int lastTick = MinecraftServer.currentTick;
+     private int allowedPlayerTicks = 1;
+-    private int lastDropTick = MinecraftServer.currentTick;
+-    private int lastBookTick  = MinecraftServer.currentTick;
++    private long lastDropTick = Util.getMillis() / 50L; // Canvas - Threaded Regions
++    private long lastBookTick  = Util.getMillis() / 50L; // Canvas - Threaded Regions
+     private int dropCount = 0;
  
-     public ServerGamePacketListenerImpl(MinecraftServer server, Connection connection, ServerPlayer player, CommonListenerCookie cookie) {
-         super(server, connection, cookie, player); // CraftBukkit
-@@ -344,6 +_,12 @@
- 
-     @Override
-     public void tick() {
-+        // Canvas start
-+        Consumer<ServerPlayer> packet;
-+        while ((packet = this.pendingPacketProcessing.poll()) != null) {
-+            packet.accept(this.player);
-+        }
-+        // Canvas end
-         if (this.ackBlockChangesUpTo > -1) {
-             this.send(new ClientboundBlockChangedAckPacket(this.ackBlockChangesUpTo));
-             this.ackBlockChangesUpTo = -1;
+     private boolean hasMoved = false;
 @@ -392,7 +_,7 @@
              this.aboveGroundVehicleTickCount = 0;
          }
@@ -200,6 +191,19 @@
          if (this.player.isImmobile()) return; // CraftBukkit
          if (this.player.hasClientLoaded()) {
              BlockPos pos = packet.getPos();
+@@ -1890,9 +_,10 @@
+                     if (!this.player.isSpectator()) {
+                         // limit how quickly items can be dropped
+                         // If the ticks aren't the same then the count starts from 0 and we update the lastDropTick.
+-                        if (this.lastDropTick != MinecraftServer.currentTick) {
++                        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.player.serverLevel()); // Canvas - Threaded Regions
++                        if (this.lastDropTick != data.peekTick()) { // Canvas - Threaded Regions
+                             this.dropCount = 0;
+-                            this.lastDropTick = MinecraftServer.currentTick;
++                            this.lastDropTick = data.peekTick(); // Canvas - Threaded Regions
+                         } else {
+                             // Else we increment the drop count and check the amount.
+                             this.dropCount++;
 @@ -2598,6 +_,7 @@
          // this.chatSpamThrottler.increment();
          if (!this.chatSpamThrottler.isIncrementAndUnderThreshold()

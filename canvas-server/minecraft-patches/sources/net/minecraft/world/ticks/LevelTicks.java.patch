@@ -1,9 +1,10 @@
 --- a/net/minecraft/world/ticks/LevelTicks.java
 +++ b/net/minecraft/world/ticks/LevelTicks.java
-@@ -1,9 +_,11 @@
+@@ -1,9 +_,12 @@
  package net.minecraft.world.ticks;
  
 +import com.google.common.collect.Sets;
++import io.canvasmc.canvas.region.ServerRegions;
  import it.unimi.dsi.fastutil.longs.Long2LongMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMaps;
  import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
@@ -30,7 +31,7 @@
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -32,17 +_,29 @@
+@@ -32,19 +_,80 @@
      private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (levelChunkTicks, levelChunkTicks1) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER
          .compare(levelChunkTicks.peek(), levelChunkTicks1.peek());
      private final LongPredicate tickCheck;
@@ -58,13 +59,93 @@
              this.updateContainerScheduling(scheduledTick);
          }
      };
+-
+-    public LevelTicks(LongPredicate tickCheck) {
 +    // Canvas start - tick delay config
 +    public int ticksSinceLastFluidTickCall = 0;
 +    public int ticksSinceLastBlockTickCall = 0;
 +    // Canvas end
- 
-     public LevelTicks(LongPredicate tickCheck) {
++
++    // Canvas start - Threaded Regions
++    public final net.minecraft.server.level.ServerLevel world;
++    public final boolean isBlock;
++
++    public void merge(final LevelTicks<T> into, final long tickOffset) {
++        // note: containersToTick, toRunThisTick, alreadyRunThisTick, toRunThisTickSet
++        // are all transient state, only ever non-empty during tick. But merging regions occurs while there
++        // is no tick happening, so we assume they are empty.
++        for (final Long2ObjectMap.Entry<LevelChunkTicks<T>> entry : (this.allContainers).long2ObjectEntrySet()) {
++            final LevelChunkTicks<T> tickContainer = entry.getValue();
++            tickContainer.offsetTicks(tickOffset);
++            into.allContainers.put(entry.getLongKey(), tickContainer);
++        }
++        for (final Iterator<Map.Entry<Long, Long>> iterator = (this.nextTickForContainer).entrySet().iterator();
++             iterator.hasNext();) {
++            final Map.Entry<Long, Long> entry = iterator.next();
++            into.nextTickForContainer.put(entry.getKey(), entry.getValue() + tickOffset);
++        }
++    }
++
++    public void split(final int chunkToRegionShift,
++                      final it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<LevelTicks<T>> regionToData) {
++        for (final Long2ObjectMap.Entry<LevelChunkTicks<T>> entry : (this.allContainers).long2ObjectEntrySet()) {
++            final long chunkKey = entry.getLongKey();
++            final int chunkX = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(chunkKey);
++            final int chunkZ = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(chunkKey);
++
++            final long regionSectionKey = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(
++                chunkX >> chunkToRegionShift, chunkZ >> chunkToRegionShift
++            );
++            // Should always be non-null, since containers are removed on unload.
++            regionToData.get(regionSectionKey).allContainers.put(chunkKey, entry.getValue());
++        }
++        for (final Map.Entry<Long, Long> entry : (this.nextTickForContainer).entrySet()) {
++            final long chunkKey = entry.getKey();
++            final int chunkX = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(chunkKey);
++            final int chunkZ = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(chunkKey);
++
++            final long regionSectionKey = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(
++                chunkX >> chunkToRegionShift, chunkZ >> chunkToRegionShift
++            );
++
++            // Should always be non-null, since containers are removed on unload.
++            regionToData.get(regionSectionKey).nextTickForContainer.put(chunkKey, entry.getValue());
++        }
++    }
++    public LevelTicks(LongPredicate tickCheck, net.minecraft.server.level.ServerLevel world, boolean isBlock) {
++        this.world = world;
++        this.isBlock = isBlock;
++    // Canvas end
          this.tickCheck = tickCheck;
+     }
+ 
+@@ -56,7 +_,17 @@
+             this.nextTickForContainer.put(packedChunkPos, scheduledTick.triggerTick());
+         }
+ 
+-        chunkTicks.setOnTickAdded(this.chunkScheduleUpdater);
++        // Canvas start - Threaded Regions
++        final boolean isBlock = this.isBlock;
++        final net.minecraft.server.level.ServerLevel world = this.world;
++        // make sure the lambda contains no reference to this LevelTicks
++        chunkTicks.setOnTickAdded((LevelChunkTicks<T> levelChunkTicks, ScheduledTick<T> tick) -> {
++            if (tick.equals(levelChunkTicks.peek())) {
++                ServerRegions.WorldTickData worldData = ServerRegions.getTickData(world);
++                ((LevelTicks<T>)(isBlock ? worldData.getBlockLevelTicks() : worldData.getFluidLevelTicks())).updateContainerScheduling(tick);
++            }
++        });
++        // Canvas end
+     }
+ 
+     public void removeContainer(ChunkPos chunkPos) {
+@@ -74,6 +_,7 @@
+         LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(packedChunkPos);
+         if (levelChunkTicks == null) {
+             Util.logAndPauseIfInIde("Trying to schedule tick in not loaded position " + tick.pos());
++            new Throwable().printStackTrace(); // Canvas - print stack
+         } else {
+             levelChunkTicks.schedule(tick);
+         }
 @@ -84,7 +_,7 @@
          profilerFiller.push("collect");
          this.collectTicks(gameTime, maxAllowedTicks, profilerFiller);
