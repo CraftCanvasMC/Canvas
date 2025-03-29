@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.util;
 
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
@@ -37,7 +38,9 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
     @Override
     public int size() {
         final AtomicInteger total = new AtomicInteger();
-        level.regioniser.computeForAllRegions((region -> total.addAndGet(region.getData().tickData.trackerEntities.size())));
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            level.regioniser.computeForAllRegions((region -> total.addAndGet(region.getData().tickData.trackerEntities.size())));
+        } else total.getAndAdd(ServerRegions.getTickData(this.level).trackerEntities.size());
         return total.get();
     }
 
@@ -50,20 +53,29 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
     public boolean containsValue(final Object value) {
         // the value must be a TrackedEntity
         if (!(value instanceof final ChunkMap.TrackedEntity tracked)) return false;
-        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
-            if (region.getData().tickData.trackerEntities.contains(tracked.entity)) return true;
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
+                if (region.getData().tickData.trackerEntities.contains(tracked.entity)) return true;
+            }
+        } else {
+            return ServerRegions.getTickData(this.level).trackerEntities.contains(tracked.entity);
         }
         return false;
     }
 
     @Override
     public void putAll(@NotNull final Map<? extends Integer, ? extends ChunkMap.TrackedEntity> m) {
+        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level);
         m.forEach((_, value) -> {
             // we need to shard this now into each region
             ChunkPos chunk = value.entity.chunkPosition();
-            ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.level.regioniser.getRegionAtUnsynchronised(chunk.x, chunk.z);
-            if (region == null) throw new RuntimeException("unable to shard to region for putAll");
-            region.getData().tickData.trackerEntities.add(value.entity);
+            if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.level.regioniser.getRegionAtUnsynchronised(chunk.x, chunk.z);
+                if (region == null) throw new RuntimeException("unable to shard to region for putAll");
+                region.getData().tickData.trackerEntities.add(value.entity);
+            } else {
+                data.trackerEntities.add(value.entity);
+            }
         });
     }
 
@@ -81,9 +93,16 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
     @Override
     public ObjectSet<Entry<ChunkMap.TrackedEntity>> int2ObjectEntrySet() {
         Int2ObjectMap<ChunkMap.TrackedEntity> entrySetMap = new Int2ObjectConcurrentHashMap<>();
-        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : this.getRegions()) {
-            for (final Entity entity : region.getData().tickData.trackerEntities) {
-                if (entity != null) entrySetMap.put(entity.getId(), entity.moonrise$getTrackedEntity());
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : this.getRegions()) {
+                for (final Entity entity : region.getData().tickData.trackerEntities) {
+                    if (entity != null) entrySetMap.put(entity.getId(), entity.moonrise$getTrackedEntity());
+                }
+            }
+        } else {
+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level);
+            for (final Entity trackerEntity : data.trackerEntities) {
+                if (trackerEntity != null) entrySetMap.put(trackerEntity.getId(), trackerEntity.moonrise$getTrackedEntity());
             }
         }
         return entrySetMap.int2ObjectEntrySet();
@@ -92,9 +111,16 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
     @Override
     public @NotNull IntSet keySet() {
         IntSet intSet = IntSets.synchronize(new IntArraySet());
-        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : this.getRegions()) {
-            for (final Entity entity : region.getData().tickData.trackerEntities) {
-                if (entity != null) intSet.add(entity.getId());
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : this.getRegions()) {
+                for (final Entity entity : region.getData().tickData.trackerEntities) {
+                    if (entity != null) intSet.add(entity.getId());
+                }
+            }
+        } else {
+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level);
+            for (final Entity trackerEntity : data.trackerEntities) {
+                if (trackerEntity != null) intSet.add(trackerEntity.getId());
             }
         }
         return intSet;
@@ -103,9 +129,16 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
     @Override
     public @NotNull ObjectCollection<ChunkMap.TrackedEntity> values() {
         ObjectCollection<ChunkMap.TrackedEntity> objectCollection = ObjectCollections.synchronize(new ObjectArraySet<>());
-        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : this.getRegions()) {
-            for (final Entity entity : region.getData().tickData.trackerEntities) {
-                if (entity != null) objectCollection.add(entity.moonrise$getTrackedEntity());
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : this.getRegions()) {
+                for (final Entity entity : region.getData().tickData.trackerEntities) {
+                    if (entity != null) objectCollection.add(entity.moonrise$getTrackedEntity());
+                }
+            }
+        } else {
+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level);
+            for (final Entity trackerEntity : data.trackerEntities) {
+                if (trackerEntity != null) objectCollection.add(trackerEntity.moonrise$getTrackedEntity());
             }
         }
         return objectCollection;
@@ -113,8 +146,15 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
 
     @Override
     public ChunkMap.TrackedEntity get(final int key) {
-        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
-            for (final Entity trackerEntity : region.getData().tickData.trackerEntities) {
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
+                for (final Entity trackerEntity : region.getData().tickData.trackerEntities) {
+                    if (trackerEntity.getId() == key) return trackerEntity.moonrise$getTrackedEntity();
+                }
+            }
+        } else {
+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level);
+            for (final Entity trackerEntity : data.trackerEntities) {
                 if (trackerEntity.getId() == key) return trackerEntity.moonrise$getTrackedEntity();
             }
         }
@@ -123,8 +163,15 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
 
     @Override
     public boolean containsKey(final int key) {
-        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
-            for (final Entity trackerEntity : region.getData().tickData.trackerEntities) {
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
+                for (final Entity trackerEntity : region.getData().tickData.trackerEntities) {
+                    if (trackerEntity.getId() == key) return true;
+                }
+            }
+        } else {
+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level);
+            for (final Entity trackerEntity : data.trackerEntities) {
                 if (trackerEntity.getId() == key) return true;
             }
         }
@@ -133,10 +180,20 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
 
     @Override
     public ChunkMap.TrackedEntity remove(final int key) {
-        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
-            for (final Entity trackerEntity : region.getData().tickData.trackerEntities) {
+        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
+                for (final Entity trackerEntity : region.getData().tickData.trackerEntities) {
+                    if (trackerEntity.getId() == key) {
+                        region.getData().tickData.trackerEntities.remove(trackerEntity);
+                        return trackerEntity.moonrise$getTrackedEntity();
+                    }
+                }
+            }
+        } else {
+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level);
+            for (final Entity trackerEntity : data.trackerEntities) {
                 if (trackerEntity.getId() == key) {
-                    region.getData().tickData.trackerEntities.remove(trackerEntity);
+                    data.trackerEntities.remove(trackerEntity);
                     return trackerEntity.moonrise$getTrackedEntity();
                 }
             }

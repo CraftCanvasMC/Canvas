@@ -800,6 +800,16 @@ public class ServerRegions {
         // make the code easier by simply discarding it in such an event
         public void pushBlockEvent(final @NotNull BlockEventData blockEventData) {
             TickThread.ensureTickThread(this.world, blockEventData.pos(), "Cannot queue block even data async");
+            // let's ensure we actually run this on the appropriate region
+            if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                ChunkPos pos = new ChunkPos(blockEventData.pos());
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(pos.x, pos.z);
+                // the chunk has to exist for the entity to be added, so we are ok to assume non-null
+                if (theRegion.getData().tickData != this) {
+                    this.blockEvents.add(blockEventData);
+                    return;
+                }
+            }
             this.blockEvents.add(blockEventData);
         }
 

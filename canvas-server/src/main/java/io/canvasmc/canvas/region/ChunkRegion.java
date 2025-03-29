@@ -130,7 +130,7 @@ public class ChunkRegion extends TickLoopScheduler.AbstractTick {
         chunkSource.tick(hasTimeLeft, true);
         if (runsNormally) {
             if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
-                if (!Config.INSTANCE.ticking.enableThreadedRegionizing) this.world.runBlockEvents();
+                this.world.runBlockEvents();
                 this.ticksSinceLastBlockEventsTickCall = 0;
             }
         }
