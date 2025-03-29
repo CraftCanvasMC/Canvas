@@ -130,4 +130,23 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
         }
         return false;
     }
+
+    @Override
+    public ChunkMap.TrackedEntity remove(final int key) {
+        for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : getRegions()) {
+            for (final Entity trackerEntity : region.getData().tickData.trackerEntities) {
+                if (trackerEntity.getId() == key) {
+                    region.getData().tickData.trackerEntities.remove(trackerEntity);
+                    return trackerEntity.moonrise$getTrackedEntity();
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public ChunkMap.TrackedEntity remove(final Object key) {
+        if (!(key instanceof Integer integer)) return null;
+        return remove((int) integer);
+    }
 }
