@@ -164,7 +164,6 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop {
             level.moonrise$getPlayerChunkLoader().tick();
             level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
             chunkSource.broadcastChangedChunks(profilerFiller);
-            chunkSource.chunkMap.tick(hasTimeLeft, true);
         }
         if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
             MoonriseCommon.WORKER_POOL.wakeup();

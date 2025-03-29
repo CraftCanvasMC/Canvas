@@ -476,7 +476,7 @@ public class ServerRegions {
 
         public ReferenceList<Entity> getTrackerEntities(ChunkPos chunkPos) {
             // let's ensure we actually run this on the appropriate region
-            if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            if (Config.INSTANCE.ticking.enableThreadedRegionizing && chunkPos != null) {
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(chunkPos.x, chunkPos.z);
                 if (theRegion.getData().tickData != this) {
                     return theRegion.getData().tickData.trackerEntities;

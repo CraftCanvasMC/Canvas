@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.profiling.Profiler;
@@ -125,7 +126,8 @@ public class ChunkRegion extends TickLoopScheduler.AbstractTick {
             data.incrementRedstoneTime();
         }
         this.world.regionTick2(profilerFiller, runsNormally, data);
-        this.world.getChunkSource().tick(hasTimeLeft, true);
+        final ServerChunkCache chunkSource = this.world.getChunkSource();
+        chunkSource.tick(hasTimeLeft, true);
         if (runsNormally) {
             if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
                 if (!Config.INSTANCE.ticking.enableThreadedRegionizing) this.world.runBlockEvents();

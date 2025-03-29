@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
-@@ -1,15 +_,26 @@
+@@ -1,15 +_,27 @@
  package net.minecraft.server.level;
  
 +import ca.spottedleaf.concurrentutil.util.Priority;
@@ -17,6 +17,7 @@
 +import io.canvasmc.canvas.entity.tracking.ThreadedTracker;
 +import io.canvasmc.canvas.region.ServerRegions;
 +import io.canvasmc.canvas.scheduler.TickLoopScheduler;
++import io.canvasmc.canvas.util.ConcurrentRegionizedEntityMap;
 +import io.canvasmc.canvas.util.fastutil.Int2ObjectConcurrentHashMap;
 +import io.netty.util.internal.ConcurrentSet;
  import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
@@ -57,12 +58,20 @@
 -    private final Long2ByteMap chunkTypeCache = new Long2ByteOpenHashMap();
 +    // private final PlayerMap playerMap = new PlayerMap(); // Canvas - Threaded Regions
 +    // Canvas start - synchronize / concurrent
-+    // public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap = new Int2ObjectConcurrentHashMap<>(); // Canvas - Threaded Regions
++    public final Int2ObjectMap<ChunkMap.TrackedEntity> entityMap; // Canvas - Threaded Regions
 +    private final Long2ByteMap chunkTypeCache = Long2ByteMaps.synchronize(new Long2ByteOpenHashMap());
 +    // Canvas end
      // Paper - rewrite chunk system
      public int serverViewDistance;
      public final WorldGenContext worldGenContext; // Paper - public
+@@ -230,6 +_,7 @@
+         );
+         this.setServerViewDistance(viewDistance);
+         this.worldGenContext = new WorldGenContext(level, generator, structureManager, this.lightEngine, null, this::setChunkUnsaved); // Paper - rewrite chunk system
++        this.entityMap = new ConcurrentRegionizedEntityMap(level); // Canvas - Threaded Regions
+     }
+ 
+     private void setChunkUnsaved(ChunkPos chunkPos) {
 @@ -244,14 +_,18 @@
  
          final int index = entity.getType().getCategory().ordinal();
@@ -113,41 +122,15 @@
          // Paper start - rewrite chunk system
          final ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder holder = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.getChunkHolder(chunkPos);
          return holder == null ? null : holder.vanillaChunkHolder;
-@@ -409,13 +_,19 @@
+@@ -409,7 +_,7 @@
          // Paper end - rewrite chunk system
      }
  
 -    protected void tick(BooleanSupplier hasMoreTime) {
-+    // Canvas start - allow autosave and unload on async chunkloader
-+    public void tick(BooleanSupplier hasMoreTime) {
-+        this.tick(hasMoreTime, false);
-+    }
-+
-+    public void tick(BooleanSupplier hasMoreTime, boolean flag) { // protected -> public
-+    // Canvas end
++    public void tick(BooleanSupplier hasMoreTime) { // Canvas - protected -> public
          ProfilerFiller profilerFiller = Profiler.get();
          profilerFiller.push("poi");
          this.poiManager.tick(hasMoreTime);
-         profilerFiller.popPush("chunk_unload");
--        if (!this.level.noSave()) {
--            this.processUnloads(hasMoreTime);
-+        if (flag || !this.level.noSave()) { // Canvas - async chunk loader
-+            this.processUnloads(hasMoreTime, flag); // Canvas - async chunk loader
-         }
- 
-         profilerFiller.pop();
-@@ -425,8 +_,10 @@
-         throw new UnsupportedOperationException(); // Paper - rewrite chunk system
-     }
- 
--    private void processUnloads(BooleanSupplier hasMoreTime) {
-+    private void processUnloads(BooleanSupplier hasMoreTime, boolean flag) {
-+        if (!flag) // Canvas - async chunk loader - just process autoSave on chunk loader. unload should be on level(or region)
-         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.processUnloads(); // Paper - rewrite chunk system
-+        else // Canvas - async chunk loader - just process autoSave on chunk loader. unload should be on level(or region)
-         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getChunkTaskScheduler().chunkHolderManager.autoSave(); // Paper - rewrite chunk system
-     }
- 
 @@ -720,40 +_,19 @@
          double blockRange; // Paper - use from event
          // Spigot end
@@ -399,8 +382,12 @@
          if (trackedEntity != null) {
              trackedEntity.broadcastAndSend(packet);
          }
-@@ -1080,7 +_,7 @@
-         final Entity entity;
+@@ -1077,10 +_,10 @@
+ 
+     public class TrackedEntity implements ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity { // Paper - optimise entity tracker
+         public final ServerEntity serverEntity;
+-        final Entity entity;
++        public final Entity entity; // Canvas - public
          private final int range;
          SectionPos lastSectionPos;
 -        public final Set<ServerPlayerConnection> seenBy = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(); // Paper - Perf: optimise map impl

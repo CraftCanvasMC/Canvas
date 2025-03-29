@@ -87,7 +87,12 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
 
     @Override
     protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
-        TickLoopScheduler.setTickingData(ServerRegions.getTickData(this.level())); // should return this data always
+        if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            if (level().levelTickData == null) {
+                level().levelTickData = new ServerRegions.WorldTickData(level(), null);
+            }
+        }
+        TickLoopScheduler.setTickingData(level().levelTickData);
         int processedPolledCount = 0;
         while (this.pollInternal() && !shutdown) processedPolledCount++;
         MinecraftServer server = MinecraftServer.getServer();
