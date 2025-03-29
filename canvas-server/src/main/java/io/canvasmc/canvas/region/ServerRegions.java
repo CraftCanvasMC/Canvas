@@ -721,11 +721,14 @@ public class ServerRegions {
                 throw new IllegalArgumentException("Entity " + entity + " is not under this region's control");
             }
             // let's ensure we actually run this on the appropriate region
-
-
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
+                if (theRegion == null) {
+                    // syncload it... this really only happens inter-dimensionally
+                    this.world.getChunkSource().getChunk(entity.chunkPosition().x, entity.chunkPosition().z, ChunkStatus.FULL, true);
+                    theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z); // its loaded now.
+                }
                 if (theRegion.getData().tickData != this) {
                     theRegion.getData().tickData.removeEntityTickingEntity(entity);
                     return;

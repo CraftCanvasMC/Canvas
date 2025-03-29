@@ -6,6 +6,7 @@ import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.command.ThreadedServerHealthDump;
 import io.canvasmc.canvas.entity.SleepingBlockEntity;
 import io.canvasmc.canvas.region.ServerRegions;
+import io.canvasmc.canvas.scheduler.TickLoopScheduler;
 import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
@@ -86,6 +87,7 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
 
     @Override
     protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
+        TickLoopScheduler.setTickingData(ServerRegions.getTickData(this.level())); // should return this data always
         int processedPolledCount = 0;
         while (this.pollInternal() && !shutdown) processedPolledCount++;
         MinecraftServer server = MinecraftServer.getServer();
@@ -107,6 +109,7 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
             }
         }
         this.level().worldtick(hasTimeLeft, tickCount);
+        TickLoopScheduler.setTickingData(null);
     }
 
     public ServerLevel level() {
