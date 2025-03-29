@@ -4,11 +4,11 @@ import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.RollingAverage;
 import io.canvasmc.canvas.TickTimes;
 import io.canvasmc.canvas.scheduler.TickLoopScheduler;
-import io.canvasmc.canvas.server.AbstractTickLoop;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
-import it.unimi.dsi.fastutil.longs.LongArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -16,12 +16,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.profiling.Profiler;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.TickRateManager;
-import net.minecraft.world.level.chunk.LevelChunk;
-import org.agrona.collections.ObjectHashSet;
 import org.jetbrains.annotations.NotNull;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
 
 import static io.canvasmc.canvas.scheduler.MultithreadedTickScheduler.TIME_BETWEEN_TICKS;
 

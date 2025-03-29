@@ -1,7 +1,6 @@
 package io.canvasmc.canvas.server;
 
 import io.canvasmc.canvas.CanvasBootstrap;
-import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.region.RegionizedTaskQueue;

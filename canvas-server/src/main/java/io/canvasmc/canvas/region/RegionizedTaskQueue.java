@@ -11,13 +11,13 @@ import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.TicketType;
-import net.minecraft.util.Unit;
 import java.lang.invoke.VarHandle;
 import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicLong;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
+import net.minecraft.util.Unit;
 
 public final class RegionizedTaskQueue {
 
