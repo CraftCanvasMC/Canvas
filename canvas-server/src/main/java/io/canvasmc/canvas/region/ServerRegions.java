@@ -140,14 +140,20 @@ public class ServerRegions {
             for (final Connection conn : from.activeConnections) {
                 final ServerPlayer player = conn.getPlayer();
                 final ChunkPos pos = player.chunkPosition();
-                // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
-                // the chunk holder must _exist_, and so the region section exists.
-                regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift))
-                    .activeConnections.add(conn);
+                final WorldTickData data = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
+                if (data == null) {
+                    // dock on level, it will handle from there
+                    ServerLevel level = player.serverLevel();
+                    if (level.levelTickData == null) {
+                        level.levelTickData = new WorldTickData(level, null);
+                    }
+                    level.levelTickData.activeConnections.add(conn);
+                } else data.activeConnections.add(conn);
             }
             // entities
             for (final ServerPlayer player : from.localPlayers) {
                 final ChunkPos pos = player.chunkPosition();
+                player.serverLevel().getChunk(pos.x, pos.z, ChunkStatus.FULL, true); // ensure loaded
                 // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
                 // the chunk holder must _exist_, and so the region section exists.
                 final WorldTickData into = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
@@ -156,6 +162,7 @@ public class ServerRegions {
             }
             for (final Entity entity : from.allEntities) {
                 final ChunkPos pos = entity.chunkPosition();
+                entity.level().level().getChunk(pos.x, pos.z, ChunkStatus.FULL, true); // ensure loaded
                 // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
                 // the chunk holder must _exist_, and so the region section exists.
                 final WorldTickData into = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
@@ -242,25 +249,25 @@ public class ServerRegions {
                 final ServerChunkCache.ChunkAndHolder holder = iterator.next();
                 final ChunkPos pos = holder.chunk().getPos();
 
-                // Impossible for get() to return null, as the chunk is entity ticking - thus the chunk holder is loaded
-                regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift))
-                    .entityTickingChunks.add(holder);
+                final WorldTickData data = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
+                if (data == null) continue;
+                data.entityTickingChunks.add(holder);
             }
             for (final Iterator<ServerChunkCache.ChunkAndHolder> iterator = from.tickingChunks.iterator(); iterator.hasNext();) {
                 final ServerChunkCache.ChunkAndHolder holder = iterator.next();
                 final ChunkPos pos = holder.chunk().getPos();
 
-                // Impossible for get() to return null, as the chunk is entity ticking - thus the chunk holder is loaded
-                regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift))
-                    .tickingChunks.add(holder);
+                final WorldTickData data = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
+                if (data == null) continue;
+                data.tickingChunks.add(holder);
             }
             for (final Iterator<ServerChunkCache.ChunkAndHolder> iterator = from.chunks.iterator(); iterator.hasNext();) {
                 final ServerChunkCache.ChunkAndHolder holder = iterator.next();
                 final ChunkPos pos = holder.chunk().getPos();
 
-                // Impossible for get() to return null, as the chunk is entity ticking - thus the chunk holder is loaded
-                regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift))
-                    .chunks.add(holder);
+                final WorldTickData data = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
+                if (data == null) continue;
+                data.chunks.add(holder);
             }
 
             // redstone torches
@@ -982,6 +989,13 @@ public class ServerRegions {
 
         @Override
         public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+            for (final Connection activeConnection : region.getData().tickData.activeConnections) {
+                ServerLevel level = region.getData().world;
+                if (level.levelTickData == null) {
+                    level.levelTickData = new WorldTickData(level, null);
+                }
+                level.levelTickData.activeConnections.add(activeConnection);
+            }
         }
 
         @Override
