@@ -6,9 +6,8 @@ import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.command.ThreadedServerHealthDump;
 import io.canvasmc.canvas.entity.SleepingBlockEntity;
 import io.canvasmc.canvas.region.ServerRegions;
-import io.canvasmc.canvas.scheduler.TickLoopScheduler;
-import io.canvasmc.canvas.server.AbstractTickLoop;
-import io.canvasmc.canvas.server.AverageTickTimeAccessor;
+import io.canvasmc.canvas.scheduler.TickScheduler;
+import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -17,9 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -29,16 +26,12 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.TextDecoration;
-import net.minecraft.Util;
-import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.protocol.Packet;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.ServerTickRateManager;
+import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -54,76 +47,68 @@ import org.jetbrains.annotations.NotNull;
 import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.RED;
 
-public abstract class MinecraftServerWorld extends AbstractTickLoop implements TickRateManagerInstance, LevelAccess, AverageTickTimeAccessor {
+public abstract class MinecraftServerWorld extends TickScheduler.FullTick<MinecraftServerWorld.TickHandle> implements LevelAccess {
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPost = new ConcurrentLinkedQueue<>();
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPre = new ConcurrentLinkedQueue<>();
-    protected final ServerTickRateManager tickRateManager;
     protected final CraftScheduler bukkitScheduler;
-    private long emptyTicks = 0L;
+    public long emptyTicks = 0L;
 
-    public MinecraftServerWorld(final String name, final String debugName) {
-        super(name, debugName);
-        this.tickRateManager = new ServerTickRateManager(this);
+    public MinecraftServerWorld(final String name) {
+        super((DedicatedServer) MinecraftServer.getServer(), name, new TickHandle());
         this.bukkitScheduler = new CraftScheduler();
     }
 
-    @Override
-    public boolean pollInternal() {
-        if (super.pollInternal()) {
-            return true;
-        } else {
-            boolean ret = false;
-            if (tickRateManager().isSprinting() || this.haveTime()) {
-                ServerLevel worldserver = level();
-
-                if (worldserver.getChunkSource().pollTask()) {
-                    ret = true;
+    public static class TickHandle implements WrappedTick {
+        @Override
+        public boolean blockTick(final WrappedTickLoop loop, final BooleanSupplier hasTimeLeft, final int tickCount) {
+            ServerLevel thisAsTickable = (ServerLevel) loop; // we are extended by ServerLevel
+            if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                if (thisAsTickable.levelTickData == null) {
+                    thisAsTickable.levelTickData = new ServerRegions.WorldTickData(thisAsTickable, null);
                 }
             }
+            TickScheduler.setTickingData(thisAsTickable.levelTickData);
+            MinecraftServer server = MinecraftServer.getServer();
+            int i = server.pauseWhileEmptySeconds() * 20;
+            if (Config.INSTANCE.ticking.emptySleepPerWorlds && i > 0) {
+                if (thisAsTickable.players().isEmpty() && !thisAsTickable.tickRateManager().isSprinting() && server.pluginsBlockingSleep.isEmpty()) {
+                    thisAsTickable.emptyTicks++;
+                } else {
+                    thisAsTickable.emptyTicks = 0;
+                }
 
-            return ret;
+                if (thisAsTickable.emptyTicks >= i) {
+                    if (thisAsTickable.emptyTicks == i) {
+                        TickScheduler.LOGGER.info("Level empty for {} seconds, pausing", server.pauseWhileEmptySeconds());
+                        thisAsTickable.sleep();
+                        thisAsTickable.emptyTicks = 0;
+                        return true; // on next tick it will realize we need to sleep and kill the task
+                    }
+                }
+            }
+            thisAsTickable.worldtick(hasTimeLeft, tickCount);
+            TickScheduler.setTickingData(null);
+            return !thisAsTickable.cancelled.get();
         }
     }
 
     @Override
-    protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
-        if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
-            if (level().levelTickData == null) {
-                level().levelTickData = new ServerRegions.WorldTickData(level(), null);
-            }
-        }
-        TickLoopScheduler.setTickingData(level().levelTickData);
-        int processedPolledCount = 0;
-        while (this.pollInternal() && !shutdown) processedPolledCount++;
-        MinecraftServer server = MinecraftServer.getServer();
-        int i = server.pauseWhileEmptySeconds() * 20;
-        if (Config.INSTANCE.ticking.emptySleepPerWorlds && i > 0) {
-            if (this.level().players().isEmpty() && !this.tickRateManager.isSprinting() && server.pluginsBlockingSleep.isEmpty()) {
-                this.emptyTicks++;
-            } else {
-                this.emptyTicks = 0;
-            }
+    public boolean runTasks(final BooleanSupplier canContinue) {
+        try {
+            TickScheduler.setTickingData(level().levelTickData);
+            if (tickRateManager().isSprinting() || canContinue.getAsBoolean()) {
+                ServerLevel worldserver = level();
 
-            if (this.emptyTicks >= i) {
-                if (this.emptyTicks == i) {
-                    LOGGER.info("Level empty for {} seconds, pausing", server.pauseWhileEmptySeconds());
-                    this.sleep();
-                    this.emptyTicks = 0;
-                    return; // on next tick it will realize we need to sleep and kill the task
-                }
+                worldserver.getChunkSource().pollTask();
             }
+            return super.runTasks(canContinue);
+        } finally {
+            TickScheduler.setTickingData(null);
         }
-        this.level().worldtick(hasTimeLeft, tickCount);
-        TickLoopScheduler.setTickingData(null);
     }
 
     public ServerLevel level() {
         return (ServerLevel) this;
-    }
-
-    @Override
-    public String getName() {
-        return this.name;
     }
 
     @Override
@@ -133,34 +118,7 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
 
     @Override
     public void scheduleOnThread(final Runnable runnable) {
-        this.scheduleOnMain(runnable);
-    }
-
-    @Override
-    public CommandSourceStack createCommandSourceStack() {
-        return MinecraftServer.getServer().createCommandSourceStack();
-    }
-
-    @Override
-    public void onTickRateChanged() {
-        MinecraftServer.getServer().onTickRateChanged();
-    }
-
-    @Override
-    public void broadcastPacketsToPlayers(final Packet<?> packet) {
-        for (final ServerPlayer player : this.level().players()) {
-            player.connection.send(packet);
-        }
-    }
-
-    @Override
-    public void skipTickWait() {
-        this.delayedTasksMaxNextTickTimeNanos = Util.getNanos();
-        this.nextTickTimeNanos = Util.getNanos();
-    }
-
-    public boolean isLevelThread() {
-        return Thread.currentThread() instanceof LevelThread;
+        this.pushTask(runnable);
     }
 
     @Override
@@ -174,42 +132,11 @@ public abstract class MinecraftServerWorld extends AbstractTickLoop implements T
     }
 
     @Override
-    public <V> V scheduleOnThread(final Callable<V> callable) throws Exception {
-        Thread current = Thread.currentThread();
-        if (current.equals(getRunningThread())) {
-            return callable.call();
-        }
-        final AtomicReference<V> retVal = new AtomicReference<V>();
-        final AtomicBoolean finished = new AtomicBoolean(false);
-        this.scheduleOnMain(() -> {
-            try {
-                retVal.set(callable.call());
-                finished.set(true);
-            } catch (Exception e) {
-                throw new RuntimeException("Unexpected exception occurred when running Callable<V> to level thread", e);
-            }
-        });
-        this.managedBlock(finished::get);
-        return retVal.get();
-    }
-
-    @Override
     public void wake() {
         // only wake the world if it has players
         // if it doesn't then why wake it...?
-        if (!this.level().players().isEmpty()) {
-            super.wake();
-        }
-    }
-
-    @Override
-    public boolean isTicking() {
-        return super.isTicking() && this.tickCount >= 1;
-    }
-
-    @Override
-    public double getAverageTickTime() {
-        return getNanoSecondsFromLastTick() / 1_000_000;
+        this.emptyTicks = 0L;
+        super.wake();
     }
 
     @Override

@@ -12,15 +12,15 @@ import it.unimi.dsi.fastutil.objects.ObjectArraySet;
 import it.unimi.dsi.fastutil.objects.ObjectCollection;
 import it.unimi.dsi.fastutil.objects.ObjectCollections;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import org.agrona.collections.ObjectHashSet;
 import org.jetbrains.annotations.NotNull;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.TrackedEntity> {
     private final ServerLevel level;

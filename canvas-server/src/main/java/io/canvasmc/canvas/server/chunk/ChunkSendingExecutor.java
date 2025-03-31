@@ -27,7 +27,7 @@ public class ChunkSendingExecutor {
                 runnable.run();
             } catch (Throwable throwable) {
                 MinecraftServer.LOGGER.warn("Failed to send chunk data, attempting retry, if no errors occur related to chunk sending immediately after this, the retry was successful.");
-                level.scheduleOnMain(() -> {
+                level.pushTask(() -> {
                     try {
                         runnable.run();
                     } catch (Throwable failed) {

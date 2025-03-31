@@ -17,14 +17,6 @@ public interface LevelAccess extends WrappedTickLoop {
      */
     void scheduleOnThread(Runnable runnable);
     /**
-     * Schedules a callable to the level thread, will block the current thread
-     * until the callable is done and return the result, or execute immediately
-     * if the current thread is the level thread
-     * @param callable the callable that will be scheduled
-     * @param <V> the return type
-     */
-    <V> V scheduleOnThread(Callable<V> callable) throws Exception;
-    /**
      * Schedules a task to be ran before the next tick
      * @param runnable the tick task
      */

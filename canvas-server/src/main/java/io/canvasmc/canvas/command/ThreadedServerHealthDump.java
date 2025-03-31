@@ -5,8 +5,7 @@ import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.TickTimes;
 import io.canvasmc.canvas.region.ChunkRegion;
 import io.canvasmc.canvas.region.ServerRegions;
-import io.canvasmc.canvas.scheduler.TickLoopScheduler;
-import io.canvasmc.canvas.server.AbstractTickLoop;
+import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.ServerBuildInfoImpl;
@@ -45,15 +44,16 @@ public class ThreadedServerHealthDump {
     public static boolean dump(@NotNull final CommandSender sender, boolean regionDump) {
         ThreadedServer server = MinecraftServer.getThreadedServer();
         int build = ServerBuildInfo.buildInfo().buildNumber().orElse(-1);
-        final int maxThreadCount = TickLoopScheduler.getInstance().scheduler.getThreads().length;
+        final int maxThreadCount = TickScheduler.getScheduler().scheduler.getCoreThreads().length;
         double totalUtil = 0.0;
         final double minTps;
         final double medianTps;
         final double maxTps;
         final DoubleArrayList allTps = new DoubleArrayList();
-        for (final AbstractTickLoop tickLoop : server.getTickLoops()) {
-            TickTimes timings15 = tickLoop.getTickTimes15s();
-            allTps.add(tickLoop.getTps15s().getAverage());
+        for (final TickScheduler.FullTick<?> fullTick : TickScheduler.FullTick.ALL_REGISTERED) {
+            if (fullTick.isSleeping()) continue;
+            TickTimes timings15 = fullTick.getTickTimes15s();
+            allTps.add(fullTick.getTps15s().getAverage());
             totalUtil += timings15.getUtilization();
         }
 
@@ -105,8 +105,8 @@ public class ThreadedServerHealthDump {
                 .append(Component.text(Bukkit.getOnlinePlayers().size(), INFORMATION))
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
-                .append(Component.text("Total TickLoops: ", PRIMARY))
-                .append(Component.text(server.getTickLoops().size(), INFORMATION))
+                .append(Component.text("Total FullTicks: ", PRIMARY))
+                .append(Component.text(allTps.size(), INFORMATION))
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("Lowest Loop TPS: ", PRIMARY))
@@ -125,8 +125,13 @@ public class ThreadedServerHealthDump {
             .append(Component.text("All " + (regionDump ? "Regions" : "TickLoops"), HEADER, TextDecoration.BOLD))
             .append(NEW_LINE)
         );
-        for (final AbstractTickLoop tickLoop : server.getTickLoops().stream().sorted(AbstractTickLoop::compareTo).toList()) {
-            if (regionDump) continue;
+        for (final TickScheduler.FullTick<?> tickLoop : TickScheduler.FullTick.ALL_REGISTERED.stream().sorted(TickScheduler.FullTick::compareTo).toList()) {
+            if (regionDump || (tickLoop instanceof ChunkRegion chunkRegion)) {
+                if (tickLoop instanceof ChunkRegion chunkRegion) {
+                    if (chunkRegion.region.getCenterChunk() == null) throw new RuntimeException("ljfksdjf" + chunkRegion.region.getOwnedChunks() + chunkRegion.cancelled.get() + chunkRegion.getStateVolatile());
+                }
+                continue;
+            }
             String location = "[" + tickLoop.location() + "]";
             double mspt5s = tickLoop.tickTimes5s.getAverage();
             double tps5s = tickLoop.tps5s.getAverage();

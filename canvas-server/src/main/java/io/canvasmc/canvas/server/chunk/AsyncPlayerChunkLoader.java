@@ -5,13 +5,15 @@ import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel
 import ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask;
-import io.canvasmc.canvas.server.AbstractTickLoop;
+import io.canvasmc.canvas.scheduler.TickScheduler;
+import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -36,19 +38,29 @@ import static io.canvasmc.canvas.command.ThreadedServerHealthDump.SECONDARY;
 import static io.canvasmc.canvas.command.ThreadedServerHealthDump.TWO_DECIMAL_PLACES;
 import static net.kyori.adventure.text.Component.text;
 
-public class AsyncPlayerChunkLoader extends AbstractTickLoop {
+public class AsyncPlayerChunkLoader extends TickScheduler.FullTick<AsyncPlayerChunkLoader.TickHandle> {
     public static AsyncPlayerChunkLoader INSTANCE;
 
-    public AsyncPlayerChunkLoader(final String name, final String debugName) {
-        super(name, debugName);
+    public AsyncPlayerChunkLoader(final DedicatedServer server, final String name) {
+        super(server, name, new TickHandle());
         INSTANCE = this;
     }
 
-    @Override
-    protected void blockTick(final BooleanSupplier hasTimeLeft, final int tickCount) {
-        int processedPolledCount = 0;
-        while (this.pollInternal() && !shutdown) processedPolledCount++;
-        this.tick(hasTimeLeft);
+    public static class TickHandle implements WrappedTick {
+        @Override
+        public boolean blockTick(final WrappedTickLoop loop, final BooleanSupplier hasTimeLeft, final int tickCount) {
+            ProfilerFiller profilerFiller = Profiler.get();
+            for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+                ServerChunkCache chunkSource = level.getChunkSource();
+                level.moonrise$getPlayerChunkLoader().tick();
+                level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
+                chunkSource.broadcastChangedChunks(profilerFiller);
+            }
+            if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
+                MoonriseCommon.WORKER_POOL.wakeup();
+            }
+            return true;
+        }
     }
 
     @Override
@@ -155,19 +167,6 @@ public class AsyncPlayerChunkLoader extends AbstractTickLoop {
             .append(Component.text("Load Queue: ", PRIME_ALT))
             .append(Component.text(load, INFORMATION));
         return root.build();
-    }
-
-    public void tick(BooleanSupplier hasTimeLeft) {
-        ProfilerFiller profilerFiller = Profiler.get();
-        for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-            ServerChunkCache chunkSource = level.getChunkSource();
-            level.moonrise$getPlayerChunkLoader().tick();
-            level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
-            chunkSource.broadcastChangedChunks(profilerFiller);
-        }
-        if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
-            MoonriseCommon.WORKER_POOL.wakeup();
-        }
     }
 
     private @NotNull Component doChunkInfo() {

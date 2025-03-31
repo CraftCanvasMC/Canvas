@@ -9,7 +9,8 @@ import ca.spottedleaf.moonrise.common.util.TickThread;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
 import com.google.common.collect.Sets;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.scheduler.TickLoopScheduler;
+import io.canvasmc.canvas.scheduler.CanvasRegionScheduler;
+import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.util.ConcurrentSet;
 import io.canvasmc.canvas.util.TPSCalculator;
 import io.papermc.paper.redstone.RedstoneWireTurbo;
@@ -36,6 +37,7 @@ import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.Connection;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
@@ -74,11 +76,13 @@ public class ServerRegions {
         private final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region;
         public final ChunkRegion tickHandle;
         public final WorldTickData tickData;
+        public final ServerLevel world;
 
-        public TickRegionData(ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+        public TickRegionData(ThreadedRegionizer.@NotNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
             this.region = region;
-            this.tickHandle = new ChunkRegion(region);
-            this.tickData = new WorldTickData(region.regioniser.world, region);
+            this.world = region.regioniser.world;
+            this.tickHandle = new ChunkRegion(region, (DedicatedServer) MinecraftServer.getServer(), "null"/*this is overridden*/);
+            this.tickData = new WorldTickData(this.world, region);
         }
 
         @Override
@@ -218,6 +222,8 @@ public class ServerRegions {
             }
             for (final TickingBlockEntity tileEntity : from.blockEntityTickers) {
                 final BlockPos pos = tileEntity.getPos();
+                // pos can be null
+                if (tileEntity.getType().equalsIgnoreCase("<lithium_sleeping>")) continue;
                 final int chunkX = pos.getX() >> 4;
                 final int chunkZ = pos.getZ() >> 4;
 
@@ -291,6 +297,8 @@ public class ServerRegions {
                     into.chunkHoldersToBroadcast.add(chunkHolder);
                 }
             }
+            // region scheduler
+            CanvasRegionScheduler.Scheduler.split(from.regionScheduler, chunkToRegionShift, regionToData, dataSet);
         }
 
         @Override
@@ -383,6 +391,8 @@ public class ServerRegions {
             }
             this.tickData.holderManagerRegionData.merge(into.holderManagerRegionData, fromTickOffset);
             this.tickData.taskQueueData.mergeInto(into.taskQueueData);
+            // region scheduler
+            CanvasRegionScheduler.Scheduler.merge(from.regionScheduler, into.regionScheduler, fromTickOffset);
         }
     }
 
@@ -392,7 +402,7 @@ public class ServerRegions {
     public static class WorldTickData {
         @Nullable
         public final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region;
-        private final ServerLevel world;
+        public final ServerLevel world;
         public final RegionizedTaskQueue.RegionTaskQueueData taskQueueData;
         public RegionizedTaskQueue.RegionTaskQueueData getTaskQueueData() {
             return this.taskQueueData;
@@ -417,22 +427,37 @@ public class ServerRegions {
         public final Queue<Connection> activeConnections = new ConcurrentLinkedQueue<>() {
             @Override
             public boolean add(final Connection connection) {
+                boolean dock = super.add(connection);
                 try {
-                    return super.add(connection);
+                    WorldTickData.this.world.wake();
+                    return dock;
                 } finally {
-                    MinecraftServer.LOGGER.info("Docked connection for '{}' to region of world '{}' and nullable region around '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(),
-                        WorldTickData.this.region == null ? "null" : WorldTickData.this.region.getCenterChunk());
+                    // don't log if we already contained
+                    if (dock) {
+                        if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
+                            MinecraftServer.LOGGER.info("Docked connection for '{}' to region of world '{}' and region around '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
+                        } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                            MinecraftServer.LOGGER.info("Docked connection for '{}' to world '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName());
+                        }
+                    }
                 }
             }
 
             @Override
             public boolean remove(final Object o) {
                 Connection connection = (Connection) o;
+                boolean dock = super.remove(connection);;
                 try {
                     return super.remove(connection);
                 } finally {
-                    MinecraftServer.LOGGER.info("Undocked connection for '{}' to region of world '{}' and nullable region around '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(),
-                        WorldTickData.this.region == null ? "null" : WorldTickData.this.region.getCenterChunk());
+                    // don't log if we already contained
+                    if (dock) {
+                        if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
+                            MinecraftServer.LOGGER.info("Undocked connection for '{}' from region of world '{}' and region around '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
+                        } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                            MinecraftServer.LOGGER.info("Undocked connection for '{}' from world '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName());
+                        }
+                    }
                 }
             }
 
@@ -478,6 +503,7 @@ public class ServerRegions {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing && chunkPos != null) {
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(chunkPos.x, chunkPos.z);
+                if (theRegion == null) return trackerEntities;
                 if (theRegion.getData().tickData != this) {
                     return theRegion.getData().tickData.trackerEntities;
                 }
@@ -596,6 +622,8 @@ public class ServerRegions {
         // we can't lock per chunk(if the entity is moving
         // into a new chunk, then it won't lock on the new chunk)
         public final ReentrantLock entityLevelCallbackLock = new ReentrantLock();
+        // scheduler
+        public final CanvasRegionScheduler.Scheduler regionScheduler = new CanvasRegionScheduler.Scheduler();
 
         public WorldTickData(ServerLevel world, final @Nullable ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
             this.world = world;
@@ -632,7 +660,7 @@ public class ServerRegions {
             return this.getNearbyPlayers();
         }
 
-        public Iterable<Entity> getLocalEntities(ChunkPos pos) {
+        public Collection<Entity> getLocalEntities(ChunkPos pos) {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(pos.x, pos.z);
@@ -764,6 +792,7 @@ public class ServerRegions {
             if (this.allEntities.add(entity)) {
                 if (entity instanceof ServerPlayer player) {
                     this.localPlayers.add(player);
+                    player.connection.connection.transferToLevel(this.world);
                     this.getNearbyPlayers(player.chunkPosition()).addPlayer(player); // moved from entity callback, required or else we might add to the world by mistake
                 }
             }
@@ -916,17 +945,16 @@ public class ServerRegions {
             return level.levelTickData;
         }
         WorldTickData possible = pullRegionData();
-        if (possible != null) return possible;
+        if (possible != null && possible.world == level) return possible;
         return level.levelTickData;
     }
 
     private static @Nullable WorldTickData pullRegionData() {
         Thread current = Thread.currentThread();
-        if (current instanceof TickLoopScheduler.ThreadRunner runner) {
+        if (current instanceof TickScheduler.TickRunner runner) {
             // the runners CAN have a region attached to it.
-            WorldTickData possible = runner.threadLocalTickData;
             // if this is null, then there isn't a region actively ticking this, so we should pull the level.
-            if (possible != null) return possible;
+            return runner.threadLocalTickData;
         }
         return null;
     }
@@ -958,15 +986,13 @@ public class ServerRegions {
 
         @Override
         public void onRegionActive(final ThreadedRegionizer.@NotNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
-            TickRegionData data = region.getData();
-            region.getData().tickHandle.prepareSchedule();
-            ((TickLoopScheduler) MinecraftServer.getThreadedServer().getScheduler()).scheduler.schedule(data.tickHandle);
+            region.getData().tickHandle.scheduleTo(TickScheduler.getScheduler().scheduler);
         }
 
         @Override
         public void onRegionInactive(final ThreadedRegionizer.@NotNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
             TickRegionData data = region.getData();
-            data.tickHandle.markNonSchedulable();
+            data.tickHandle.tick.markNonSchedulable();
         }
 
         @Override

@@ -1,165 +1,70 @@
 package io.canvasmc.canvas.region;
 
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.RollingAverage;
-import io.canvasmc.canvas.TickTimes;
-import io.canvasmc.canvas.scheduler.TickLoopScheduler;
+import io.canvasmc.canvas.scheduler.TickScheduler;
+import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
-import net.minecraft.Util;
-import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.profiling.Profiler;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.TickRateManager;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 
-import static io.canvasmc.canvas.scheduler.MultithreadedTickScheduler.TIME_BETWEEN_TICKS;
-
-public class ChunkRegion extends TickLoopScheduler.AbstractTick {
+public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> {
     public final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region;
-    private final AtomicBoolean cancelled = new AtomicBoolean();
     public final ServerLevel world;
-    private int ticksSinceLastBlockEventsTickCall = 0;
-    public boolean isActive = false;
-    public final RollingAverage tps5s = new RollingAverage(5);
-    public final RollingAverage tps10s = new RollingAverage(10);
-    public final RollingAverage tps15s = new RollingAverage(15);
-    public final RollingAverage tps1m = new RollingAverage(60);
-    public final TickTimes tickTimes5s = new TickTimes(100);
-    public final TickTimes tickTimes10s = new TickTimes(200);
-    public final TickTimes tickTimes15s = new TickTimes(300);
-    public final TickTimes tickTimes60s = new TickTimes(1200);
-    public boolean lagging = false;
-    public int currentTick;
-    protected long tickSection = 0;
-    public long fullTaskStart = 0L;
 
-    public ChunkRegion(final ThreadedRegionizer.@NotNull ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region) {
+    public ChunkRegion(final ThreadedRegionizer.@NotNull ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region, final DedicatedServer server, final String formal) {
+        super(server, formal, new TickHandle(region));
         this.region = region;
         this.world = region.regioniser.world;
     }
 
-    private void tickMspt(long start) {
-        long totalProcessNanos = Util.getNanos() - start;
-        this.tickTimes5s.add(this.currentTick, totalProcessNanos);
-        this.tickTimes10s.add(this.currentTick, totalProcessNanos);
-        this.tickTimes15s.add(this.currentTick, totalProcessNanos);
-        this.tickTimes60s.add(this.currentTick, totalProcessNanos);
+    @Override
+    public String getFormalName() {
+        return "Region at " + this.world.location() + " surrounding chunk " + this.region.getCenterChunk();
     }
 
-    private void tickTps(long start) {
-        if (++currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
-            final long diff = start - tickSection;
-            final java.math.BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
-            tps5s.add(currentTps, diff);
-            tps1m.add(currentTps, diff);
-            tps15s.add(currentTps, diff);
-            tps10s.add(currentTps, diff);
-
-            lagging = tps5s.getAverage() < org.purpurmc.purpur.PurpurConfig.laggingThreshold;
-            tickSection = start;
-        }
+    @Override
+    public String toString() {
+        return "Region at " + this.world.location() + " surrounding chunk " + this.region.getCenterChunk() + " " + super.toString();
     }
 
-    public boolean blockRegionTick() {
-        if (cancelled.get()) {
-            return false;
-        }
-        if (!this.tryMarkTicking()) {
-            if (!this.cancelled.get()) {
-                throw new IllegalStateException("Scheduled region should be acquirable");
-            }
-            // region was killed
-            return false;
-        }
-        // tick region
+    @Override
+    public boolean runTasks(final BooleanSupplier canContinue) {
         try {
-            TickLoopScheduler.setTickingData(this.region.getData().tickData);
-            isActive = true;
-            long nanosecondsOverload = this.world.tickRateManager().nanosecondsPerTick();
-            boolean doesntHaveTime = nanosecondsOverload == 0L;
-            try {
-                final BooleanSupplier hasTimeLeft = doesntHaveTime ? () -> false : this::haveTime;
-                try {
-                    this.tick(hasTimeLeft);
-                } finally {
-                    this.tickMspt(this.fullTaskStart);
-                    this.tickTps(this.fullTaskStart);
-                }
-                // run region tasks if we still have time, not part of the tick so don't include in mspt/tps calculations
-                this.runRegionTasks(hasTimeLeft);
-            } catch (Exception e) {
-                TickLoopConstantsUtils.hardCrashCatch(new RegionCrash(e, this));
-            }
-            TickLoopScheduler.setTickingData(null);
-        } catch (Throwable throwable) {
-            ThreadedServer.LOGGER.error("Unable to tick region surrounding {}", this.region.getCenterChunk(), throwable);
-            throw new RuntimeException(throwable);
-        }
-        return this.markNotTicking() && !this.cancelled.get();
-    }
-
-    // copied and modified from io.canvasmc.canvas.server.AbstractTickLoop
-    protected boolean haveTime() {
-        return world.server.forceTicks || Util.getNanos() < (this.tickStart + TIME_BETWEEN_TICKS/*equivalent to nextTickTimeNanos*/);
-    }
-
-    private void tick(BooleanSupplier hasTimeLeft) {
-        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
-        data.popTick();
-        data.setHandlingTick(true);
-        this.fullTaskStart = Util.getNanos();
-        ProfilerFiller profilerFiller = Profiler.get();
-        TickRateManager tickRateManager = this.world.tickRateManager();
-        boolean runsNormally = tickRateManager.runsNormally();
-        this.world.tickConnection(data); // tick connection on region
-        data.tpsCalculator.doTick();
-        this.world.updateLagCompensationTick();
-        this.world.regionTick1(data);
-        if (runsNormally) {
-            data.incrementRedstoneTime();
-        }
-        this.world.regionTick2(profilerFiller, runsNormally, data);
-        final ServerChunkCache chunkSource = this.world.getChunkSource();
-        chunkSource.tick(hasTimeLeft, true);
-        if (runsNormally) {
-            if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
-                this.world.runBlockEvents();
-                this.ticksSinceLastBlockEventsTickCall = 0;
-            }
-        }
-        data.setHandlingTick(false);
-        this.world.regiontick3(profilerFiller, true, runsNormally, data);
-        ServerRegions.getTickData(this.world).explosionDensityCache.clear();
-        for (final ServerPlayer localPlayer : data.getLocalPlayers()) {
-            localPlayer.connection.chunkSender.sendNextChunks(localPlayer);
-            localPlayer.connection.resumeFlushing();
-        }
-        if (this.cancelled.get()) {
-            this.isActive = false;
+            TickScheduler.setTickingData(this.region.getData().tickData);
+            super.runTasks(canContinue);
+            return runRegionTasks(canContinue);
+        } finally {
+            TickScheduler.setTickingData(null);
         }
     }
 
-    protected boolean runRegionTasks(final BooleanSupplier canContinue) {
+    @Override
+    public boolean hasTasks() {
+        return super.hasTasks() || this.region.getData().tickData.taskQueueData.hasTasks();
+    }
+
+    boolean runRegionTasks(final BooleanSupplier canContinue) {
         final RegionizedTaskQueue.RegionTaskQueueData queue = this.region.getData().tickData.taskQueueData;
 
         boolean processedChunkTask = false;
 
-        boolean executeChunkTask = true;
-        boolean executeTickTask = true;
+        boolean executeChunkTask;
+        boolean executeTickTask;
         do {
-            if (executeTickTask) {
-                executeTickTask = queue.executeTickTask();
-            }
-            if (executeChunkTask) {
-                processedChunkTask |= (executeChunkTask = queue.executeChunkTask());
-            }
+            executeTickTask = queue.executeTickTask();
+            executeChunkTask = queue.executeChunkTask();
+
+            processedChunkTask |= executeChunkTask;
         } while ((executeChunkTask | executeTickTask) && canContinue.getAsBoolean());
 
         if (processedChunkTask) {
@@ -169,34 +74,99 @@ public class ChunkRegion extends TickLoopScheduler.AbstractTick {
         return true;
     }
 
-    public final boolean isMarkedAsNonSchedulable() {
-        return this.cancelled.get();
-    }
-
-    protected boolean tryMarkTicking() {
-        return this.region.tryMarkTicking(this::isMarkedAsNonSchedulable);
-    }
-
-    protected boolean markNotTicking() {
-        return this.region.markNotTicking();
-    }
-
-    public void prepareSchedule() {
-        setScheduledStart(System.nanoTime() + TIME_BETWEEN_TICKS);
-    }
-
-    public final void markNonSchedulable() {
-        this.cancelled.set(true);
-        isActive = false;
-    }
-
     @Override
-    public boolean blockTick() {
-        return blockRegionTick();
+    public boolean shouldSleep() {
+        return false; // TODO - implement
     }
 
-    @Override
-    public String toString() {
-        return "Region at " + this.world.location() + " surrounding chunk " + this.region.getCenterChunk() + " " + super.toString();
+    public static class TickHandle implements WrappedTick {
+        private final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region;
+        private final ServerLevel world;
+        public boolean isActive;
+        private int ticksSinceLastBlockEventsTickCall;
+
+        @Contract(pure = true)
+        public TickHandle(ThreadedRegionizer.@NotNull ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region) {
+            this.region = region;
+            this.world = region.regioniser.world;
+        }
+
+        public final boolean isMarkedAsNonSchedulable() {
+            return this.region.getData().tickHandle.cancelled.get();
+        }
+
+        protected boolean tryMarkTicking() {
+            return this.region.tryMarkTicking(this::isMarkedAsNonSchedulable);
+        }
+
+        protected boolean markNotTicking() {
+            return this.region.markNotTicking();
+        }
+
+        public final void markNonSchedulable() {
+            this.region.getData().tickHandle.retire();
+            isActive = false;
+        }
+
+        @Override
+        public boolean blockTick(final WrappedTickLoop loop, final BooleanSupplier hasTimeLeft, final int tickCount) {
+            final ChunkRegion tickHandle = region.getData().tickHandle;
+            if (tickHandle.cancelled.get()) {
+                return false;
+            }
+            if (!this.tryMarkTicking()) {
+                if (!tickHandle.cancelled.get()) {
+                    throw new IllegalStateException("Scheduled region should be acquirable");
+                }
+                // region was killed
+                return false;
+            }
+            // tick region
+            try {
+                TickScheduler.setTickingData(this.region.getData().tickData);
+                isActive = true;
+                try {
+                    ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
+                    data.popTick();
+                    data.setHandlingTick(true);
+                    ProfilerFiller profilerFiller = Profiler.get();
+                    TickRateManager tickRateManager = this.world.tickRateManager();
+                    boolean runsNormally = tickRateManager.runsNormally();
+                    this.world.tickConnection(data); // tick connection on region
+                    data.tpsCalculator.doTick();
+                    this.world.updateLagCompensationTick();
+                    this.world.regionTick1(data);
+                    if (runsNormally) {
+                        data.incrementRedstoneTime();
+                    }
+                    this.world.regionTick2(profilerFiller, runsNormally, data);
+                    final ServerChunkCache chunkSource = this.world.getChunkSource();
+                    chunkSource.tick(hasTimeLeft, true);
+                    if (runsNormally) {
+                        if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
+                            this.world.runBlockEvents();
+                            this.ticksSinceLastBlockEventsTickCall = 0;
+                        }
+                    }
+                    data.setHandlingTick(false);
+                    this.world.regiontick3(profilerFiller, true, runsNormally, data);
+                    ServerRegions.getTickData(this.world).explosionDensityCache.clear();
+                    for (final ServerPlayer localPlayer : data.getLocalPlayers()) {
+                        localPlayer.connection.chunkSender.sendNextChunks(localPlayer);
+                        localPlayer.connection.resumeFlushing();
+                    }
+                    if (this.region.getData().tickHandle.cancelled.get()) {
+                        this.isActive = false;
+                    }
+                } catch (Exception exception) {
+                    TickLoopConstantsUtils.hardCrashCatch(new RegionCrash(exception, tickHandle));
+                }
+                TickScheduler.setTickingData(null);
+            } catch (Throwable throwable) {
+                ThreadedServer.LOGGER.error("Unable to tick region surrounding {}", this.region.getCenterChunk(), throwable);
+                throw new RuntimeException(throwable);
+            }
+            return this.markNotTicking() && !tickHandle.cancelled.get();
+        }
     }
 }

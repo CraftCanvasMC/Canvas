@@ -2,8 +2,7 @@ package io.canvasmc.canvas.server;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseCommon;
 import ca.spottedleaf.moonrise.common.util.TickThread;
-import io.canvasmc.canvas.scheduler.TickLoopScheduler;
-import io.canvasmc.canvas.server.level.MinecraftServerWorld;
+import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.papermc.paper.FeatureHooks;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.configuration.GlobalConfiguration;
@@ -205,13 +204,7 @@ public class MultiWatchdogThread extends TickThread {
 
                 final double totalElapsedS = (double) (now - tick.start) / 1.0E9;
 
-                if (tick.handle instanceof MinecraftServerWorld world) {
-                    LOGGER.error("Tick handle for world '{}' has not responded in {}s:", world.getWorld().getName(), totalElapsedS);
-                } else if (tick.handle instanceof AbstractTickLoop abstractLoop) {
-                    LOGGER.error("Tick-loop '{}' has not responded in {}s:", abstractLoop.getFormalName(), totalElapsedS);
-                } else {
-                    LOGGER.error("Unknown tick-loop, '{}' has not responded in {}s", tick.handle.toString(), totalElapsedS);
-                }
+                LOGGER.error("tick handle with name '{}' has not responded in {}s", tick.handle.getDebugName(), totalElapsedS);
                 logOverflow();
 
                 dumpThread(ManagementFactory.getThreadMXBean().getThreadInfo(tick.thread.threadId(), Integer.MAX_VALUE));
@@ -261,12 +254,12 @@ public class MultiWatchdogThread extends TickThread {
     public static final class RunningTick {
 
         public final long start;
-        public final TickLoopScheduler.AbstractTick handle;
+        public final TickScheduler.FullTick handle;
         public final Thread thread;
 
         private long lastPrint;
 
-        public RunningTick(final long start, final TickLoopScheduler.AbstractTick handle, final Thread thread) {
+        public RunningTick(final long start, final TickScheduler.FullTick handle, final Thread thread) {
             this.start = start;
             this.handle = handle;
             this.thread = thread;

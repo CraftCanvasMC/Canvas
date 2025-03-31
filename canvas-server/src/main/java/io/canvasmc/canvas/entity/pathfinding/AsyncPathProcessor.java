@@ -49,7 +49,7 @@ public class AsyncPathProcessor {
             asyncPath.postProcessing(() -> {
                 if (MinecraftServer.getThreadedServer().hasStarted()) {
                     // Schedule on level instead of main.
-                    serverLevel.scheduleOnThread(serverLevel.wrapRunnable(() -> afterProcessing.accept(path)));
+                    serverLevel.pushTask(() -> afterProcessing.accept(path));
                     return;
                 }
                 MinecraftServer.getServer().scheduleOnMain(() -> afterProcessing.accept(path));

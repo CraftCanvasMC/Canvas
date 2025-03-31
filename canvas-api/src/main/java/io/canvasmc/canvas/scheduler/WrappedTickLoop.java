@@ -240,8 +240,9 @@ public interface WrappedTickLoop {
          *                    // or if the current time(in nanoseconds) is less than the scheduled next tick time(in nanoseconds)
          *                    }</pre>
          * @param tickCount the current tick count
+         * @return if the tick should be rescheduled
          */
-        void blockTick(WrappedTickLoop loop, BooleanSupplier hasTimeLeft, int tickCount);
+        boolean blockTick(WrappedTickLoop loop, BooleanSupplier hasTimeLeft, int tickCount);
 
         /**
          * Debug information overload for the tick-loop.

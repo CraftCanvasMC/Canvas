@@ -1,22 +1,19 @@
 package io.canvasmc.canvas.server;
 
 import io.canvasmc.canvas.CanvasBootstrap;
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.region.RegionizedTaskQueue;
 import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
-import io.canvasmc.canvas.scheduler.TickLoopScheduler;
+import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Queue;
-import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
@@ -38,7 +35,6 @@ import org.slf4j.LoggerFactory;
 public class ThreadedServer implements ThreadedBukkitServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
     public static BooleanSupplier SHOULD_KEEP_TICKING;
-    protected final Queue<AbstractTickLoop> loops;
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final DedicatedServer server;
     protected long tickSection;
@@ -47,7 +43,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public ThreadedServer(DedicatedServer server) {
         this.server = server;
-        this.loops = new ConcurrentLinkedQueue<>();
     }
 
     @Override
@@ -62,7 +57,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     @Override
     public MultithreadedTickScheduler getScheduler() {
-        return TickLoopScheduler.getInstance();
+        return TickScheduler.getScheduler();
     }
 
     @Override
@@ -89,12 +84,13 @@ public class ThreadedServer implements ThreadedBukkitServer {
             MultiLoopThreadDumper.REGISTRY.add("tick scheduler");
             ThreadedBukkitServer.setInstance(this);
 
+            TickScheduler scheduler = new TickScheduler(Config.INSTANCE.ticking.allocatedSchedulerThreadCount);
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
             this.started = true;
-            TickLoopScheduler.start();
+            scheduler.start();
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
             this.server.status = this.server.buildServerStatus();
@@ -183,21 +179,17 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     public void stopLevel(@NotNull ServerLevel level) {
         this.levels.remove(level);
-        level.stopSpin();
+        level.retire();
     }
 
     public Collection<ServerLevel> getAllLevels() {
         return MinecraftServer.getServer().levels.values();
     }
 
-    public Set<AbstractTickLoop> getTickLoops() {
-        return new HashSet<>(this.loops);
-    }
-
     public void markPrepareHalt() {
         // mark all threads to stop ticking.
-        for (final AbstractTickLoop loop : this.loops) {
-            loop.stopSpin();
+        for (final TickScheduler.FullTick<?> fullTick : TickScheduler.FullTick.ALL_REGISTERED) {
+            fullTick.retire();
         }
     }
 }

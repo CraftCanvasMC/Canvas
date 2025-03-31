@@ -8,16 +8,8 @@ public interface MultithreadedTickScheduler {
     long TIME_BETWEEN_TICKS = 1_000_000_000L / TICK_RATE; // nanoseconds
 
     /**
-     * Schedules a tick to be repeated at the normal Minecraft
-     * tick-rate, 20 tps, in parallel with the rest of the server.
-     *
-     * @param tick the tick
-     */
-    void schedule(Tick tick);
-
-    /**
-     * This is a slightly different implementation of {@link MultithreadedTickScheduler#schedule(Tick)}
-     * that wraps the tick in an "Abstract Tick-Loop", which does the following:
+     * Creates a new "full tick", which contains and manages logic ticking
+     * in parallel with the server at the server tick-rate ({@link MultithreadedTickScheduler#TICK_RATE}). This contains logic for the following automatically:
      * <ui>
      * <li>Appends the tick loop to the <b>/tps</b> command</li>
      * <li>Registers it to Watchdog</li>
@@ -25,7 +17,6 @@ public interface MultithreadedTickScheduler {
      * <li>Implements tick sleeping</li>
      * <li>Implements "task scheduling"</li>
      * </ui>
-     * Other than the wrapper, this works exactly the same as {@link MultithreadedTickScheduler#schedule(Tick)}
      * <br><br>
      * Example:
      * <pre>{@code
