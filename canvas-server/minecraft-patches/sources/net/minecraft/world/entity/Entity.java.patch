@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -1,21 +_,27 @@
+@@ -1,21 +_,28 @@
  package net.minecraft.world.entity;
  
 +import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.EntityLookup;
@@ -13,6 +13,7 @@
 +import io.canvasmc.canvas.Config;
 +import io.canvasmc.canvas.region.ServerRegions;
 +import io.canvasmc.canvas.util.ThreadLocalRandomSource;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
  import it.unimi.dsi.fastutil.floats.FloatArraySet;
  import it.unimi.dsi.fastutil.floats.FloatArrays;
  import it.unimi.dsi.fastutil.floats.FloatSet;
@@ -44,7 +45,7 @@
  import net.minecraft.BlockUtil;
  import net.minecraft.CrashReport;
  import net.minecraft.CrashReportCategory;
-@@ -44,6 +_,7 @@
+@@ -44,11 +_,13 @@
  import net.minecraft.core.SectionPos;
  import net.minecraft.core.particles.BlockParticleOption;
  import net.minecraft.core.particles.ParticleTypes;
@@ -52,11 +53,18 @@
  import net.minecraft.nbt.CompoundTag;
  import net.minecraft.nbt.DoubleTag;
  import net.minecraft.nbt.FloatTag;
-@@ -110,13 +_,16 @@
+ import net.minecraft.nbt.ListTag;
+ import net.minecraft.nbt.StringTag;
++import net.minecraft.network.Connection;
+ import net.minecraft.network.chat.Component;
+ import net.minecraft.network.chat.HoverEvent;
+ import net.minecraft.network.chat.MutableComponent;
+@@ -110,13 +_,17 @@
  import net.minecraft.world.level.block.SoundType;
  import net.minecraft.world.level.block.state.BlockState;
  import net.minecraft.world.level.border.WorldBorder;
 +import net.minecraft.world.level.chunk.LevelChunk;
++import net.minecraft.world.level.chunk.status.ChunkStatus;
  import net.minecraft.world.level.entity.EntityAccess;
  import net.minecraft.world.level.entity.EntityInLevelCallback;
  import net.minecraft.world.level.gameevent.DynamicGameEventListener;
@@ -327,6 +335,58 @@
          List<Entity> passengers = this.getPassengers();
          List<Entity> list = new ArrayList<>(passengers.size());
          this.ejectPassengers();
+@@ -3950,7 +_,51 @@
+     public void teleportSetPosition(PositionMoveRotation positionMovementRotation, Set<Relative> relatives) {
+         PositionMoveRotation positionMoveRotation = PositionMoveRotation.of(this);
+         PositionMoveRotation positionMoveRotation1 = PositionMoveRotation.calculateAbsolute(positionMoveRotation, positionMovementRotation, relatives);
++        // Canvas start - Threaded Regions
++        ChunkPos position = new ChunkPos(new BlockPos(
++            (int) Math.round(positionMovementRotation.position().x), (int) Math.round(positionMovementRotation.position().y), (int) Math.round(positionMovementRotation.position().z)));
++        // syncload both of these, we need them both in regions
++        this.level.getChunk(position.x, position.z, ChunkStatus.FULL, true);
++        this.level.getChunk(chunkPosition().x, chunkPosition().z, ChunkStatus.FULL, true);
++        ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> newRegion = null;
++        ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> oldRegion = null;
++        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
++            newRegion = this.level.level().regioniser.getRegionAtUnsynchronised(position.x, position.z);
++            oldRegion = this.level.level().regioniser.getRegionAtUnsynchronised(chunkPosition.x, chunkPosition.z);
++        }
+         this.setPosRaw(positionMoveRotation1.position().x, positionMoveRotation1.position().y, positionMoveRotation1.position().z);
++        if (newRegion != null && oldRegion != null) {
++            // moved to new region, move ourselves
++            if (newRegion == oldRegion) {
++                LOGGER.info("Teleported entity across same region surrounding {}", newRegion.getCenterChunk());
++            } else {
++                ServerRegions.WorldTickData from = oldRegion.getData().tickData;
++                ServerRegions.WorldTickData to = newRegion.getData().tickData;
++                // general entity containing and tracking
++                from.removeEntity(this, false);
++                from.trackerEntities.remove(this);
++                to.addEntity(this, false);
++                to.trackerEntities.add(this);
++                // navigating mobs
++                if (this instanceof Mob mob && from.navigatingMobs.contains(this)) {
++                    from.navigatingMobs.remove(mob);
++                    to.navigatingMobs.add(mob);
++                }
++                // entity ticking
++                if (from.entityTickList.contains(this)) {
++                    from.entityTickList.remove(this);
++                    to.entityTickList.add(this);
++                }
++                // loaded entities
++                if (from.loadedEntities.contains(this)) {
++                    from.loadedEntities.remove(this);
++                    to.loadedEntities.add(this);
++                }
++                LOGGER.info("Moved entity {} across region surrounding {} and {}", this, newRegion.getCenterChunk(), oldRegion.getCenterChunk());
++            }
++            // we have the extra check for regions because if we disable regionizing, then they are always null
++        } else if (Config.INSTANCE.ticking.enableThreadedRegionizing) LOGGER.warn("Teleporting entity into possible unknown(null) region, A(destination):{}, B(old):{}", newRegion == null ? null : newRegion.getCenterChunk(), oldRegion == null ? null : oldRegion.getCenterChunk(), new Throwable());
++        // Canvas end
+         this.setYRot(positionMoveRotation1.yRot());
+         this.setYHeadRot(positionMoveRotation1.yRot());
+         this.setXRot(positionMoveRotation1.xRot());
 @@ -4735,11 +_,18 @@
      }
  

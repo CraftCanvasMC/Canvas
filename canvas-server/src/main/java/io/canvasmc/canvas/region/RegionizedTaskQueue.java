@@ -15,6 +15,7 @@ import java.lang.invoke.VarHandle;
 import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicLong;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.util.Unit;
@@ -359,7 +360,8 @@ public final class RegionizedTaskQueue {
                         final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>
                             region = into.get(sectionKey);
                         if (region == null) {
-                            throw new IllegalStateException();
+                            MinecraftServer.getThreadedServer().taskQueue.queueChunkTask(task.world.world, task.chunkX, task.chunkZ, task.run, task.priority);
+                            continue;
                         }
 
                         split.computeIfAbsent(region, (keyInMap) -> {

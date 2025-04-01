@@ -5,6 +5,7 @@ import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel
 import ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask;
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import java.util.List;
@@ -47,13 +48,18 @@ public class AsyncPlayerChunkLoader extends TickScheduler.FullTick<AsyncPlayerCh
     }
 
     public static class TickHandle implements WrappedTick {
+        private long ticksSinceLastPurgeStaleTicketsCall;
+
         @Override
         public boolean blockTick(final WrappedTickLoop loop, final BooleanSupplier hasTimeLeft, final int tickCount) {
             ProfilerFiller profilerFiller = Profiler.get();
             for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
                 ServerChunkCache chunkSource = level.getChunkSource();
                 level.moonrise$getPlayerChunkLoader().tick();
-                level.moonrise$getChunkTaskScheduler().executeMainThreadTask();
+                if (this.ticksSinceLastPurgeStaleTicketsCall++ > Config.INSTANCE.ticksBetweenPurgeStaleTickets) {
+                    level.chunkSource.distanceManager.purgeStaleTickets();
+                    this.ticksSinceLastPurgeStaleTicketsCall = 0;
+                }
                 chunkSource.broadcastChangedChunks(profilerFiller);
             }
             if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {

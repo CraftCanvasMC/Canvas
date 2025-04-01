@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -139,33 +140,40 @@ public class ServerRegions {
             // connections
             for (final Connection conn : from.activeConnections) {
                 final ServerPlayer player = conn.getPlayer();
-                final ChunkPos pos = player.chunkPosition();
-                final WorldTickData data = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
-                if (data == null) {
-                    // dock on level, it will handle from there
-                    ServerLevel level = player.serverLevel();
-                    if (level.levelTickData == null) {
-                        level.levelTickData = new WorldTickData(level, null);
-                    }
-                    level.levelTickData.activeConnections.add(conn);
-                } else data.activeConnections.add(conn);
+                // dock on level, it will handle from there
+                ServerLevel level = player.serverLevel();
+                if (level.levelTickData == null) {
+                    level.levelTickData = new WorldTickData(level, null);
+                }
+                level.levelTickData.activeConnections.add(conn);
             }
             // entities
             for (final ServerPlayer player : from.localPlayers) {
                 final ChunkPos pos = player.chunkPosition();
-                player.serverLevel().getChunk(pos.x, pos.z, ChunkStatus.FULL, true); // ensure loaded
                 // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
                 // the chunk holder must _exist_, and so the region section exists.
                 final WorldTickData into = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
+                if (into == null) {
+                    // most likely teleported out
+                    player.level().scheduleOnThread(() -> {
+                        player.serverLevel().getChunk(pos.x, pos.z, ChunkStatus.FULL, true);
+                        ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> threadedRegion = player.serverLevel().regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
+                        threadedRegion.getData().tickData.addEntity(player);
+                    });
+                    continue;
+                }
                 into.localPlayers.add(player);
                 into.nearbyPlayers.addPlayer(player);
             }
             for (final Entity entity : from.allEntities) {
                 final ChunkPos pos = entity.chunkPosition();
-                entity.level().level().getChunk(pos.x, pos.z, ChunkStatus.FULL, true); // ensure loaded
                 // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
                 // the chunk holder must _exist_, and so the region section exists.
                 final WorldTickData into = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
+                if (into == null) {
+                    // if this was a player, we are already scheduled from when we ran local players, so we are fine
+                    continue;
+                }
                 into.allEntities.add(entity);
                 // Note: entityTickList is a subset of allEntities
                 if (from.entityTickList.contains(entity)) {
@@ -331,17 +339,13 @@ public class ServerRegions {
             for (final Entity entity : from.loadedEntities) {
                 into.loadedEntities.add(entity);
             }
-            for (final Iterator<Entity> iterator = from.entityTickList.iterator(); iterator.hasNext();) {
-                into.entityTickList.add(iterator.next());
+            into.entityTickList.addAll(from.entityTickList);
+            into.navigatingMobs.addAll(from.navigatingMobs);
+            for (final Entity entity : from.trackerEntities) {
+                into.trackerEntities.add(entity);
             }
-            for (final Iterator<Mob> iterator = from.navigatingMobs.iterator(); iterator.hasNext();) {
-                into.navigatingMobs.add(iterator.next());
-            }
-            for (final Iterator<Entity> iterator = from.trackerEntities.iterator(); iterator.hasNext();) {
-                into.trackerEntities.add(iterator.next());
-            }
-            for (final Iterator<Entity> iterator = from.trackerUnloadedEntities.iterator(); iterator.hasNext();) {
-                into.trackerUnloadedEntities.add(iterator.next());
+            for (final Entity entity : from.trackerUnloadedEntities) {
+                into.trackerUnloadedEntities.add(entity);
             }
             // block ticking
             into.blockEvents.addAll(from.blockEvents);
@@ -393,9 +397,7 @@ public class ServerRegions {
                 into.wanderingTraderSpawnChance = Math.max(from.wanderingTraderSpawnChance, into.wanderingTraderSpawnChance);
             }
             // chunkHoldersToBroadcast
-            for (final ChunkHolder chunkHolder : from.chunkHoldersToBroadcast) {
-                into.chunkHoldersToBroadcast.add(chunkHolder);
-            }
+            into.chunkHoldersToBroadcast.addAll(from.chunkHoldersToBroadcast);
             this.tickData.holderManagerRegionData.merge(into.holderManagerRegionData, fromTickOffset);
             this.tickData.taskQueueData.mergeInto(into.taskQueueData);
             // region scheduler
@@ -442,7 +444,7 @@ public class ServerRegions {
                     // don't log if we already contained
                     if (dock) {
                         if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
-                            MinecraftServer.LOGGER.info("Docked connection for '{}' to region of world '{}' and region around '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
+                            MinecraftServer.LOGGER.info("Docked connection for '{}' to region of world '{}' surrounding chunk '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
                         } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
                             MinecraftServer.LOGGER.info("Docked connection for '{}' to world '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName());
                         }
@@ -460,7 +462,7 @@ public class ServerRegions {
                     // don't log if we already contained
                     if (dock) {
                         if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
-                            MinecraftServer.LOGGER.info("Undocked connection for '{}' from region of world '{}' and region around '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
+                            MinecraftServer.LOGGER.info("Undocked connection for '{}' from region of world '{}' surrounding chunk '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
                         } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
                             MinecraftServer.LOGGER.info("Undocked connection for '{}' from world '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName());
                         }
@@ -495,8 +497,8 @@ public class ServerRegions {
         private final List<ServerPlayer> localPlayers = new ArrayList<>();
         private final NearbyPlayers nearbyPlayers;
         private final ReferenceList<Entity> allEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
-        private final ReferenceList<Entity> loadedEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
-        private final Set<Entity> entityTickList = Sets.newConcurrentHashSet();
+        public final ReferenceList<Entity> loadedEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
+        public final Set<Entity> entityTickList = Sets.newConcurrentHashSet();
         public final Set<Mob> navigatingMobs = Sets.newConcurrentHashSet(); // must be concurrent
         public final ReferenceList<Entity> trackerEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY) {
             @Override
@@ -779,11 +781,15 @@ public class ServerRegions {
         }
 
         public void addEntity(final @NotNull Entity entity) {
+            addEntity(entity, true);
+        }
+
+        public void addEntity(final @NotNull Entity entity, boolean check) {
             if (!TickThread.isTickThreadFor(this.world, entity.chunkPosition())) {
                 throw new IllegalArgumentException("Entity " + entity + " is not under this region's control");
             }
             // let's ensure we actually run this on the appropriate region
-            if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            if (Config.INSTANCE.ticking.enableThreadedRegionizing && check) {
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion == null) {
@@ -792,7 +798,7 @@ public class ServerRegions {
                     theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z); // its loaded now.
                 }
                 if (theRegion.getData().tickData != this) {
-                    theRegion.getData().tickData.addEntity(entity);
+                    theRegion.getData().tickData.addEntity(entity, false);
                     return;
                 }
             }
@@ -800,7 +806,9 @@ public class ServerRegions {
                 if (entity instanceof ServerPlayer player) {
                     this.localPlayers.add(player);
                     player.connection.connection.transferToLevel(this.world);
-                    this.getNearbyPlayers(player.chunkPosition()).addPlayer(player); // moved from entity callback, required or else we might add to the world by mistake
+                    if (!this.getNearbyPlayers(player.chunkPosition()).players.containsKey(player)) {
+                        this.getNearbyPlayers(player.chunkPosition()).addPlayer(player); // moved from entity callback, required or else we might add to the world by mistake
+                    }
                 }
             }
         }
@@ -810,21 +818,26 @@ public class ServerRegions {
         }
 
         public void removeEntity(final Entity entity) {
+            removeEntity(entity, true);
+        }
+
+        public void removeEntity(final Entity entity, boolean check) {
             if (!TickThread.isTickThreadFor(entity)) {
                 throw new IllegalArgumentException("Entity " + entity + " is not under this region's control");
             }
             // let's ensure we actually run this on the appropriate region
-            if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+            if (Config.INSTANCE.ticking.enableThreadedRegionizing && check) {
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
-                    theRegion.getData().tickData.removeEntity(entity);
+                    theRegion.getData().tickData.removeEntity(entity, false);
                     return;
                 }
             }
             if (this.allEntities.remove(entity)) {
                 if (entity instanceof ServerPlayer player) {
                     this.localPlayers.remove(player);
+                    this.activeConnections.remove(player.connection.connection);
                 }
             }
         }
@@ -990,11 +1003,8 @@ public class ServerRegions {
         @Override
         public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
             for (final Connection activeConnection : region.getData().tickData.activeConnections) {
-                ServerLevel level = region.getData().world;
-                if (level.levelTickData == null) {
-                    level.levelTickData = new WorldTickData(level, null);
-                }
-                level.levelTickData.activeConnections.add(activeConnection);
+                ServerRegions.getTickData(region.getData().world);
+                Objects.requireNonNull(region.getData().world.levelTickData, "this really shouldn't be null").activeConnections.add(activeConnection);
             }
         }
 
