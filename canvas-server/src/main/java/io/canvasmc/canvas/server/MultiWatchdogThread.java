@@ -2,6 +2,8 @@ package io.canvasmc.canvas.server;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseCommon;
 import ca.spottedleaf.moonrise.common.util.TickThread;
+import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.region.ChunkRegion;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.papermc.paper.FeatureHooks;
 import io.papermc.paper.ServerBuildInfo;
@@ -9,6 +11,7 @@ import io.papermc.paper.configuration.GlobalConfiguration;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MonitorInfo;
 import java.lang.management.ThreadInfo;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -18,6 +21,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.CraftServer;
@@ -32,6 +37,7 @@ import org.spigotmc.SpigotConfig;
 // of threads through dedicated registration and docking/undocking
 public class MultiWatchdogThread extends TickThread {
     public static final boolean DISABLE_WATCHDOG = Boolean.getBoolean("disable.watchdog");
+    public static final ThreadLocal<DecimalFormat> ONE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
     public static final Logger LOGGER = LoggerFactory.getLogger("Watchdog");
     private static final Queue<ThreadEntry> REGISTRY = new ConcurrentLinkedQueue<>();
     public static volatile boolean hasStarted;
@@ -197,14 +203,14 @@ public class MultiWatchdogThread extends TickThread {
 
             for (final RunningTick tick : ticks) {
                 final long elapsed = now - tick.lastPrint;
-                if (elapsed <= TimeUnit.SECONDS.toNanos(2L)) {
+                if (elapsed <= TimeUnit.SECONDS.toNanos(Config.INSTANCE.ticking.watchdogLoggingTime)) {
                     continue;
                 }
                 tick.lastPrint = now;
 
                 final double totalElapsedS = (double) (now - tick.start) / 1.0E9;
 
-                LOGGER.error("tick handle with name '{}' has not responded in {}s", tick.handle.getDebugName(), totalElapsedS);
+                LOGGER.error("tick handle with name '{}' has not responded in {}s", tick.handle.getDebugName(), ONE_DECIMAL_PLACES.get().format(totalElapsedS));
                 logOverflow();
 
                 dumpThread(ManagementFactory.getThreadMXBean().getThreadInfo(tick.thread.threadId(), Integer.MAX_VALUE));
@@ -237,6 +243,54 @@ public class MultiWatchdogThread extends TickThread {
         }
         LOGGER.error(BREAK);
         LOGGER.error("Active Chunk Workers {}", MoonriseCommon.WORKER_POOL.getAliveThreads());
+        int queuedTasks = 0;
+        for (final TickScheduler.FullTick<?> fullTick : TickScheduler.FullTick.ALL_REGISTERED) {
+            if (!fullTick.tasks.isEmpty()) {
+                LOGGER.error("{} has {} full tick tasks scheduled", fullTick, fullTick.tasks.size());
+            }
+            queuedTasks += fullTick.tasks.size();
+            if (fullTick instanceof ServerLevel level) {
+                if (!level.taskQueueRegionData.globalChunkTask.isEmpty()) {
+                    LOGGER.error("{} has {} global chunk tasks scheduled", fullTick, level.taskQueueRegionData.globalChunkTask.size());
+                }
+                queuedTasks += level.taskQueueRegionData.globalChunkTask.size();
+                if (level.getChunkSource().mainThreadProcessor.getPendingTasksCount() > 0) {
+                    LOGGER.error("{} has {} tasks pending in its main thread processor", fullTick, level.getChunkSource().mainThreadProcessor.getPendingTasksCount());
+                }
+                queuedTasks += level.getChunkSource().mainThreadProcessor.getPendingTasksCount();
+                // public boolean hasNoScheduledTasks() {
+                //         final long executedTasks = this.executedTasks.get();
+                //         final long scheduledTasks = this.scheduledTasks.get();
+                //
+                //         return executedTasks == scheduledTasks;
+                //     }
+                if (((int) (level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksScheduled() - level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksExecuted())) > 0) {
+                    LOGGER.error("{} has {} tasks pending in its chunk task scheduler", fullTick, (int) (level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksScheduled() - level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksExecuted()));
+                }
+                queuedTasks += (int) (level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksScheduled() - level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksExecuted());
+            }
+            if (fullTick instanceof ChunkRegion region) {
+                if (region.region.getData().tickData.taskQueueData.size() > 0) {
+                    LOGGER.error("{} has {} tasks queued in its task queue", region, region.region.getData().tickData.taskQueueData.size());
+                    for (final StackTraceElement stackTraceElement : region.owner.getStackTrace()) {
+                        LOGGER.error("\t\t{}", stackTraceElement);
+                    }
+                }
+                queuedTasks += region.region.getData().tickData.taskQueueData.size();
+            }
+        }
+        LOGGER.error("Total tasks queued {}", queuedTasks);
+        LOGGER.error(BREAK);
+        LOGGER.error("Current Locked Entity Statuses");
+        for (final Entity entity : Entity.locked) {
+            LOGGER.error(BREAK);
+            LOGGER.error("Entity {}", entity);
+            LOGGER.error("Held by lock {} status: {}", entity.statusLock, entity.statusLock.getStatus());
+            LOGGER.error("Stack:");
+            for (final StackTraceElement stackTraceElement : entity.statusLock.getOwner().getStackTrace()) {
+                LOGGER.error("\t\t{}", stackTraceElement);
+            }
+        }
     }
 
     public void dock(final RunningTick tick) {
@@ -254,12 +308,12 @@ public class MultiWatchdogThread extends TickThread {
     public static final class RunningTick {
 
         public final long start;
-        public final TickScheduler.FullTick handle;
+        public final TickScheduler.FullTick<?> handle;
         public final Thread thread;
 
         private long lastPrint;
 
-        public RunningTick(final long start, final TickScheduler.FullTick handle, final Thread thread) {
+        public RunningTick(final long start, final TickScheduler.FullTick<?> handle, final Thread thread) {
             this.start = start;
             this.handle = handle;
             this.thread = thread;

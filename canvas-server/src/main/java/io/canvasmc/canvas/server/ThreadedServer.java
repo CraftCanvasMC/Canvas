@@ -100,6 +100,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
             this.server.server.spark.enableBeforePlugins();
 
+            MultiWatchdogThread.register(new MultiWatchdogThread.ThreadEntry(Thread.currentThread(), "main thread", "Main Thread", this.server::isTicking, this.server::isEmptyTickSkipping));
             MultiWatchdogThread.hasStarted = true;
             //noinspection removal
             Arrays.fill(this.server.recentTps, 20);

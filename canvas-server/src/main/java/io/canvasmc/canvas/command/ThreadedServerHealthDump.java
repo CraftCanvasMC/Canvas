@@ -174,7 +174,7 @@ public class ThreadedServerHealthDump {
 
             for (final World bukkitWorld : Bukkit.getWorlds()) {
                 final ServerLevel world = ((CraftWorld)bukkitWorld).getHandle();
-                world.regioniser.computeForAllRegions(regions::add);
+                world.regioniser.computeForAllRegionsUnsynchronised(regions::add);
             }
             for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : regions) {
                 ChunkRegion tickHandle = region.getData().tickHandle;

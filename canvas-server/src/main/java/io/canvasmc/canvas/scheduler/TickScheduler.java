@@ -154,6 +154,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         private boolean hasInitSchedule;
         private boolean processingTick;
         private final long constructorInit;
+        public Thread owner;
 
         // tasks
         public ConcurrentLinkedQueue<Runnable> tasks = new ConcurrentLinkedQueue<>();
@@ -170,6 +171,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
         @Override
         public boolean runTick() {
+            this.owner = Thread.currentThread();
             boolean reschedule = fullTick();
             if (!reschedule) {
                 this.retire();
@@ -315,7 +317,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
             return runFullTickTasks;
         }
 
-        private boolean runFullTickTasks(BooleanSupplier canContinue) {
+        public boolean runFullTickTasks(BooleanSupplier canContinue) {
             Runnable run;
             while ((run = this.tasks.poll()) != null) {
                 if (!canContinue.getAsBoolean()) break;

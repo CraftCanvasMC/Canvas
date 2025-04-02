@@ -55,12 +55,14 @@ public class AsyncPlayerChunkLoader extends TickScheduler.FullTick<AsyncPlayerCh
             ProfilerFiller profilerFiller = Profiler.get();
             for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
                 ServerChunkCache chunkSource = level.getChunkSource();
-                level.moonrise$getPlayerChunkLoader().tick();
                 if (this.ticksSinceLastPurgeStaleTicketsCall++ > Config.INSTANCE.ticksBetweenPurgeStaleTickets) {
                     level.chunkSource.distanceManager.purgeStaleTickets();
                     this.ticksSinceLastPurgeStaleTicketsCall = 0;
                 }
+                level.moonrise$getPlayerChunkLoader().tick();
+                chunkSource.runDistanceManagerUpdates();
                 chunkSource.broadcastChangedChunks(profilerFiller);
+                chunkSource.chunkMap.tick(hasTimeLeft);
             }
             if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
                 MoonriseCommon.WORKER_POOL.wakeup();

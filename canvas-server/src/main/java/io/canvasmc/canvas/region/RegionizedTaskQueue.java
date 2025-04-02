@@ -74,7 +74,7 @@ public final class RegionizedTaskQueue {
 
     public static final class WorldRegionTaskData {
         private final ServerLevel world;
-        private final MultiThreadedQueue<Runnable> globalChunkTask = new MultiThreadedQueue<>();
+        public final MultiThreadedQueue<Runnable> globalChunkTask = new MultiThreadedQueue<>();
         private final ConcurrentLong2ReferenceChainedHashTable<ReferenceCountData> referenceCounters = new ConcurrentLong2ReferenceChainedHashTable<>();
 
         public WorldRegionTaskData(final ServerLevel world) {
@@ -101,7 +101,7 @@ public final class RegionizedTaskQueue {
         private PrioritisedQueue getQueue(final boolean synchronise, final int chunkX, final int chunkZ, final boolean isChunkTask) {
             final ThreadedRegionizer<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> regioniser = this.world.regioniser;
             final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region
-                = synchronise ? regioniser.getRegionAtSynchronised(chunkX, chunkZ) : regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
+                = synchronise ? regioniser.getRegionAtUnsynchronised(chunkX, chunkZ) : regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
             if (region == null) {
                 return null;
             }
@@ -272,6 +272,10 @@ public final class RegionizedTaskQueue {
             }
         }
 
+        public int size() {
+            return this.tickTaskQueue.getScheduledTasks() + this.chunkQueue.getScheduledTasks();
+        }
+
         public boolean hasTasks() {
             return !this.tickTaskQueue.isEmpty() || !this.chunkQueue.isEmpty();
         }
@@ -360,7 +364,9 @@ public final class RegionizedTaskQueue {
                         final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>
                             region = into.get(sectionKey);
                         if (region == null) {
-                            MinecraftServer.getThreadedServer().taskQueue.queueChunkTask(task.world.world, task.chunkX, task.chunkZ, task.run, task.priority);
+                            task.world.world.moonrise$getChunkTaskScheduler().scheduleChunkTaskEventually(task.chunkX, task.chunkZ, () -> {
+                                MinecraftServer.getThreadedServer().taskQueue.queueChunkTask(task.world.world, task.chunkX, task.chunkZ, task.run, task.priority);
+                            });
                             continue;
                         }
 

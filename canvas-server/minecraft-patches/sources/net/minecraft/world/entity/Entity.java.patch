@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -1,21 +_,28 @@
+@@ -1,21 +_,30 @@
  package net.minecraft.world.entity;
  
 +import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.EntityLookup;
@@ -11,7 +11,9 @@
  import com.google.common.collect.ImmutableList.Builder;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.entity.EntityStatusLock;
 +import io.canvasmc.canvas.region.ServerRegions;
++import io.canvasmc.canvas.util.ConcurrentSet;
 +import io.canvasmc.canvas.util.ThreadLocalRandomSource;
 +import io.papermc.paper.threadedregions.ThreadedRegionizer;
  import it.unimi.dsi.fastutil.floats.FloatArraySet;
@@ -179,12 +181,14 @@
  
      public void inactiveTick() {
      }
-@@ -381,7 +_,7 @@
-     private int sectionX = Integer.MIN_VALUE;
+@@ -382,6 +_,10 @@
      private int sectionY = Integer.MIN_VALUE;
      private int sectionZ = Integer.MIN_VALUE;
--    private boolean updatingSectionStatus;
-+    private volatile boolean updatingSectionStatus; // Canvas - volatile
+     private boolean updatingSectionStatus;
++    // Canvas start - threadsafe entity status changes
++    public static final Set<Entity> locked = new ConcurrentSet<>();
++    public final EntityStatusLock statusLock = new EntityStatusLock(this);
++    // Canvas end
  
      @Override
      public final boolean moonrise$isHardColliding() {
@@ -414,14 +418,25 @@
      }
  
      public ChunkPos chunkPosition() {
-@@ -4836,6 +_,7 @@
+@@ -4836,15 +_,18 @@
      }
      public final void setPosRaw(double x, double y, double z, boolean forceBoundingBoxUpdate) {
          // Paper start - rewrite chunk system
-+        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level.level()); data.entityLevelCallbackLock.lock(); // Canvas - Threaded Regions
++        this.statusLock.acquire(EntityStatusLock.Status.POS_CHANGE); // Canvas - threadsafe entity status changes
          if (this.updatingSectionStatus) {
              LOGGER.error(
                  "Refusing to update position for entity " + this + " to position " + new Vec3(x, y, z)
+                     + " since it is processing a section status update", new Throwable()
+             );
++            this.statusLock.release(); // Canvas - threadsafe entity status changes
+             return;
+         }
+         // Paper end - rewrite chunk system
+         if (!checkPosition(this, x, y, z)) {
++            this.statusLock.release(); // Canvas - threadsafe entity status changes
+             return;
+         }
+         // Paper end - Block invalid positions and bounding box
 @@ -4867,7 +_,9 @@
              int floor2 = Mth.floor(z);
              if (floor != this.blockPosition.getX() || floor1 != this.blockPosition.getY() || floor2 != this.blockPosition.getZ()) {
@@ -432,27 +447,54 @@
                  if (SectionPos.blockToSectionCoord(floor) != this.chunkPosition.x || SectionPos.blockToSectionCoord(floor2) != this.chunkPosition.z) {
                      this.chunkPosition = new ChunkPos(this.blockPosition);
                  }
-@@ -4880,6 +_,7 @@
-         if (!(this instanceof net.minecraft.world.entity.decoration.HangingEntity) && (forceBoundingBoxUpdate || this.position.x != x || this.position.y != y || this.position.z != z)) {
+@@ -4881,6 +_,7 @@
              this.setBoundingBox(this.makeBoundingBox());
          }
-+        data.entityLevelCallbackLock.unlock(); // Canvas - Threaded Regions
          // Paper end - Block invalid positions and bounding box
++        this.statusLock.release(); // Canvas - threadsafe entity status changes
      }
  
-@@ -4975,6 +_,7 @@
+     public void checkDespawn() {
+@@ -4975,8 +_,10 @@
      @Override
      public final void setRemoved(Entity.RemovalReason removalReason, org.bukkit.event.entity.EntityRemoveEvent.Cause cause) {
          // Paper start - rewrite chunk system
-+        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.level.level()); try {data.entityLevelCallbackLock.lock(); // Canvas - Threaded Regions
++        this.statusLock.acquire(EntityStatusLock.Status.REMOVED); // Canvas - threadsafe entity status changes
          if (!((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this.level).moonrise$getEntityLookup().canRemoveEntity((Entity)(Object)this)) {
              LOGGER.warn("Entity " + this + " is currently prevented from being removed from the world since it is processing section status updates", new Throwable());
++            this.statusLock.release(); // Canvas - threadsafe entity status changes
              return;
+         }
+         // Paper end - rewrite chunk system
 @@ -4999,6 +_,7 @@
              // Players need to be special cased, because they are regularly removed from the world
              this.retireScheduler();
          }
-+        } finally {data.entityLevelCallbackLock.unlock();} // Canvas - Threaded Regions
++        this.statusLock.release(); // Canvas - threadsafe entity status changes
          // Paper end - Folia schedulers
      }
  
+@@ -5014,6 +_,23 @@
+         // we need to force create the bukkit entity so that the scheduler can be retired...
+         this.getBukkitEntity().taskScheduler.retire();
+     }
++    // Canvas start - threadsafe entity status changes
++
++    public final void tickScheduler() {
++        // we lock like this to prevent the entity from being removed while we tick its scheduler
++        // if we don't, we run the risk of crashing the server
++        this.statusLock.acquire(EntityStatusLock.Status.SCHEDULER);
++        final org.bukkit.craftbukkit.entity.CraftEntity bukkit = this.getBukkitEntityRaw();
++        if (bukkit != null) {
++            if (this.isRemoved()) {
++                this.statusLock.release();
++                return; // already removed, return.
++            }
++            bukkit.taskScheduler.executeTick();
++        }
++        this.statusLock.release();
++    }
++    // Canvas end
+     // Paper end - Folia schedulers
+ 
+     @Override

@@ -348,7 +348,7 @@
      }
  
      // Paper start
-@@ -733,10 +_,201 @@
+@@ -733,10 +_,227 @@
      public StructureManager structureManager() {
          return this.structureManager;
      }
@@ -375,10 +375,56 @@
 +    public void removeConnection(Connection connection) {
 +        this.wake(); // wake
 +        ServerRegions.getTickData(this);
-+        this.regioniser.computeForAllRegions((region) -> {
++        this.regioniser.computeForAllRegionsUnsynchronised((region) -> {
 +            region.getData().tickData.activeConnections.remove(connection);
 +        });
 +        this.levelTickData.activeConnections.remove(connection);
++    }
++
++    private void tickRegionizedWorldConnection(ServerRegions.WorldTickData data) {
++        for (Iterator<Connection> iterator = data.activeConnections.iterator(); iterator.hasNext(); ) {
++            final Connection activeConnection = iterator.next();
++            if (!activeConnection.isConnecting()) {
++                if (activeConnection.isConnected()) {
++                    try {
++                        // we are in game phase if we are already here. this means we have a player, move to region.
++                        if (activeConnection.triesBeforeRegionKick >= 3) {
++                            MutableComponent disconnectComponent = Component.literal("Player entity moved outside of region and couldn't place in new region");
++                            activeConnection.getPlayer().connection.disconnect(disconnectComponent);
++                            continue;
++                        }
++                        ServerPlayer player = activeConnection.getPlayer();
++                        ChunkPos pos = player.chunkPosition();
++                        this.getChunk(pos.x, pos.z, ChunkStatus.FULL, true); // load full
++                        // we run synchronized because if we don't, we run the risk of trying to process during splits or merges
++                        ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.regioniser.getRegionAtUnsynchronised(player.chunkPosition().x, player.chunkPosition().z);
++                        if (region != null) {
++                            // if the region is null, the chunk hasn't been loaded yet, so we can keep quiet for now.
++                            // check for contains, because on region destroy it moves all of its connections here, it may have
++                            // been moved correctly, so it may be fine, but we check just in case
++                            region.getData().tickData.activeConnections.add(activeConnection);
++                            iterator.remove(); // we transferred to the region, remove our ownership of it.
++                        } else activeConnection.triesBeforeRegionKick++;
++                    } catch (Exception exception) {
++                        if (activeConnection.isMemoryConnection()) {
++                            throw new ReportedException(CrashReport.forThrowable(exception, "Ticking memory connection"));
++                        }
++
++                        LOGGER.warn("Failed to handle redocking for {}", activeConnection.getLoggableAddress(this.server.logIPs()), exception);
++                        MutableComponent ichatmutablecomponent = Component.literal(exception.getMessage());
++
++                        activeConnection.send(new ClientboundDisconnectPacket(ichatmutablecomponent), PacketSendListener.thenRun(() -> {
++                            activeConnection.disconnect(ichatmutablecomponent);
++                        }));
++                        activeConnection.setReadOnly();
++                    }
++                } else {
++                    if (activeConnection.preparing) continue;
++                    removeConnection(activeConnection);
++                    activeConnection.handleDisconnection();
++                }
++            }
++        }
 +    }
 +
 +    public void tickConnection(ServerRegions.WorldTickData data) { // Canvas - protected -> public
@@ -391,22 +437,8 @@
 +        // in MOST instances, this is very intentional for connections
 +        // to be passed through here to get to the region
 +        if (Config.INSTANCE.ticking.enableThreadedRegionizing && (data.region == null)) { // if the region in the data is null, we are running a world region
-+            for (Iterator<Connection> iterator = data.activeConnections.iterator(); iterator.hasNext(); ) {
-+                final Connection activeConnection = iterator.next();
-+                // we are in game phase if we are already here. this means we have a player, move to region.
-+                ServerPlayer player = activeConnection.getPlayer();
-+                ChunkPos pos = player.chunkPosition();
-+                this.getChunk(pos.x, pos.z, ChunkStatus.FULL, true); // load full
-+                // we run synchronized because if we don't, we run the risk of trying to process during splits or merges
-+                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.regioniser.getRegionAtSynchronised(player.chunkPosition().x, player.chunkPosition().z);
-+                if (region != null) {
-+                    // if the region is null, the chunk hasn't been loaded yet, so we can keep quiet for now.
-+                    // check for contains, because on region destroy it moves all of its connections here, it may have
-+                    // been moved correctly, so it may be fine, but we check just in case
-+                    region.getData().tickData.activeConnections.add(activeConnection);
-+                    iterator.remove(); // we transferred to the region, remove our ownership of it.
-+                }
-+            }
++            this.tickRegionizedWorldConnection(data);
++            return;
 +        }
 +        // Canvas end
 +        for (ServerPlayer player : this.getLocalPlayers()) {
@@ -500,13 +532,7 @@
 +            entityplayer.connection.send(packet);
 +        }
 +        for (final Entity entity : tickData.getLocalEntitiesCopy()) {
-+            final org.bukkit.craftbukkit.entity.CraftEntity bukkit = entity.getBukkitEntityRaw();
-+            if (bukkit != null) {
-+                if (entity.isRemoved()) {
-+                    continue;
-+                }
-+                bukkit.taskScheduler.executeTick();
-+            }
++            entity.tickScheduler();
 +        }
 +        chunkSource.tick(() -> true, false);
 +    }
@@ -1199,7 +1225,7 @@
 +    public Iterable<Entity> getAllRegionizedEntities() {
 +        Set<Entity> entities = new ObjectHashSet<>();
 +        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-+            this.regioniser.computeForAllRegions((region) -> {
++            this.regioniser.computeForAllRegionsUnsynchronised((region) -> {
 +                for (final Entity loadedEntity : region.getData().tickData.getLoadedEntities()) {
 +                    entities.add(loadedEntity);
 +                }
@@ -1215,7 +1241,7 @@
 +    public Iterable<BlockEntity> getAllBlockEntities() {
 +        Set<BlockEntity> blockEntities = new ObjectHashSet<>();
 +        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-+            this.regioniser.computeForAllRegions((region) -> {
++            this.regioniser.computeForAllRegionsUnsynchronised((region) -> {
 +                for (final ServerChunkCache.ChunkAndHolder chunkAndHolder : region.getData().tickData.getTickingChunks().getRawDataUnchecked()) {
 +                    if (chunkAndHolder == null) continue;
 +                    blockEntities.addAll(chunkAndHolder.chunk().blockEntities.values());
@@ -1398,10 +1424,12 @@
              }
  
              if (entity instanceof EnderDragon enderDragon) {
-@@ -2729,8 +_,10 @@
+@@ -2728,9 +_,11 @@
+         }
  
          @Override
-         public void onTrackingEnd(Entity entity) {
+-        public void onTrackingEnd(Entity entity) {
++        public synchronized void onTrackingEnd(Entity entity) { // Canvas - synchronized
 +            TNTMergeManager.onEntityUnload(entity); // Canvas - tnt merging
              org.spigotmc.AsyncCatcher.catchOp("entity unregister"); // Spigot
              // Spigot start // TODO I don't think this is needed anymore

@@ -153,7 +153,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
     public @NotNull Component debugInfo() {
         final List<ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>> regions =
             new ArrayList<>();
-        this.level().regioniser.computeForAllRegions((Consumer<ThreadedRegionizer.ThreadedRegion>) regions::add);
+        this.level().regioniser.computeForAllRegionsUnsynchronised((Consumer<ThreadedRegionizer.ThreadedRegion>) regions::add);
         TextComponent.Builder basic = Component.text()
             .append(Component.text("Basic Information", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
             .append(ThreadedServerHealthDump.NEW_LINE);

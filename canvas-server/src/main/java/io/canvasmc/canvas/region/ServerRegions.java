@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -330,7 +331,9 @@ public class ServerRegions {
             // entities
             for (final ServerPlayer player : from.localPlayers) {
                 into.localPlayers.add(player);
-                into.nearbyPlayers.addPlayer(player);
+                if (!into.nearbyPlayers.players.containsKey(player)) {
+                    into.nearbyPlayers.addPlayer(player);
+                }
             }
             for (final Entity entity : from.allEntities) {
                 into.allEntities.add(entity);
@@ -494,7 +497,7 @@ public class ServerRegions {
 
         // entities
         private static final Entity[] EMPTY_ENTITY_ARRAY = new Entity[0];
-        private final List<ServerPlayer> localPlayers = new ArrayList<>();
+        private final List<ServerPlayer> localPlayers = new CopyOnWriteArrayList<>(); // concurrent
         private final NearbyPlayers nearbyPlayers;
         private final ReferenceList<Entity> allEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
         public final ReferenceList<Entity> loadedEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
@@ -619,18 +622,6 @@ public class ServerRegions {
         public final RedstoneWireTurbo turbo;
         // canvas
         public TPSCalculator tpsCalculator = new TPSCalculator();
-        // we add a lock on entity callbacks because plugins,
-        // commands, etc, can execute on any thread.
-        // because of this, the entity lookup updates are no
-        // longer stable or safe. to combat this, we add
-        // a lock on entity move/remove/add per region
-        // which essentially makes it so that only 1
-        // entity per region can be moved/removed/added
-        // at a time. while this is ungodly stupid, this
-        // is the only way to do this reliably, given that
-        // we can't lock per chunk(if the entity is moving
-        // into a new chunk, then it won't lock on the new chunk)
-        public final ReentrantLock entityLevelCallbackLock = new ReentrantLock();
         // scheduler
         public final CanvasRegionScheduler.Scheduler regionScheduler = new CanvasRegionScheduler.Scheduler();
 
@@ -658,7 +649,7 @@ public class ServerRegions {
         public NearbyPlayers getNearbyPlayers(ChunkPos position) {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(position.x, position.z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(position.x, position.z);
                 if (theRegion == null) {
                     return this.getNearbyPlayers();
                 }
@@ -672,7 +663,7 @@ public class ServerRegions {
         public Collection<Entity> getLocalEntities(ChunkPos pos) {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(pos.x, pos.z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
                 if (theRegion.getData().tickData != this) {
                     return theRegion.getData().tickData.allEntities;
                 }
@@ -691,7 +682,7 @@ public class ServerRegions {
         public List<ServerPlayer> getLocalPlayers(ChunkPos pos) {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(pos.x, pos.z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
                 if (theRegion.getData().tickData != this) {
                     return theRegion.getData().tickData.localPlayers;
                 }
@@ -702,7 +693,7 @@ public class ServerRegions {
         public void addLoadedEntity(final Entity entity) {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
                     theRegion.getData().tickData.addLoadedEntity(entity);
@@ -719,7 +710,7 @@ public class ServerRegions {
         public void removeLoadedEntity(final Entity entity) {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
                     theRegion.getData().tickData.removeLoadedEntity(entity);
@@ -739,7 +730,7 @@ public class ServerRegions {
             }
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
                     theRegion.getData().tickData.addEntityTickingEntity(entity);
@@ -759,7 +750,7 @@ public class ServerRegions {
             }
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion == null) {
                     // syncload it... this really only happens inter-dimensionally
@@ -790,7 +781,7 @@ public class ServerRegions {
             }
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing && check) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion == null) {
                     // syncload it... this really only happens inter-dimensionally
@@ -827,7 +818,7 @@ public class ServerRegions {
             }
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing && check) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(entity.chunkPosition().x, entity.chunkPosition().z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
                     theRegion.getData().tickData.removeEntity(entity, false);
@@ -852,7 +843,7 @@ public class ServerRegions {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
                 ChunkPos pos = new ChunkPos(blockEventData.pos());
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtSynchronised(pos.x, pos.z);
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
                 // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
                     this.blockEvents.add(blockEventData);

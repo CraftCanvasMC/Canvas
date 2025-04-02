@@ -27,7 +27,7 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
 
     public Set<ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>> getRegions() {
         Set<ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>> regions = new ObjectHashSet<>();
-        level.regioniser.computeForAllRegions(regions::add);
+        level.regioniser.computeForAllRegionsUnsynchronised(regions::add);
         return regions;
     }
 
@@ -39,7 +39,7 @@ public class ConcurrentRegionizedEntityMap implements Int2ObjectMap<ChunkMap.Tra
     public int size() {
         final AtomicInteger total = new AtomicInteger();
         if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
-            level.regioniser.computeForAllRegions((region -> total.addAndGet(region.getData().tickData.trackerEntities.size())));
+            level.regioniser.computeForAllRegionsUnsynchronised((region -> total.addAndGet(region.getData().tickData.trackerEntities.size())));
         } else total.getAndAdd(ServerRegions.getTickData(this.level).trackerEntities.size());
         return total.get();
     }

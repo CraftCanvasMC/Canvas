@@ -1,87 +1,45 @@
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/EntityLookup.java
-@@ -6,6 +_,7 @@
+@@ -6,6 +_,8 @@
  import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
  import ca.spottedleaf.moonrise.common.util.WorldUtil;
  import ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity;
++import io.canvasmc.canvas.entity.EntityStatusLock;
 +import io.canvasmc.canvas.region.ServerRegions;
  import net.minecraft.core.BlockPos;
  import net.minecraft.server.level.FullChunkStatus;
  import net.minecraft.util.AbortableIterationConsumer;
-@@ -229,6 +_,7 @@
- 
-     public void entityStatusChange(final Entity entity, final ChunkEntitySlices slices, final Visibility oldVisibility, final Visibility newVisibility, final boolean moved,
+@@ -231,6 +_,7 @@
                                     final boolean created, final boolean destroyed) {
-+        ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world.level()); try {data.entityLevelCallbackLock.lock(); // Canvas - Threaded Regions
          this.checkThread(entity, "Entity status change must only happen on the main thread");
  
++        try {entity.statusLock.acquire(EntityStatusLock.Status.STATUS_CHANGES); // Canvas - threadsafe entity status changes
          if (((ChunkSystemEntity)entity).moonrise$isUpdatingSectionStatus()) {
-@@ -324,6 +_,7 @@
+             // recursive status update
+             LOGGER.error("Cannot recursively update entity chunk status for entity " + entity, new Throwable());
+@@ -324,6 +_,9 @@
                  slices.stopPreventingStatusUpdates(false);
              }
          }
-+        } finally {data.entityLevelCallbackLock.unlock();} // Canvas - Threaded Regions
++        } finally {
++            entity.statusLock.release();
++        }
      }
  
      public void chunkStatusChange(final int x, final int z, final FullChunkStatus newStatus) {
-@@ -398,6 +_,7 @@
-     }
- 
-     protected boolean addEntity(final Entity entity, final boolean fromDisk, final boolean event) {
-+        ServerRegions.WorldTickData data = ServerRegions.getTickData(entity.level().level()); try {data.entityLevelCallbackLock.lock();
-         final BlockPos pos = entity.blockPosition();
-         final int sectionX = pos.getX() >> 4;
-         final int sectionY = Mth.clamp(pos.getY() >> 4, WorldUtil.getMinSection(this.world), WorldUtil.getMaxSection(this.world));
-@@ -447,6 +_,7 @@
-         this.entityStatusChange(entity, slices, Visibility.HIDDEN, getEntityStatus(entity), false, !fromDisk, false);
- 
-         return true;
-+        } finally {data.entityLevelCallbackLock.unlock();} // Canvas - sync-lock
-     }
- 
-     public boolean canRemoveEntity(final Entity entity) {
-@@ -536,11 +_,11 @@
-         final ChunkEntitySlices slices = this.getOrCreateChunk(newSectionX, newSectionZ);
- 
-         if (!old.removeEntity(entity, sectionY)) {
--            LOGGER.warn("Could not remove entity " + entity + " from its old chunk section (" + sectionX + "," + sectionY + "," + sectionZ + ") since it was not contained in the section");
-+            // LOGGER.warn("Could not remove entity " + entity + " from its old chunk section (" + sectionX + "," + sectionY + "," + sectionZ + ") since it was not contained in the section"); // Canvas - silence
-         }
- 
-         if (!slices.addEntity(entity, newSectionY)) {
--            LOGGER.warn("Could not add entity " + entity + " to its new chunk section (" + newSectionX + "," + newSectionY + "," + newSectionZ + ") as it is already contained in the section");
-+            // LOGGER.warn("Could not add entity " + entity + " to its new chunk section (" + newSectionX + "," + newSectionY + "," + newSectionZ + ") as it is already contained in the section"); // Canvas - silence
-         }
- 
-         ((ChunkSystemEntity)entity).moonrise$setSectionX(newSectionX);
-@@ -961,6 +_,7 @@
-         @Override
-         public void onMove() {
-             final Entity entity = this.entity;
-+            ServerRegions.WorldTickData data = ServerRegions.getTickData(entity.level().level()); try {data.entityLevelCallbackLock.lock(); // Canvas - sync-lock
-             final Visibility oldVisibility = getEntityStatus(entity);
-             final ChunkEntitySlices newSlices = EntityLookup.this.moveEntity(this.entity);
-             if (newSlices == null) {
-@@ -971,11 +_,13 @@
-             final Visibility newVisibility = getEntityStatus(entity);
- 
-             EntityLookup.this.entityStatusChange(entity, newSlices, oldVisibility, newVisibility, true, false, false);
-+            } finally {data.entityLevelCallbackLock.unlock();} // Canvas - sync-lock
-         }
- 
+@@ -976,6 +_,7 @@
          @Override
          public void onRemove(final Entity.RemovalReason reason) {
              final Entity entity = this.entity;
-+            ServerRegions.WorldTickData data = ServerRegions.getTickData(entity.level().level()); try {data.entityLevelCallbackLock.lock(); // Canvas - sync-lock
++            ServerRegions.WorldTickData data = ServerRegions.getTickData(entity.level().level()); // Canvas - Threaded Regions
              EntityLookup.this.checkThread(entity, "Cannot remove entity off-main");
              final Visibility tickingState = EntityLookup.getEntityStatus(entity);
  
-@@ -986,6 +_,8 @@
+@@ -986,6 +_,7 @@
              EntityLookup.this.removeEntityCallback(entity);
  
              this.entity.setLevelCallback(NoOpCallback.INSTANCE);
 +            data.removeEntity(entity); // Canvas - Threaded Regions
-+            } finally {data.entityLevelCallbackLock.unlock();} // Canvas - sync-lock
          }
      }
  
