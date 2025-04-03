@@ -445,7 +445,7 @@ public class ServerRegions {
                     return dock;
                 } finally {
                     // don't log if we already contained
-                    if (dock) {
+                    if (dock && false) { // debugging only
                         if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
                             MinecraftServer.LOGGER.info("Docked connection for '{}' to region of world '{}' surrounding chunk '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
                         } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
@@ -463,7 +463,7 @@ public class ServerRegions {
                     return super.remove(connection);
                 } finally {
                     // don't log if we already contained
-                    if (dock) {
+                    if (dock && false) { // debugging only
                         if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
                             MinecraftServer.LOGGER.info("Undocked connection for '{}' from region of world '{}' surrounding chunk '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
                         } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
