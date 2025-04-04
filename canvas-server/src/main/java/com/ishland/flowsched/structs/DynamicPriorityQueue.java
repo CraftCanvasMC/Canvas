@@ -1,6 +1,6 @@
 package com.ishland.flowsched.structs;
 
-import ca.spottedleaf.concurrentutil.util.Priority;
+import io.canvasmc.canvas.server.chunk.PriorityHandler;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicIntegerArray;
@@ -14,37 +14,32 @@ public class DynamicPriorityQueue<E> {
 
     private final AtomicIntegerArray taskCount;
     private final ConcurrentLinkedQueue<E>[] priorities;
-    private final ConcurrentHashMap<E, Priority> priorityMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<E, Integer> priorityMap = new ConcurrentHashMap<>();
 
     public DynamicPriorityQueue() {
-        Priority[] values = Priority.values();
-        this.taskCount = new AtomicIntegerArray(values.length);
+        this.taskCount = new AtomicIntegerArray(PriorityHandler.MAX_PRIORITY + 1);
         //noinspection unchecked
-        this.priorities = new ConcurrentLinkedQueue[values.length];
-        for (int i = 0; i < values.length; i++) {
+        this.priorities = new ConcurrentLinkedQueue[PriorityHandler.MAX_PRIORITY + 1];
+        for (int i = 0; i < (PriorityHandler.MAX_PRIORITY + 1); i++) {
             this.priorities[i] = new ConcurrentLinkedQueue<>();
         }
     }
 
-    public void enqueue(E element, Priority priority) {
-        if (priority == null) throw new IllegalArgumentException("Priority cannot be null");
+    public void enqueue(E element, int priority) {
         if (this.priorityMap.putIfAbsent(element, priority) != null)
             throw new IllegalArgumentException("Element already in queue");
 
-        int priorityIndex = priority.ordinal();
-        this.priorities[priorityIndex].add(element);
-        this.taskCount.incrementAndGet(priorityIndex);
+        this.priorities[priority].add(element);
+        this.taskCount.incrementAndGet(priority);
     }
 
-    public boolean changePriority(E element, Priority newPriority) {
-        if (newPriority == null) throw new IllegalArgumentException("Priority cannot be null");
-
-        Priority currentPriority = this.priorityMap.get(element);
+    public boolean changePriority(E element, int newPriority) {
+        Integer currentPriority = this.priorityMap.get(element);
         if (currentPriority == null || currentPriority == newPriority) {
             return false; // a clear failure
         }
 
-        int currentIndex = currentPriority.ordinal();
+        int currentIndex = currentPriority;
         boolean removedFromQueue = this.priorities[currentIndex].remove(element);
         if (!removedFromQueue) {
             return false; // the element is dequeued while we are changing priority
@@ -56,9 +51,8 @@ public class DynamicPriorityQueue<E> {
             return false; // something else may have called remove()
         }
 
-        int newIndex = newPriority.ordinal();
-        this.priorities[newIndex].add(element);
-        this.taskCount.incrementAndGet(newIndex);
+        this.priorities[newPriority].add(element);
+        this.taskCount.incrementAndGet(newPriority);
         return true;
     }
 
@@ -80,11 +74,11 @@ public class DynamicPriorityQueue<E> {
     }
 
     public void remove(E element) {
-        Priority priority = this.priorityMap.remove(element);
+        Integer priority = this.priorityMap.remove(element);
         if (priority == null) return;
 
-        boolean removed = this.priorities[priority.ordinal()].remove(element); // best-effort
-        if (removed) this.taskCount.decrementAndGet(priority.ordinal());
+        boolean removed = this.priorities[priority].remove(element); // best-effort
+        if (removed) this.taskCount.decrementAndGet(priority);
     }
 
     public int size() {

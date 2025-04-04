@@ -10,6 +10,6 @@ public interface Task {
 
     LockToken[] lockTokens();
 
-    Priority priority();
+    int priority();
 
 }

@@ -86,9 +86,13 @@ public class MultiWatchdogThread extends TickThread {
         return entry;
     }
 
-    private static void dumpThread(@NotNull ThreadInfo thread) {
+    private static void dumpThread(ThreadInfo thread) {
         LOGGER.error("------------------------------");
 
+        if (thread == null) {
+            LOGGER.error("Null ThreadInfo.");
+            return;
+        }
         LOGGER.error("Current Thread: {}", thread.getThreadName());
         LOGGER.error("\tPID: {} | Suspended: {} | Native: {} | State: {}", thread.getThreadId(), thread.isSuspended(), thread.isInNative(), thread.getThreadState());
         if (thread.getLockedMonitors().length != 0) {
@@ -272,8 +276,15 @@ public class MultiWatchdogThread extends TickThread {
             if (fullTick instanceof ChunkRegion region) {
                 if (region.region.getData().tickData.taskQueueData.size() > 0) {
                     LOGGER.error("{} has {} tasks queued in its task queue", region, region.region.getData().tickData.taskQueueData.size());
-                    for (final StackTraceElement stackTraceElement : region.owner.getStackTrace()) {
-                        LOGGER.error("\t\t{}", stackTraceElement);
+                    if (region.owner != null) {
+                        for (final StackTraceElement stackTraceElement : region.owner.getStackTrace()) {
+                            LOGGER.error("\t\t{}", stackTraceElement);
+                        }
+                    }
+                    if (region.world.owner != null) {
+                        for (final StackTraceElement stackTraceElement : region.world.owner.getStackTrace()) {
+                            LOGGER.error("\t\t{}", stackTraceElement);
+                        }
                     }
                 }
                 queuedTasks += region.region.getData().tickData.taskQueueData.size();

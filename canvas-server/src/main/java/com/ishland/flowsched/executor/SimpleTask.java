@@ -6,9 +6,9 @@ import java.util.Objects;
 public class SimpleTask implements Task {
 
     private final Runnable wrapped;
-    private final Priority priority;
+    private final int priority;
 
-    public SimpleTask(Runnable wrapped, Priority priority) {
+    public SimpleTask(Runnable wrapped, int priority) {
         this.wrapped = Objects.requireNonNull(wrapped);
         this.priority = priority;
     }
@@ -33,7 +33,7 @@ public class SimpleTask implements Task {
     }
 
     @Override
-    public Priority priority() {
+    public int priority() {
         return this.priority;
     }
 }

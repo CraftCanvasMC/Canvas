@@ -165,7 +165,7 @@ public class ExecutorManager {
      * @param runnable the runnable.
      * @param priority the priority.
      */
-    public void schedule(Runnable runnable, Priority priority) {
+    public void schedule(Runnable runnable, int priority) {
         this.schedule(new SimpleTask(runnable, priority));
     }
 
@@ -175,7 +175,7 @@ public class ExecutorManager {
      * @param priority the priority.
      * @return the executor.
      */
-    public Executor executor(Priority priority) {
+    public Executor executor(int priority) {
         return runnable -> this.schedule(runnable, priority);
     }
 

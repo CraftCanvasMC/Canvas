@@ -130,7 +130,6 @@ public final class RegionizedTaskQueue {
             if (!referenceCountData.addedTicket) {
                 // fine if multiple threads do this, no removeTicket may be called for this coord due to reference count inc
                 this.addTicket(coord);
-                this.processTicketUpdates(coord);
                 referenceCountData.addedTicket = true;
             }
         }
@@ -236,7 +235,7 @@ public final class RegionizedTaskQueue {
         }
 
         public boolean executeChunkTask() {
-            return this.worldRegionTaskData.executeGlobalChunkTask() || this.chunkQueue.executeTask();
+            return this.chunkQueue.executeTask();
         }
 
         void split(final ThreadedRegionizer<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> regioniser,
@@ -420,7 +419,7 @@ public final class RegionizedTaskQueue {
             ReferenceCountData referenceCounter = null;
             synchronized (this) {
                 if (this.isDestroyed) {
-                    throw new IllegalStateException("Attempting to poll from dead queue");
+                    return false;
                 }
 
                 search_loop:
@@ -595,7 +594,7 @@ public final class RegionizedTaskQueue {
                         }
                         // may have been cancelled before we got to the queue
                         if (this.getReferenceCounterVolatile() != null) {
-                            throw new IllegalStateException("Expected null ref count when queue does not exist");
+                            return false;
                         }
                         // the task never could be polled from the queue, so we return false
                         // don't decrement reference count, as we were certainly cancelled by another thread, which

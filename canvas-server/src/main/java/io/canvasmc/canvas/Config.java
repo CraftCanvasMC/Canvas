@@ -74,7 +74,7 @@ public class Config {
         public boolean enableThreadedRegionizing = false;
 
         @Comment("The region chunk shift. Only works with threaded regionizing enabled")
-        public int gridExponent = 4;
+        public int regionGridExponent = 3;
 
         @Comment("The amount of time(in seconds) before watchdog starts printing error logs from slowdown")
         public long watchdogLoggingTime = 4L;
