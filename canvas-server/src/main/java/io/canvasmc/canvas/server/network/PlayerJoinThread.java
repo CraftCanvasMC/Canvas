@@ -13,6 +13,7 @@ import net.minecraft.network.Connection;
 import net.minecraft.network.PacketSendListener;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import org.jetbrains.annotations.NotNull;
@@ -22,7 +23,7 @@ public class PlayerJoinThread extends TickScheduler.FullTick<PlayerJoinThread.Ti
     private final ConcurrentLinkedQueue<Connection> activeConnections = new ConcurrentLinkedQueue<>();
 
     public PlayerJoinThread(DedicatedServer server) {
-        super(server, "player join thread", new TickHandle());
+        super(server, ResourceLocation.fromNamespaceAndPath("canvas", "join_thread"), new TickHandle());
         INSTANCE = this;
         MinecraftServer.LOGGER.info("Loaded player join thread to server context");
     }

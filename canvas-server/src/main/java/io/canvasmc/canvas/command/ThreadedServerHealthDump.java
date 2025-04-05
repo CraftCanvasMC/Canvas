@@ -126,13 +126,10 @@ public class ThreadedServerHealthDump {
             .append(NEW_LINE)
         );
         for (final TickScheduler.FullTick<?> tickLoop : TickScheduler.FullTick.ALL_REGISTERED.stream().sorted(TickScheduler.FullTick::compareTo).toList()) {
-            if (regionDump || (tickLoop instanceof ChunkRegion chunkRegion)) {
-                if (tickLoop instanceof ChunkRegion chunkRegion) {
-                    if (chunkRegion.region.getCenterChunk() == null) throw new RuntimeException("ljfksdjf" + chunkRegion.region.getOwnedChunks() + chunkRegion.cancelled.get() + chunkRegion.getStateVolatile());
-                }
+            if (regionDump || (tickLoop instanceof ChunkRegion)) {
                 continue;
             }
-            String location = "[" + tickLoop.location() + "]";
+            String location = "[" + tickLoop.toString() + "]";
             double mspt5s = tickLoop.tickTimes5s.getAverage();
             double tps5s = tickLoop.tps5s.getAverage();
             double util = tickLoop.tickTimes5s.getUtilization();
@@ -143,13 +140,13 @@ public class ThreadedServerHealthDump {
                     .clickEvent(ClickEvent.callback((audience) -> {
                         audience.sendMessage(
                             Component.text()
-                                .append(Component.text(tickLoop.getName(), HEADER, TextDecoration.BOLD))
+                                .append(Component.text(tickLoop.toString(), HEADER, TextDecoration.BOLD))
                                 .build()
                         );
                         audience.sendMessage(tickLoop.debugInfo());
                     }))
                     .hoverEvent(HoverEvent.hoverEvent(HoverEvent.Action.SHOW_TEXT, Component.text()
-                        .append(Component.text(tickLoop.getName(), HEADER, TextDecoration.BOLD))
+                        .append(Component.text(tickLoop.toString(), HEADER, TextDecoration.BOLD))
                         .append(Component.text(" debug info", PRIME_ALT))
                         .build()))
                 )
@@ -178,7 +175,7 @@ public class ThreadedServerHealthDump {
             }
             for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : regions) {
                 ChunkRegion tickHandle = region.getData().tickHandle;
-                String location = "Region at " + tickHandle.world.location() + "|" + region.getCenterChunk();
+                String location = "Region at " + tickHandle.world.getDebugLocation() + "|" + region.getCenterChunk();
                 double mspt5s = tickHandle.tickTimes5s.getAverage();
                 double tps5s = tickHandle.tps5s.getAverage();
                 double util = tickHandle.tickTimes5s.getUtilization();

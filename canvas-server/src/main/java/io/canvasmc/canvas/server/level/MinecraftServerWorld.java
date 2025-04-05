@@ -53,8 +53,8 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
     protected final CraftScheduler bukkitScheduler;
     public long emptyTicks = 0L;
 
-    public MinecraftServerWorld(final String name) {
-        super((DedicatedServer) MinecraftServer.getServer(), name, new TickHandle());
+    public MinecraftServerWorld(final ResourceLocation worldIdentifier) {
+        super((DedicatedServer) MinecraftServer.getServer(), worldIdentifier, new TickHandle());
         this.bukkitScheduler = new CraftScheduler();
     }
 
@@ -144,9 +144,13 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
         return bukkitScheduler;
     }
 
-    @Override
-    public String location() {
+    public String getDebugLocation() {
         return "w:" + this.level().dimension().location();
+    }
+
+    @Override
+    public String toString() {
+        return getDebugLocation();
     }
 
     @Override

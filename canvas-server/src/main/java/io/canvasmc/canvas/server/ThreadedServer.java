@@ -4,7 +4,9 @@ import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
 import io.canvasmc.canvas.ThreadedBukkitServer;
+import io.canvasmc.canvas.region.Region;
 import io.canvasmc.canvas.region.RegionizedTaskQueue;
+import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
@@ -17,6 +19,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
+import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
@@ -28,6 +31,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +69,12 @@ public class ThreadedServer implements ThreadedBukkitServer {
         this.server.scheduleOnMain(runnable);
     }
 
+    @Override
+    public @Nullable Region getRegionAtChunk(final World world, final int chunkX, final int chunkZ) {
+        ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = ((CraftWorld) world).getHandle().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
+        return region == null ? null : region.getData();
+    }
+
     public List<ServerLevel> getThreadedWorlds() {
         return levels;
     }
@@ -81,7 +91,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
         try {
             MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             MultiLoopThreadDumper.REGISTRY.add("ls_wg "); // add linear-scaling world-gen workers
-            MultiLoopThreadDumper.REGISTRY.add("tick scheduler");
+            MultiLoopThreadDumper.REGISTRY.add("tick runner");
             ThreadedBukkitServer.setInstance(this);
 
             TickScheduler scheduler = new TickScheduler(Config.INSTANCE.ticking.allocatedSchedulerThreadCount);

@@ -214,7 +214,7 @@ public class MultiWatchdogThread extends TickThread {
 
                 final double totalElapsedS = (double) (now - tick.start) / 1.0E9;
 
-                LOGGER.error("tick handle with name '{}' has not responded in {}s", tick.handle.getDebugName(), ONE_DECIMAL_PLACES.get().format(totalElapsedS));
+                LOGGER.error("tick handle with name '{}' has not responded in {}s", tick.handle.toString(), ONE_DECIMAL_PLACES.get().format(totalElapsedS));
                 logOverflow();
 
                 dumpThread(ManagementFactory.getThreadMXBean().getThreadInfo(tick.thread.threadId(), Integer.MAX_VALUE));

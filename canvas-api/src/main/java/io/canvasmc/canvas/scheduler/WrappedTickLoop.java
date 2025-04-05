@@ -4,6 +4,7 @@ import io.canvasmc.canvas.RollingAverage;
 import io.canvasmc.canvas.TickTimes;
 import java.util.function.BooleanSupplier;
 import net.kyori.adventure.text.Component;
+import org.bukkit.NamespacedKey;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
@@ -14,19 +15,6 @@ import org.slf4j.Logger;
  * useful information
  */
 public interface WrappedTickLoop {
-    /**
-     * Gets the name used in more formal contexts, like "SuperCoolTickLoop"
-     *
-     * @return formal name
-     */
-    String getFormalName();
-
-    /**
-     * Gets the name used in more debugging contexts, like "super cool tick-loop"
-     *
-     * @return debug name
-     */
-    String getDebugName();
 
     /**
      * Gets if the tick-loop is currently sleeping.
@@ -85,8 +73,14 @@ public interface WrappedTickLoop {
     boolean isTicking();
 
     /**
+     * Gets the identifier for the tick-loop
+     * @return the possibly unique identifier
+     */
+    NamespacedKey getIdentifier();
+
+    /**
      * Gets the {@link Logger} for the tick-loop.
-     * The name of the logger is the same as {@link WrappedTickLoop#getFormalName()}
+     * The name of the logger is the same as {@link WrappedTickLoop#getIdentifier()}
      *
      * @return the logger for the tick-loop
      */

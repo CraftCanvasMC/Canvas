@@ -11,5 +11,6 @@ public final class CanvasCommands {
         ViewDistanceCommand.register(dispatcher);
         ResendChunksCommand.register(dispatcher);
         SenderInfoCommand.register(dispatcher);
+        PriorityCommand.register(dispatcher);
     }
 }

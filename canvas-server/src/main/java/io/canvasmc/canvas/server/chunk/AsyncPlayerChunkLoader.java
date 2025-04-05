@@ -12,6 +12,7 @@ import java.util.function.BooleanSupplier;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
@@ -38,8 +39,8 @@ import static net.kyori.adventure.text.Component.text;
 public class AsyncPlayerChunkLoader extends TickScheduler.FullTick<AsyncPlayerChunkLoader.TickHandle> {
     public static AsyncPlayerChunkLoader INSTANCE;
 
-    public AsyncPlayerChunkLoader(final DedicatedServer server, final String name) {
-        super(server, name, new TickHandle());
+    public AsyncPlayerChunkLoader(final DedicatedServer server) {
+        super(server, ResourceLocation.fromNamespaceAndPath("canvas", "async_chunk_loader"), new TickHandle());
         INSTANCE = this;
     }
 

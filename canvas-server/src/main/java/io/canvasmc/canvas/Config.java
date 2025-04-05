@@ -503,7 +503,9 @@ public class Config {
                 "All configuration options here are made for vanilla-compatibility",
                 "and not for performance. Settings must be configured specific",
                 "to your hardware and server type. If you have questions",
-                "join our discord at https://discord.gg/canvasmc/"
+                "join our discord at https://discord.gg/canvasmc/",
+                "As a general rule of thumb, do NOT change a setting if",
+                "you don't know what it does! If you don't know, ask!"
             })
             .handler(ConfigHandlers.CommentProcessor::new)
             .validator(ConfigHandlers.RangeProcessor::new)

@@ -15,6 +15,8 @@ import io.canvasmc.canvas.util.ConcurrentSet;
 import io.canvasmc.canvas.util.IdGenerator;
 import io.papermc.paper.threadedregions.ScheduledTaskThreadPool;
 import io.papermc.paper.util.TraceUtil;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,13 +33,17 @@ import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerTickRateManager;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.TimeUtil;
+import org.bukkit.NamespacedKey;
+import org.bukkit.craftbukkit.util.CraftNamespacedKey;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import static ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.DEADLINE_NOT_SET;
@@ -101,10 +107,29 @@ public class TickScheduler implements MultithreadedTickScheduler {
     }
 
     @Override
-    public WrappedTickLoop scheduleWrapped(final WrappedTickLoop.WrappedTick tick, final String formalName, final String debugName) {
-        FullTick<?> tickLoop = new FullTick<>((DedicatedServer) MinecraftServer.getServer(), formalName, tick);
+    public WrappedTickLoop scheduleWrapped(final WrappedTickLoop.WrappedTick tick, final NamespacedKey identifier) {
+        FullTick<?> tickLoop = new FullTick<>((DedicatedServer) MinecraftServer.getServer(), CraftNamespacedKey.toMinecraft(identifier), tick);
         tickLoop.scheduleTo(this.scheduler);
         return tickLoop;
+    }
+
+    @Override
+    public @Nullable WrappedTickLoop getTickLoop(final NamespacedKey identifier) {
+        ResourceLocation minecraft = CraftNamespacedKey.toMinecraft(identifier);
+        for (final FullTick<?> fullTick : FullTick.ALL_REGISTERED) {
+            if (fullTick.identifier.equals(minecraft)) return fullTick;
+        }
+        return null;
+    }
+
+    @Override
+    public int getThreadCount() {
+        return this.threadCount;
+    }
+
+    @Override
+    public Thread[] getThreads() {
+        return this.scheduler.getCoreThreads();
     }
 
     // Note: only a region can call this
@@ -129,7 +154,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
         // important
         public final DedicatedServer server;
-        private final String name;
+        protected final ResourceLocation identifier;
         public final T tick;
         private final Schedule tickSchedule;
 
@@ -160,9 +185,9 @@ public class TickScheduler implements MultithreadedTickScheduler {
         public ConcurrentLinkedQueue<Runnable> tasks = new ConcurrentLinkedQueue<>();
         public boolean alreadyScheduled = false;
 
-        public FullTick(DedicatedServer server, String name, T tick) {
+        public FullTick(DedicatedServer server, ResourceLocation identifier, T tick) {
             this.server = server;
-            this.name = name;
+            this.identifier = identifier;
             this.tick = tick;
             this.setScheduledStart(System.nanoTime() + TIME_BETWEEN_TICKS);
             this.tickSchedule = new Schedule(DEADLINE_NOT_SET);
@@ -192,8 +217,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
                 MinecraftServer.LOGGER.error("Encountered an unexpected exception", throwable);
                 CrashReport crashReport = MinecraftServer.constructOrExtractCrashReport(throwable);
                 CrashReportCategory crashReportCategory = crashReport.addCategory("TickLoop");
-                crashReportCategory.setDetail("FormalName", this.getFormalName());
-                crashReportCategory.setDetail("DebugName", this.getDebugName());
+                crashReportCategory.setDetail("Identifier", this.getLocation());
                 crashReportCategory.setDetail("TickCount", this.tickCount);
                 MinecraftServer server = MinecraftServer.getServer();
 
@@ -215,6 +239,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
             // ticking
             {
                 long tickStart;
+                long tickEnd;
                 // process overload
                 long nanosecondsOverload;
                 if (tickRateManager().isSprinting() && tickRateManager().checkShouldSprintThisTick()) {
@@ -229,12 +254,12 @@ public class TickScheduler implements MultithreadedTickScheduler {
                         long ticksBehind = diff / nanosecondsOverload;
 
                         if (server.server.getWarnOnOverload()) {
-                            MinecraftServer.LOGGER.warn("Can't keep up! Is the {} overloaded? Running {}ms or {} ticks behind", this.getDebugName(), diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind);
+                            MinecraftServer.LOGGER.warn("Can't keep up! Is the {} overloaded? Running {}ms or {} ticks behind", this.getLocation(), diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind);
                             if (Config.INSTANCE.broadcastServerTicksBehindToOps) {
                                 for (final ServerPlayer player : server.getPlayerList().players) {
                                     if (player.getBukkitEntity().isOp()) {
                                         player.getBukkitEntity().sendMessage(
-                                            Component.text(String.format("Can't keep up! Is the %s overloaded? Running %sms or %s ticks behind", this.getDebugName(), diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind), TextColor.color(255, 161, 14), TextDecoration.BOLD)
+                                            Component.text(String.format("Can't keep up! Is the %s overloaded? Running %sms or %s ticks behind", this.getLocation(), diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind), TextColor.color(255, 161, 14), TextDecoration.BOLD)
                                         );
                                     }
                                 }
@@ -246,6 +271,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
                 }
 
                 tickStart = Util.getNanos();
+                final int tickCount = Math.max(1, this.tickSchedule.getPeriodsAhead(TIME_BETWEEN_TICKS, tickStart));
                 tickTps(tickStart);
 
                 boolean doesntHaveTime = nanosecondsOverload == 0L;
@@ -255,30 +281,37 @@ public class TickScheduler implements MultithreadedTickScheduler {
                 // dock watchdog
                 final MultiWatchdogThread.RunningTick runningTick = new MultiWatchdogThread.RunningTick(tickStart, this, Thread.currentThread());
                 MultiWatchdogThread.WATCHDOG.dock(runningTick);
-                final int tickCount = Math.max(1, this.tickSchedule.getPeriodsAhead(TIME_BETWEEN_TICKS, tickStart));
                 // run tick
                 if (!isSleeping) {
                     if (wasSleeping) {
                         wasSleeping = false;
-                        LOGGER.info("Waking tick-loop '{}'", this.getDebugName());
+                        LOGGER.info("Waking tick-loop '{}'", this.getLocation());
                     }
-                    if (!this.tick.blockTick(this, doesntHaveTime ? () -> false : this::haveTime, this.tickCount++)) this.retire();
+                    try {
+                        tickStart = Util.getNanos();
+                        if (!this.tick.blockTick(this, doesntHaveTime ? () -> false : this::haveTime, this.tickCount++)) this.retire();
+                        tickEnd = Util.getNanos();
+                    } catch (Exception e) {
+                        MultiWatchdogThread.WATCHDOG.undock(runningTick); // don't continue dock on watchdog if we fail to tick.
+                        LOGGER.error("Encountered tick task crash at '{}'", this);
+                        LOGGER.error("", e);
+                        this.retire();
+                        this.server.stopServer();
+                        return false;
+                    }
                 } else {
-                    if (!wasSleeping) LOGGER.info("Pausing tick-loop '{}'", this.getDebugName());
+                    if (!wasSleeping) LOGGER.info("Pausing tick-loop '{}'", this.getLocation());
                     wasSleeping = true;
+                    tickEnd = Util.getNanos();
                 }
                 // undock watchdog
                 MultiWatchdogThread.WATCHDOG.undock(runningTick);
                 // schedule next tick
-                final long tickEnd = System.nanoTime();
                 this.tickSchedule.advanceBy(tickCount, TIME_BETWEEN_TICKS);
-                long nextStart = ca.spottedleaf.concurrentutil.util.TimeUtil.getGreatestTime(tickEnd, this.tickSchedule.getDeadline(TIME_BETWEEN_TICKS));
-                setScheduledStart(nextStart);
-                this.nextTickTimeNanos = nextStart; // let's be accurate with this, this is technically our next scheduled start, so let's use this.
+                this.setScheduledStart(ca.spottedleaf.concurrentutil.util.TimeUtil.getGreatestTime(tickEnd, this.tickSchedule.getDeadline(TIME_BETWEEN_TICKS)));
+                this.nextTickTimeNanos = this.getScheduledStart(); // use internal scheduled start from ScheduledTaskThreadPool.SchedulableTick
 
-                if (!org.purpurmc.purpur.PurpurConfig.tpsCatchup) {
-                    this.nextTickTimeNanos = tickStart + nanosecondsOverload;
-                }
+                // we don't have tps catchup on tick schedulers.
                 tickMspt(tickStart);
                 processingTick = false;
                 return !cancelled.get();
@@ -288,7 +321,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         public void scheduleTo(@NotNull ScheduledTaskThreadPool scheduler) {
             this.setScheduledStart(System.nanoTime() + TIME_BETWEEN_TICKS);
             if (alreadyScheduled) {
-                throw new RuntimeException("already scheduled " + getDebugName());
+                throw new RuntimeException("already scheduled " + getIdentifier());
             }
             alreadyScheduled = true;
             scheduler.schedule(this);
@@ -337,7 +370,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         private void tickTps(long start) {
             if (++tickCount % MinecraftServer.SAMPLE_INTERVAL == 0) {
                 final long diff = start - tickSection;
-                final java.math.BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
+                final BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new BigDecimal(diff), 30, RoundingMode.HALF_UP);
                 tps5s.add(currentTps, diff);
                 tps1m.add(currentTps, diff);
                 tps15s.add(currentTps, diff);
@@ -353,8 +386,8 @@ public class TickScheduler implements MultithreadedTickScheduler {
             return !this.cancelled.get() && this.tickCount >= 1;
         }
 
-        public String location() {
-            return this.getDebugName();
+        public ResourceLocation getLocation() {
+            return this.identifier;
         }
 
         @Override
@@ -390,18 +423,9 @@ public class TickScheduler implements MultithreadedTickScheduler {
             return this.tick.shouldSleep();
         }
 
-        public String getName() {
-            return this.name;
-        }
-
         @Override
-        public String getFormalName() {
-            return getName();
-        }
-
-        @Override
-        public String getDebugName() {
-            return getFormalName().toLowerCase();
+        public NamespacedKey getIdentifier() {
+            return CraftNamespacedKey.fromMinecraft(this.identifier);
         }
 
         @Override
@@ -479,6 +503,11 @@ public class TickScheduler implements MultithreadedTickScheduler {
             this.cancelled.set(true);
             ALL_REGISTERED.remove(this);
             return super.cancel();
+        }
+
+        @Override
+        public String toString() {
+            return this.identifier.toString();
         }
     }
 

@@ -9,14 +9,20 @@ import ca.spottedleaf.moonrise.common.util.TickThread;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
 import com.google.common.collect.Sets;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.event.region.RegionCreateEvent;
+import io.canvasmc.canvas.event.region.RegionDestroyEvent;
+import io.canvasmc.canvas.event.region.RegionMergeEvent;
+import io.canvasmc.canvas.event.region.RegionSplitEvent;
 import io.canvasmc.canvas.scheduler.CanvasRegionScheduler;
 import io.canvasmc.canvas.scheduler.TickScheduler;
+import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import io.canvasmc.canvas.util.ConcurrentSet;
 import io.canvasmc.canvas.util.TPSCalculator;
 import io.papermc.paper.redstone.RedstoneWireTurbo;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceMap;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
@@ -33,10 +39,10 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.network.Connection;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
@@ -63,6 +69,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.pathfinder.PathTypeCache;
 import net.minecraft.world.ticks.LevelTicks;
+import org.bukkit.World;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -73,7 +80,7 @@ public class ServerRegions {
 
     public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
 
-    public static final class TickRegionData implements ThreadedRegionizer.ThreadedRegionData<TickRegionData, TickRegionSectionData> {
+    public static final class TickRegionData implements ThreadedRegionizer.ThreadedRegionData<TickRegionData, TickRegionSectionData>, Region {
 
         private final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region;
         public final ChunkRegion tickHandle;
@@ -83,7 +90,7 @@ public class ServerRegions {
         public TickRegionData(ThreadedRegionizer.@NotNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
             this.region = region;
             this.world = region.regioniser.world;
-            this.tickHandle = new ChunkRegion(region, (DedicatedServer) MinecraftServer.getServer(), "null"/*this is overridden*/);
+            this.tickHandle = new ChunkRegion(region, (DedicatedServer) MinecraftServer.getServer());
             this.tickData = new WorldTickData(this.world, region);
         }
 
@@ -315,6 +322,10 @@ public class ServerRegions {
             }
             // region scheduler
             CanvasRegionScheduler.Scheduler.split(from.regionScheduler, chunkToRegionShift, regionToData, dataSet);
+            // event
+            for (final WorldTickData data : dataSet) {
+                new RegionSplitEvent(from.region.getData(), data.region.getData());
+            }
         }
 
         @Override
@@ -405,6 +416,29 @@ public class ServerRegions {
             this.tickData.taskQueueData.mergeInto(into.taskQueueData);
             // region scheduler
             CanvasRegionScheduler.Scheduler.merge(from.regionScheduler, into.regionScheduler, fromTickOffset);
+            // event
+            new RegionMergeEvent(from.region.getData(), into.region.getData()).callEvent();
+        }
+
+        @Override
+        public @NotNull LongArrayList getOwnedChunkPositions() {
+            return this.region.getOwnedChunks();
+        }
+
+        @Override
+        public @Nullable Long getCenterChunk() {
+            ChunkPos center = this.region.getCenterChunk();
+            return center == null ? null : center.longKey;
+        }
+
+        @Override
+        public @NotNull World getWorld() {
+            return this.world.getWorld();
+        }
+
+        @Override
+        public WrappedTickLoop getTickHandle() {
+            return this.tickHandle;
         }
     }
 
@@ -892,6 +926,25 @@ public class ServerRegions {
         public void addBlockEntityTicker(final @NotNull TickingBlockEntity ticker) {
             TickThread.ensureTickThread(this.world, ticker.getPos(), "Tile entity must be owned by current region");
 
+            // ensure we are on correct region data
+            BlockPos position = ticker.getPos();
+            if (position == null && ticker.getTileEntity() != null) {
+                position = ticker.getTileEntity().worldPosition;
+            }
+            if (position == null) throw new RuntimeException("Unable to add block entity ticker, cannot pull position");
+            if (this.region == null && Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                // we are on level... translate to region
+                // to add tickers, the chunk cannot be null.
+                int x = SectionPos.blockToSectionCoord(position.getX());
+                int z = SectionPos.blockToSectionCoord(position.getZ());
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> threadedRegion = this.world.regioniser.getRegionAtUnsynchronised(x, z);
+                if (threadedRegion == null) {
+                    throw new RuntimeException("Attempted to add block entity in a chunk not owned by region");
+                } else {
+                    threadedRegion.getData().tickData.addBlockEntityTicker(ticker);
+                }
+                return;
+            }
             (this.tickingBlockEntities ? this.pendingBlockEntityTickers : this.blockEntityTickers).add(ticker);
         }
 
@@ -989,6 +1042,7 @@ public class ServerRegions {
 
         @Override
         public void onRegionCreate(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
+            new RegionCreateEvent(region.getData()).callEvent();
         }
 
         @Override
@@ -997,6 +1051,7 @@ public class ServerRegions {
                 ServerRegions.getTickData(region.getData().world);
                 Objects.requireNonNull(region.getData().world.levelTickData, "this really shouldn't be null").activeConnections.add(activeConnection);
             }
+            new RegionDestroyEvent(region.getData()).callEvent();
         }
 
         @Override

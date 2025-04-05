@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicIntegerArray;
 public class DynamicPriorityQueue<E> {
 
     private final AtomicIntegerArray taskCount;
-    private final ConcurrentLinkedQueue<E>[] priorities;
+    public final ConcurrentLinkedQueue<E>[] priorities;
     private final ConcurrentHashMap<E, Integer> priorityMap = new ConcurrentHashMap<>();
 
     public DynamicPriorityQueue() {

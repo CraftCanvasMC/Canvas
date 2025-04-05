@@ -3,8 +3,6 @@ package io.canvasmc.canvas.server.chunk;
 import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.Priority;
-import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask;
-import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask;
 import java.lang.invoke.VarHandle;
 import java.util.Comparator;
 import java.util.Map;
@@ -155,16 +153,29 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
                 // try and use our priority manager more, but we cannot always
                 // use our own, as some chunk tasks are either not runnables, or
                 // do not contain chunk positions
-                int priority = this.priority.priority;
-                Runnable instance = this.holder.task.execute;
-                if (instance instanceof ChunkFullTask full) {
-                    priority = full.world.chunkSystemPriorities.priority(full.chunkX, full.chunkZ);
-                } else if (instance instanceof ChunkUpgradeGenericStatusTask gen) {
-                    priority = gen.world.chunkSystemPriorities.priority(gen.chunkX, gen.chunkZ);
-                }
-                if (this.priority.isHigherOrEqualPriority(Priority.BLOCKING)) {
+                int priority = this.holder.task.priority.priority;
+                // TODO - need better way to do this...
+                /* if (this.holder.task.priority.isHigherOrEqualPriority(Priority.BLOCKING)) {
                     priority = PriorityHandler.BLOCKING;
-                }
+                } else if (this.holder.task.execute instanceof ChunkUpgradeGenericStatusTask upgradeTask) {
+                    int x = upgradeTask.chunkX;
+                    int z = upgradeTask.chunkZ;
+                    priority = upgradeTask.world.chunkSystemPriorities.priority(x, z);
+                } else if (this.holder.task.execute instanceof RadiusAwarePrioritisedExecutor.Task task) {
+                    int x = task.chunkX;
+                    int z = task.chunkZ;
+                    if (!(x == 0 && z == 0)) {
+                        priority = task.world.chunkSystemPriorities.priority(x, z);
+                    } // else | infinite radius task, ignore.
+                } else if (this.holder.task.execute instanceof GenericDataLoadTask<?, ?>.ProcessOffMainTask offMainTask) {
+                    int x = offMainTask.loadTask().chunkX;
+                    int z = offMainTask.loadTask().chunkZ;
+                    priority = offMainTask.loadTask().world.chunkSystemPriorities.priority(x, z);
+                } else if (this.holder.task.execute instanceof ChunkRunnable chunkRunnable) {
+                    int x = chunkRunnable.chunkX;
+                    int z = chunkRunnable.chunkZ;
+                    priority = chunkRunnable.world.chunkSystemPriorities.priority(x, z);
+                } */
                 ChunkSystemTaskQueue.this.chunkSystem.schedule(this.holder.task.execute, priority);
             }
 

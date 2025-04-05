@@ -10,6 +10,6 @@ public class RegionCrash extends RuntimeException {
 
     @Override
     public String getMessage() {
-        return "Encountered region crash at " + this.tickHandle.world.location() + " surrounding chunk " + this.tickHandle.region.getCenterChunk() + ": " + super.getMessage();
+        return "Encountered region crash at " + this.tickHandle.world.getDebugLocation() + " surrounding chunk " + this.tickHandle.region.getCenterChunk() + ": " + super.getMessage();
     }
 }

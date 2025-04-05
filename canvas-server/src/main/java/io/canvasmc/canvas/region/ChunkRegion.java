@@ -5,8 +5,11 @@ import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
+import io.canvasmc.canvas.util.IdGenerator;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
@@ -18,23 +21,23 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 
 public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> {
+    private static final IdGenerator ID_GENERATOR = new IdGenerator();
+    public static final Supplier<ResourceLocation> IDENTIFIER_GENERATOR = () -> {
+        int id = ID_GENERATOR.poll();
+        return ResourceLocation.fromNamespaceAndPath("canvas", "region_" + id);
+    };
     public final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region;
     public final ServerLevel world;
 
-    public ChunkRegion(final ThreadedRegionizer.@NotNull ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region, final DedicatedServer server, final String formal) {
-        super(server, formal, new TickHandle(region));
+    public ChunkRegion(final ThreadedRegionizer.@NotNull ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region, final DedicatedServer server) {
+        super(server, IDENTIFIER_GENERATOR.get(), new TickHandle(region));
         this.region = region;
         this.world = region.regioniser.world;
     }
 
     @Override
-    public String getFormalName() {
-        return "Region at " + this.world.location() + " surrounding chunk " + this.region.getCenterChunk();
-    }
-
-    @Override
     public String toString() {
-        return "Region at " + this.world.location() + " surrounding chunk " + this.region.getCenterChunk() + " " + super.toString();
+        return "Region at " + this.world.getDebugLocation() + " surrounding chunk " + this.region.getCenterChunk() + " " + super.toString();
     }
 
     @Override
@@ -46,6 +49,12 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
         } finally {
             TickScheduler.setTickingData(null);
         }
+    }
+
+    @Override
+    public void retire() {
+        ID_GENERATOR.pop(Integer.parseInt(this.identifier.toString().split("_")[1])); // we split the identifier because the format is 'canvas:region_#'
+        super.retire();
     }
 
     @Override
