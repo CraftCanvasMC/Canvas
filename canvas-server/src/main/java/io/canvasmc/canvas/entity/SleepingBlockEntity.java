@@ -53,7 +53,6 @@ public interface SleepingBlockEntity {
             return false;
         }
         this.lithium$setSleepingTicker(tickWrapper.ticker);
-        tickWrapper.rebind(SleepingBlockEntity.SLEEPING_BLOCK_ENTITY_TICKER);
         return true;
     }
 

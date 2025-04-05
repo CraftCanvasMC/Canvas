@@ -36,8 +36,6 @@ public final class MultiLoopThreadDumper implements ThreadDumper {
 
     @Override
     public SparkSamplerProtos.SamplerMetadata.ThreadDumper getMetadata() {
-        ThreadInfo[] threads = dumpThreads(ManagementFactory.getThreadMXBean());
-
         return SparkSamplerProtos.SamplerMetadata.ThreadDumper.newBuilder()
             .setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC)
             .addAllPatterns(REGISTRY)

@@ -245,8 +245,6 @@ public class ServerRegions {
             }
             for (final TickingBlockEntity tileEntity : from.blockEntityTickers) {
                 final BlockPos pos = tileEntity.getPos();
-                // pos can be null
-                if (tileEntity.getType().equalsIgnoreCase("<lithium_sleeping>")) continue;
                 final int chunkX = pos.getX() >> 4;
                 final int chunkZ = pos.getZ() >> 4;
 
@@ -621,6 +619,14 @@ public class ServerRegions {
         // shouldSignal is threadlocal, don't need to isolate
         public final Map<ServerExplosion.CacheKey, Float> explosionDensityCache = new HashMap<>(64, 0.25f);
         public final PathTypeCache pathTypesByPosCache = new PathTypeCache();
+        public PathTypeCache getPathTypesByPosCache(int chunkX, int chunkZ) {
+            if (this.region == null && Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> threadedRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
+                if (threadedRegion == null) return this.pathTypesByPosCache;
+                return threadedRegion.getData().tickData.pathTypesByPosCache;
+            }
+            return this.pathTypesByPosCache;
+        }
         public final List<LevelChunk> temporaryChunkTickList = new ObjectArrayList<>();
         private final Set<ChunkHolder> chunkHoldersToBroadcast = new ConcurrentSet<>();
         public Set<ChunkHolder> getChunkHoldersToBroadcast() {
@@ -888,12 +894,14 @@ public class ServerRegions {
         }
 
         public void pushBlockEvents(final @NotNull Collection<? extends BlockEventData> blockEvents) {
+            if (this.region == null && Config.INSTANCE.ticking.enableThreadedRegionizing) throw new RuntimeException("cannot push block event to non-region");
             for (final BlockEventData blockEventData : blockEvents) {
                 this.pushBlockEvent(blockEventData);
             }
         }
 
         public void removeIfBlockEvents(final Predicate<? super BlockEventData> predicate) {
+            if (this.region == null && Config.INSTANCE.ticking.enableThreadedRegionizing) throw new RuntimeException("cannot remove block event from non-region");
             for (final Iterator<BlockEventData> iterator = this.blockEvents.iterator(); iterator.hasNext();) {
                 final BlockEventData blockEventData = iterator.next();
                 if (predicate.test(blockEventData)) {
@@ -903,6 +911,7 @@ public class ServerRegions {
         }
 
         public BlockEventData removeFirstBlockEvent() {
+            if (this.region == null && Config.INSTANCE.ticking.enableThreadedRegionizing) throw new RuntimeException("cannot remove first block event from non-region");
             BlockEventData ret;
             while (!this.blockEvents.isEmpty()) {
                 ret = this.blockEvents.removeFirst();

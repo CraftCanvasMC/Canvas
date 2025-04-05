@@ -3,6 +3,9 @@ package io.canvasmc.canvas.server.chunk;
 import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.Priority;
+import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.executor.RadiusAwarePrioritisedExecutor;
+import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkUpgradeGenericStatusTask;
+import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.GenericDataLoadTask;
 import java.lang.invoke.VarHandle;
 import java.util.Comparator;
 import java.util.Map;
@@ -155,7 +158,7 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
                 // do not contain chunk positions
                 int priority = this.holder.task.priority.priority;
                 // TODO - need better way to do this...
-                /* if (this.holder.task.priority.isHigherOrEqualPriority(Priority.BLOCKING)) {
+                if (this.holder.task.priority.isHigherOrEqualPriority(Priority.BLOCKING)) {
                     priority = PriorityHandler.BLOCKING;
                 } else if (this.holder.task.execute instanceof ChunkUpgradeGenericStatusTask upgradeTask) {
                     int x = upgradeTask.chunkX;
@@ -175,7 +178,7 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
                     int x = chunkRunnable.chunkX;
                     int z = chunkRunnable.chunkZ;
                     priority = chunkRunnable.world.chunkSystemPriorities.priority(x, z);
-                } */
+                }
                 ChunkSystemTaskQueue.this.chunkSystem.schedule(this.holder.task.execute, priority);
             }
 
@@ -183,7 +186,6 @@ public final class ChunkSystemTaskQueue implements PrioritisedExecutor {
                 this.cancel();
                 throw new IllegalStateException("Queue is shutdown");
             }
-
 
             return true;
         }
