@@ -91,7 +91,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
         try {
             MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             MultiLoopThreadDumper.REGISTRY.add("ls_wg "); // add linear-scaling world-gen workers
-            MultiLoopThreadDumper.REGISTRY.add("tick runner");
+            MultiLoopThreadDumper.REGISTRY.add("Tick Runner ");
             ThreadedBukkitServer.setInstance(this);
 
             TickScheduler scheduler = new TickScheduler(Config.INSTANCE.ticking.allocatedSchedulerThreadCount);
