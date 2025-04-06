@@ -551,7 +551,6 @@ public class Config {
         }
         if (INSTANCE.ticking.enableThreadedRegionizing) {
             INSTANCE.entities.enableAsyncSpawning = false; // incompatible with threaded regions
-            INSTANCE.entities.entityTracking.enableThreadedTracking = false; // incompatible with threaded regions
         }
         LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
         return INSTANCE;
