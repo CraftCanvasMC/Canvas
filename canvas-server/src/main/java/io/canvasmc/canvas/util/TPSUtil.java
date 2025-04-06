@@ -31,6 +31,6 @@ public class TPSUtil {
     }
 
     public static double rawTT20(double ticks, @Nullable ServerLevel level) {
-        return ticks == 0 ? 0 : ticks * (level == null ? MinecraftServer.getServer().tps5s.getAverage() : ServerRegions.getTickData(level).getTPS()) / MAX_TPS; // Canvas - Threaded Regions
+        return ticks == 0 ? 0 : ticks * (level == null ? MinecraftServer.getServer().tpsCalculator.getMostAccurateTPS() : ServerRegions.getTickData(level).tpsCalculator.getMostAccurateTPS()) / MAX_TPS; // Canvas - Threaded Regions
     }
 }

@@ -13,11 +13,6 @@ public class RollingAverage {
     private int index = 0;
     private final java.math.BigDecimal[] samples;
     private final long[] times;
-    private double cachedAverage = 20L;
-    // missed ticks
-    private long lastTick;
-    private long currentTick;
-    private double allMissedTicks = 0;
 
     public RollingAverage(int size) {
         this.size = size;
@@ -50,27 +45,6 @@ public class RollingAverage {
         if (++index == size) {
             index = 0;
         }
-        this.cachedAverage = total.divide(dec(time), 30, java.math.RoundingMode.HALF_UP).doubleValue();
-        // missed ticks
-        lastTick = currentTick;
-        currentTick = System.nanoTime();
-
-        long tickDuration = Math.max(1, currentTick - lastTick); // prevent divide by zero
-        trackMissedTicks(tickDuration);
-        clearMissedTicks();
-    }
-
-    private void trackMissedTicks(long durationNano) {
-        double missedTicks = (durationNano / (double) MultithreadedTickScheduler.TIME_BETWEEN_TICKS) - 1;
-        allMissedTicks += Math.max(0, missedTicks);
-    }
-
-    public void clearMissedTicks() {
-        allMissedTicks -= applicableMissedTicks();
-    }
-
-    public int applicableMissedTicks() {
-        return (int) Math.floor(allMissedTicks);
     }
 
     /**
@@ -78,6 +52,6 @@ public class RollingAverage {
      * @return TPS average
      */
     public double getAverage() {
-        return cachedAverage;
+        return total.divide(dec(time), 30, java.math.RoundingMode.HALF_UP).doubleValue();
     }
 }
