@@ -618,14 +618,6 @@ public class ServerRegions {
         // shouldSignal is threadlocal, don't need to isolate
         public final Map<ServerExplosion.CacheKey, Float> explosionDensityCache = new HashMap<>(64, 0.25f);
         public final PathTypeCache pathTypesByPosCache = new PathTypeCache();
-        public PathTypeCache getPathTypesByPosCache(int chunkX, int chunkZ) {
-            if (this.region == null && Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> threadedRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
-                if (threadedRegion == null) return this.pathTypesByPosCache;
-                return threadedRegion.getData().tickData.pathTypesByPosCache;
-            }
-            return this.pathTypesByPosCache;
-        }
         public final List<LevelChunk> temporaryChunkTickList = new ObjectArrayList<>();
         private final Set<ChunkHolder> chunkHoldersToBroadcast = new ConcurrentSet<>();
         public Set<ChunkHolder> getChunkHoldersToBroadcast() {
