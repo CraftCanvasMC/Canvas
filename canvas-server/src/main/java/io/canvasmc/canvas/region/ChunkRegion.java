@@ -142,7 +142,6 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
                     TickRateManager tickRateManager = this.world.tickRateManager();
                     boolean runsNormally = tickRateManager.runsNormally();
                     this.world.tickConnection(data); // tick connection on region
-                    data.tpsCalculator.doTick();
                     this.world.updateLagCompensationTick();
                     this.world.regionTick1(data);
                     if (runsNormally) {

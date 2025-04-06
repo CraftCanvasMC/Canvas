@@ -17,7 +17,6 @@ import io.canvasmc.canvas.scheduler.CanvasRegionScheduler;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import io.canvasmc.canvas.util.ConcurrentSet;
-import io.canvasmc.canvas.util.TPSCalculator;
 import io.papermc.paper.redstone.RedstoneWireTurbo;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceMap;
@@ -660,8 +659,6 @@ public class ServerRegions {
         // redstone
         public final WireHandler wireHandler;
         public final RedstoneWireTurbo turbo;
-        // canvas
-        public TPSCalculator tpsCalculator = new TPSCalculator();
         // scheduler
         public final CanvasRegionScheduler.Scheduler regionScheduler = new CanvasRegionScheduler.Scheduler();
 
@@ -1007,6 +1004,14 @@ public class ServerRegions {
 
         public ReferenceList<ServerChunkCache.ChunkAndHolder> getChunks() {
             return this.chunks;
+        }
+
+        public double getTPS() {
+            return this.region == null ? this.world.tps5s.getAverage() : this.region.getData().tickHandle.tps5s.getAverage();
+        }
+
+        public int applicableMissedTicks() {
+            return this.region == null ? this.world.tps5s.applicableMissedTicks() : this.region.getData().tickHandle.tps5s.applicableMissedTicks();
         }
     }
 
