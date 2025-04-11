@@ -22,7 +22,7 @@ public class SenderInfoCommand {
                         player.sendSystemMessage(Component.literal("== Debug Information, for development purposes only, can change at any time =="));
                         player.sendSystemMessage(Component.literal("Owned by NearbyPlayers of level " + player.npr.get().world));
                         player.sendSystemMessage(Component.literal("tick count " + player.tickCount));
-                        Connection connection = player.connection.connection;
+                        /* Connection connection = player.connection.connection;
                         ChunkPos chunkPos = player.chunkPosition();
                         ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = player.serverLevel().regioniser.getRegionAtUnsynchronised(chunkPos.x, chunkPos.z);
                         if (region == null) return 0;
@@ -30,7 +30,7 @@ public class SenderInfoCommand {
                             MinecraftServer.LOGGER.error("player {} doesn't own connection", player);
                         } else {
                             MinecraftServer.LOGGER.info("player {} has connection", player);
-                        }
+                        } */
                         return 0;
                     } else {
                         context.getSource().sendFailure(Component.literal("Only a player can execute this command!"));

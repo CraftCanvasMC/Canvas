@@ -1,8 +1,9 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -1,21 +_,30 @@
+@@ -1,21 +_,31 @@
  package net.minecraft.world.entity;
  
++import ca.spottedleaf.concurrentutil.util.Priority;
 +import ca.spottedleaf.moonrise.patches.chunk_system.level.entity.EntityLookup;
  import com.google.common.collect.ImmutableList;
  import com.google.common.collect.Iterables;
@@ -31,11 +32,12 @@
  import java.util.HashSet;
  import java.util.List;
  import java.util.Locale;
-@@ -23,11 +_,15 @@
+@@ -23,11 +_,16 @@
  import java.util.Optional;
  import java.util.Set;
  import java.util.UUID;
 +import java.util.concurrent.CopyOnWriteArrayList;
++import java.util.concurrent.atomic.AtomicBoolean;
  import java.util.concurrent.atomic.AtomicInteger;
 +import java.util.concurrent.atomic.AtomicReference;
 +import java.util.concurrent.locks.ReentrantLock;
@@ -333,25 +335,20 @@
              LOGGER.warn("Illegal Entity Teleport " + this + " to " + teleportTransition.newLevel() + ":" + teleportTransition.position(), new Throwable());
              return null;
          }
-@@ -3870,6 +_,13 @@
+@@ -3870,6 +_,7 @@
      }
  
      private Entity teleportCrossDimension(ServerLevel level, TeleportTransition teleportTransition) {
-+        // Canvas start
-+        if (this instanceof ServerPlayer player) {
-+            LOGGER.info("Attempting to transfer to new level cross-dimension");
-+            player.serverLevel().notifyNewConnection(player.connection.connection);
-+        }
-+        this.level.wake(); // wake if sleeping
-+        // Canvas end
++        this.level.wake(); // Canvas - wake if sleeping
          List<Entity> passengers = this.getPassengers();
          List<Entity> list = new ArrayList<>(passengers.size());
          this.ejectPassengers();
-@@ -3950,7 +_,51 @@
+@@ -3950,7 +_,94 @@
      public void teleportSetPosition(PositionMoveRotation positionMovementRotation, Set<Relative> relatives) {
          PositionMoveRotation positionMoveRotation = PositionMoveRotation.of(this);
          PositionMoveRotation positionMoveRotation1 = PositionMoveRotation.calculateAbsolute(positionMoveRotation, positionMovementRotation, relatives);
 +        // Canvas start - Threaded Regions
++        ServerLevel oldLevel = this.level.level();
 +        ChunkPos position = new ChunkPos(new BlockPos(
 +            (int) Math.round(positionMovementRotation.position().x), (int) Math.round(positionMovementRotation.position().y), (int) Math.round(positionMovementRotation.position().z)));
 +        // syncload both of these, we need them both in regions
@@ -391,10 +388,52 @@
 +                    from.loadedEntities.remove(this);
 +                    to.loadedEntities.add(this);
 +                }
-+                // LOGGER.info("Moved entity {} across region surrounding {} and {}", this, newRegion.getCenterChunk(), oldRegion.getCenterChunk()); // debug print
++                LOGGER.info("Moved entity {} across region surrounding {} and {}", this, newRegion.getCenterChunk(), oldRegion.getCenterChunk()); // debug print
 +            }
 +            // we have the extra check for regions because if we disable regionizing, then they are always null
 +        } else if (Config.INSTANCE.ticking.enableThreadedRegionizing) LOGGER.warn("Teleporting entity into possible unknown(null) region, A(destination):{}, B(old):{}", newRegion == null ? null : newRegion.getCenterChunk(), oldRegion == null ? null : oldRegion.getCenterChunk(), new Throwable());
++        // cleanup schedule
++        ServerRegions.WorldTickData regionData = this.level.level().regioniser.getRegionAtSynchronised(this.chunkPosition.x, this.chunkPosition.z).getData().tickData;
++        Runnable run = (() -> {
++            AtomicBoolean entityTickList = new AtomicBoolean(false);
++            AtomicBoolean loadedEntities = new AtomicBoolean(false);
++            AtomicBoolean navigatingMobs = new AtomicBoolean(false);
++            for (final ServerLevel level : this.getServer().getAllLevels()) {
++                level.regioniser.computeForAllRegions(region -> {
++                    ServerRegions.WorldTickData from = region.getData().tickData;
++                    from.removeEntity(this, false);
++                    from.trackerEntities.remove(this);
++                    if (this instanceof Mob mob && from.navigatingMobs.contains(this)) {
++                        navigatingMobs.set(true);
++                        from.navigatingMobs.remove(mob);
++                    }
++                    if (from.entityTickList.contains(this)) {
++                        entityTickList.set(true);
++                        from.entityTickList.remove(this);
++                    }
++                    if (from.loadedEntities.contains(this)) {
++                        loadedEntities.set(true);
++                        from.loadedEntities.remove(this);
++                    }
++                });
++            }
++            // now we are completely removed from the world, there is quite literally NOTHING that ties us to anywhere, we can now add back.
++            // this is non-null, we syncloaded earlier.
++            regionData.addEntity(this);
++            regionData.trackerEntities.add(this);
++            if (navigatingMobs.get()) {
++                regionData.navigatingMobs.add((Mob) this);
++            }
++            if (entityTickList.get()) {
++                regionData.entityTickList.add(this);
++            }
++            if (loadedEntities.get()) {
++                regionData.loadedEntities.add(this);
++            }
++        });
++        if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
++            MinecraftServer.getThreadedServer().taskQueue.queueTickTaskQueue(this.level.level(), this.chunkPosition.x, this.chunkPosition.z, run, Priority.BLOCKING);
++        } else this.level.scheduleForPreNextTick(run);
 +        // Canvas end
          this.setYRot(positionMoveRotation1.yRot());
          this.setYHeadRot(positionMoveRotation1.yRot());

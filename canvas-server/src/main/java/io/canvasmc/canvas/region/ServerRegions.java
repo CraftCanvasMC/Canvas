@@ -145,16 +145,6 @@ public class ServerRegions {
 
         private void splitRegion(@NotNull Long2ReferenceOpenHashMap<WorldTickData> regionToData, int chunkToRegionShift, final @NotNull ReferenceOpenHashSet<WorldTickData> dataSet) {
             final WorldTickData from = this.tickData;
-            // connections
-            for (final Connection conn : from.activeConnections) {
-                final ServerPlayer player = conn.getPlayer();
-                // dock on level, it will handle from there
-                ServerLevel level = player.serverLevel();
-                if (level.levelTickData == null) {
-                    level.levelTickData = new WorldTickData(level, null);
-                }
-                level.levelTickData.activeConnections.add(conn);
-            }
             // entities
             for (final ServerPlayer player : from.localPlayers) {
                 final ChunkPos pos = player.chunkPosition();
@@ -333,8 +323,6 @@ public class ServerRegions {
             final long currentTickTo = into.peekTick();
             final long currentTickFrom = from.peekTick();
             final long fromTickOffset = currentTickTo - currentTickFrom;
-            // connections
-            into.activeConnections.addAll(from.activeConnections);
             // time
             final long fromRedstoneTimeOffset = into.redstoneTime - from.redstoneTime;
             // entities
@@ -467,45 +455,6 @@ public class ServerRegions {
             return currentTick;
         }
 
-        // connections
-        public final Queue<Connection> activeConnections = new ConcurrentLinkedQueue<>() {
-            @Override
-            public boolean add(final Connection connection) {
-                boolean dock = super.add(connection);
-                try {
-                    WorldTickData.this.world.wake();
-                    return dock;
-                } finally {
-                    // don't log if we already contained
-                    if (dock && false) { // debugging only
-                        if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
-                            MinecraftServer.LOGGER.info("Docked connection for '{}' to region of world '{}' surrounding chunk '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
-                        } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                            MinecraftServer.LOGGER.info("Docked connection for '{}' to world '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName());
-                        }
-                    }
-                }
-            }
-
-            @Override
-            public boolean remove(final Object o) {
-                Connection connection = (Connection) o;
-                boolean dock = super.remove(connection);;
-                try {
-                    return super.remove(connection);
-                } finally {
-                    // don't log if we already contained
-                    if (dock && false) { // debugging only
-                        if (Config.INSTANCE.ticking.enableThreadedRegionizing && WorldTickData.this.region != null) {
-                            MinecraftServer.LOGGER.info("Undocked connection for '{}' from region of world '{}' surrounding chunk '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName(), WorldTickData.this.region.getCenterChunk());
-                        } else if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                            MinecraftServer.LOGGER.info("Undocked connection for '{}' from world '{}'", connection.getPlayer().getName().getString(), WorldTickData.this.world.dimension().location().toDebugFileName());
-                        }
-                    }
-                }
-            }
-
-        };
         // ticks
         private long lagCompensationTick;
 
@@ -531,7 +480,7 @@ public class ServerRegions {
         private static final Entity[] EMPTY_ENTITY_ARRAY = new Entity[0];
         private final List<ServerPlayer> localPlayers = new CopyOnWriteArrayList<>(); // concurrent
         private final NearbyPlayers nearbyPlayers;
-        private final ReferenceList<Entity> allEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
+        public final ReferenceList<Entity> allEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
         public final ReferenceList<Entity> loadedEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
         public final Set<Entity> entityTickList = Sets.newConcurrentHashSet();
         public final Set<Mob> navigatingMobs = Sets.newConcurrentHashSet(); // must be concurrent
@@ -825,13 +774,11 @@ public class ServerRegions {
                     return;
                 }
             }
-            if (this.allEntities.add(entity)) {
-                if (entity instanceof ServerPlayer player) {
-                    this.localPlayers.add(player);
-                    player.connection.connection.transferToLevel(this.world);
-                    if (!this.getNearbyPlayers(player.chunkPosition()).players.containsKey(player)) {
-                        this.getNearbyPlayers(player.chunkPosition()).addPlayer(player); // moved from entity callback, required or else we might add to the world by mistake
-                    }
+            this.allEntities.add(entity);
+            if (entity instanceof ServerPlayer player) {
+                this.localPlayers.add(player);
+                if (!this.getNearbyPlayers(player.chunkPosition()).players.containsKey(player)) {
+                    this.getNearbyPlayers(player.chunkPosition()).addPlayer(player); // moved from entity callback, required or else we might add to the world by mistake
                 }
             }
         }
@@ -857,11 +804,9 @@ public class ServerRegions {
                     return;
                 }
             }
-            if (this.allEntities.remove(entity)) {
-                if (entity instanceof ServerPlayer player) {
-                    this.localPlayers.remove(player);
-                    this.activeConnections.remove(player.connection.connection);
-                }
+            this.allEntities.remove(entity);
+            if (entity instanceof ServerPlayer player) {
+                this.localPlayers.remove(player);
             }
         }
 
@@ -1048,10 +993,6 @@ public class ServerRegions {
 
         @Override
         public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
-            for (final Connection activeConnection : region.getData().tickData.activeConnections) {
-                ServerRegions.getTickData(region.getData().world);
-                Objects.requireNonNull(region.getData().world.levelTickData, "this really shouldn't be null").activeConnections.add(activeConnection);
-            }
             new RegionDestroyEvent(region.getData()).callEvent();
         }
 

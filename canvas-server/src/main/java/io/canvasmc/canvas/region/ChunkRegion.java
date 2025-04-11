@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.region;
 
+import ca.spottedleaf.concurrentutil.util.Priority;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
@@ -140,6 +141,24 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
                     data.setHandlingTick(true);
                     ProfilerFiller profilerFiller = Profiler.get();
                     TickRateManager tickRateManager = this.world.tickRateManager();
+                    // run all BLOCKING tasks if we have any
+                    final RegionizedTaskQueue.RegionTaskQueueData queue = this.region.getData().tickData.taskQueueData;
+
+                    boolean processedChunkTask = false;
+
+                    boolean executeChunkTask;
+                    boolean executeTickTask;
+                    do {
+                        executeTickTask = queue.executeTickTask(Priority.BLOCKING);
+                        executeChunkTask = queue.executeChunkTask();
+
+                        processedChunkTask |= executeChunkTask;
+                    } while ((executeChunkTask | executeTickTask));
+
+                    if (processedChunkTask) {
+                        // if we processed any chunk tasks, try to process ticket level updates for full status changes
+                        this.world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
+                    }
                     boolean runsNormally = tickRateManager.runsNormally();
                     this.world.tickConnection(data); // tick connection on region
                     data.tpsCalculator.doTick();

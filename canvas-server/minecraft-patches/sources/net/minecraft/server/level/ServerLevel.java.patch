@@ -1,15 +1,17 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -5,28 +_,46 @@
+@@ -5,28 +_,48 @@
  import com.mojang.datafixers.DataFixer;
  import com.mojang.datafixers.util.Pair;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.entity.tnt.TNTMergeManager;
 +import io.canvasmc.canvas.Config;
++import io.canvasmc.canvas.region.ChunkRegion;
 +import io.canvasmc.canvas.region.RegionizedTaskQueue;
 +import io.canvasmc.canvas.region.ServerRegions;
 +import io.canvasmc.canvas.scheduler.CanvasPerWorldScheduler;
 +import io.canvasmc.canvas.scheduler.CanvasRegionScheduler;
++import io.canvasmc.canvas.scheduler.TickScheduler;
 +import io.canvasmc.canvas.server.chunk.PriorityHandler;
 +import io.canvasmc.canvas.server.level.distance.command.DistanceUtils;
 +import io.canvasmc.canvas.util.SimpleThreadLocalRandomSource;
@@ -344,57 +346,17 @@
      }
  
      // Paper start
-@@ -733,10 +_,182 @@
+@@ -733,10 +_,134 @@
      public StructureManager structureManager() {
          return this.structureManager;
      }
 -
 -    public void tick(BooleanSupplier hasTimeLeft) {
 +    // Canvas start - Multithreaded Dimension Ticking
-+    // private final List<Connection> activeConnections = new ObjectArrayList<>(); // Canvas - Threaded Regions
-+    private final Object lock = new Object();
 +
 +    private int ticksSinceLastBlockEventsTickCall = 0;
 +    private int ticksSinceLastRaidTickCall = 0;
 +    private int ticksSinceLastTickCustomSpawnersCall = 0;
-+
-+    public static final int WORLD_INIT_NOT_CHECKED = 0;
-+    public static final int WORLD_INIT_CHECKING = 1;
-+    public static final int WORLD_INIT_CHECKED = 2;
-+
-+    public void notifyNewConnection(Connection connection) {
-+        this.wake(); // wake
-+        ServerRegions.getTickData(this);
-+        this.levelTickData.activeConnections.add(connection);
-+    }
-+
-+    public void removeConnection(Connection connection) {
-+        this.wake(); // wake
-+        ServerRegions.getTickData(this);
-+        this.regioniser.computeForAllRegionsUnsynchronised((region) -> {
-+            region.getData().tickData.activeConnections.remove(connection);
-+        });
-+        this.levelTickData.activeConnections.remove(connection);
-+    }
-+
-+    private void tickRegionizedWorldConnection(ServerRegions.WorldTickData data) {
-+        for (Iterator<Connection> iterator = data.activeConnections.iterator(); iterator.hasNext(); ) {
-+            final Connection activeConnection = iterator.next();
-+            ServerPlayer player = activeConnection.getPlayer();
-+            if (player == null) continue;
-+            ChunkPos pos = player.chunkPosition();
-+            this.getChunk(pos.x, pos.z, ChunkStatus.FULL, true); // load full
-+            // we run synchronized because if we don't, we run the risk of trying to process during splits or merges
-+            ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.regioniser.getRegionAtUnsynchronised(player.chunkPosition().x, player.chunkPosition().z);
-+            if (region != null) {
-+                // if the region is null, the chunk hasn't been loaded yet, so we can keep quiet for now.
-+                // check for contains, because on region destroy it moves all of its connections here, it may have
-+                // been moved correctly, so it may be fine, but we check just in case
-+                region.getData().tickData.activeConnections.add(activeConnection);
-+                iterator.remove(); // we transferred to the region, remove our ownership of it.
-+            }
-+        }
-+    }
 +
 +    public void tickConnection(ServerRegions.WorldTickData data) { // Canvas - protected -> public
 +        // Canvas start - Threaded Regions
@@ -405,27 +367,20 @@
 +        // to the region tick data or not
 +        // in MOST instances, this is very intentional for connections
 +        // to be passed through here to get to the region
-+        if (Config.INSTANCE.ticking.enableThreadedRegionizing && (data.region == null)) { // if the region in the data is null, we are running a world region
-+            this.tickRegionizedWorldConnection(data);
++        if (Config.INSTANCE.ticking.enableThreadedRegionizing && (data.region == null)) { // if the region in the data is null, we are running a world region, cannot do this with regionizing
 +            return;
 +        }
 +        // Canvas end
 +        for (ServerPlayer player : this.getLocalPlayers()) {
 +            player.connection.suspendFlushing();
 +        }
-+        Iterator<Connection> iterator = data.activeConnections.iterator(); // Canvas - Threaded Regions
++        Iterator<Connection> iterator = this.server.connectionPool.getConnectionsForRegion(data).iterator(); // Canvas - Threaded Regions
 +        while (iterator.hasNext()) {
 +            Connection networkmanager = iterator.next();
 +
 +            if (!networkmanager.isConnecting()) {
 +                if (networkmanager.isConnected()) {
 +                    try {
-+                        ServerPlayer player = networkmanager.getPlayer();
-+                        if (player.serverLevel() != this) {
-+                            this.removeConnection(networkmanager);
-+                            player.serverLevel().notifyNewConnection(networkmanager);
-+                            continue;
-+                        }
 +                        networkmanager.tick();
 +                    } catch (Exception exception) {
 +                        if (networkmanager.isMemoryConnection()) {
@@ -442,7 +397,6 @@
 +                    }
 +                } else {
 +                    if (networkmanager.preparing) continue;
-+                    removeConnection(networkmanager);
 +                    networkmanager.handleDisconnection();
 +                }
 +            }

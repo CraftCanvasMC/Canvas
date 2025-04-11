@@ -231,11 +231,15 @@ public final class RegionizedTaskQueue {
         }
 
         public boolean executeTickTask() {
-            return this.tickTaskQueue.executeTask();
+            return this.tickTaskQueue.executeTask(null);
+        }
+
+        public boolean executeTickTask(Priority only) {
+            return this.tickTaskQueue.executeTask(only);
         }
 
         public boolean executeChunkTask() {
-            return this.chunkQueue.executeTask();
+            return this.chunkQueue.executeTask(null);
         }
 
         void split(final ThreadedRegionizer<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> regioniser,
@@ -260,8 +264,8 @@ public final class RegionizedTaskQueue {
             boolean executeGlobalTasks = true;
 
             do {
-                executeTickTasks = executeTickTasks && allowedTickTasks-- > 0 && tickTaskQueue.executeTask();
-                executeChunkTasks = executeChunkTasks && allowedChunkTasks-- > 0 && chunkTaskQueue.executeTask();
+                executeTickTasks = executeTickTasks && allowedTickTasks-- > 0 && tickTaskQueue.executeTask(null);
+                executeChunkTasks = executeChunkTasks && allowedChunkTasks-- > 0 && chunkTaskQueue.executeTask(null);
                 executeGlobalTasks = executeGlobalTasks && this.worldRegionTaskData.executeGlobalChunkTask();
             } while (executeTickTasks | executeChunkTasks | executeGlobalTasks);
 
@@ -277,6 +281,10 @@ public final class RegionizedTaskQueue {
 
         public boolean hasTasks() {
             return !this.tickTaskQueue.isEmpty() || !this.chunkQueue.isEmpty();
+        }
+
+        public boolean hasChunkTasks() {
+            return !this.chunkQueue.isEmpty();
         }
     }
 
@@ -412,7 +420,7 @@ public final class RegionizedTaskQueue {
             }
         }
 
-        private boolean executeTask() {
+        private boolean executeTask(Priority priority) {
             final ArrayDeque<ChunkBasedPriorityTask>[] queues = this.queues;
             final int max = Priority.IDLE.priority;
             ChunkBasedPriorityTask task = null;
@@ -424,6 +432,7 @@ public final class RegionizedTaskQueue {
 
                 search_loop:
                 for (int i = 0; i <= max; ++i) {
+                    if (priority != null && priority.isLowerPriority(Priority.getPriority(i))) break search_loop; // break once we reach the limit
                     final ArrayDeque<ChunkBasedPriorityTask> queue = queues[i];
                     while ((task = queue.pollFirst()) != null) {
                         if ((referenceCounter = task.trySetCompleting(i)) != null) {
