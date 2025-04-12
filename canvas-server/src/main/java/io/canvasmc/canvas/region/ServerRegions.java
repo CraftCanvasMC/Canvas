@@ -684,10 +684,6 @@ public class ServerRegions {
             this.loadedEntities.add(entity);
         }
 
-        public boolean hasLoadedEntity(final Entity entity) {
-            return this.loadedEntities.contains(entity);
-        }
-
         public void removeLoadedEntity(final Entity entity) {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
@@ -781,10 +777,6 @@ public class ServerRegions {
                     this.getNearbyPlayers(player.chunkPosition()).addPlayer(player); // moved from entity callback, required or else we might add to the world by mistake
                 }
             }
-        }
-
-        public boolean hasEntity(final Entity entity) {
-            return this.allEntities.contains(entity);
         }
 
         public void removeEntity(final Entity entity) {
@@ -955,7 +947,7 @@ public class ServerRegions {
             return level.levelTickData;
         }
         WorldTickData possible = pullRegionData();
-        if (possible != null && possible.world == level) return possible;
+        if (possible != null && possible.world == level && possible.region != null) return possible;
         return level.levelTickData;
     }
 
