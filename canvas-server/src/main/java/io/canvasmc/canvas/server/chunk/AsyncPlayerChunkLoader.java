@@ -18,6 +18,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.profiling.Profiler;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ImposterProtoChunk;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -49,6 +50,10 @@ public class AsyncPlayerChunkLoader extends TickScheduler.FullTick<AsyncPlayerCh
         @Override
         public boolean blockTick(final WrappedTickLoop loop, final BooleanSupplier hasTimeLeft, final int tickCount) {
             for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+                // push any chunk holders sent to the level (might be from plugins)
+                if (level.levelTickData != null && Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                    level.chunkSource.broadcastChangedChunks(Profiler.get());
+                }
                 tickWaiting(level);
             }
             if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {

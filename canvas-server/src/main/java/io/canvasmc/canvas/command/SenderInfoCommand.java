@@ -2,11 +2,14 @@ package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import it.unimi.dsi.fastutil.shorts.ShortSet;
+import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.concurrent.TimeUnit;
 
 import static net.minecraft.commands.Commands.literal;
 
@@ -23,6 +26,7 @@ public class SenderInfoCommand {
                         for (final ShortSet shorts : holder.changedBlocksPerSection) {
                             player.sendSystemMessage(Component.literal("In chunk found changed shorts: " + shorts));
                         }
+                        player.sendSystemMessage(Component.literal("Last chunk broadcast: " + TimeUnit.SECONDS.convert(Util.getNanos() - holder.lastTickNanos, TimeUnit.NANOSECONDS) + "s ago"));
                         player.sendSystemMessage(Component.literal("attempting broadcast..."));
                         holder.broadcastChanges(player.serverLevel().getChunk(player.chunkPosition().x, player.chunkPosition().z).chunkAndHolder.chunk());
                         /* Connection connection = player.connection.connection;
