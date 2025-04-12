@@ -5,6 +5,7 @@ import ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel
 import ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.task.ChunkFullTask;
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import java.util.List;
@@ -48,22 +49,33 @@ public class AsyncPlayerChunkLoader extends TickScheduler.FullTick<AsyncPlayerCh
         @Override
         public boolean blockTick(final WrappedTickLoop loop, final BooleanSupplier hasTimeLeft, final int tickCount) {
             for (ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-                if (level.owner != null && level.owner.getState().equals(Thread.State.WAITING)) {
-                    level.taskQueueRegionData.drainGlobalChunkTasks();
-                    level.runFullTickTasks(() -> true);
-                    level.regioniser.computeForAllRegionsUnsynchronised((region) -> {
-                        if (region == null) return; // don't poll if the region is null
-                        if (!region.getData().tickHandle.tick.isActive || (region.getData().tickHandle.owner == null || region.getData().tickHandle.owner.getState().equals(Thread.State.WAITING))) {
-                            region.getData().tickData.getTaskQueueData().executeChunkTask();
-                            region.getData().tickHandle.runFullTickTasks(() -> true);
-                        }
-                    });
-                }
+                tickWaiting(level);
             }
             if (MoonriseCommon.WORKER_POOL.hasPendingTasks()) {
                 MoonriseCommon.WORKER_POOL.wakeup();
             }
             return true;
+        }
+
+        private static void tickWaiting(@NotNull ServerLevel level) {
+            if (level.owner != null && level.owner.getState().equals(Thread.State.WAITING)) {
+                level.taskQueueRegionData.drainGlobalChunkTasks();
+                level.runFullTickTasks(() -> true);
+                if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                    // main thread processor is only run with regionizing disabled
+                    int i = 0;
+                    while (((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)level).moonrise$getChunkTaskScheduler().executeMainThreadTask() && level.owner.getState().equals(Thread.State.WAITING)) {
+                        i++;
+                    }
+                }
+                level.regioniser.computeForAllRegionsUnsynchronised((region) -> {
+                    if (region == null) return; // don't poll if the region is null
+                    if (!region.getData().tickHandle.tick.isActive || (region.getData().tickHandle.owner == null || region.getData().tickHandle.owner.getState().equals(Thread.State.WAITING))) {
+                        region.getData().tickData.getTaskQueueData().executeChunkTask();
+                        region.getData().tickHandle.runFullTickTasks(() -> true);
+                    }
+                });
+            }
         }
     }
 

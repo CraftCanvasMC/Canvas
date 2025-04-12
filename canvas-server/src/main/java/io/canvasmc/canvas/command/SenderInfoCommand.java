@@ -1,14 +1,11 @@
 package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.CommandDispatcher;
-import io.canvasmc.canvas.region.ServerRegions;
-import io.papermc.paper.threadedregions.ThreadedRegionizer;
+import it.unimi.dsi.fastutil.shorts.ShortSet;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.ChunkPos;
 import org.jetbrains.annotations.NotNull;
 
 import static net.minecraft.commands.Commands.literal;
@@ -22,6 +19,12 @@ public class SenderInfoCommand {
                         player.sendSystemMessage(Component.literal("== Debug Information, for development purposes only, can change at any time =="));
                         player.sendSystemMessage(Component.literal("Owned by NearbyPlayers of level " + player.npr.get().world));
                         player.sendSystemMessage(Component.literal("tick count " + player.tickCount));
+                        ChunkHolder holder = player.serverLevel().getChunk(player.chunkPosition().x, player.chunkPosition().z).chunkAndHolder.holder();
+                        for (final ShortSet shorts : holder.changedBlocksPerSection) {
+                            player.sendSystemMessage(Component.literal("In chunk found changed shorts: " + shorts));
+                        }
+                        player.sendSystemMessage(Component.literal("attempting broadcast..."));
+                        holder.broadcastChanges(player.serverLevel().getChunk(player.chunkPosition().x, player.chunkPosition().z).chunkAndHolder.chunk());
                         /* Connection connection = player.connection.connection;
                         ChunkPos chunkPos = player.chunkPosition();
                         ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = player.serverLevel().regioniser.getRegionAtUnsynchronised(chunkPos.x, chunkPos.z);
