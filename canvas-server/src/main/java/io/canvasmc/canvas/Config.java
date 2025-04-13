@@ -263,6 +263,9 @@ public class Config {
         @Comment("More efficiently clumps XP orbs")
         public boolean clumpOrbs = true;
 
+        @Comment("Allows configurability of the Skeleton aim accuracy. 0 is normal, higher the value, the less accurate it is.")
+        public int skeletonAimAccuracy = 0;
+
         @Comment(value = {
             "Masks for goals. Allows disabling and adding delays to the tick rate of the goal. The 'goalClass'",
             "must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a",
