@@ -184,7 +184,7 @@ public class Constructor extends SafeConstructor {
                     try {
                         property = memberDescription == null ? this.getProperty(beanType, key) : memberDescription.getProperty(key);
                     } catch (Exception e) {
-                        LOGGER.warn("Encountered exception when parsing node, skipping: {}", e.getMessage());
+                        LOGGER.warn("Configuration option was removed, details: {}", e.getMessage());
                         continue;
                     }
                     // Canvas end

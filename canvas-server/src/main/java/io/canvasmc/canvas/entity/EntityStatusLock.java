@@ -58,6 +58,7 @@ public class EntityStatusLock extends ReentrantLock {
         STATUS_CHANGES,
         POS_CHANGE,
         REMOVED,
+        TRACKING,
         SCHEDULER;
     }
 }
