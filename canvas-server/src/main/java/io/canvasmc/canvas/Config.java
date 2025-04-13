@@ -186,6 +186,9 @@ public class Config {
     public Blocks blocks = new Blocks();
     public static class Blocks {
 
+        @Comment("Disables leaf block decay")
+        public boolean disableLeafDecay = false;
+
         @Comment("Optimizes piston block entities")
         public boolean optimizePistonMovingBlockEntity = true;
 
@@ -367,9 +370,6 @@ public class Config {
 
     @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
     public boolean chainEndCrystalExplosions = false;
-
-    @Comment("Disables leaf block decay")
-    public boolean disableLeafDecay = false;
 
     @Comment(value = {
         "Allows configurability of the distance of which certain objects need to be from a player",

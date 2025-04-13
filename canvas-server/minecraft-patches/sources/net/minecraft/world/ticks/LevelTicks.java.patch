@@ -14,7 +14,7 @@
  import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMap.Entry;
  import it.unimi.dsi.fastutil.objects.ObjectIterator;
-@@ -11,11 +_,17 @@
+@@ -11,11 +_,18 @@
  import java.util.ArrayDeque;
  import java.util.ArrayList;
  import java.util.Comparator;
@@ -26,13 +26,14 @@
  import java.util.Queue;
  import java.util.Set;
 +import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.ConcurrentLinkedDeque;
 +import java.util.concurrent.ConcurrentLinkedQueue;
 +import java.util.concurrent.PriorityBlockingQueue;
 +import java.util.concurrent.atomic.AtomicInteger;
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -26,16 +_,26 @@
+@@ -26,16 +_,24 @@
  import net.minecraft.util.profiling.Profiler;
  import net.minecraft.util.profiling.ProfilerFiller;
  import net.minecraft.world.level.ChunkPos;
@@ -53,17 +54,15 @@
 +    // if it's not, crashes occur EVERYWHERE...
 +    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
 +    // we use our own Long2Long map using an implementation we made that adds concurrent fastutil utilities
-+    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongConcurrentHashMap(Long.MAX_VALUE), map -> map.defaultReturnValue(Long.MAX_VALUE));
++    private final Long2LongMap nextTickForContainer = Util.make(Long2LongMaps.synchronize(new Long2LongOpenHashMap()), map -> map.defaultReturnValue(Long.MAX_VALUE));
 +    // we use a concurrent version of `containersToTick` and `toRunThisTick` since those are primarily accessed everywhere.
 +    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityBlockingQueue<>(11, CONTAINER_DRAIN_ORDER);
-+    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedQueue<>();
-+    // we add this to simplify counting of toRunThisTick.size(), since for some reason this is REALLY expensive...?
-+    private final AtomicInteger toRunThisTickCount = new AtomicInteger(0);
++    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedDeque<>();
 +    // Canvas end
      private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
      private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (levelChunkTicks, scheduledTick) -> {
-@@ -43,8 +_,63 @@
+@@ -43,8 +_,60 @@
              this.updateContainerScheduling(scheduledTick);
          }
      };
@@ -87,11 +86,9 @@
 +            tickContainer.offsetTicks(tickOffset);
 +            into.allContainers.put(entry.getLongKey(), tickContainer);
 +        }
-+        for (final Iterator<Map.Entry<Long, Long>> iterator = (this.nextTickForContainer).entrySet().iterator();
-+             iterator.hasNext();) {
-+            final Map.Entry<Long, Long> entry = iterator.next();
-+            into.nextTickForContainer.put(entry.getKey().longValue(), entry.getValue() + tickOffset);
-+        }
++        this.nextTickForContainer.forEach((key, value) -> {
++            into.nextTickForContainer.put(key.longValue(), value + tickOffset);
++        });
 +    }
 +
 +    public void split(final int chunkToRegionShift,
@@ -108,8 +105,7 @@
 +            if (ticks == null) continue;
 +            ticks.allContainers.put(chunkKey, entry.getValue());
 +        }
-+        for (final Map.Entry<Long, Long> entry : (this.nextTickForContainer).entrySet()) {
-+            final long chunkKey = entry.getKey();
++        this.nextTickForContainer.forEach((chunkKey, value) -> {
 +            final int chunkX = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(chunkKey);
 +            final int chunkZ = ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(chunkKey);
 +
@@ -118,9 +114,9 @@
 +            );
 +
 +            LevelTicks<T> ticks = regionToData.get(regionSectionKey);
-+            if (ticks == null) continue;
-+            ticks.nextTickForContainer.put(chunkKey, entry.getValue().longValue());
-+        }
++            if (ticks == null) return;
++            ticks.nextTickForContainer.put(chunkKey.longValue(), value.longValue());
++        });
 +    }
 +    public LevelTicks(LongPredicate tickCheck, net.minecraft.server.level.ServerLevel world, boolean isBlock) {
 +        this.world = world;
@@ -165,60 +161,45 @@
          } else {
              levelChunkTicks.schedule(tick);
          }
-@@ -84,7 +_,7 @@
-         profilerFiller.push("collect");
-         this.collectTicks(gameTime, maxAllowedTicks, profilerFiller);
-         profilerFiller.popPush("run");
--        profilerFiller.incrementCounter("ticksToRun", this.toRunThisTick.size());
-+        profilerFiller.incrementCounter("ticksToRun", this.toRunThisTickCount.get()); // Canvas
-         this.runCollectedTicks(ticker);
-         profilerFiller.popPush("cleanup");
-         this.cleanupAfterTick();
-@@ -99,12 +_,15 @@
+@@ -99,29 +_,30 @@
      }
  
      private void sortContainersToTick(long gameTime) {
 -        ObjectIterator<Entry> objectIterator = Long2LongMaps.fastIterator(this.nextTickForContainer);
 -
-+        // Canvas start - concurrent
-+        // this is really the only thing that is incompatible with Long2Long and ConcurrentHashMap
-+        // so we rewrite this to be compatible.
-+        Iterator<Map.Entry<Long, Long>> objectIterator = this.nextTickForContainer.entrySet().iterator();
-         while (objectIterator.hasNext()) {
+-        while (objectIterator.hasNext()) {
 -            Entry entry = objectIterator.next();
 -            long longKey = entry.getLongKey();
 -            long longValue = entry.getLongValue();
-+            Map.Entry<Long, Long> entry = objectIterator.next();
-+            long longKey = entry.getKey();
-+            long longValue = entry.getValue();
++        // Canvas start - concurrent
++        // this is really the only thing that is incompatible with Long2Long and ConcurrentHashMap
++        // so we rewrite this to be compatible.
++        this.nextTickForContainer.forEach((entryKey, entryValue) -> {
++            long longKey = entryKey;
++            long longValue = entryValue;
 +        // Canvas end
              if (longValue <= gameTime) {
                  LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(longKey);
                  if (levelChunkTicks == null) {
-@@ -172,15 +_,17 @@
- 
-     private void scheduleForThisTick(ScheduledTick<T> tick) {
-         this.toRunThisTick.add(tick);
-+        this.toRunThisTickCount.incrementAndGet(); // Canvas
-     }
- 
-     private boolean canScheduleMoreTicks(int maxAllowedTicks) {
--        return this.toRunThisTick.size() < maxAllowedTicks;
-+        return this.toRunThisTickCount.get() < maxAllowedTicks; // Canvas
-     }
- 
-     private void runCollectedTicks(BiConsumer<BlockPos, T> ticker) {
-         while (!this.toRunThisTick.isEmpty()) {
-             ScheduledTick<T> scheduledTick = this.toRunThisTick.poll();
-+            this.toRunThisTickCount.decrementAndGet(); // Canvas
-             if (!this.toRunThisTickSet.isEmpty()) {
-                 this.toRunThisTickSet.remove(scheduledTick);
+-                    objectIterator.remove();
++                    this.nextTickForContainer.remove(longKey, longValue); // Canvas
+                 } else {
+                     ScheduledTick<T> scheduledTick = levelChunkTicks.peek();
+                     if (scheduledTick == null) {
+-                        objectIterator.remove();
++                        this.nextTickForContainer.remove(longKey, longValue); // Canvas
+                     } else if (scheduledTick.triggerTick() > gameTime) {
+-                        entry.setValue(scheduledTick.triggerTick());
++                        this.nextTickForContainer.replace(longKey, longValue); // Canvas
+                     } else if (this.tickCheck.test(longKey)) {
+-                        objectIterator.remove();
++                        this.nextTickForContainer.remove(longKey, longValue); // Canvas
+                         this.containersToTick.add(levelChunkTicks);
+                     }
+                 }
              }
-@@ -192,6 +_,7 @@
+-        }
++        });
+     }
  
-     private void cleanupAfterTick() {
-         this.toRunThisTick.clear();
-+        this.toRunThisTickCount.set(0); // Canvas
-         this.containersToTick.clear();
-         this.alreadyRunThisTick.clear();
-         this.toRunThisTickSet.clear();
+     private void drainContainers(long gameTime, int maxAllowedTicks) {
