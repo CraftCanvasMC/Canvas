@@ -1,10 +1,11 @@
 --- a/net/minecraft/world/ticks/LevelTicks.java
 +++ b/net/minecraft/world/ticks/LevelTicks.java
-@@ -1,9 +_,12 @@
+@@ -1,9 +_,13 @@
  package net.minecraft.world.ticks;
  
 +import com.google.common.collect.Sets;
 +import io.canvasmc.canvas.region.ServerRegions;
++import io.canvasmc.canvas.util.fastutil.Long2LongConcurrentHashMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMaps;
  import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
@@ -31,7 +32,7 @@
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -26,25 +_,90 @@
+@@ -26,16 +_,26 @@
  import net.minecraft.util.profiling.Profiler;
  import net.minecraft.util.profiling.ProfilerFiller;
  import net.minecraft.world.level.ChunkPos;
@@ -51,19 +52,18 @@
 +    // LevelTicks can be accessed ANYWHERE. these *must* be threadsafe
 +    // if it's not, crashes occur EVERYWHERE...
 +    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
-+    // shockingly, we don't actually need to implement code for a
-+    // custom default return value we don't fetch anything that doesn't
-+    // already exist, so we can easily swap to a ConcurrentHashMap
-+    private final Map<Long, Long> nextTickForContainer = new ConcurrentHashMap<>(); // Util.make(, map -> map.defaultReturnValue(Long.MAX_VALUE));
++    // we use our own Long2Long map using an implementation we made that adds concurrent fastutil utilities
++    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongConcurrentHashMap(Long.MAX_VALUE), map -> map.defaultReturnValue(Long.MAX_VALUE));
++    // we use a concurrent version of `containersToTick` and `toRunThisTick` since those are primarily accessed everywhere.
 +    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityBlockingQueue<>(11, CONTAINER_DRAIN_ORDER);
 +    private final Queue<ScheduledTick<T>> toRunThisTick = new ConcurrentLinkedQueue<>();
++    // we add this to simplify counting of toRunThisTick.size(), since for some reason this is REALLY expensive...?
 +    private final AtomicInteger toRunThisTickCount = new AtomicInteger(0);
-     private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
--    private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
-+    private final Set<ScheduledTick<?>> toRunThisTickSet = Sets.newConcurrentHashSet();
 +    // Canvas end
+     private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
+     private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (levelChunkTicks, scheduledTick) -> {
-         if (scheduledTick.equals(levelChunkTicks.peek())) {
+@@ -43,8 +_,63 @@
              this.updateContainerScheduling(scheduledTick);
          }
      };
@@ -90,7 +90,7 @@
 +        for (final Iterator<Map.Entry<Long, Long>> iterator = (this.nextTickForContainer).entrySet().iterator();
 +             iterator.hasNext();) {
 +            final Map.Entry<Long, Long> entry = iterator.next();
-+            into.nextTickForContainer.put(entry.getKey(), entry.getValue() + tickOffset);
++            into.nextTickForContainer.put(entry.getKey().longValue(), entry.getValue() + tickOffset);
 +        }
 +    }
 +
@@ -119,7 +119,7 @@
 +
 +            LevelTicks<T> ticks = regionToData.get(regionSectionKey);
 +            if (ticks == null) continue;
-+            ticks.nextTickForContainer.put(chunkKey, entry.getValue());
++            ticks.nextTickForContainer.put(chunkKey, entry.getValue().longValue());
 +        }
 +    }
 +    public LevelTicks(LongPredicate tickCheck, net.minecraft.server.level.ServerLevel world, boolean isBlock) {
