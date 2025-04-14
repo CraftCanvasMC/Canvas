@@ -148,11 +148,6 @@ public class Config {
 
         public Generation generation = new Generation();
         public static class Generation {
-            @Comment(value = {
-                "Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing",
-                "some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more"
-            })
-            public boolean mc258859 = false;
 
             @Comment(value = {
                 "Whether to use an alternative strategy to make structure layouts generate slightly even faster than",
@@ -183,6 +178,19 @@ public class Config {
         }
     }
 
+    public Fixes fixes = new Fixes();
+    public static class Fixes {
+        @Comment(value = {
+            "Fixes MC-258859, fixing what Minecraft classifies as a 'slope', fixing",
+            "some visuals with biomes like Snowy Slopes, Frozen Peaks, Jagged Peaks, Terralith & more"
+        })
+        public boolean mc258859 = false;
+        @Comment(value = {
+            "Fixes MC-136249(and 174584, along with its duplicates), fixing a bug where the",
+            "Riptide enchantment does not function properly when combined with the Depth Strider enchantment"
+        })
+        public boolean mc136249 = false;
+    }
     public Blocks blocks = new Blocks();
     public static class Blocks {
 

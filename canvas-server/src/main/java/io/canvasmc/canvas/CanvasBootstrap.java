@@ -30,6 +30,7 @@ public class CanvasBootstrap {
     public static boolean RUNNING_IN_IDE = false;
 
     public static OptionSet bootstrap(String[] args) {
+        Thread.currentThread().setPriority(9); // higher startup priority
         System.setProperty("java.util.logging.manager", "io.papermc.paper.log.CustomLogManager");
         final String warnWhenLegacyFormattingDetected = String.join(".", "net", "kyori", "adventure", "text", "warnWhenLegacyFormattingDetected");
         if (false) {

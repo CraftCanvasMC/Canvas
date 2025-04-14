@@ -13,8 +13,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class EntityStatusLock extends ReentrantLock {
 
     public final Entity entity;
-    private volatile Status status;
-    public volatile boolean lock = false;
+    private Status status;
 
     public EntityStatusLock(Entity entity) {
         this.entity = entity;
@@ -22,6 +21,7 @@ public class EntityStatusLock extends ReentrantLock {
 
     public void acquire(Status status) {
         if (ServerChunkCache.MainThreadExecutor.entityOverride.contains(Thread.currentThread())) return; // pass
+        if (status == this.status && Thread.currentThread().equals(getOwner())) return;
         int tries = 0;
         while (!this.tryLock()) {
             // attempt 40 times before we try and exit the lock. this is equivalent to at least 40 milliseconds
