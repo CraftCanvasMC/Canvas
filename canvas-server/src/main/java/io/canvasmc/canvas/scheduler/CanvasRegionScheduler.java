@@ -5,6 +5,7 @@ import ca.spottedleaf.concurrentutil.util.Validate;
 import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
 import io.canvasmc.canvas.region.ServerRegions;
+import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.scheduler.RegionScheduler;
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -42,8 +43,9 @@ public class CanvasRegionScheduler implements RegionScheduler {
     }
 
     private static void scheduleInternalOnRegion(final @NotNull LocationScheduledTask task, final long delay) {
-        ServerRegions.WorldTickData data = ServerRegions.getTickData(((CraftWorld) task.world).getHandle());
-        if (data.region == null) throw new RuntimeException("attempted to schedule on region when we are off region");
+        final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = ((CraftWorld) task.world).getHandle().regioniser.getRegionAtUnsynchronised(task.chunkX, task.chunkZ);
+        if (region == null) throw new RuntimeException("Cannot schedule to a chunk that isn't owned by a region.");
+        ServerRegions.WorldTickData data = region.getData().tickData;
         data.regionScheduler.queueTask(task, delay, data);
     }
 
