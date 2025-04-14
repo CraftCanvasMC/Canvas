@@ -37,6 +37,7 @@ public class ConnectionPool {
         } else {
             // region is not null, isolate per region
             for (final Connection connection : this.backend) {
+                if (connection.getPlayer() == null) continue; // ensure player isn't null.
                 long packed = connection.getPlayer().chunkPosition().longKey;
                 if (connection.getPhase().equals(ConnectionHandlePhases.PLAY) && regionData.region.getOwnedChunks().contains(packed)) retVal.add(connection);
             }

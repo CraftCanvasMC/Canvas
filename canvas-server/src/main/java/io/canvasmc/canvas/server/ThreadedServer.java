@@ -1,5 +1,10 @@
 package io.canvasmc.canvas.server;
 
+import com.google.common.base.Charsets;
+import com.google.common.io.Resources;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
 import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.LevelAccess;
@@ -10,16 +15,22 @@ import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
+import io.papermc.paper.util.MCUtil;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
@@ -143,6 +154,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
             List<World> worlds = Bukkit.getServer().getWorlds();
             LOGGER.info("Booted server with {} worlds {}", worlds.size(), worlds.stream().map(World::getName).collect(Collectors.toSet()));
             LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1_000.00D));
+            performVersionCheck();
             while (this.server.isRunning()) {
                 tickSection = this.getServer().tick(tickSection);
             }
@@ -202,5 +214,39 @@ public class ThreadedServer implements ThreadedBukkitServer {
         for (final TickScheduler.FullTick<?> fullTick : TickScheduler.FullTick.ALL_REGISTERED) {
             fullTick.retire();
         }
+    }
+
+    private void performVersionCheck() {
+        MCUtil.scheduleAsyncTask(() -> {
+            ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
+            final OptionalInt buildNumber = buildInfo.buildNumber();
+            int distance;
+            if (buildNumber.isPresent()) {
+                distance = ((Supplier<Integer>) () -> {
+                    try {
+                        final String jenkinsApiUrl = "https://jenkins.canvasmc.io/job/Canvas/lastSuccessfulBuild/api/json";
+                        try (final BufferedReader reader = Resources.asCharSource(
+                            URI.create(jenkinsApiUrl).toURL(),
+                            Charsets.UTF_8
+                        ).openBufferedStream()) {
+                            final JsonObject json = new Gson().fromJson(reader, JsonObject.class);
+                            final int latestBuild = json.getAsJsonPrimitive("number").getAsInt();
+                            return latestBuild - buildNumber.getAsInt();
+                        } catch (final JsonSyntaxException ex) {
+                            LOGGER.error("Error parsing JSON from CanvasMC's Jenkins API", ex);
+                            return -1;
+                        }
+                    } catch (final IOException e) {
+                        LOGGER.error("Error while parsing version from Jenkins API", e);
+                        return -1;
+                    }
+                }).get();
+            } else {
+                distance = -10;
+            }
+            if (distance != 10 && distance != -1 && distance != 0) {
+                LOGGER.warn("You are {} version(s) behind. Download the new version at 'https://canvasmc.io/downloads'", distance);
+            }
+        });
     }
 }
