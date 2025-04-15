@@ -5,7 +5,7 @@ import com.mojang.logging.LogUtils;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.RollingAverage;
 import io.canvasmc.canvas.TickTimes;
-import io.canvasmc.canvas.event.TickSchedulerInitEvent;
+import io.canvasmc.canvas.event.TickSchedulerStartEvent;
 import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.server.MultiWatchdogThread;
 import io.canvasmc.canvas.server.ThreadedServer;
@@ -53,14 +53,20 @@ public class TickScheduler implements MultithreadedTickScheduler {
     private static TickScheduler INSTANCE;
     private final int threadCount;
     public final ScheduledTaskThreadPool scheduler;
+    public final DedicatedServer server;
+    public BigDecimal tpsBase;
+    private int tickRate;
 
-    public TickScheduler(int threadCount) {
+    public TickScheduler(int threadCount, DedicatedServer server) {
+        this.server = server;
         if (INSTANCE != null) throw new IllegalStateException("tried to build new scheduler when one was already set");
         this.threadCount = threadCount;
         this.scheduler = new ScheduledTaskThreadPool(
             new TickThreadFactory(Config.INSTANCE.ticking.tickLoopThreadPriority),
             TimeUnit.MILLISECONDS.toNanos(3L), TimeUnit.MILLISECONDS.toNanos(2L)
         );
+        this.setTickRate(20); // default tick rate
+        this.tpsBase = new BigDecimal("1E9").multiply(new java.math.BigDecimal(getTickRate()));
         INSTANCE = this;
     }
 
@@ -75,7 +81,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         TickScheduler tickScheduler = getScheduler();
         tickScheduler.scheduler.setCoreThreads(tickScheduler.threadCount);
         ThreadedServer.LOGGER.info("Tick Scheduler is enabled with {} tick runners allocated", tickScheduler.threadCount);
-        new TickSchedulerInitEvent().callEvent();
+        new TickSchedulerStartEvent().callEvent();
         List<FullTick<? extends WrappedTickLoop.WrappedTick>> ticks = new ArrayList<>(List.of(
             AsyncPlayerChunkLoader.INSTANCE, PlayerJoinThread.getInstance()
         ));
@@ -130,6 +136,40 @@ public class TickScheduler implements MultithreadedTickScheduler {
     @Override
     public Thread[] getThreads() {
         return this.scheduler.getCoreThreads();
+    }
+
+    @Override
+    public int getTickRate() {
+        return tickRate;
+    }
+
+    @Override
+    public void setTickRate(final int tickRate) {
+        // this will automatically update the schedulers, given they depend on this value
+        this.tickRate = tickRate;
+        this.tpsBase = new BigDecimal("1E9").multiply(new java.math.BigDecimal(getTickRate()));
+        this.server.tickRateManager().setTickRate(tickRate); // update main thread
+        // reset tick times, as this is now technically inaccurate now
+        for (final FullTick<?> fullTick : FullTick.ALL_REGISTERED) {
+            fullTick.tickTimes5s.reset();
+            fullTick.tickTimes10s.reset();
+            fullTick.tickTimes15s.reset();
+            fullTick.tickTimes60s.reset();
+            fullTick.tps5s.reset();
+            fullTick.tps10s.reset();
+            fullTick.tps15s.reset();
+            fullTick.tps1m.reset();
+        }
+    }
+
+    @Override
+    public long getTimeBetweenTicks() {
+        return 1_000_000_000L / tickRate;
+    }
+
+    @Override
+    public BigDecimal getTpsBase() {
+        return tpsBase;
     }
 
     // Note: only a region can call this
@@ -189,7 +229,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
             this.server = server;
             this.identifier = identifier;
             this.tick = tick;
-            this.setScheduledStart(System.nanoTime() + TIME_BETWEEN_TICKS);
+            this.setScheduledStart(System.nanoTime() + getScheduler().getTimeBetweenTicks());
             this.tickSchedule = new Schedule(DEADLINE_NOT_SET);
             this.constructorInit = Util.getNanos();
         }
@@ -271,7 +311,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
                 }
 
                 tickStart = Util.getNanos();
-                final int tickCount = Math.max(1, this.tickSchedule.getPeriodsAhead(TIME_BETWEEN_TICKS, tickStart));
+                final int tickCount = Math.max(1, this.tickSchedule.getPeriodsAhead(getScheduler().getTimeBetweenTicks(), tickStart));
                 tickTps(tickStart);
 
                 boolean doesntHaveTime = nanosecondsOverload == 0L;
@@ -307,8 +347,8 @@ public class TickScheduler implements MultithreadedTickScheduler {
                 // undock watchdog
                 MultiWatchdogThread.WATCHDOG.undock(runningTick);
                 // schedule next tick
-                this.tickSchedule.advanceBy(tickCount, TIME_BETWEEN_TICKS);
-                this.setScheduledStart(ca.spottedleaf.concurrentutil.util.TimeUtil.getGreatestTime(tickEnd, this.tickSchedule.getDeadline(TIME_BETWEEN_TICKS)));
+                this.tickSchedule.advanceBy(tickCount, getScheduler().getTimeBetweenTicks());
+                this.setScheduledStart(ca.spottedleaf.concurrentutil.util.TimeUtil.getGreatestTime(tickEnd, this.tickSchedule.getDeadline(getScheduler().getTimeBetweenTicks())));
                 this.nextTickTimeNanos = this.getScheduledStart(); // use internal scheduled start from ScheduledTaskThreadPool.SchedulableTick
 
                 // we don't have tps catchup on tick schedulers.
@@ -319,7 +359,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         }
 
         public void scheduleTo(@NotNull ScheduledTaskThreadPool scheduler) {
-            this.setScheduledStart(System.nanoTime() + TIME_BETWEEN_TICKS);
+            this.setScheduledStart(System.nanoTime() + getScheduler().getTimeBetweenTicks());
             if (alreadyScheduled) {
                 throw new RuntimeException("already scheduled " + getIdentifier());
             }
@@ -368,9 +408,9 @@ public class TickScheduler implements MultithreadedTickScheduler {
         }
 
         private void tickTps(long start) {
-            if (++tickCount % MinecraftServer.SAMPLE_INTERVAL == 0) {
+            if (++tickCount % getScheduler().getTickRate() == 0) {
                 final long diff = start - tickSection;
-                final BigDecimal currentTps = MinecraftServer.TPS_BASE.divide(new BigDecimal(diff), 30, RoundingMode.HALF_UP);
+                final BigDecimal currentTps = getScheduler().getTpsBase().divide(new BigDecimal(diff), 30, RoundingMode.HALF_UP); // Canvas - rewrite tick system
                 tps5s.add(currentTps, diff);
                 tps1m.add(currentTps, diff);
                 tps15s.add(currentTps, diff);

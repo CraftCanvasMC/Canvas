@@ -74,8 +74,6 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import static io.canvasmc.canvas.scheduler.MultithreadedTickScheduler.TIME_BETWEEN_TICKS;
-
 public class ServerRegions {
 
     public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
@@ -463,7 +461,7 @@ public class ServerRegions {
         }
 
         public void updateLagCompensationTick() {
-            this.lagCompensationTick = (System.nanoTime() - MinecraftServer.SERVER_INIT) / TIME_BETWEEN_TICKS;
+            this.lagCompensationTick = (System.nanoTime() - MinecraftServer.SERVER_INIT) / TickScheduler.getScheduler().getTimeBetweenTicks();
         }
 
         private boolean isHandlingTick;

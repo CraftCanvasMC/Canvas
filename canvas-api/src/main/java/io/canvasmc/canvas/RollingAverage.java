@@ -11,17 +11,17 @@ public class RollingAverage {
     private long time;
     private java.math.BigDecimal total;
     private int index = 0;
-    private final java.math.BigDecimal[] samples;
-    private final long[] times;
+    private java.math.BigDecimal[] samples;
+    private long[] times;
 
     public RollingAverage(int size) {
         this.size = size;
         this.time = size * SEC_IN_NANO;
-        this.total = dec(MultithreadedTickScheduler.TICK_RATE).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
+        this.total = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate()).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
         this.samples = new java.math.BigDecimal[size];
         this.times = new long[size];
         for (int i = 0; i < size; i++) {
-            this.samples[i] = dec(MultithreadedTickScheduler.TICK_RATE);
+            this.samples[i] = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate());
             this.times[i] = SEC_IN_NANO;
         }
     }
@@ -53,5 +53,18 @@ public class RollingAverage {
      */
     public double getAverage() {
         return total.divide(dec(time), 30, java.math.RoundingMode.HALF_UP).doubleValue();
+    }
+
+    /**
+     * Resets the times and samples. Used when updating the tick rate of the server.
+     */
+    public void reset() {
+        this.total = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate()).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
+        this.samples = new java.math.BigDecimal[size];
+        this.times = new long[size];
+        for (int i = 0; i < size; i++) {
+            this.samples[i] = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate());
+            this.times[i] = SEC_IN_NANO;
+        }
     }
 }

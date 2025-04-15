@@ -8,7 +8,7 @@ public class TickTimes {
 
     public TickTimes(int length) {
         times = new long[length];
-        this.intervalNs = 50 * 1_000_000 ; // ms -> nanos -- ms * 1_000_000
+        this.intervalNs = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
     }
 
     /**
@@ -46,5 +46,14 @@ public class TickTimes {
         }
         long totalElapsedTime = times.length * intervalNs;
         return ((double) totalExecutionTime / totalElapsedTime) * 100;
+    }
+
+    /**
+     * Resets the tick times. Used primarily when changing the tick rate
+     */
+    public void reset() {
+        for (int i = this.times.length - 1; i >= 0; i--) {
+            this.times[i] = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
+        }
     }
 }

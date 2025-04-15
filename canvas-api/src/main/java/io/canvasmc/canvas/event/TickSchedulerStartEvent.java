@@ -6,7 +6,7 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.event.server.ServerEvent;
 import org.jetbrains.annotations.NotNull;
 
-public class TickSchedulerInitEvent extends ServerEvent {
+public class TickSchedulerStartEvent extends ServerEvent {
     private static final HandlerList handlers = new HandlerList();
 
     @NotNull

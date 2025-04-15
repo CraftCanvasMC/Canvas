@@ -157,19 +157,18 @@
      private long delayedTasksMaxNextTickTimeNanos;
      private boolean mayHaveDelayedTasks;
      private final PackRepository packRepository;
-@@ -291,9 +_,9 @@
-     public boolean forceTicks;
+@@ -292,8 +_,8 @@
      // CraftBukkit end
      // Spigot start
--    public static final int TPS = 20;
-+    public static final int TPS = MultithreadedTickScheduler.TICK_RATE; // Canvas - rewrite tick system
-     public static final int TICK_TIME = 1000000000 / MinecraftServer.TPS;
+     public static final int TPS = 20;
+-    public static final int TICK_TIME = 1000000000 / MinecraftServer.TPS;
 -    private static final int SAMPLE_INTERVAL = 20; // Paper - improve server tick loop
-+    public static final int SAMPLE_INTERVAL = TPS; // Paper - improve server tick loop // Canvas - private -> public // Canvas - rewrite tick system
++    // Canvas - rewrite tick system
++    // Canvas - rewrite tick system
      @Deprecated(forRemoval = true) // Paper
      public final double[] recentTps = new double[4]; // Purpur - Add 5 second tps average in /tps
      // Spigot end
-@@ -302,17 +_,42 @@
+@@ -302,17 +_,41 @@
      public volatile Thread shutdownThread; // Paper - Improved watchdog support
      public final io.papermc.paper.configuration.PaperConfigurations paperConfigurations; // Paper - add paper configuration files
      public boolean isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
@@ -206,7 +205,6 @@
 -        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> atomicReference.get().runServer(), "Server thread");
 +        // Canvas start - Threaded Dimensions
 +        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> {
-+            THREADED_SERVER = new ThreadedServer((DedicatedServer) atomicReference.get());
 +            THREADED_SERVER.spin();
 +        }, "Server thread");
 +        // Canvas end
@@ -269,7 +267,20 @@
                  return;
              }
          }
-@@ -480,7 +_,7 @@
+@@ -474,13 +_,20 @@
+         Runtime.getRuntime().addShutdownHook(new org.bukkit.craftbukkit.util.ServerShutdownThread(this));
+         // CraftBukkit end
+         this.paperConfigurations = services.paperConfigurations(); // Paper - add paper configuration files
++        // Canvas start - rewrite tick system
++        THREADED_SERVER = new ThreadedServer(this);
++        this.tps5s = new io.canvasmc.canvas.RollingAverage(5); // Purpur - Add 5 second tps average in /tps
++        this.tps1 = new io.canvasmc.canvas.RollingAverage(60);
++        this.tps5 = new io.canvasmc.canvas.RollingAverage(60 * 5);
++        this.tps15 = new io.canvasmc.canvas.RollingAverage(60 * 15);
++        // Canvas end
+     }
+ 
+     private void readScoreboard(DimensionDataStorage dataStorage) {
          dataStorage.computeIfAbsent(this.getScoreboard().dataFactory(), "scoreboard");
      }
  
@@ -398,6 +409,27 @@
          this.onServerExit();
          // Paper end - Improved watchdog support - move final shutdown items here
      }
+@@ -1123,13 +_,15 @@
+ 
+     // Paper start - Further improve server tick loop
+     private static final long SEC_IN_NANO = 1000000000;
+-    private static final long MAX_CATCHUP_BUFFER = TICK_TIME * TPS * 60L;
++    // private static final long MAX_CATCHUP_BUFFER = TICK_TIME * TPS * 60L; // Canvas - rewrite tick system
+     private long lastTick = 0;
+     private long catchupTime = 0;
+-    public final RollingAverage tps5s = new RollingAverage(5); // Purpur - Add 5 second tps average in /tps
+-    public final RollingAverage tps1 = new RollingAverage(60);
+-    public final RollingAverage tps5 = new RollingAverage(60 * 5);
+-    public final RollingAverage tps15 = new RollingAverage(60 * 15);
++    // Canvas start - use ours
++    public final io.canvasmc.canvas.RollingAverage tps5s; // Purpur - Add 5 second tps average in /tps
++    public final io.canvasmc.canvas.RollingAverage tps1;
++    public final io.canvasmc.canvas.RollingAverage tps5;
++    public final io.canvasmc.canvas.RollingAverage tps15;
++    // Canvas end
+ 
+     public static class RollingAverage {
+         private final int size;
 @@ -1139,7 +_,7 @@
          private final java.math.BigDecimal[] samples;
          private final long[] times;
@@ -412,7 +444,7 @@
          }
      }
 -    private static final java.math.BigDecimal TPS_BASE = new java.math.BigDecimal(1E9).multiply(new java.math.BigDecimal(SAMPLE_INTERVAL));
-+    public static final java.math.BigDecimal TPS_BASE = new java.math.BigDecimal(1E9).multiply(new java.math.BigDecimal(SAMPLE_INTERVAL)); // Canvas - private -> public
++    // Canvas - rewrite tick system
      // Paper end
  
      protected void runServer() {
@@ -466,9 +498,9 @@
 +        }
 +
 +        currentTime = Util.getNanos();
-+        if (++MinecraftServer.currentTick % MinecraftServer.SAMPLE_INTERVAL == 0) {
++        if (++MinecraftServer.currentTick % getThreadedServer().getScheduler().getTickRate() == 0) { // Canvas - rewrite tick system - sample interval == tick rate
 +            final long diff = currentTime - tickSection;
-+            final java.math.BigDecimal currentTps = TPS_BASE.divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
++            final java.math.BigDecimal currentTps = getThreadedServer().getScheduler().getTpsBase().divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP); // Canvas - rewrite tick system
 +            tps5s.add(currentTps, diff);
 +            tps1.add(currentTps, diff);
 +            tps5.add(currentTps, diff);
@@ -658,6 +690,15 @@
          new com.destroystokyo.paper.event.server.ServerTickStartEvent(this.tickCount+1).callEvent(); // Paper - Server Tick Events
          this.tickCount++;
          this.tickRateManager.tick();
+@@ -1608,7 +_,7 @@
+         this.server.spark.executeMainThreadTasks(); // Paper - spark
+         // Paper start - Server Tick Events
+         long endTime = System.nanoTime();
+-        long remaining = (TICK_TIME - (endTime - lastTick)) - catchupTime;
++        long remaining = (getThreadedServer().getScheduler().getTimeBetweenTicks() - (endTime - lastTick)) - catchupTime; // Canvas - rewrite tick system
+         new com.destroystokyo.paper.event.server.ServerTickEndEvent(this.tickCount, ((double)(endTime - lastTick) / 1000000D), remaining).callEvent();
+         // Paper end - Server Tick Events
+         this.server.spark.tickEnd(((double)(endTime - lastTick) / 1000000D)); // Paper - spark
 @@ -1664,11 +_,11 @@
          }
      }
@@ -672,20 +713,12 @@
          ServerStatus.Players players = this.buildPlayerStatus();
          return new ServerStatus(
              io.papermc.paper.adventure.PaperAdventure.asVanilla(this.motd), // Paper - Adventure
-@@ -1701,11 +_,20 @@
+@@ -1701,11 +_,12 @@
  
      protected void tickChildren(BooleanSupplier hasTimeLeft) {
          ProfilerFiller profilerFiller = Profiler.get();
 -        this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing());
-+        // Canvas start
-+        // this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing());
-+        for (final ServerPlayer player : this.playerList.players) {
-+            // repeat every 18 ticks.
-+            if (this.tickCount % (20*18) == 0) {
-+                player.connection.keepConnectionAlive(true);
-+            }
-+        }
-+        // Canvas end
++        // this.getPlayerList().getPlayers().forEach(serverPlayer1 -> serverPlayer1.connection.suspendFlushing()); // Canvas - moved to worlds
          this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
          // Paper start - Folia scheduler API
          ((io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler) org.bukkit.Bukkit.getGlobalRegionScheduler()).tick();

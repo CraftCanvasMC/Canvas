@@ -52,12 +52,15 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public static BooleanSupplier SHOULD_KEEP_TICKING;
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final DedicatedServer server;
+    private final TickScheduler scheduler;
     protected long tickSection;
     private boolean started = false;
     public final RegionizedTaskQueue taskQueue = new RegionizedTaskQueue(); // Threaded Regions
 
-    public ThreadedServer(DedicatedServer server) {
-        this.server = server;
+    public ThreadedServer(MinecraftServer server) {
+        ThreadedBukkitServer.setInstance(this);
+        this.scheduler = new TickScheduler(Config.INSTANCE.ticking.allocatedSchedulerThreadCount, (DedicatedServer) server);
+        this.server = (DedicatedServer) server;
     }
 
     @Override
@@ -103,15 +106,13 @@ public class ThreadedServer implements ThreadedBukkitServer {
             MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             MultiLoopThreadDumper.REGISTRY.add("ls_wg "); // add linear-scaling world-gen workers
             MultiLoopThreadDumper.REGISTRY.add("Tick Runner ");
-            ThreadedBukkitServer.setInstance(this);
 
-            TickScheduler scheduler = new TickScheduler(Config.INSTANCE.ticking.allocatedSchedulerThreadCount);
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");
             }
 
             this.started = true;
-            scheduler.start();
+            this.scheduler.start();
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
             this.server.status = this.server.buildServerStatus();
@@ -244,7 +245,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
             } else {
                 distance = -10;
             }
-            if (distance != 10 && distance != -1 && distance != 0) {
+            if (distance != -10 && distance != -1 && distance != 0) {
                 LOGGER.warn("You are {} version(s) behind. Download the new version at 'https://canvasmc.io/downloads'", distance);
             }
         });
