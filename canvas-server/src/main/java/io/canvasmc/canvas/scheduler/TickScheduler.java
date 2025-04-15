@@ -197,6 +197,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         protected final ResourceLocation identifier;
         public final T tick;
         private final Schedule tickSchedule;
+        public long lastRespondedNanos = Util.getNanos();
 
         // tick times
         public final RollingAverage tps5s = new RollingAverage(5);
@@ -275,6 +276,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
                 return false;
             }
             processingTick = true;
+            lastRespondedNanos = Util.getNanos();
 
             // ticking
             {
@@ -526,6 +528,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
         @Override
         public void retire() {
+            LOGGER.info("Retiring tick task {} from scheduler", this);
             getScheduler().scheduler.cancel(this);
         }
 

@@ -14,6 +14,7 @@ import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -21,6 +22,7 @@ import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.util.HSVLike;
+import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import org.bukkit.Bukkit;
@@ -133,7 +135,7 @@ public class ThreadedServerHealthDump {
             double mspt5s = tickLoop.tickTimes5s.getAverage();
             double tps5s = tickLoop.tps5s.getAverage();
             double util = tickLoop.tickTimes5s.getUtilization();
-            Component head = Component.text()
+            TextComponent.@NotNull Builder head = Component.text()
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("TickLoop of ", PRIMARY))
                 .append(Component.text(location, INFORMATION)
@@ -160,10 +162,14 @@ public class ThreadedServerHealthDump {
                     .append(Component.text(" MSPT at ", PRIMARY))
                     .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps5s), getColourForTPS(tps5s)))
                     .append(Component.text(" TPS", PRIMARY)))
-                .append(NEW_LINE)
+                .append(NEW_LINE);
 
-                .build();
-            root.append(head);
+            if ((Util.getNanos() - tickLoop.lastRespondedNanos) > TimeUnit.SECONDS.toNanos(5)) {
+                // hasn't responded in 5 seconds, warn.
+                head.append(Component.text("    Hasn't responded in over 5 seconds!", TextColor.color(200, 52, 34)))
+                    .append(NEW_LINE);
+            }
+            root.append(head.build());
         }
         if (Config.INSTANCE.ticking.enableThreadedRegionizing && regionDump) {
             final List<ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData>> regions =
@@ -179,7 +185,7 @@ public class ThreadedServerHealthDump {
                 double mspt5s = tickHandle.tickTimes5s.getAverage();
                 double tps5s = tickHandle.tps5s.getAverage();
                 double util = tickHandle.tickTimes5s.getUtilization();
-                Component head = Component.text()
+                TextComponent.@NotNull Builder head = Component.text()
                     .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                     .append(Component.text("TickLoop of ", PRIMARY))
                     .append(Component.text(location, INFORMATION))
@@ -193,10 +199,14 @@ public class ThreadedServerHealthDump {
                         .append(Component.text(" MSPT at ", PRIMARY))
                         .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps5s), getColourForTPS(tps5s)))
                         .append(Component.text(" TPS", PRIMARY)))
-                    .append(NEW_LINE)
+                    .append(NEW_LINE);
 
-                    .build();
-                root.append(head);
+                    if ((Util.getNanos() - tickHandle.lastRespondedNanos) > TimeUnit.SECONDS.toNanos(5)) {
+                        // hasn't responded in 5 seconds, warn.
+                        head.append(Component.text("Hasn't responded in over 5 seconds!", TextColor.color(200, 52, 34)))
+                            .append(NEW_LINE);
+                    }
+                root.append(head.build());
             }
         }
         sender.sendMessage(root.build());
