@@ -4,12 +4,14 @@ import ca.spottedleaf.concurrentutil.util.Priority;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
+import io.canvasmc.canvas.server.MultiWatchdogThread;
 import io.canvasmc.canvas.server.ThreadedServer;
 import io.canvasmc.canvas.server.TickLoopConstantsUtils;
 import io.canvasmc.canvas.util.IdGenerator;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import net.minecraft.Util;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerChunkCache;
@@ -43,12 +45,15 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
 
     @Override
     public boolean runTasks(final BooleanSupplier canContinue) {
+        MultiWatchdogThread.RunningTick watchdogEntry = new MultiWatchdogThread.RunningTick(Util.getNanos(), this, Thread.currentThread());
         try {
+            MultiWatchdogThread.WATCHDOG.dock(watchdogEntry);
             TickScheduler.setTickingData(this.region.getData().tickData);
             super.runTasks(canContinue);
             return runRegionTasks(canContinue);
         } finally {
             TickScheduler.setTickingData(null);
+            MultiWatchdogThread.WATCHDOG.undock(watchdogEntry);
         }
     }
 

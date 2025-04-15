@@ -385,11 +385,18 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
         @Override
         public boolean runTasks(final BooleanSupplier canContinue) {
-            boolean runFullTickTasks = runFullTickTasks(canContinue);
-            if (!runFullTickTasks) {
-                this.retire();
+            long tasksStart = Util.getNanos();
+            final MultiWatchdogThread.RunningTick runningTick = new MultiWatchdogThread.RunningTick(tasksStart, this, Thread.currentThread());
+            try {
+                MultiWatchdogThread.WATCHDOG.dock(runningTick);
+                boolean runFullTickTasks = runFullTickTasks(canContinue);
+                if (!runFullTickTasks) {
+                    this.retire();
+                }
+                return runFullTickTasks;
+            } finally {
+                MultiWatchdogThread.WATCHDOG.undock(runningTick);
             }
-            return runFullTickTasks;
         }
 
         public boolean runFullTickTasks(BooleanSupplier canContinue) {
@@ -453,6 +460,10 @@ public class TickScheduler implements MultithreadedTickScheduler {
             synchronized (SLEEP_HANDLE) {
                 isSleeping = false;
             }
+        }
+
+        public long getNextScheduledStart() {
+            return getScheduledStart();
         }
 
         @Override

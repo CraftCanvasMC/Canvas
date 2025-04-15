@@ -8,6 +8,7 @@ import io.canvasmc.canvas.entity.SleepingBlockEntity;
 import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
+import io.canvasmc.canvas.server.MultiWatchdogThread;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -94,7 +96,9 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
 
     @Override
     public boolean runTasks(final BooleanSupplier canContinue) {
+        MultiWatchdogThread.RunningTick watchdogEntry = new MultiWatchdogThread.RunningTick(Util.getNanos(), this, Thread.currentThread());
         try {
+            MultiWatchdogThread.WATCHDOG.dock(watchdogEntry);
             TickScheduler.setTickingData(level().levelTickData);
             if (tickRateManager().isSprinting() || canContinue.getAsBoolean()) {
                 ServerLevel worldserver = level();
@@ -104,6 +108,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             return super.runTasks(canContinue);
         } finally {
             TickScheduler.setTickingData(null);
+            MultiWatchdogThread.WATCHDOG.undock(watchdogEntry);
         }
     }
 

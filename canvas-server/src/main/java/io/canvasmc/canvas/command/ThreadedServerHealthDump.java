@@ -166,7 +166,7 @@ public class ThreadedServerHealthDump {
 
             if ((Util.getNanos() - tickLoop.lastRespondedNanos) > TimeUnit.SECONDS.toNanos(5)) {
                 // hasn't responded in 5 seconds, warn.
-                head.append(Component.text("    Hasn't responded in over 5 seconds!", TextColor.color(200, 52, 34)))
+                head.append(Component.text("    Hasn't responded in over 5 seconds! Next scheduled start in " + (tickLoop.getNextScheduledStart() - Util.getNanos()) + " nanos", TextColor.color(200, 52, 34)))
                     .append(NEW_LINE);
             }
             root.append(head.build());
@@ -203,7 +203,7 @@ public class ThreadedServerHealthDump {
 
                     if ((Util.getNanos() - tickHandle.lastRespondedNanos) > TimeUnit.SECONDS.toNanos(5)) {
                         // hasn't responded in 5 seconds, warn.
-                        head.append(Component.text("Hasn't responded in over 5 seconds!", TextColor.color(200, 52, 34)))
+                        head.append(Component.text("    Hasn't responded in over 5 seconds! Next scheduled start in " + (tickHandle.getNextScheduledStart() - Util.getNanos()) + " nanos", TextColor.color(200, 52, 34)))
                             .append(NEW_LINE);
                     }
                 root.append(head.build());
