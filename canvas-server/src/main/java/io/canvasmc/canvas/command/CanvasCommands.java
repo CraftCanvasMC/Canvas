@@ -12,5 +12,6 @@ public final class CanvasCommands {
         ResendChunksCommand.register(dispatcher);
         SenderInfoCommand.register(dispatcher);
         PriorityCommand.register(dispatcher);
+        SetMaxPlayersCommand.register(dispatcher);
     }
 }
