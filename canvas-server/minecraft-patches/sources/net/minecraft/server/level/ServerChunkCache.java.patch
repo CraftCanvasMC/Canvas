@@ -313,7 +313,7 @@
                  continue;
              }
  
-@@ -568,14 +_,15 @@
+@@ -568,14 +_,16 @@
          // Paper end - chunk tick iteration optimisation
      }
  
@@ -323,6 +323,7 @@
          int naturalSpawnChunkCount = this.distanceManager.getNaturalSpawnChunkCount();
          // Paper start - Optional per player mob spawns
          NaturalSpawner.SpawnState spawnState;
++        final ServerRegions.WorldTickData tickData = ServerRegions.getTickData(this.level); // Canvas - Threaded Regions
          if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
 +            if (!Config.INSTANCE.entities.enableAsyncSpawning) { // Canvas
              // re-set mob counts
@@ -336,12 +337,12 @@
                  // Paper end - per player mob spawning backoff
              }
 -            spawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, null, true);
-+            ServerRegions.getTickData(this.level).setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, ServerRegions.getTickData(this.level).getLoadedEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), true)); // Canvas - async mob spawning - Threaded Regions
++            tickData.setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, tickData.getLoadedEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), true)); // Canvas - async mob spawning - Threaded Regions
 +            } // Canvas
          } else {
 -            spawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
 +            // Canvas start
-+            ServerRegions.getTickData(this.level).setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, ServerRegions.getTickData(this.level).getLoadedEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), false)); // Canvas - async mob spawning - Threaded Regions
++            tickData.setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, tickData.getLoadedEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), false)); // Canvas - async mob spawning - Threaded Regions
 +            spawnCountsReady.set(true);
 +            // Canvas end
          }
@@ -356,7 +357,7 @@
          if (_boolean && (this.spawnEnemies || this.spawnFriendlies)) {
              // Paper start - PlayerNaturallySpawnCreaturesEvent
 -            for (ServerPlayer entityPlayer : this.level.players()) {
-+            for (ServerPlayer entityPlayer : this.level.getLocalPlayers()) { // Canvas - Threaded Regions
++            for (ServerPlayer entityPlayer : tickData.getLocalPlayers()) { // Canvas - Threaded Regions
                  int chunkRange = Math.min(level.spigotConfig.mobSpawnRange, entityPlayer.getBukkitEntity().getViewDistance());
                  chunkRange = Math.min(chunkRange, 8);
                  entityPlayer.playerNaturallySpawnedEvent = new com.destroystokyo.paper.event.entity.PlayerNaturallySpawnCreaturesEvent(entityPlayer.getBukkitEntity(), (byte) chunkRange);
@@ -366,7 +367,7 @@
 -            boolean flag = this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) != 0L && this.level.getLevelData().getGameTime() % this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) == 0L; // CraftBukkit
 -            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(spawnState, this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit
 +            boolean flag = this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) != 0L && this.level.getRedstoneGameTime() % this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) == 0L; // CraftBukkit // Canvas - Threaded Regions
-+            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(ServerRegions.getTickData(this.level).getLastSpawnState(), this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit // Canvas - async mob spawning - Threaded Regions
++            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(tickData.getLastSpawnState(), this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit // Canvas - async mob spawning - Threaded Regions
          } else {
              filteredSpawningCategories = List.of();
          }
@@ -377,7 +378,7 @@
 -            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot
 -                NaturalSpawner.spawnForChunk(this.level, levelChunk, spawnState, filteredSpawningCategories);
 +            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && (!Config.INSTANCE.entities.enableAsyncSpawning || spawnCountsReady.get()) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot // Canvas
-+                NaturalSpawner.spawnForChunk(this.level, levelChunk, ServerRegions.getTickData(this.level).getLastSpawnState(), filteredSpawningCategories); // Canvas - async mob spawning - Threaded Regions
++                NaturalSpawner.spawnForChunk(this.level, levelChunk, tickData.getLastSpawnState(), filteredSpawningCategories); // Canvas - async mob spawning - Threaded Regions
              }
  
              if (true) { // Paper - rewrite chunk system
@@ -434,7 +435,7 @@
          }
      }
  
-@@ -818,14 +_,81 @@
+@@ -818,14 +_,71 @@
              super.doRunTask(task);
          }
  
@@ -470,50 +471,40 @@
 +                    serverLevel.wake(); // we must wake the world if needed, so it can process chunk tasks.
 +                    return true;
 +                }
-+                serverLevel.wake();
-+                if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
++                try {
 +                    entityOverride.add(current);
-+                    AtomicBoolean retVal = new AtomicBoolean(false);
-+                    // we basically do this to poll any tasks for inactive regions, since if they are inactive, how tf are they going to process these??
-+                    serverLevel.regioniser.computeForAllRegionsUnsynchronised((region) -> {
-+                        if (region == null) return; // don't poll if the region is null
-+                        if (!region.getData().tickHandle.tick.isActive || (region.getData().tickHandle.owner == null || region.getData().tickHandle.owner.getState().equals(Thread.State.WAITING))) {
-+                            boolean ret = false;
-+                            while (region.getData().tickData.getTaskQueueData().hasChunkTasks()) {
-+                                region.getData().tickData.getTaskQueueData().executeChunkTask();
-+                                ret = true;
-+                            }
-+                            region.getData().tickHandle.runFullTickTasks(() -> true);
-+                            if (ret) retVal.set(true);
++                    // wake the world regardless, we may actually need it.
++                    serverLevel.wake();
++                    if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
++                        // regionizing IS enabled
++
++                        // we basically do this to poll any tasks for inactive regions, since if they are inactive, how tf are they going to process these??
++                        {
++                            serverLevel.regioniser.computeForAllRegionsUnsynchronised((region) -> {
++                                if (region == null) return; // don't poll if the region is null
++                                if (!region.getData().tickHandle.tick.isActive || (region.getData().tickHandle.owner == null || region.getData().tickHandle.owner.getState().equals(Thread.State.WAITING))) {
++                                    if (region.getData().tickData.getTaskQueueData().hasChunkTasks()) {
++                                        region.getData().tickData.getTaskQueueData().executeChunkTask();
++                                    }
++                                    region.getData().tickHandle.runFullTickTasks(() -> true);
++                                }
++                            });
 +                        }
-+                    });
-+                    ServerRegions.WorldTickData thisData = ServerRegions.getTickData(serverLevel);
-+                    if (thisData.region == null) {
-+                        // we can run global chunk tasks, this is the world.
-+                        serverLevel.taskQueueRegionData.drainGlobalChunkTasks();
-+                        while (((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) serverLevel).moonrise$getChunkTaskScheduler().executeMainThreadTask()) {
-+                            retVal.set(true);
++                        // NOW we can poll our own tasks.
++                        ServerRegions.WorldTickData thisData = ServerRegions.getTickData(serverLevel);
++                        if (thisData.region != null) {
++                            // we are on a region, execute our chunk task.
++                            // unlike Folia, we still can have tasks be submitted to the
++                            // main thread executor, so we run 'super' poll aswell.
++                            return super.pollTask() | thisData.getTaskQueueData().executeChunkTask();
 +                        }
-+                        serverLevel.runFullTickTasks(() -> true);
-+                    } else {
-+                        ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = thisData.region;
-+                        boolean ret = false;
-+                        while (region.getData().tickData.getTaskQueueData().hasChunkTasks()) {
-+                            region.getData().tickData.getTaskQueueData().executeChunkTask();
-+                            ret = true;
-+                        }
-+                        region.getData().tickHandle.runFullTickTasks(() -> true);
-+                        if (ret) retVal.set(true);
 +                    }
++                    // not regionized OR we are on global
++                    serverLevel.taskQueueRegionData.drainGlobalChunkTasks();
++                    return super.pollTask() | ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)serverChunkCache.level).moonrise$getChunkTaskScheduler().executeMainThreadTask();
++                } finally {
 +                    entityOverride.remove(current);
-+                    return super.pollTask() | (retVal.get() || (current instanceof TickScheduler.TickRunner runner && runner.threadLocalTickData != null && runner.threadLocalTickData.getTaskQueueData().executeChunkTask()));
 +                }
-+                serverLevel.taskQueueRegionData.drainGlobalChunkTasks();
-+                boolean hasChunk = false;
-+                while (((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) serverLevel).moonrise$getChunkTaskScheduler().executeMainThreadTask()) {
-+                    hasChunk = true;
-+                }
-+                return super.pollTask() | hasChunk;
 +        // Canvas end
              }
              // Paper end - rewrite chunk system

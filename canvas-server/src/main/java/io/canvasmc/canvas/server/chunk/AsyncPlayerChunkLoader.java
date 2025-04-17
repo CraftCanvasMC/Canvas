@@ -38,6 +38,7 @@ import static io.canvasmc.canvas.command.ThreadedServerHealthDump.SECONDARY;
 import static io.canvasmc.canvas.command.ThreadedServerHealthDump.TWO_DECIMAL_PLACES;
 import static net.kyori.adventure.text.Component.text;
 
+@Deprecated(forRemoval = true) // not needed anymore
 public class AsyncPlayerChunkLoader extends TickScheduler.FullTick<AsyncPlayerChunkLoader.TickHandle> {
     public static AsyncPlayerChunkLoader INSTANCE;
 

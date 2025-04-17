@@ -810,8 +810,9 @@ public class ServerRegions {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
                 ChunkPos pos = new ChunkPos(blockEventData.pos());
+                this.world.getChunk(pos.x, pos.z, ChunkStatus.FULL, true);
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
-                // the chunk has to exist for the entity to be added, so we are ok to assume non-null
+                // the chunk has to exist for the block event to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
                     this.blockEvents.add(blockEventData);
                     return;

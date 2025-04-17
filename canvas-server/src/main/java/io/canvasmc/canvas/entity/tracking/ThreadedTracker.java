@@ -11,9 +11,11 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import net.minecraft.server.level.ChunkMap;
+import net.minecraft.server.level.FullChunkStatus;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import org.jetbrains.annotations.NotNull;
+import javax.annotation.Nullable;
 
 public class ThreadedTracker {
     private static final ThreadPoolExecutor processor = new ThreadPoolExecutor(
@@ -35,7 +37,7 @@ public class ThreadedTracker {
     }
 
     public boolean tick(@NotNull ChunkSystemServerLevel chunkSystemServerLevel) {
-        if (this.enableThreading) {
+        if (this.enableThreading || Config.INSTANCE.ticking.enableThreadedRegionizing) { // we run tracking threaded if regionized.
             final NearbyPlayers nearbyPlayers = chunkSystemServerLevel.moonrise$getNearbyPlayers();
             final Entity[] trackerEntitiesRaw = ServerRegions.getTickData((ServerLevel) chunkSystemServerLevel).trackerEntities.getRawDataUnchecked(); // Canvas - Threaded Regions
 
@@ -47,7 +49,11 @@ public class ThreadedTracker {
                     if (trackedInstance == null) continue;
 
                     trackedInstance.moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition()));
-                    trackedInstance.serverEntity.sendChanges();
+                    @Nullable FullChunkStatus chunkStatus = ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus(); // Canvas
+                    if ((trackedInstance).moonrise$hasPlayers()
+                        || (chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) {
+                        trackedInstance.serverEntity.sendChanges();
+                    }
                 }
             });
             return true;
