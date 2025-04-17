@@ -178,6 +178,14 @@ public class Config {
         }
     }
 
+    public Debug debug = new Debug();
+    public static class Debug {
+        @Comment("Logs region teleports with entities")
+        public boolean regionTeleports = false;
+        @Comment("Logs task retiring with the tick scheduler")
+        public boolean taskRetire = false;
+    }
+
     public Fixes fixes = new Fixes();
     public static class Fixes {
         @Comment(value = {
@@ -191,6 +199,7 @@ public class Config {
         })
         public boolean mc136249 = false;
     }
+
     public Blocks blocks = new Blocks();
     public static class Blocks {
 

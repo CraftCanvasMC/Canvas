@@ -539,7 +539,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
         @Override
         public void retire() {
-            LOGGER.info("Retiring tick task {} from scheduler", this);
+            if (Config.INSTANCE.debug.taskRetire) LOGGER.info("Retiring tick task {} from scheduler", this);
             getScheduler().scheduler.cancel(this);
         }
 
