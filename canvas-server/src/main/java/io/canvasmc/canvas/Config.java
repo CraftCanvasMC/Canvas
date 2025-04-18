@@ -70,7 +70,11 @@ public class Config {
         @Comment(value = {
             "Enables threaded regions. Works exactly like Folia in region grouping, but",
             "works slightly differently in behavior. To prevent issues with plugins, it's",
-            "recommended to use folia-compatible plugins with this option enabled."
+            "recommended to use folia-compatible plugins with this option enabled.",
+            "",
+            "This force-modifies the following options(for stability and performance purposes):",
+            " - Enables threaded tracking",
+            " - Disables async mob spawning"
         })
         public boolean enableThreadedRegionizing = false;
 

@@ -50,9 +50,8 @@ public class ThreadedTracker {
 
                     trackedInstance.moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition()));
                     @Nullable FullChunkStatus chunkStatus = ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus(); // Canvas
-                    if (chunkStatus == null) continue;
                     if ((trackedInstance).moonrise$hasPlayers()
-                        || (chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) {
+                        || (chunkStatus == null || chunkStatus.isOrAfter(FullChunkStatus.ENTITY_TICKING))) {
                         trackedInstance.serverEntity.sendChanges();
                     }
                 }

@@ -19,9 +19,8 @@ public class EntityStatusLock extends ReentrantLock {
         this.entity = entity;
     }
 
-    public void acquire(Status status) {
+    public void acquire() {
         if (ServerChunkCache.MainThreadExecutor.entityOverride.contains(Thread.currentThread())) return; // pass
-        if (status == this.status && Thread.currentThread().equals(getOwner())) return;
         int tries = 0;
         while (!this.tryLock()) {
             // attempt 40 times before we try and exit the lock. this is equivalent to at least 40 milliseconds
@@ -33,8 +32,6 @@ public class EntityStatusLock extends ReentrantLock {
             LockSupport.parkNanos("wait for acquire", 1_000_000 /*1ms*/);
             this.entity.level().level().getChunkSource().mainThreadProcessor.pollTask(false);
         }
-        // once it gets here, it has been acquired by the lock
-        this.status = status;
     }
 
     public void release() {
@@ -42,7 +39,6 @@ public class EntityStatusLock extends ReentrantLock {
         try {
             this.unlock();
         } catch (IllegalMonitorStateException ignored) {}
-        this.status = null;
     }
 
     public Status getStatus() {
