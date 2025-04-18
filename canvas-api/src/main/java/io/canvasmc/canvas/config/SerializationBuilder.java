@@ -5,6 +5,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -14,9 +15,9 @@ import org.jetbrains.annotations.NotNull;
 
 @SuppressWarnings("rawtypes")
 public class SerializationBuilder<C> {
-    private final List<WrappedContextProvider> contextProviders = new ArrayList<>();
-    private final List<WrappedValidationProvider> validationProviders = new ArrayList<>();
-    private final List<Consumer<AnnotationBasedYamlSerializer.PostSerializeContext<C>>> postConsumers = new ArrayList<>();
+    private final List<WrappedContextProvider> contextProviders = new LinkedList<>();
+    private final List<WrappedValidationProvider> validationProviders = new LinkedList<>();
+    private final List<Consumer<AnnotationBasedYamlSerializer.PostSerializeContext<C>>> postConsumers = new LinkedList<>();
     private String[] header = new String[0];
     private boolean immutable = false;
 

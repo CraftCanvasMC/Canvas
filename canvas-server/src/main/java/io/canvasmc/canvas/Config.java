@@ -8,6 +8,7 @@ import io.canvasmc.canvas.config.ConfigurationUtils;
 import io.canvasmc.canvas.config.SerializationBuilder;
 import io.canvasmc.canvas.config.annotation.AlwaysAtTop;
 import io.canvasmc.canvas.config.annotation.Comment;
+import io.canvasmc.canvas.config.annotation.Experimental;
 import io.canvasmc.canvas.config.annotation.numeric.NonNegativeNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.Range;
@@ -29,7 +30,7 @@ import org.jetbrains.annotations.Nullable;
 
 @Configuration("canvas_server")
 public class Config {
-    public static final Logger LOGGER = LogManager.getLogger("CanvasConfig");
+    public static final Logger LOGGER = LogManager.getLogger("canvas_server");
     public static final Map<Class<? extends Goal>, Entities.GoalMask> COMPILED_GOAL_MASKS = new ConcurrentHashMap<>();
     public static final List<ResourceLocation> COMPILED_ENTITY_MASK_LOCATIONS = Collections.synchronizedList(new ArrayList<>());
     public static boolean CHECK_ENTITY_MASKS = false;
@@ -251,6 +252,7 @@ public class Config {
     public static class Entities {
 
         public Pathfinding pathfinding = new Pathfinding();
+
         public static class Pathfinding {
             @AlwaysAtTop
             public boolean enableThreadedPathfinding = true;
@@ -307,10 +309,10 @@ public class Config {
         }
 
         @Comment(value = {
-            "Disables entity pushing, but the player can still be pushed.",
-            "Immensely optimizes entity performance with lots of crammed entities"
+            "Disables entity pushing, but the player can still push entities",
+            "Immensely optimizes entity performance with lots of colliding entities"
         })
-        public boolean disableEntityPushing = false;
+        public boolean onlyPlayersPushEntities = false;
 
         @Comment(value = {
             "Defines a percentage of which the server will apply to the velocity applied to",
@@ -323,6 +325,16 @@ public class Config {
 
         @Comment("Disables saving firework entities. This patches certain lag machines.")
         public boolean disableFireworkSaving = false;
+
+        public Cramming cramming = new Cramming();
+        public static class Cramming {
+            @Experimental // could have odd side effects
+            @Comment("Reduces the amount of times an entity's movement goals(like random strolling) are ticked based on how crammed it is with other entities.")
+            public boolean reduceEntityMoveWhenCrammed = false;
+
+            @Comment("The threshold for an entity to be considered \"crammed\"")
+            public int crammedThreshold = 2;
+        }
     }
 
     @Comment("Use faster sin/cos math operations")
@@ -527,6 +539,7 @@ public class Config {
                 "As a general rule of thumb, do NOT change a setting if",
                 "you don't know what it does! If you don't know, ask!"
             })
+            .handler(ConfigHandlers.ExperimentalProcessor::new)
             .handler(ConfigHandlers.CommentProcessor::new)
             .validator(ConfigHandlers.RangeProcessor::new)
             .validator(ConfigHandlers.NegativeProcessor::new)

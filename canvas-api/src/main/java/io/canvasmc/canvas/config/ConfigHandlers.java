@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.config;
 
 import io.canvasmc.canvas.config.annotation.Comment;
+import io.canvasmc.canvas.config.annotation.Experimental;
 import io.canvasmc.canvas.config.annotation.Pattern;
 import io.canvasmc.canvas.config.annotation.RegisteredHandler;
 import io.canvasmc.canvas.config.annotation.numeric.NegativeNumericValue;
@@ -26,6 +27,18 @@ public class ConfigHandlers {
 
         public Class<Comment> comment() {
             return Comment.class;
+        }
+    }
+
+    @RegisteredHandler("experimental")
+    public static class ExperimentalProcessor implements AnnotationContextProvider<Experimental> {
+        @Override
+        public void apply(final @NotNull StringWriter yamlWriter, final String indent, final String fullKey, final Field field, final @NotNull Experimental comment) {
+            yamlWriter.append(indent).append("## ").append("=== EXPERIMENTAL FEATURE ===").append("\n");
+        }
+
+        public Class<Experimental> experimental() {
+            return Experimental.class;
         }
     }
 
