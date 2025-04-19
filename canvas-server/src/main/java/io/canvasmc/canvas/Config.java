@@ -368,6 +368,9 @@ public class Config {
         @Comment("Prevents players being disconnected by disconnect.spam")
         public boolean disableDisconnectSpam = false;
 
+        @Comment("Prevents players being disconnected by connection throttling")
+        public boolean disableConnectionThrottle = false;
+
         public NoChatReports noChatReports = new NoChatReports();
         public static class NoChatReports {
             @AlwaysAtTop
