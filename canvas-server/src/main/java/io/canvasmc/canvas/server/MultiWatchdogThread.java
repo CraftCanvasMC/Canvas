@@ -113,7 +113,7 @@ public class MultiWatchdogThread extends TickThread {
         String brandName = ServerBuildInfo.buildInfo().brandName();
         String importantBrandName = brandName.toUpperCase(Locale.ROOT);
         String repository = "https://github.com/CraftCanvasMC/Canvas/";
-        String discord = "https://discord.gg/canvasmc";
+        String discord = "https://canvasmc.io/discord";
         main_loop:
         while (!this.stopping) {
             long currentTime = MultiWatchdogThread.monotonicMillis();

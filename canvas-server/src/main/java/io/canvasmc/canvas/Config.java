@@ -477,7 +477,7 @@ public class Config {
     public VirtualThreads virtualThreads = new VirtualThreads();
     public static class VirtualThreads {
         @AlwaysAtTop
-        @Comment("Enables use of Java 21+ virtual threads")
+        @Comment("Enables use of Java 21+ virtual threads. Generally recommended to have these enabled")
         public boolean enabled = false;
 
         @Comment("Uses virtual threads for the Bukkit scheduler.")
@@ -545,7 +545,7 @@ public class Config {
                 "All configuration options here are made for vanilla-compatibility",
                 "and not for performance. Settings must be configured specific",
                 "to your hardware and server type. If you have questions",
-                "join our discord at https://discord.gg/canvasmc/",
+                "join our discord at https://canvasmc.io/discord",
                 "As a general rule of thumb, do NOT change a setting if",
                 "you don't know what it does! If you don't know, ask!"
             })
