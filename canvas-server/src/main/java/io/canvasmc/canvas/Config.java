@@ -182,6 +182,16 @@ public class Config {
             @Comment("Disables fluid ticking on chunk generation")
             public boolean disableFluidTickingInPostProcessGenerationStep = false;
         }
+
+        public RateLimiters rateLimiters = new RateLimiters();
+        public static class RateLimiters {
+            @Comment("Disables the rate-limiter for the chunk sender. The limit only affects players")
+            public boolean disableChunkSendRateLimiter = false;
+            @Comment("Disables the rate-limiter for the chunk loader. The limit only affects players")
+            public boolean disableChunkLoadRateLimiter = false;
+            @Comment("Disables the rate-limiter for the chunk generator. The limit only affects players")
+            public boolean disableChunkGenRateLimiter = false;
+        }
     }
 
     public Debug debug = new Debug();
