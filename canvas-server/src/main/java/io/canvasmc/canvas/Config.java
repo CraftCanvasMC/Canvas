@@ -263,6 +263,12 @@ public class Config {
 
         @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
         public boolean chainEndCrystalExplosions = false;
+
+        @Comment("Disables falling on farmland turning it back to dirt")
+        public boolean disableFarmlandTrampling = false;
+
+        @Comment("Makes farmland always moist, never drying out, even if it isn't near water")
+        public boolean farmlandAlwaysMoist = false;
     }
 
     @Comment(value = {
