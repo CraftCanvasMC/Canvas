@@ -31,9 +31,6 @@ import org.jetbrains.annotations.Nullable;
 @Configuration("canvas_server")
 public class Config {
     public static final Logger LOGGER = LogManager.getLogger("canvas_server");
-    public static final Map<Class<? extends Goal>, Entities.GoalMask> COMPILED_GOAL_MASKS = new ConcurrentHashMap<>();
-    public static final List<ResourceLocation> COMPILED_ENTITY_MASK_LOCATIONS = Collections.synchronizedList(new ArrayList<>());
-    public static boolean CHECK_ENTITY_MASKS = false;
     public static Config INSTANCE = new Config();
 
     public Ticking ticking = new Ticking();
@@ -205,6 +202,16 @@ public class Config {
         public boolean mc136249 = false;
     }
 
+    public Spawner spawner = new Spawner();
+    public static class Spawner {
+        public int minSpawnDelay = 200;
+        public int maxSpawnDelay = 800;
+        public int spawnCount = 4;
+        public int maxNearbyEntities = 6;
+        public int requiredPlayerRange = 16;
+        public int spawnRange = 4;
+    }
+
     public Blocks blocks = new Blocks();
     public static class Blocks {
 
@@ -237,6 +244,9 @@ public class Config {
             "from command blocks(given parsing is often times half the command blocks tick time)"
         })
         public boolean cacheCommandBlockParseResults = true;
+
+        @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
+        public boolean chainEndCrystalExplosions = false;
     }
 
     @Comment(value = {
@@ -293,26 +303,6 @@ public class Config {
         public int skeletonAimAccuracy = 0;
 
         @Comment(value = {
-            "Masks for goals. Allows disabling and adding delays to the tick rate of the goal. The 'goalClass'",
-            "must be the class name of the goal. Like \"net.minecraft.entity.goal.ExampleGoal\", and if its a",
-            "subclass, then \"net.minecraft.entity.goal.RootClass$ExampleGoalInSubClass\""
-        })
-        public List<GoalMask> entityGoalMasks = new ArrayList<>();
-        public static class GoalMask {
-            public String goalClass;
-            public boolean disableGoal = false;
-            public int goalTickDelay = 0;
-        }
-
-        @Comment("Allows configuration of how entities are ticked, and if they should be ticked based on the type")
-        public List<EntityMask> entityMasks = new ArrayList<>();
-        public static class EntityMask {
-            public String type;
-            public boolean shouldTick = true;
-            public int tickRate = 1;
-        }
-
-        @Comment(value = {
             "Disables entity pushing, but the player can still push entities",
             "Immensely optimizes entity performance with lots of colliding entities"
         })
@@ -322,7 +312,7 @@ public class Config {
             "Defines a percentage of which the server will apply to the velocity applied to",
             "item entities dropped on death. 0 means it has no velocity, 1 is default."
         })
-        public double itemEntitySpreadFactor = 1;
+        public double itemEntitySpreadFactor = 1.0D;
 
         @Comment("Disables saving snowball entities. This patches certain lag machines.")
         public boolean disableSnowballSaving = false;
@@ -400,9 +390,6 @@ public class Config {
             public String disconnectDemandOnClientMessage = "You do not have No Chat Reports, and this server is configured to require it on client!";
         }
     }
-
-    @Comment("Determines if end crystals should explode in a chain reaction, similar to how tnt works when exploded")
-    public boolean chainEndCrystalExplosions = false;
 
     @Comment(value = {
         "Allows configurability of the distance of which certain objects need to be from a player",
@@ -566,25 +553,6 @@ public class Config {
             } catch (Throwable t) {
                 t.printStackTrace();
             }
-        }
-        for (final Entities.GoalMask goalMask : INSTANCE.entities.entityGoalMasks) {
-            try {
-                //noinspection unchecked
-                Class<? extends Goal> clazz = (Class<? extends Goal>) Class.forName(goalMask.goalClass);
-                COMPILED_GOAL_MASKS.put(clazz, goalMask);
-                LOGGER.info("Enabling Goal Mask for \"{}\"...", clazz.getSimpleName());
-            } catch (ClassNotFoundException e) {
-                LOGGER.error("Unable to locate goal class \"{}\", skipping.", goalMask, e);
-                continue;
-            }
-        }
-        for (final Entities.EntityMask entityMask : INSTANCE.entities.entityMasks) {
-            if (!CHECK_ENTITY_MASKS) {
-                LOGGER.warn("An EntityMask was registered, please be very careful with this, as it can make the movement of entities a lot more choppy(if using delays)");
-                CHECK_ENTITY_MASKS = true;
-            }
-            LOGGER.info("Registered EntityMask for '{}'", entityMask.type);
-            COMPILED_ENTITY_MASK_LOCATIONS.add(ResourceLocation.parse(entityMask.type));
         }
         if (INSTANCE.ticking.enableThreadedRegionizing) {
             INSTANCE.entities.enableAsyncSpawning = false; // incompatible with threaded regions

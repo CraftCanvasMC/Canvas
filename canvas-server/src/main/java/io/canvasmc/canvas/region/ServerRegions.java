@@ -68,6 +68,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.levelgen.RandomSupport;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.pathfinder.PathTypeCache;
@@ -456,7 +457,7 @@ public class ServerRegions {
             return currentTick;
         }
 
-        public RandomSource nonThreadsafeRandom = new XoroshiroRandomSource(new Random().nextLong());
+        public RandomSource nonThreadsafeRandom = new XoroshiroRandomSource(RandomSupport.generateUniqueSeed());
         // ticks
         private long lagCompensationTick;
 
