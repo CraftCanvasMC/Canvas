@@ -247,11 +247,12 @@ public class CanvasBootstrap {
         final String osName = System.getProperty("os.name");
         final String osVersion = System.getProperty("os.version");
         final String osArch = System.getProperty("os.arch");
+        final int availableThreads = Runtime.getRuntime().availableProcessors();
 
         final ServerBuildInfo bi = ServerBuildInfo.buildInfo();
         return List.of(
             String.format(
-                "Running Java %s (%s %s; %s %s) on %s %s (%s)",
+                "Running Java %s (%s %s; %s %s) on %s %s (%s) with %s threads",
                 javaSpecVersion,
                 javaVmName,
                 javaVmVersion,
@@ -259,7 +260,8 @@ public class CanvasBootstrap {
                 javaVendorVersion,
                 osName,
                 osVersion,
-                osArch
+                osArch,
+                availableThreads
             ),
             String.format(
                 "Loading %s %s for Minecraft %s",

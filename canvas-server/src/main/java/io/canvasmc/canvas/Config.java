@@ -20,6 +20,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import io.canvasmc.canvas.util.YamlTextFormatter;
+import io.papermc.paper.adventure.PaperAdventure;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.minecraft.Util;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -186,6 +190,8 @@ public class Config {
         public boolean regionTeleports = false;
         @Comment("Logs task retiring with the tick scheduler")
         public boolean taskRetire = false;
+        @Comment("Prints the configuration tree at startup. Not really recommended to disable, as this helps a ton with debugging issues")
+        public boolean printConfigurationTree = true;
     }
 
     public Fixes fixes = new Fixes();
@@ -541,7 +547,15 @@ public class Config {
             .validator(ConfigHandlers.NonNegativeProcessor::new)
             .validator(ConfigHandlers.NonPositiveProcessor::new)
             .validator(ConfigHandlers.PatternProcessor::new)
-            .post(context -> INSTANCE = context.configuration())
+            .post(context -> {
+                INSTANCE = context.configuration();
+                if (INSTANCE.debug.printConfigurationTree) {
+                    // build and print config tree.
+                    ComponentLogger componentLogger = ComponentLogger.logger("Canvas");
+                    YamlTextFormatter formatter = new YamlTextFormatter(4);
+                    componentLogger.info(Component.text("Printing configuration tree:").appendNewline().append(formatter.apply(context.contents())));
+                }
+            })
             .build(config, configClass)
         );
     }
