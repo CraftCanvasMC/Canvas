@@ -81,7 +81,7 @@ public final class RegionizedTaskQueue {
             this.world = world;
         }
 
-        private boolean executeGlobalChunkTask() {
+        public boolean executeGlobalChunkTask() {
             final Runnable run = this.globalChunkTask.poll();
             if (run != null) {
                 run.run();

@@ -8,10 +8,6 @@ import java.math.BigDecimal;
  * An interface into Canvas' tick scheduler
  */
 public interface MultithreadedTickScheduler {
-    // canvas namespacedkeys for its internal tick-loops(hard-coded)
-    NamespacedKey JOIN_THREAD = NamespacedKey.fromString("canvas:join_thread");
-    @Deprecated(forRemoval = true)
-    NamespacedKey ASYNC_CHUNK_LOADER = NamespacedKey.fromString("canvas:async_chunk_loader");
 
     /**
      * Creates a new "full tick", which contains and manages logic ticking

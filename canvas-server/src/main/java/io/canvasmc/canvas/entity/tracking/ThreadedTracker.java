@@ -10,12 +10,14 @@ import io.canvasmc.canvas.util.NamedAgnosticThreadFactory;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.FullChunkStatus;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import org.jetbrains.annotations.NotNull;
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 public class ThreadedTracker {
     private static final ThreadPoolExecutor processor = new ThreadPoolExecutor(
@@ -27,6 +29,7 @@ public class ThreadedTracker {
     );
     public static ThreadedTracker INSTANCE = new ThreadedTracker(Config.INSTANCE.entities.entityTracking.enableThreadedTracking);
     private final boolean enableThreading;
+    public static final AtomicBoolean canceled = new AtomicBoolean(false);
 
     ThreadedTracker(boolean enableThreading) {
         this.enableThreading = enableThreading;
@@ -38,6 +41,7 @@ public class ThreadedTracker {
 
     public boolean tick(@NotNull ChunkSystemServerLevel chunkSystemServerLevel) {
         if (this.enableThreading || Config.INSTANCE.ticking.enableThreadedRegionizing) { // we run tracking threaded if regionized.
+            if (canceled.get()) return true;
             final NearbyPlayers nearbyPlayers = chunkSystemServerLevel.moonrise$getNearbyPlayers();
             final Entity[] trackerEntitiesRaw = ServerRegions.getTickData((ServerLevel) chunkSystemServerLevel).trackerEntities.getRawDataUnchecked(); // Canvas - Threaded Regions
 
@@ -46,7 +50,10 @@ public class ThreadedTracker {
                     if (entity == null) continue;
 
                     final ChunkMap.TrackedEntity trackedInstance = ((EntityTrackerEntity) entity).moonrise$getTrackedEntity();
-                    if (trackedInstance == null) continue;
+                    if (trackedInstance == null) {
+                        MinecraftServer.LOGGER.warn("Encountered a null tracker entity instance when attempting to update tracking for entity {}", entity);
+                        continue;
+                    }
 
                     trackedInstance.moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition()));
                     @Nullable FullChunkStatus chunkStatus = ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus(); // Canvas

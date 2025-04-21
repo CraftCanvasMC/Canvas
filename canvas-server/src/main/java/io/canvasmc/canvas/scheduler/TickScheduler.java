@@ -9,8 +9,6 @@ import io.canvasmc.canvas.event.TickSchedulerStartEvent;
 import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.server.MultiWatchdogThread;
 import io.canvasmc.canvas.server.ThreadedServer;
-import io.canvasmc.canvas.server.chunk.AsyncPlayerChunkLoader;
-import io.canvasmc.canvas.server.network.PlayerJoinThread;
 import io.canvasmc.canvas.util.ConcurrentSet;
 import io.canvasmc.canvas.util.IdGenerator;
 import io.papermc.paper.threadedregions.ScheduledTaskThreadPool;
@@ -82,9 +80,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         tickScheduler.scheduler.setCoreThreads(tickScheduler.threadCount);
         ThreadedServer.LOGGER.info("Tick Scheduler is enabled with {} tick runners allocated", tickScheduler.threadCount);
         new TickSchedulerStartEvent().callEvent();
-        List<FullTick<? extends WrappedTickLoop.WrappedTick>> ticks = new ArrayList<>(List.of(
-            AsyncPlayerChunkLoader.INSTANCE, PlayerJoinThread.getInstance()
-        ));
+        List<FullTick<? extends WrappedTickLoop.WrappedTick>> ticks = new ArrayList<>();
         for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
             level.regioniser.computeForAllRegions((region) -> ticks.add(region.getData().tickHandle));
             ticks.add(level);

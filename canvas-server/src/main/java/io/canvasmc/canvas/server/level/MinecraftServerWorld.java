@@ -100,11 +100,9 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
         try {
             MultiWatchdogThread.WATCHDOG.dock(watchdogEntry);
             TickScheduler.setTickingData(level().levelTickData);
-            if (tickRateManager().isSprinting() || canContinue.getAsBoolean()) {
-                ServerLevel worldserver = level();
+            ServerLevel worldserver = level();
 
-                worldserver.getChunkSource().pollTask();
-            }
+            worldserver.getChunkSource().pollTask();
             return super.runTasks(canContinue);
         } finally {
             TickScheduler.setTickingData(null);

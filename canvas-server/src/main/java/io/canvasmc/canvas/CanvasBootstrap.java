@@ -16,6 +16,7 @@ import java.util.logging.Logger;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.util.PathConverter;
+import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Eula;
 import org.bukkit.craftbukkit.CraftServer;
@@ -25,8 +26,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 
 public class CanvasBootstrap {
+    public static ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
     public static final Instant BOOT_TIME = Instant.now();
-    private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
     public static boolean RUNNING_IN_IDE = false;
 
     public static OptionSet bootstrap(String[] args) {

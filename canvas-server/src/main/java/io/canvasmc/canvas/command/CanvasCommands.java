@@ -13,5 +13,6 @@ public final class CanvasCommands {
         SenderInfoCommand.register(dispatcher);
         PriorityCommand.register(dispatcher);
         SetMaxPlayersCommand.register(dispatcher);
+        TrackingControlCommand.register(dispatcher);
     }
 }

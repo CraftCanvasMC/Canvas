@@ -34,7 +34,6 @@ import org.jetbrains.annotations.Nullable;
 
 @Configuration("canvas_server")
 public class Config {
-    public static final Logger LOGGER = LogManager.getLogger("canvas_server");
     public static Config INSTANCE = new Config();
 
     public Ticking ticking = new Ticking();
@@ -567,9 +566,8 @@ public class Config {
                 INSTANCE = context.configuration();
                 if (INSTANCE.debug.printConfigurationTree) {
                     // build and print config tree.
-                    ComponentLogger componentLogger = ComponentLogger.logger("Canvas");
                     YamlTextFormatter formatter = new YamlTextFormatter(4);
-                    componentLogger.info(Component.text("Printing configuration tree:").appendNewline().append(formatter.apply(context.contents())));
+                    CanvasBootstrap.LOGGER.info(Component.text("Printing configuration tree:").appendNewline().append(formatter.apply(context.contents())));
                 }
             })
             .build(config, configClass)
@@ -590,7 +588,7 @@ public class Config {
         if (INSTANCE.ticking.enableThreadedRegionizing) {
             INSTANCE.entities.enableAsyncSpawning = false; // incompatible with threaded regions
         }
-        LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
+        CanvasBootstrap.LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
         return INSTANCE;
     }
 

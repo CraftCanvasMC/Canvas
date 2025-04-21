@@ -49,7 +49,8 @@ public class ConnectionPool {
         this.backend.remove(connection);
     }
 
-    public void connect(Connection connection) {
+    public void connect(@NotNull Connection connection) {
+        connection.setPhase(ConnectionHandlePhases.PLAY);
         this.backend.add(connection);
     }
 }
