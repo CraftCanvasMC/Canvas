@@ -51,7 +51,6 @@ public class ThreadedTracker {
 
                     final ChunkMap.TrackedEntity trackedInstance = ((EntityTrackerEntity) entity).moonrise$getTrackedEntity();
                     if (trackedInstance == null) {
-                        MinecraftServer.LOGGER.warn("Encountered a null tracker entity instance when attempting to update tracking for entity {}", entity);
                         continue;
                     }
 
