@@ -14,5 +14,6 @@ public final class CanvasCommands {
         PriorityCommand.register(dispatcher);
         SetMaxPlayersCommand.register(dispatcher);
         TrackingControlCommand.register(dispatcher);
+        SyncloadCommand.register(dispatcher);
     }
 }
