@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
 import io.canvasmc.canvas.server.level.distance.command.CommandUtils;
 import io.canvasmc.canvas.server.level.distance.component.WorldSpecificViewDistanceComponents;
@@ -16,26 +17,28 @@ import org.jetbrains.annotations.NotNull;
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
-public final class ViewDistanceCommand {
-    public static void register(@NotNull CommandDispatcher<CommandSourceStack> commandDispatcher) {
-        commandDispatcher.register(
+public final class ViewDistanceCommand implements CommandInstance {
+
+    @Override
+    public LiteralCommandNode<CommandSourceStack> register(@NotNull CommandDispatcher<CommandSourceStack> commandDispatcher) {
+        return commandDispatcher.register(
             literal("viewdistance")
                 .then(literal("set")
                     .requires((src) -> src.hasPermission(2, "canvas.world.command.viewdistance"))
                     .then(literal("global")
                         .then(argument("viewDistance", IntegerArgumentType.integer(0, 255))
-                            .executes(ViewDistanceCommand::setGlobalViewDistance)))
+                            .executes(this::setGlobalViewDistance)))
                     .then(argument("dimension", DimensionArgument.dimension())
                         .then(argument("viewDistance", IntegerArgumentType.integer(0, 255))
-                            .executes(ViewDistanceCommand::setWorldViewDistance))))
+                            .executes(this::setWorldViewDistance))))
                 .then(literal("get")
                     .then(literal("global")
-                        .executes(ViewDistanceCommand::getGlobalViewDistance))
+                        .executes(this::getGlobalViewDistance))
                     .then(argument("dimension", DimensionArgument.dimension())
-                        .executes(ViewDistanceCommand::getWorldViewDistance))));
+                        .executes(this::getWorldViewDistance))));
     }
 
-    public static int setWorldViewDistance(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+    public int setWorldViewDistance(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         int viewdist = IntegerArgumentType.getInteger(ctx, "viewDistance");
         CommandSourceStack src = ctx.getSource();
         ServerLevel w = DimensionArgument.getDimension(ctx, "dimension");
@@ -55,7 +58,7 @@ public final class ViewDistanceCommand {
         return 1;
     }
 
-    public static int getWorldViewDistance(@NotNull CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+    public int getWorldViewDistance(@NotNull CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         CommandSourceStack src = ctx.getSource();
         ServerLevel w = DimensionArgument.getDimension(ctx, "dimension");
 
@@ -74,7 +77,7 @@ public final class ViewDistanceCommand {
         return 1;
     }
 
-    public static int getGlobalViewDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
+    public int getGlobalViewDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack src = ctx.getSource();
         int viewDist = src.getServer().getPlayerList().getViewDistance() + 1;
 
@@ -83,7 +86,7 @@ public final class ViewDistanceCommand {
         return 1;
     }
 
-    public static int setGlobalViewDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
+    public int setGlobalViewDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack src = ctx.getSource();
         int viewDist = IntegerArgumentType.getInteger(ctx, "viewDistance");
 

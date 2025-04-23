@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
 import io.canvasmc.canvas.server.level.distance.command.CommandUtils;
 import io.canvasmc.canvas.server.level.distance.component.WorldSpecificViewDistanceComponents;
@@ -16,26 +17,28 @@ import org.jetbrains.annotations.NotNull;
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
-public final class SimulationDistanceCommand {
-    public static void register(@NotNull CommandDispatcher<CommandSourceStack> commandDispatcher) {
-        commandDispatcher.register(
+public final class SimulationDistanceCommand implements CommandInstance {
+
+    @Override
+    public  LiteralCommandNode<CommandSourceStack> register(@NotNull CommandDispatcher<CommandSourceStack> commandDispatcher) {
+        return commandDispatcher.register(
             literal("simulationdistance")
                 .then(literal("set")
                     .requires((src) -> src.hasPermission(3, "canvas.world.command.simulationdistance"))
                     .then(literal("global")
                         .then(argument("simulationDistance", IntegerArgumentType.integer(0, 255))
-                            .executes(SimulationDistanceCommand::setGlobalSimulationDistance)))
+                            .executes(this::setGlobalSimulationDistance)))
                     .then(argument("dimension", DimensionArgument.dimension())
                         .then(argument("simulationDistance", IntegerArgumentType.integer(0, 255))
-                            .executes(SimulationDistanceCommand::setWorldSimulationDistance))))
+                            .executes(this::setWorldSimulationDistance))))
                 .then(literal("get")
                     .then(literal("global")
-                        .executes(SimulationDistanceCommand::getGlobalSimulationDistance))
+                        .executes(this::getGlobalSimulationDistance))
                     .then(argument("dimension", DimensionArgument.dimension())
-                        .executes(SimulationDistanceCommand::getWorldSimulationDistance))));
+                        .executes(this::getWorldSimulationDistance))));
     }
 
-    public static int setWorldSimulationDistance(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+    public int setWorldSimulationDistance(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         int simDist = IntegerArgumentType.getInteger(ctx, "simulationDistance");
         CommandSourceStack src = ctx.getSource();
         ServerLevel level = DimensionArgument.getDimension(ctx, "dimension");
@@ -56,7 +59,7 @@ public final class SimulationDistanceCommand {
         return 1;
     }
 
-    public static int getWorldSimulationDistance(@NotNull CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+    public int getWorldSimulationDistance(@NotNull CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
         CommandSourceStack src = ctx.getSource();
         ServerLevel w = DimensionArgument.getDimension(ctx, "dimension");
 
@@ -75,7 +78,7 @@ public final class SimulationDistanceCommand {
         return 1;
     }
 
-    public static int getGlobalSimulationDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
+    public int getGlobalSimulationDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack src = ctx.getSource();
         int simDist = src.getServer().getPlayerList().getSimulationDistance() + 1;
 
@@ -84,7 +87,7 @@ public final class SimulationDistanceCommand {
         return 1;
     }
 
-    public static int setGlobalSimulationDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
+    public int setGlobalSimulationDistance(@NotNull CommandContext<CommandSourceStack> ctx) {
         CommandSourceStack src = ctx.getSource();
         int simDist = IntegerArgumentType.getInteger(ctx, "simulationDistance");
 

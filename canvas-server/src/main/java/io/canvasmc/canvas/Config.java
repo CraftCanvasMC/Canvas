@@ -119,13 +119,13 @@ public class Config {
         }
 
         @Comment(value = {
-            "Modifies what algorithm the chunk system will use to define thread counts.",
+            "Modifies what algorithm the chunk system will use to define thread counts. Internally, the chunk system does not change.",
             "Valid options(lowercase or uppercase):",
             " - MOONRISE [Paper default thread count]",
             " - C2ME [Old algorithm from C2ME, less aggressive than the modern one]",
             " - C2ME_AGGRESSIVE [Modern algorithm from C2ME, more aggressive than the previous]"
         })
-        public ChunkSystemAlgorithm chunkWorkerAlgorithm = ChunkSystemAlgorithm.C2ME;
+        public ChunkSystemAlgorithm defaultThreadAlgorithm = ChunkSystemAlgorithm.C2ME;
 
         @Comment(value = {
             "Sets the thread priority for worker threads. Default is NORMAL+1",

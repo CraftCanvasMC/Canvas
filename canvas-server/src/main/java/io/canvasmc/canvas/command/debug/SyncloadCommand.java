@@ -1,6 +1,9 @@
-package io.canvasmc.canvas.command;
+package io.canvasmc.canvas.command.debug;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.tree.LiteralCommandNode;
+import java.util.concurrent.TimeUnit;
+import io.canvasmc.canvas.command.CommandInstance;
 import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.coordinates.ColumnPosArgument;
@@ -10,14 +13,14 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.concurrent.TimeUnit;
-
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
-public class SyncloadCommand {
-    public static void register(@NotNull CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(
+public class SyncloadCommand implements CommandInstance {
+
+    @Override
+    public LiteralCommandNode<CommandSourceStack> register(@NotNull CommandDispatcher<CommandSourceStack> dispatcher) {
+        return dispatcher.register(
             literal("syncload").requires(commandSourceStack -> commandSourceStack.hasPermission(3, "canvas.debug.command.syncload"))
                 .then(argument("coords", ColumnPosArgument.columnPos()).executes(context -> {
                     long startNanos = Util.getNanos();

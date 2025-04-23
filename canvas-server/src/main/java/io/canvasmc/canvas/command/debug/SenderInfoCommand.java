@@ -1,9 +1,12 @@
-package io.canvasmc.canvas.command;
+package io.canvasmc.canvas.command.debug;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.tree.LiteralCommandNode;
+import io.canvasmc.canvas.command.CommandInstance;
 import io.canvasmc.canvas.region.ChunkRegion;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import it.unimi.dsi.fastutil.shorts.ShortSet;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
@@ -12,14 +15,14 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.concurrent.TimeUnit;
-
 import static io.canvasmc.canvas.server.ThreadedServer.LOGGER;
 import static net.minecraft.commands.Commands.literal;
 
-public class SenderInfoCommand {
-    public static void register(@NotNull CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(
+public class SenderInfoCommand implements CommandInstance {
+
+    @Override
+    public LiteralCommandNode<CommandSourceStack> register(@NotNull CommandDispatcher<CommandSourceStack> dispatcher) {
+        return dispatcher.register(
             literal("senderinfo").requires(commandSourceStack -> commandSourceStack.hasPermission(3, "canvas.debug.command.senderinfo"))
                 .executes(context -> {
                     if (context.getSource().getEntity() instanceof ServerPlayer player) {

@@ -176,7 +176,7 @@ public class ThreadedServerHealthDump {
                 new ArrayList<>();
 
             for (final World bukkitWorld : Bukkit.getWorlds()) {
-                final ServerLevel world = ((CraftWorld)bukkitWorld).getHandle();
+                final ServerLevel world = ((CraftWorld) bukkitWorld).getHandle();
                 world.regioniser.computeForAllRegionsUnsynchronised(regions::add);
             }
             for (final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region : regions) {
@@ -201,11 +201,11 @@ public class ThreadedServerHealthDump {
                         .append(Component.text(" TPS", PRIMARY)))
                     .append(NEW_LINE);
 
-                    if ((Util.getNanos() - tickHandle.lastRespondedNanos) > TimeUnit.SECONDS.toNanos(5)) {
-                        // hasn't responded in 5 seconds, warn.
-                        head.append(Component.text("    Hasn't responded in over 5 seconds! Next scheduled start in " + (tickHandle.getNextScheduledStart() - Util.getNanos()) + " nanos", TextColor.color(200, 52, 34)))
-                            .append(NEW_LINE);
-                    }
+                if ((Util.getNanos() - tickHandle.lastRespondedNanos) > TimeUnit.SECONDS.toNanos(5)) {
+                    // hasn't responded in 5 seconds, warn.
+                    head.append(Component.text("    Hasn't responded in over 5 seconds! Next scheduled start in " + (tickHandle.getNextScheduledStart() - Util.getNanos()) + " nanos", TextColor.color(200, 52, 34)))
+                        .append(NEW_LINE);
+                }
                 root.append(head.build());
             }
         }
