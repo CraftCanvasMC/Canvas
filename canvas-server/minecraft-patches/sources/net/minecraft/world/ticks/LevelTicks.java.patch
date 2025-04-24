@@ -15,7 +15,7 @@
  import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMap.Entry;
  import it.unimi.dsi.fastutil.objects.ObjectIterator;
-@@ -11,11 +_,19 @@
+@@ -11,11 +_,18 @@
  import java.util.ArrayDeque;
  import java.util.ArrayList;
  import java.util.Comparator;
@@ -31,11 +31,10 @@
 +import java.util.concurrent.ConcurrentLinkedQueue;
 +import java.util.concurrent.PriorityBlockingQueue;
 +import java.util.concurrent.atomic.AtomicInteger;
-+import java.util.concurrent.locks.ReentrantLock;
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -26,16 +_,25 @@
+@@ -26,16 +_,24 @@
  import net.minecraft.util.profiling.Profiler;
  import net.minecraft.util.profiling.ProfilerFiller;
  import net.minecraft.world.level.ChunkPos;
@@ -55,7 +54,6 @@
 +    // LevelTicks can be accessed ANYWHERE. these *must* be threadsafe
 +    // if it's not, crashes occur EVERYWHERE...
 +    // we opt for synchronization rather than swapping the field type to try and maintain behavior with upstream.
-+    public final ReentrantLock lock = new ReentrantLock();
 +    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
 +    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongConcurrentHashMap(Long.MAX_VALUE), map -> map.defaultReturnValue(Long.MAX_VALUE));
 +    // we use a concurrent version of `containersToTick` and `toRunThisTick` since those are primarily accessed everywhere.
@@ -65,7 +63,7 @@
      private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
      private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
      private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (levelChunkTicks, scheduledTick) -> {
-@@ -43,12 +_,65 @@
+@@ -43,8 +_,60 @@
              this.updateContainerScheduling(scheduledTick);
          }
      };
@@ -128,12 +126,7 @@
          this.tickCheck = tickCheck;
      }
  
-     public void addContainer(ChunkPos chunkPos, LevelChunkTicks<T> chunkTicks) {
-+        try { lock.lock(); // Canvas - lock
-         long packedChunkPos = chunkPos.toLong();
-         this.allContainers.put(packedChunkPos, chunkTicks);
-         ScheduledTick<T> scheduledTick = chunkTicks.peek();
-@@ -56,30 +_,53 @@
+@@ -56,7 +_,17 @@
              this.nextTickForContainer.put(packedChunkPos, scheduledTick.triggerTick());
          }
  
@@ -148,21 +141,11 @@
 +                ((LevelTicks<T>)(isBlock ? worldData.getBlockLevelTicks() : worldData.getFluidLevelTicks())).updateContainerScheduling(tick);
 +            }
 +        });
-+        } finally { lock.unlock(); }
 +        // Canvas end
      }
  
      public void removeContainer(ChunkPos chunkPos) {
-+        try { lock.lock(); // Canvas - lock
-         long packedChunkPos = chunkPos.toLong();
-         LevelChunkTicks<T> levelChunkTicks = this.allContainers.remove(packedChunkPos);
-         this.nextTickForContainer.remove(packedChunkPos);
-         if (levelChunkTicks != null) {
-             levelChunkTicks.setOnTickAdded(null);
-         }
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
+@@ -71,9 +_,16 @@
      @Override
      public void schedule(ScheduledTick<T> tick) {
          long packedChunkPos = ChunkPos.asLong(tick.pos());
@@ -170,7 +153,6 @@
 +        ChunkPos position = new ChunkPos(tick.pos());
 +        LevelChunk chunk = (LevelChunk) this.world.getChunk(position.x, position.z, ChunkStatus.FULL, true);
 +        if (chunk == null) throw new RuntimeException("chunk was null when scheduling");
-+        try { lock.lock(); // Canvas - lock
 +        if (!this.allContainers.containsKey(packedChunkPos)) chunk.registerTickContainerInLevel(this.world);
 +        // Canvas end
          LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(packedChunkPos);
@@ -180,22 +162,6 @@
          } else {
              levelChunkTicks.schedule(tick);
          }
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     public void tick(long gameTime, int maxAllowedTicks, BiConsumer<BlockPos, T> ticker) {
-+        try { lock.lock(); // Canvas - lock
-         ProfilerFiller profilerFiller = Profiler.get();
-         profilerFiller.push("collect");
-         this.collectTicks(gameTime, maxAllowedTicks, profilerFiller);
-@@ -89,6 +_,7 @@
-         profilerFiller.popPush("cleanup");
-         this.cleanupAfterTick();
-         profilerFiller.pop();
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     private void collectTicks(long gameTime, int maxAllowedTicks, ProfilerFiller profiler) {
 @@ -99,29 +_,25 @@
      }
  
@@ -232,61 +198,3 @@
      }
  
      private void drainContainers(long gameTime, int maxAllowedTicks) {
-@@ -199,14 +_,18 @@
- 
-     @Override
-     public boolean hasScheduledTick(BlockPos pos, T type) {
-+        try { lock.lock(); // Canvas - lock
-         LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(ChunkPos.asLong(pos));
-         return levelChunkTicks != null && levelChunkTicks.hasScheduledTick(pos, type);
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     @Override
-     public boolean willTickThisTick(BlockPos pos, T type) {
-+        try { lock.lock(); // Canvas - lock
-         this.calculateTickSetIfNeeded();
-         return this.toRunThisTickSet.contains(ScheduledTick.probe(type, pos));
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     private void calculateTickSetIfNeeded() {
-@@ -233,6 +_,7 @@
-     }
- 
-     public void clearArea(BoundingBox area) {
-+        try { lock.lock(); // Canvas - lock
-         Predicate<ScheduledTick<T>> predicate = scheduledTick -> area.isInside(scheduledTick.pos());
-         this.forContainersInArea(area, (pos, container) -> {
-             ScheduledTick<T> scheduledTick = container.peek();
-@@ -248,6 +_,7 @@
-         });
-         this.alreadyRunThisTick.removeIf(predicate);
-         this.toRunThisTick.removeIf(predicate);
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     public void copyArea(BoundingBox area, Vec3i offset) {
-@@ -255,6 +_,7 @@
-     }
- 
-     public void copyAreaFrom(LevelTicks<T> levelTicks, BoundingBox area, Vec3i offset) {
-+        try { lock.lock(); // Canvas - lock
-         List<ScheduledTick<T>> list = new ArrayList<>();
-         Predicate<ScheduledTick<T>> predicate = scheduledTick -> area.isInside(scheduledTick.pos());
-         levelTicks.alreadyRunThisTick.stream().filter(predicate).forEach(list::add);
-@@ -274,11 +_,14 @@
-                 )
-             )
-         );
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     @Override
-     public int count() {
-+        try { lock.lock(); // Canvas - lock
-         return this.allContainers.values().stream().mapToInt(TickAccess::count).sum();
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     @FunctionalInterface
