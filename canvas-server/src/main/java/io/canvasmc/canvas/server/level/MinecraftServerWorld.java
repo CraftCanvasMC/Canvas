@@ -71,6 +71,13 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             }
             TickScheduler.setTickingData(thisAsTickable.levelTickData);
             MinecraftServer server = MinecraftServer.getServer();
+            if (!server.isTicking()) {
+                while (hasTimeLeft.getAsBoolean()) {
+                    thisAsTickable.runTasks(hasTimeLeft);
+                }
+                TickScheduler.setTickingData(null);
+                return !thisAsTickable.cancelled.get();
+            }
             int i = server.pauseWhileEmptySeconds() * 20;
             if (Config.INSTANCE.ticking.emptySleepPerWorlds && i > 0) {
                 if (thisAsTickable.players().isEmpty() && !thisAsTickable.tickRateManager().isSprinting() && server.pluginsBlockingSleep.isEmpty()) {

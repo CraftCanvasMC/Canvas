@@ -13,6 +13,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.Util;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
@@ -68,7 +69,7 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
         return super.hasTasks() || this.region.getData().tickData.taskQueueData.hasTasks();
     }
 
-    boolean runRegionTasks(final BooleanSupplier canContinue) {
+    public boolean runRegionTasks(final BooleanSupplier canContinue) {
         final RegionizedTaskQueue.RegionTaskQueueData queue = this.region.getData().tickData.taskQueueData;
 
         boolean processedChunkTask = false;
@@ -139,15 +140,22 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
             // tick region
             try {
                 TickScheduler.setTickingData(this.region.getData().tickData);
+                if (!MinecraftServer.getServer().isTicking()) {
+                    while (hasTimeLeft.getAsBoolean()) {
+                        tickHandle.runTasks(hasTimeLeft);
+                    }
+                    TickScheduler.setTickingData(null);
+                    return this.markNotTicking() && !tickHandle.cancelled.get();
+                }
                 isActive = true;
                 try {
-                    ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
+                    ServerRegions.WorldTickData data = this.region.getData().tickData;
                     data.popTick();
                     data.setHandlingTick(true);
                     ProfilerFiller profilerFiller = Profiler.get();
                     TickRateManager tickRateManager = this.world.tickRateManager();
                     // run all BLOCKING tasks if we have any
-                    final RegionizedTaskQueue.RegionTaskQueueData queue = this.region.getData().tickData.taskQueueData;
+                    final RegionizedTaskQueue.RegionTaskQueueData queue = data.taskQueueData;
 
                     boolean processedChunkTask = false;
 

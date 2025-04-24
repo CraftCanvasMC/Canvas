@@ -52,7 +52,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
     public static BooleanSupplier SHOULD_KEEP_TICKING;
     private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final DedicatedServer server;
-    private final TickScheduler scheduler;
+    public final TickScheduler scheduler;
     protected long tickSection;
     private boolean started = false;
     public final RegionizedTaskQueue taskQueue = new RegionizedTaskQueue(); // Threaded Regions
@@ -112,7 +112,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
             }
 
             this.started = true;
-            this.scheduler.start();
             this.server.nextTickTimeNanos = Util.getNanos();
             this.server.statusIcon = this.server.loadStatusIcon().orElse(null);
             this.server.status = this.server.buildServerStatus();

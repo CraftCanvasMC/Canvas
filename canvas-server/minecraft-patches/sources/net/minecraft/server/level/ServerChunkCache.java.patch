@@ -202,7 +202,7 @@
          }
  
          this.runDistanceManagerUpdates();
-@@ -503,79 +_,127 @@
+@@ -503,26 +_,27 @@
  
      private void tickChunks() {
          long gameTime = this.level.getGameTime();
@@ -236,44 +236,8 @@
                  }
              }
  
-             this.broadcastChangedChunks(profilerFiller);
-             profilerFiller.pop();
+@@ -531,51 +_,62 @@
          }
-+        // Canvas start
-+        if (Config.INSTANCE.entities.enableAsyncSpawning) {
-+            for (ServerPlayer player : this.level.players) {
-+                for (int ii = 0; ii < ServerPlayer.MOBCATEGORY_TOTAL_ENUMS; ii++) {
-+                    player.mobCounts[ii] = 0;
-+
-+                    int newBackoff = player.mobBackoffCounts[ii] - 1;
-+                    if (newBackoff < 0) {
-+                        newBackoff = 0;
-+                    }
-+                    player.mobBackoffCounts[ii] = newBackoff;
-+                }
-+            }
-+            if (firstRunSpawnCounts) {
-+                firstRunSpawnCounts = false;
-+                spawnCountsReady.set(true);
-+            }
-+            if (spawnCountsReady.getAndSet(false)) {
-+                ServerRegions.WorldTickData tickData = ServerRegions.getTickData(this.level); // Canvas - Threaded Regions
-+                MinecraftServer.getServer().mobSpawnExecutor.submit(() -> {
-+                    int mapped = distanceManager.getNaturalSpawnChunkCount();
-+                    try {
-+                        Entity[] entities = tickData.getLocalEntitiesCopy(); // Canvas - Threaded Regions
-+                        tickData.setLastSpawnState(NaturalSpawner.createState(
-+                            mapped,
-+                            entities == null ? List.of() : Arrays.stream(entities).filter(Objects::nonNull).toList(),
-+                            this::getFullChunk,
-+                            new LocalMobCapCalculator(this.chunkMap),
-+                            true)); // Canvas - Threaded Regions
-+                    } finally { }
-+                    spawnCountsReady.set(true);
-+                });
-+            }
-+        }
-+        // Canvas end
      }
  
 -    private void broadcastChangedChunks(ProfilerFiller profiler) {
@@ -355,26 +319,21 @@
          NaturalSpawner.SpawnState spawnState;
 +        final ServerRegions.WorldTickData tickData = ServerRegions.getTickData(this.level); // Canvas - Threaded Regions
          if ((this.spawnFriendlies || this.spawnEnemies) && this.level.paperConfig().entities.spawning.perPlayerMobSpawns) { // don't count mobs when animals and monsters are disabled
-+            if (!Config.INSTANCE.entities.enableAsyncSpawning) { // Canvas
              // re-set mob counts
 -            for (ServerPlayer player : this.level.players) {
 +            for (ServerPlayer player : this.level.getLocalPlayers()) { // Canvas - Threaded Regions
                  // Paper start - per player mob spawning backoff
                  for (int ii = 0; ii < ServerPlayer.MOBCATEGORY_TOTAL_ENUMS; ii++) {
                      player.mobCounts[ii] = 0;
-@@ -588,36 +_,41 @@
+@@ -588,36 +_,38 @@
                  }
                  // Paper end - per player mob spawning backoff
              }
 -            spawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, null, true);
-+            tickData.setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, tickData.getLoadedEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), true)); // Canvas - async mob spawning - Threaded Regions
-+            } // Canvas
++            tickData.setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, null, true)); // Canvas - Threaded Regions
          } else {
 -            spawnState = NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false);
-+            // Canvas start
-+            tickData.setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, tickData.getLoadedEntities(), this::getFullChunk, new LocalMobCapCalculator(this.chunkMap), false)); // Canvas - async mob spawning - Threaded Regions
-+            spawnCountsReady.set(true);
-+            // Canvas end
++            tickData.setLastSpawnState(NaturalSpawner.createState(naturalSpawnChunkCount, this.level.getAllEntities(), this::getFullChunk, !this.level.paperConfig().entities.spawning.perPlayerMobSpawns ? new LocalMobCapCalculator(this.chunkMap) : null, false)); // Canvas - Threaded Regions
          }
          // Paper end - Optional per player mob spawns
 -        this.lastSpawnState = spawnState;
@@ -397,7 +356,7 @@
 -            boolean flag = this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) != 0L && this.level.getLevelData().getGameTime() % this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) == 0L; // CraftBukkit
 -            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(spawnState, this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit
 +            boolean flag = this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) != 0L && this.level.getRedstoneGameTime() % this.level.ticksPerSpawnCategory.getLong(org.bukkit.entity.SpawnCategory.ANIMAL) == 0L; // CraftBukkit // Canvas - Threaded Regions
-+            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(tickData.getLastSpawnState(), this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit // Canvas - async mob spawning - Threaded Regions
++            filteredSpawningCategories = NaturalSpawner.getFilteredSpawningCategories(tickData.getLastSpawnState(), this.spawnFriendlies, this.spawnEnemies, flag, this.level); // CraftBukkit // Canvas - Threaded Regions
          } else {
              filteredSpawningCategories = List.of();
          }
@@ -406,10 +365,10 @@
 +            if (levelChunk == null) continue; // Canvas - optimize chunk collect
              ChunkPos pos = levelChunk.getPos();
              levelChunk.incrementInhabitedTime(timeInhabited);
--            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot
++
+             if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot
 -                NaturalSpawner.spawnForChunk(this.level, levelChunk, spawnState, filteredSpawningCategories);
-+            if (!filteredSpawningCategories.isEmpty() && this.level.getWorldBorder().isWithinBounds(pos) && (!Config.INSTANCE.entities.enableAsyncSpawning || spawnCountsReady.get()) && this.chunkMap.anyPlayerCloseEnoughForSpawning(pos, true)) { // Spigot // Canvas
-+                NaturalSpawner.spawnForChunk(this.level, levelChunk, tickData.getLastSpawnState(), filteredSpawningCategories); // Canvas - async mob spawning - Threaded Regions
++                NaturalSpawner.spawnForChunk(this.level, levelChunk, tickData.getLastSpawnState(), filteredSpawningCategories); // Canvas - Threaded Regions
              }
  
              if (true) { // Paper - rewrite chunk system
@@ -466,7 +425,7 @@
          }
      }
  
-@@ -818,14 +_,75 @@
+@@ -818,14 +_,76 @@
              super.doRunTask(task);
          }
  
@@ -498,9 +457,9 @@
 -                return super.pollTask() | ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)serverChunkCache.level).moonrise$getChunkTaskScheduler().executeMainThreadTask();
 +                final ServerLevel serverLevel = serverChunkCache.level;
 +                Thread current = Thread.currentThread();
-+                if (MinecraftServer.getServer().isTicking() && current == MinecraftServer.getServer().serverThread) {
-+                    serverLevel.wake(); // we must wake the world if needed, so it can process chunk tasks.
-+                    return true;
++                if (current == MinecraftServer.getServer().serverThread) {
++                    // we don't want to process chunk tasks on main.
++                    return false;
 +                }
 +                try {
 +                    entityOverride.add(current);
@@ -513,7 +472,8 @@
 +                        {
 +                            serverLevel.regioniser.computeForAllRegionsUnsynchronised((region) -> {
 +                                if (region == null) return; // don't poll if the region is null
-+                                if (!region.getData().tickHandle.tick.isActive || (region.getData().tickHandle.owner == null || region.getData().tickHandle.owner.getState().equals(Thread.State.WAITING))) {
++                                // check if active. this is ONLY true once the first tick has started until the end of its lifecycle
++                                if (!region.getData().tickHandle.tick.isActive) {
 +                                    if (region.getData().tickData.getTaskQueueData().hasChunkTasks()) {
 +                                        while(region.getData().tickData.getTaskQueueData().executeChunkTask());
 +                                    }

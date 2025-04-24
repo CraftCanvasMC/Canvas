@@ -80,12 +80,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         tickScheduler.scheduler.setCoreThreads(tickScheduler.threadCount);
         ThreadedServer.LOGGER.info("Tick Scheduler is enabled with {} tick runners allocated", tickScheduler.threadCount);
         new TickSchedulerStartEvent().callEvent();
-        List<FullTick<? extends WrappedTickLoop.WrappedTick>> ticks = new ArrayList<>();
-        for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-            level.regioniser.computeForAllRegions((region) -> ticks.add(region.getData().tickHandle));
-            ticks.add(level);
-        }
-        for (final FullTick<? extends WrappedTickLoop.WrappedTick> fullTick : ticks) {
+        for (final FullTick<? extends WrappedTickLoop.WrappedTick> fullTick : FullTick.ALL_REGISTERED) {
             if (fullTick.alreadyScheduled) continue;
             fullTick.scheduleTo(tickScheduler.scheduler);
         }
@@ -361,6 +356,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
             if (alreadyScheduled) {
                 throw new RuntimeException("already scheduled " + getIdentifier());
             }
+            LOGGER.info("Scheduled tick task '{}' on scheduler", this.identifier);
             alreadyScheduled = true;
             scheduler.schedule(this);
             ALL_REGISTERED.add(this);

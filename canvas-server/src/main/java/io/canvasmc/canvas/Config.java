@@ -585,9 +585,6 @@ public class Config {
                 t.printStackTrace();
             }
         }
-        if (INSTANCE.ticking.enableThreadedRegionizing) {
-            INSTANCE.entities.enableAsyncSpawning = false; // incompatible with threaded regions
-        }
         CanvasBootstrap.LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
         return INSTANCE;
     }
