@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import org.spigotmc.AsyncCatcher;
 import org.spigotmc.RestartCommand;
 import org.spigotmc.SpigotConfig;
+import org.spigotmc.WatchdogThread;
 
 // heavily modified version of the WatchdogThread class allowing multi-registration
 // of threads through dedicated registration and docking/undocking
@@ -121,17 +122,12 @@ public class MultiWatchdogThread extends TickThread {
             for (final ThreadEntry threadEntry : REGISTRY) {
                 if (threadEntry.lastTick != 0 && this.timeoutTime > 0 && MultiWatchdogThread.hasStarted && (!server.isRunning() || (currentTime > threadEntry.lastTick + this.earlyWarningEvery && !DISABLE_WATCHDOG))) {
                     boolean isLongTimeout = currentTime > threadEntry.lastTick + this.timeoutTime || (!server.isRunning() && !server.hasStopped() && currentTime > threadEntry.lastTick + 1000);
-                    if (!threadEntry.isTicking.getAsBoolean() || threadEntry.isSleeping.getAsBoolean()) {
-                        continue;
-                    }
                     if (!isLongTimeout && (this.earlyWarningEvery <= 0 ||
                         !hasStarted || currentTime < threadEntry.lastEarlyWarning + this.earlyWarningEvery ||
-                        currentTime < threadEntry.lastTick + this.earlyWarningDelay)) {
+                        currentTime < threadEntry.lastTick + this.earlyWarningDelay))
                         continue;
-                    }
-                    if (!isLongTimeout && server.hasStopped()) {
+                    if (!isLongTimeout && server.hasStopped())
                         continue;
-                    }
                     threadEntry.lastEarlyWarning = currentTime;
                     if (isLongTimeout) {
                         LOGGER.error(BREAK);
