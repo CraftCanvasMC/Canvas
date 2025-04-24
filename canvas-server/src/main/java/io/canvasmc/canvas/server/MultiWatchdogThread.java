@@ -292,7 +292,6 @@ public class MultiWatchdogThread extends TickThread {
         for (final Entity entity : Entity.locked) {
             LOGGER.error(BREAK);
             LOGGER.error("Entity {}", entity);
-            LOGGER.error("Held by lock {} status: {}", entity.statusLock, entity.statusLock.getStatus());
             LOGGER.error("Stack:");
             if (entity.statusLock.getOwner() == null) continue;
             for (final StackTraceElement stackTraceElement : entity.statusLock.getOwner().getStackTrace()) {

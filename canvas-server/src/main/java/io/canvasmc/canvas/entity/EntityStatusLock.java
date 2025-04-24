@@ -13,10 +13,15 @@ import java.util.concurrent.locks.ReentrantLock;
 public class EntityStatusLock extends ReentrantLock {
 
     public final Entity entity;
-    private Status status;
+    private final int attempts;
+    private final long waitNanos;
+    private final boolean pollTasks;
 
-    public EntityStatusLock(Entity entity) {
+    public EntityStatusLock(Entity entity, int attempts, long waitNanos, boolean pollTasks) {
         this.entity = entity;
+        this.attempts = attempts;
+        this.waitNanos = waitNanos;
+        this.pollTasks = pollTasks;
     }
 
     public void acquire() {
@@ -25,12 +30,12 @@ public class EntityStatusLock extends ReentrantLock {
         while (!this.tryLock()) {
             // attempt 40 times before we try and exit the lock. this is equivalent to at least 40 milliseconds
             // if we don't do this, then during intra-dimensional teleports we run the risk of infinite locking.
-            if (tries++ >= 40) {
+            if (tries++ >= this.attempts) {
                 release();
                 break;
             }
-            LockSupport.parkNanos("wait for acquire", 1_000_000 /*1ms*/);
-            this.entity.level().level().getChunkSource().mainThreadProcessor.pollTask(false);
+            LockSupport.parkNanos("wait for acquire", this.waitNanos);
+            if (pollTasks) this.entity.level().level().getChunkSource().mainThreadProcessor.pollTask(false);
         }
     }
 
@@ -39,10 +44,6 @@ public class EntityStatusLock extends ReentrantLock {
         try {
             this.unlock();
         } catch (IllegalMonitorStateException ignored) {}
-    }
-
-    public Status getStatus() {
-        return status;
     }
 
     @Override
