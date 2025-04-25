@@ -2,6 +2,7 @@ package io.canvasmc.canvas.command;
 
 import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.ThreadedBukkitServer;
 import io.canvasmc.canvas.TickTimes;
 import io.canvasmc.canvas.region.ChunkRegion;
 import io.canvasmc.canvas.region.ServerRegions;
@@ -15,6 +16,7 @@ import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import it.unimi.dsi.fastutil.objects.Object2DoubleArrayMap;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -44,19 +46,18 @@ public class ThreadedServerHealthDump {
     public static final TextColor ORANGE = TextColor.color(255, 165, 0);
 
     public static boolean dump(@NotNull final CommandSender sender, boolean regionDump) {
-        ThreadedServer server = MinecraftServer.getThreadedServer();
         int build = ServerBuildInfo.buildInfo().buildNumber().orElse(-1);
         final int maxThreadCount = TickScheduler.getScheduler().scheduler.getCoreThreads().length;
-        double totalUtil = 0.0;
         final double minTps;
         final double medianTps;
         final double maxTps;
+        final Object2DoubleArrayMap<TickScheduler.FullTick<?>> utilization = new Object2DoubleArrayMap<>();
         final DoubleArrayList allTps = new DoubleArrayList();
         for (final TickScheduler.FullTick<?> fullTick : TickScheduler.FullTick.ALL_REGISTERED) {
             if (fullTick.isSleeping()) continue;
             TickTimes timings15 = fullTick.getTickTimes15s();
             allTps.add(fullTick.getTps15s().getAverage());
-            totalUtil += timings15.getUtilization();
+            utilization.put(fullTick, timings15.getUtilization());
         }
 
         allTps.sort(null);
@@ -97,7 +98,7 @@ public class ThreadedServerHealthDump {
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("Utilization: ", PRIMARY))
-                .append(Component.text(ONE_DECIMAL_PLACES.get().format(totalUtil), getColourForMSPT((totalUtil / ((double) (maxThreadCount * 100))) * 50.0)))
+                .append(Component.text(ONE_DECIMAL_PLACES.get().format(utilization.values().doubleStream().sum()), getColorForMSPT((utilization.values().doubleStream().sum() / ((double) (maxThreadCount * 100))) * 50.0)))
                 .append(Component.text("% / ", PRIMARY))
                 .append(Component.text(ONE_DECIMAL_PLACES.get().format(maxThreadCount * 100.0), INFORMATION))
                 .append(Component.text("%", PRIMARY))
@@ -112,15 +113,15 @@ public class ThreadedServerHealthDump {
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("Lowest Loop TPS: ", PRIMARY))
-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps), getColourForTPS(minTps)))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps), getColorForTPS(minTps)))
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("Median Loop TPS: ", PRIMARY))
-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps), getColourForTPS(medianTps)))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(medianTps), getColorForTPS(medianTps)))
                 .append(NEW_LINE)
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("Highest Loop TPS: ", PRIMARY))
-                .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps), getColourForTPS(maxTps)))
+                .append(Component.text(TWO_DECIMAL_PLACES.get().format(maxTps), getColorForTPS(maxTps)))
                 .append(NEW_LINE)
         );
         root.append(Component.text()
@@ -132,9 +133,9 @@ public class ThreadedServerHealthDump {
                 continue;
             }
             String location = "[" + tickLoop.toString() + "]";
-            double mspt5s = tickLoop.tickTimes5s.getAverage();
-            double tps5s = tickLoop.tps5s.getAverage();
-            double util = tickLoop.tickTimes5s.getUtilization();
+            double mspt5s = Math.min(tickLoop.tickTimes5s.getAverage(), ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks());
+            double tps5s = Math.min(tickLoop.tps5s.getAverage(), ThreadedBukkitServer.getInstance().getScheduler().getTickRate());
+            double util = utilization.getDouble(tickLoop);
             TextComponent.@NotNull Builder head = Component.text()
                 .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                 .append(Component.text("TickLoop of ", PRIMARY))
@@ -156,11 +157,11 @@ public class ThreadedServerHealthDump {
 
                 .append(Component.text()
                     .append(Component.text("    5s: ", PRIMARY, TextDecoration.BOLD))
-                    .append(Component.text(ONE_DECIMAL_PLACES.get().format(util), getColourForMSPT((util / 100) * 50.0)))
+                    .append(Component.text(ONE_DECIMAL_PLACES.get().format(util), getColorForMSPT((util / 100) * 50.0)))
                     .append(Component.text("% util at ", PRIMARY))
-                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt5s), getColourForMSPT(mspt5s)))
+                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt5s), getColorForMSPT(mspt5s)))
                     .append(Component.text(" MSPT at ", PRIMARY))
-                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps5s), getColourForTPS(tps5s)))
+                    .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps5s), getColorForTPS(tps5s)))
                     .append(Component.text(" TPS", PRIMARY)))
                 .append(NEW_LINE);
 
@@ -184,7 +185,7 @@ public class ThreadedServerHealthDump {
                 String location = "Region at " + tickHandle.world.getDebugLocation() + "|" + region.getCenterChunk();
                 double mspt5s = tickHandle.tickTimes5s.getAverage();
                 double tps5s = tickHandle.tps5s.getAverage();
-                double util = tickHandle.tickTimes5s.getUtilization();
+                double util = utilization.getDouble(region);
                 TextComponent.@NotNull Builder head = Component.text()
                     .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                     .append(Component.text("TickLoop of ", PRIMARY))
@@ -193,17 +194,17 @@ public class ThreadedServerHealthDump {
 
                     .append(Component.text()
                         .append(Component.text("    5s: ", PRIMARY, TextDecoration.BOLD))
-                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(util), getColourForMSPT((util / 100) * 50.0)))
+                        .append(Component.text(ONE_DECIMAL_PLACES.get().format(util), getColorForMSPT((util / 100) * 50.0)))
                         .append(Component.text("% util at ", PRIMARY))
-                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(mspt5s), getColourForMSPT(mspt5s)))
+                        .append(getMSPTColor(Math.min(mspt5s, ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks())))
                         .append(Component.text(" MSPT at ", PRIMARY))
-                        .append(Component.text(TWO_DECIMAL_PLACES.get().format(tps5s), getColourForTPS(tps5s)))
+                        .append(getTPSColor(Math.min(tps5s, ThreadedBukkitServer.getInstance().getScheduler().getTickRate())))
                         .append(Component.text(" TPS", PRIMARY)))
                     .append(NEW_LINE);
 
                 if ((Util.getNanos() - tickHandle.lastRespondedNanos) > TimeUnit.SECONDS.toNanos(5)) {
                     // hasn't responded in 5 seconds, warn.
-                    head.append(Component.text("    Hasn't responded in over 5 seconds! Next scheduled start in " + (tickHandle.getNextScheduledStart() - Util.getNanos()) + " nanos", TextColor.color(200, 52, 34)))
+                    head.append(Component.text("    Hasn't responded in over 5 seconds! Next scheduled start in " + TimeUnit.MILLISECONDS.convert((tickHandle.getNextScheduledStart() - Util.getNanos()), TimeUnit.NANOSECONDS) + "ms", TextColor.color(200, 52, 34)))
                         .append(NEW_LINE);
                 }
                 root.append(head.build());
@@ -213,38 +214,34 @@ public class ThreadedServerHealthDump {
         return true;
     }
 
-    public static @NotNull TextColor getColourForTPS(final double tps) {
-        final double difference = Math.min(Math.abs(20.0 - tps), 20.0);
-        final double coordinate;
-        if (difference <= 2.0) {
-            coordinate = 70.0 + ((140.0 - 70.0) / (0.0 - 2.0)) * (difference - 2.0);
-        } else if (difference <= 5.0) {
-            coordinate = 30.0 + ((70.0 - 30.0) / (2.0 - 5.0)) * (difference - 5.0);
-        } else if (difference <= 10.0) {
-            coordinate = 10.0 + ((30.0 - 10.0) / (5.0 - 10.0)) * (difference - 10.0);
-        } else {
-            coordinate = 0.0 + ((10.0 - 0.0) / (10.0 - 20.0)) * (difference - 20.0);
-        }
+    public static @NotNull TextColor getColorForTPS(final double tps) {
+        final double maxTps = ThreadedBukkitServer.getInstance().getScheduler().getTickRate();
+        final double clamped = Math.min(Math.abs(maxTps - tps), maxTps);
+        final double percent = clamped / maxTps;
 
-        return TextColor.color(HSVLike.hsvLike((float) (coordinate / 360.0), 85.0f / 100.0f, 80.0f / 100.0f));
+        final double hue = interpolateHue(percent);
+        return TextColor.color(HSVLike.hsvLike((float)(hue / 360.0), 0.85f, 0.80f));
     }
 
-    public static @NotNull TextColor getColourForMSPT(final double mspt) {
-        final double clamped = Math.min(Math.abs(mspt), 50.0);
-        final double coordinate;
-        if (clamped <= 15.0) {
-            coordinate = 130.0 + ((140.0 - 130.0) / (0.0 - 15.0)) * (clamped - 15.0);
-        } else if (clamped <= 25.0) {
-            coordinate = 90.0 + ((130.0 - 90.0) / (15.0 - 25.0)) * (clamped - 25.0);
-        } else if (clamped <= 35.0) {
-            coordinate = 30.0 + ((90.0 - 30.0) / (25.0 - 35.0)) * (clamped - 35.0);
-        } else if (clamped <= 40.0) {
-            coordinate = 15.0 + ((30.0 - 15.0) / (35.0 - 40.0)) * (clamped - 40.0);
-        } else {
-            coordinate = 0.0 + ((15.0 - 0.0) / (40.0 - 50.0)) * (clamped - 50.0);
-        }
+    public static @NotNull TextColor getColorForMSPT(final double mspt) {
+        final double idealMspt = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
+        final double clamped = Math.min(mspt, idealMspt * 2);
+        final double percent = Math.max(0.0, (clamped - idealMspt) / idealMspt);
 
-        return TextColor.color(HSVLike.hsvLike((float) (coordinate / 360.0), 85.0f / 100.0f, 80.0f / 100.0f));
+        final double hue = interpolateHue(percent);
+        return TextColor.color(HSVLike.hsvLike((float)(hue / 360.0), 0.85f, 0.80f));
     }
 
+    private static double interpolateHue(double percent) {
+        percent = Math.min(Math.max(percent, 0.0), 1.0);
+        return 130.0 * (1.0 - percent);
+    }
+
+    public static @NotNull Component getTPSColor(double tps) {
+        return Component.text(String.format("%.2f", tps)).color(getColorForTPS(tps));
+    }
+
+    public static @NotNull Component getMSPTColor(double mspt) {
+        return Component.text(String.format("%.2f", mspt)).color(getColorForMSPT(mspt));
+    }
 }

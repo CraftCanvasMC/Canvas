@@ -1,15 +1,19 @@
 --- a/src/main/java/org/purpurmc/purpur/task/TPSBarTask.java
 +++ b/src/main/java/org/purpurmc/purpur/task/TPSBarTask.java
-@@ -1,18 +_,40 @@
+@@ -1,18 +_,44 @@
  package org.purpurmc.purpur.task;
  
++import io.canvasmc.canvas.ThreadedBukkitServer;
++import io.canvasmc.canvas.command.ThreadedServerHealthDump;
 +import io.canvasmc.canvas.region.ChunkRegion;
 +import io.canvasmc.canvas.region.ServerRegions;
 +import io.papermc.paper.threadedregions.ThreadedRegionizer;
  import net.kyori.adventure.bossbar.BossBar;
  import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.format.TextColor;
  import net.kyori.adventure.text.minimessage.MiniMessage;
  import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
++import net.kyori.adventure.util.HSVLike;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;
 +import net.minecraft.server.level.ServerPlayer;
@@ -44,29 +48,22 @@
  
      public static TPSBarTask instance() {
          if (instance == null) {
-@@ -23,60 +_,72 @@
- 
-     @Override
-     BossBar createBossBar() {
--        return BossBar.bossBar(Component.text(""), 0.0F, instance().getBossBarColor(), PurpurConfig.commandTPSBarProgressOverlay);
-+        return BossBar.bossBar(Component.text(""), 0.0F, instance().getBossBarColor(null), PurpurConfig.commandTPSBarProgressOverlay); // Canvas - Pass null because we need to know where's player right now to show proper data
-     }
+@@ -28,115 +_,113 @@
  
      @Override
      void updateBossBar(BossBar bossbar, Player player) {
 -        bossbar.progress(getBossBarProgress());
--        bossbar.color(getBossBarColor());
 +        // Canvas start - get player's current world UUID and pass it to some of the methods for showing TPS and MSPT of current world
 +        UUID playerWorldUID = player.getWorld().getUID();
 +
 +        bossbar.progress(getBossBarProgress(playerWorldUID));
-+        bossbar.color(getBossBarColor(playerWorldUID));
+         bossbar.color(getBossBarColor());
          bossbar.name(MiniMessage.miniMessage().deserialize(PurpurConfig.commandTPSBarTitle,
 -                Placeholder.component("tps", getTPSColor()),
 -                Placeholder.component("mspt", getMSPTColor()),
 -                Placeholder.component("ping", getPingColor(player.getPing()))
-+            Placeholder.component("tps", getTPSColor(playerWorldUID)),
-+            Placeholder.component("mspt", getMSPTColor(playerWorldUID)),
++            Placeholder.component("tps", ThreadedServerHealthDump.getTPSColor(((CraftPlayer) player).getHandle().serverLevel().getTps5s().getAverage())),
++            Placeholder.component("mspt", ThreadedServerHealthDump.getMSPTColor(((CraftPlayer) player).getHandle().serverLevel().getTickTimes5s().getAverage())),
 +            Placeholder.component("ping", getPingColor(player.getPing()))
          ));
 +        // Canvas end
@@ -96,121 +93,105 @@
 +    private float getBossBarProgress(UUID playerWorldUID) {  // Canvas - Add UUID as an argument
          if (PurpurConfig.commandTPSBarProgressFillMode == FillMode.MSPT) {
 -            return Math.max(Math.min((float) mspt / 50.0F, 1.0F), 0.0F);
-+            return Math.max(Math.min(mspt.get(playerWorldUID).floatValue() / 50.0F, 1.0F), 0.0F); // Canvas - get MSPT from map
++            return Math.max(Math.min(mspt.get(playerWorldUID).floatValue() / ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks(), 1.0F), 0.0F); // Canvas - get MSPT from map
          } else {
 -            return Math.max(Math.min((float) tps / 20.0F, 1.0F), 0.0F);
-+            return Math.max(Math.min(tps.get(playerWorldUID).floatValue() / 20.0F, 1.0F), 0.0F); // Canvas - get TPS from map
++            return Math.max(Math.min(tps.get(playerWorldUID).floatValue() / ThreadedBukkitServer.getInstance().getScheduler().getTickRate(), 1.0F), 0.0F); // Canvas - get TPS from map
          }
      }
  
--    private BossBar.Color getBossBarColor() {
+     private BossBar.Color getBossBarColor() {
 -        if (isGood(PurpurConfig.commandTPSBarProgressFillMode)) {
-+    private BossBar.Color getBossBarColor(UUID playerWorldUID) {  // Canvas - Add UUID as an argument
-+        if(playerWorldUID == null) return PurpurConfig.commandTPSBarProgressColorGood; // Canvas - It's required to not get NPE on bossbar creation
-+
-+        // Canvas start - Pass world UUID to isGood() and isMedium() as we need it to get proper bossbar color
-+        if (isGood(PurpurConfig.commandTPSBarProgressFillMode, playerWorldUID)) {
-             return PurpurConfig.commandTPSBarProgressColorGood;
+-            return PurpurConfig.commandTPSBarProgressColorGood;
 -        } else if (isMedium(PurpurConfig.commandTPSBarProgressFillMode)) {
-+        } else if (isMedium(PurpurConfig.commandTPSBarProgressFillMode, playerWorldUID)) {
-+            // Canvas end
-             return PurpurConfig.commandTPSBarProgressColorMedium;
-         } else {
-             return PurpurConfig.commandTPSBarProgressColorLow;
-         }
-     }
- 
+-            return PurpurConfig.commandTPSBarProgressColorMedium;
+-        } else {
+-            return PurpurConfig.commandTPSBarProgressColorLow;
+-        }
+-    }
+-
 -    private boolean isGood(FillMode mode) {
 -        return isGood(mode, 0);
-+    private boolean isGood(FillMode mode, UUID playerWorldUID) {  // Canvas - Add UUID as an argument
-+        return isGood(mode, 0, playerWorldUID); // Canvas - Pass UUID
-     }
- 
+-    }
+-
 -    private boolean isGood(FillMode mode, int ping) {
-+    private boolean isGood(FillMode mode, int ping, UUID playerWorldUID) {  // Canvas - Add UUID as an argument
-         if (mode == FillMode.MSPT) {
+-        if (mode == FillMode.MSPT) {
 -            return mspt < 40;
-+            return mspt.get(playerWorldUID) < 40; // Canvas - get MSPT from map
-         } else if (mode == FillMode.TPS) {
+-        } else if (mode == FillMode.TPS) {
 -            return tps >= 19;
-+            return tps.get(playerWorldUID) >= 19; // Canvas - get TPS from map
-         } else if (mode == FillMode.PING) {
-             return ping < 100;
-         } else {
-@@ -84,15 +_,15 @@
-         }
-     }
- 
+-        } else if (mode == FillMode.PING) {
+-            return ping < 100;
+-        } else {
+-            return false;
+-        }
+-    }
+-
 -    private boolean isMedium(FillMode mode) {
 -        return isMedium(mode, 0);
-+    private boolean isMedium(FillMode mode, UUID playerWorldUID) {  // Canvas - Add UUID as an argument
-+        return isMedium(mode, 0, playerWorldUID); // Canvas - Pass UUID
-     }
- 
+-    }
+-
 -    private boolean isMedium(FillMode mode, int ping) {
-+    private boolean isMedium(FillMode mode, int ping, UUID playerWorldUID) {  // Canvas - Add UUID as an argument
-         if (mode == FillMode.MSPT) {
+-        if (mode == FillMode.MSPT) {
 -            return mspt < 50;
-+            return mspt.get(playerWorldUID) < 50; // Canvas - get MSPT from map
-         } else if (mode == FillMode.TPS) {
+-        } else if (mode == FillMode.TPS) {
 -            return tps >= 15;
-+            return tps.get(playerWorldUID) >= 15; // Canvas - get TPS from map
-         } else if (mode == FillMode.PING) {
-             return ping < 200;
-         } else {
-@@ -100,35 +_,41 @@
-         }
-     }
- 
+-        } else if (mode == FillMode.PING) {
+-            return ping < 200;
+-        } else {
+-            return false;
+-        }
+-    }
+-
 -    private Component getTPSColor() {
-+    private Component getTPSColor(UUID playerWorldUID) {  // Canvas - Add UUID as an argument
-         String color;
+-        String color;
 -        if (isGood(FillMode.TPS)) {
-+        // Canvas start - Pass world UUID to isGood() and isMedium() as we need it to get TPS
-+        if (isGood(FillMode.TPS, playerWorldUID)) {
-             color = PurpurConfig.commandTPSBarTextColorGood;
+-            color = PurpurConfig.commandTPSBarTextColorGood;
 -        } else if (isMedium(FillMode.TPS)) {
-+        } else if (isMedium(FillMode.TPS, playerWorldUID)) {
-+            // Canvas end
-             color = PurpurConfig.commandTPSBarTextColorMedium;
-         } else {
-             color = PurpurConfig.commandTPSBarTextColorLow;
-         }
+-            color = PurpurConfig.commandTPSBarTextColorMedium;
+-        } else {
+-            color = PurpurConfig.commandTPSBarTextColorLow;
+-        }
 -        return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", tps)));
-+        return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", tps.get(playerWorldUID)))); // Canvas - get TPS from map
-     }
- 
+-    }
+-
 -    private Component getMSPTColor() {
-+    private Component getMSPTColor(UUID playerWorldUID) {  // Canvas - Add UUID as an argument
-         String color;
+-        String color;
 -        if (isGood(FillMode.MSPT)) {
-+        // Canvas start - Pass world UUID to isGood() and isMedium() as we need it to get MSPT
-+        if (isGood(FillMode.MSPT, playerWorldUID)) {
-             color = PurpurConfig.commandTPSBarTextColorGood;
+-            color = PurpurConfig.commandTPSBarTextColorGood;
 -        } else if (isMedium(FillMode.MSPT)) {
-+        } else if (isMedium(FillMode.MSPT, playerWorldUID)) {
-+            // Canvas end
-             color = PurpurConfig.commandTPSBarTextColorMedium;
-         } else {
-             color = PurpurConfig.commandTPSBarTextColorLow;
-         }
+-            color = PurpurConfig.commandTPSBarTextColorMedium;
+-        } else {
+-            color = PurpurConfig.commandTPSBarTextColorLow;
+-        }
 -        return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", mspt)));
-+        return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", mspt.get(playerWorldUID)))); // Canvas - get MSPT from map
-     }
- 
-     private Component getPingColor(int ping) {
-         String color;
+-    }
+-
+-    private Component getPingColor(int ping) {
+-        String color;
 -        if (isGood(FillMode.PING, ping)) {
-+        // Canvas start - Pass null to isGood() and isMedium() as we don't need world UUID for ping
-+        if (isGood(FillMode.PING, ping, null)) {
-             color = PurpurConfig.commandTPSBarTextColorGood;
+-            color = PurpurConfig.commandTPSBarTextColorGood;
 -        } else if (isMedium(FillMode.PING, ping)) {
-+        } else if (isMedium(FillMode.PING, ping, null)) {
-+            // Canvas end
-             color = PurpurConfig.commandTPSBarTextColorMedium;
-         } else {
-             color = PurpurConfig.commandTPSBarTextColorLow;
-@@ -139,4 +_,132 @@
+-            color = PurpurConfig.commandTPSBarTextColorMedium;
+-        } else {
+-            color = PurpurConfig.commandTPSBarTextColorLow;
+-        }
+-        return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%s", ping)));
+-    }
++        return BossBar.Color.GREEN; // Canvas - rwerite TPS bars
++    }
++
++    // Canvas start - rewrite TPS bars
++    private static Component getPingColor(int ping) {
++        final double clamped = Math.min(Math.max(ping, 0), 300);
++        final double hue = 130.0 - (130.0 * (clamped / 300.0));
++        final float saturation = 0.85f;
++        final float value = 0.80f;
++
++        return Component.text(String.valueOf(ping))
++            .color(TextColor.color(HSVLike.hsvLike((float)(hue / 360.0), saturation, value)));
++    }
++    // Canvas end
+ 
      public enum FillMode {
          TPS, MSPT, PING
      }
@@ -229,7 +210,7 @@
 +
 +        @Override
 +        BossBar createBossBar() {
-+            return BossBar.bossBar(Component.text(""), 0.0F, instance().getBossBarColor(null), PurpurConfig.commandTPSBarProgressOverlay);
++            return BossBar.bossBar(Component.text(""), 0.0F, BossBar.Color.BLUE, PurpurConfig.commandTPSBarProgressOverlay);
 +        }
 +
 +        @Override
@@ -241,10 +222,10 @@
 +            }
 +
 +            bossbar.progress(getBossBarProgress(chunkRegion.getData().tickHandle));
-+            bossbar.color(getBossBarColor(chunkRegion.getData().tickHandle));
++            bossbar.color(BossBar.Color.BLUE);
 +            bossbar.name(MiniMessage.miniMessage().deserialize("<gray>Region TPS<yellow>:</yellow> <tps> Region MSPT<yellow>:</yellow> <mspt>",
-+                Placeholder.component("tps", getTPSColor(chunkRegion.getData().tickHandle)),
-+                Placeholder.component("mspt", getMSPTColor(chunkRegion.getData().tickHandle))
++                Placeholder.component("tps", ThreadedServerHealthDump.getTPSColor(chunkRegion.getData().tickHandle.getTps5s().getAverage())),
++                Placeholder.component("mspt", ThreadedServerHealthDump.getMSPTColor(chunkRegion.getData().tickHandle.getTickTimes5s().getAverage()))
 +            ));
 +        }
 +
@@ -259,86 +240,10 @@
 +
 +        private float getBossBarProgress(ChunkRegion region) {
 +            if (PurpurConfig.commandTPSBarProgressFillMode == org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT) {
-+                return Math.max(Math.min(((float) region.tickTimes5s.getAverage()) / 50.0F, 1.0F), 0.0F);
++                return Math.max(Math.min(((float) region.tickTimes5s.getAverage()) / ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks(), 1.0F), 0.0F);
 +            } else {
-+                return Math.max(Math.min(((float) region.tps5s.getAverage()) / 20.0F, 1.0F), 0.0F);
++                return Math.max(Math.min(((float) region.tps5s.getAverage()) / ThreadedBukkitServer.getInstance().getScheduler().getTickRate(), 1.0F), 0.0F);
 +            }
-+        }
-+
-+        private BossBar.Color getBossBarColor(ChunkRegion chunkRegion) {
-+            return BossBar.Color.BLUE;
-+        }
-+
-+        private boolean isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, ChunkRegion chunkRegion) {
-+            return isGood(mode, 0, chunkRegion);
-+        }
-+
-+        private boolean isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, int ping, ChunkRegion chunkRegion) {
-+            if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT) {
-+                return chunkRegion.tickTimes5s.getAverage() < 40;
-+            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS) {
-+                return chunkRegion.tps5s.getAverage() >= 19;
-+            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.PING) {
-+                return ping < 100;
-+            } else {
-+                return false;
-+            }
-+        }
-+
-+        private boolean isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, ChunkRegion chunkRegion) {
-+            return isMedium(mode, 0, chunkRegion);
-+        }
-+
-+        private boolean isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode mode, int ping, ChunkRegion chunkRegion) {
-+            if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT) {
-+                return chunkRegion.tickTimes5s.getAverage() < 50;
-+            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS) {
-+                return chunkRegion.tps5s.getAverage() >= 15;
-+            } else if (mode == org.purpurmc.purpur.task.TPSBarTask.FillMode.PING) {
-+                return ping < 200;
-+            } else {
-+                return false;
-+            }
-+        }
-+
-+        private Component getTPSColor(ChunkRegion chunkRegion) {
-+            String color;
-+            if (isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS, chunkRegion)) {
-+                color = PurpurConfig.commandTPSBarTextColorGood;
-+            } else if (isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode.TPS, chunkRegion)) {
-+                color = PurpurConfig.commandTPSBarTextColorMedium;
-+            } else {
-+                color = PurpurConfig.commandTPSBarTextColorLow;
-+            }
-+            return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", chunkRegion.tps5s.getAverage())));
-+        }
-+
-+        private Component getMSPTColor(ChunkRegion chunkRegion) {
-+            String color;
-+            if (isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT, chunkRegion)) {
-+                color = PurpurConfig.commandTPSBarTextColorGood;
-+            } else if (isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode.MSPT, chunkRegion)) {
-+                color = PurpurConfig.commandTPSBarTextColorMedium;
-+            } else {
-+                color = PurpurConfig.commandTPSBarTextColorLow;
-+            }
-+            return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%.2f", chunkRegion.tickTimes5s.getAverage())));
-+        }
-+
-+        private Component getPingColor(int ping) {
-+            String color;
-+            if (isGood(org.purpurmc.purpur.task.TPSBarTask.FillMode.PING, ping, null)) {
-+                color = PurpurConfig.commandTPSBarTextColorGood;
-+            } else if (isMedium(org.purpurmc.purpur.task.TPSBarTask.FillMode.PING, ping, null)) {
-+                color = PurpurConfig.commandTPSBarTextColorMedium;
-+            } else {
-+                color = PurpurConfig.commandTPSBarTextColorLow;
-+            }
-+            return MiniMessage.miniMessage().deserialize(color, Placeholder.parsed("text", String.format("%s", ping)));
-+        }
-+
-+        public enum FillMode {
-+            TPS, MSPT, PING
 +        }
 +    }
 +    // Canvas end

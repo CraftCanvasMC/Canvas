@@ -3,11 +3,11 @@ package io.canvasmc.canvas;
 import org.jetbrains.annotations.ApiStatus;
 
 public class TickTimes {
-    private final long[] times;
-    private final long intervalNs;
+    private long[] times;
+    private long intervalNs;
 
     public TickTimes(int length) {
-        times = new long[length];
+        this.times = new long[length];
         this.intervalNs = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
     }
 
@@ -52,8 +52,7 @@ public class TickTimes {
      * Resets the tick times. Used primarily when changing the tick rate
      */
     public void reset() {
-        for (int i = this.times.length - 1; i >= 0; i--) {
-            this.times[i] = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
-        }
+        this.times = new long[times.length];
+        this.intervalNs = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
     }
 }

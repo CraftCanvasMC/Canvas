@@ -43,11 +43,12 @@ import org.bukkit.craftbukkit.util.CraftNamespacedKey;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.DEADLINE_NOT_SET;
 
 public class TickScheduler implements MultithreadedTickScheduler {
-    public static final Logger LOGGER = LogUtils.getLogger();
+    public static final Logger LOGGER = LoggerFactory.getLogger("Scheduler");
     private static TickScheduler INSTANCE;
     private final int threadCount;
     public final ScheduledTaskThreadPool scheduler;
@@ -391,7 +392,9 @@ public class TickScheduler implements MultithreadedTickScheduler {
             }
         }
 
-        public boolean runFullTickTasks(BooleanSupplier canContinue) {
+        // Note: final so we don't override, this is for tasks scheduled to the back-bone instance only
+        // if tick task implementation want to run a custom task system, override 'runTasks'
+        public final boolean runFullTickTasks(BooleanSupplier canContinue) {
             Runnable run;
             while ((run = this.tasks.poll()) != null) {
                 if (!canContinue.getAsBoolean()) break;

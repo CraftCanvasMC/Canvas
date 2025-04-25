@@ -110,6 +110,10 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
     public boolean runTasks(final BooleanSupplier canContinue) {
         MultiWatchdogThread.RunningTick watchdogEntry = new MultiWatchdogThread.RunningTick(Util.getNanos(), this, Thread.currentThread());
         try {
+            if (this.isSleeping) {
+                // don't poll tasks if we are asleep! this is dumb!
+                return super.runTasks(canContinue);
+            }
             MultiWatchdogThread.WATCHDOG.dock(watchdogEntry);
             TickScheduler.setTickingData(level().levelTickData);
             ServerLevel worldserver = level();
