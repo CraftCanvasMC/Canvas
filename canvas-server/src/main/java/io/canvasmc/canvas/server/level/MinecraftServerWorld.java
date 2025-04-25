@@ -102,11 +102,6 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
     }
 
     @Override
-    public boolean hasTasks() {
-        return true;
-    }
-
-    @Override
     public boolean runTasks(final BooleanSupplier canContinue) {
         MultiWatchdogThread.RunningTick watchdogEntry = new MultiWatchdogThread.RunningTick(Util.getNanos(), this, Thread.currentThread());
         try {
