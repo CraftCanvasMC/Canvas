@@ -17,11 +17,11 @@ public class RollingAverage {
     public RollingAverage(int size) {
         this.size = size;
         this.time = size * SEC_IN_NANO;
-        this.total = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate()).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
+        this.total = dec(MultithreadedTickScheduler.SAMPLE_RATE).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
         this.samples = new java.math.BigDecimal[size];
         this.times = new long[size];
         for (int i = 0; i < size; i++) {
-            this.samples[i] = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate());
+            this.samples[i] = dec(MultithreadedTickScheduler.SAMPLE_RATE);
             this.times[i] = SEC_IN_NANO;
         }
     }
@@ -36,11 +36,6 @@ public class RollingAverage {
      */
     @ApiStatus.Internal
     public void add(java.math.@NotNull BigDecimal x, long t) {
-        java.math.BigDecimal maxTickRate = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate());
-        if (x.compareTo(maxTickRate) > 0) {
-            x = maxTickRate; // clamp to tick rate
-        }
-
         time -= times[index];
         total = total.subtract(samples[index].multiply(dec(times[index])));
         samples[index] = x;
@@ -64,11 +59,11 @@ public class RollingAverage {
      * Resets the times and samples. Used when updating the tick rate of the server.
      */
     public void reset() {
-        this.total = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate()).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
+        this.total = dec(MultithreadedTickScheduler.SAMPLE_RATE).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
         this.samples = new java.math.BigDecimal[size];
         this.times = new long[size];
         for (int i = 0; i < size; i++) {
-            this.samples[i] = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate());
+            this.samples[i] = dec(MultithreadedTickScheduler.SAMPLE_RATE);
             this.times[i] = SEC_IN_NANO;
         }
     }

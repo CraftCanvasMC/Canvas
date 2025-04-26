@@ -10,6 +10,11 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongComparator;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ChunkPos;
+import org.slf4j.Logger;
 import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -20,11 +25,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.ChunkPos;
-import org.slf4j.Logger;
 
 public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegionData<R, S>, S extends ThreadedRegionizer.ThreadedRegionSectionData> {
 
@@ -201,7 +201,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
     }
 
     public int computeForRegions(final int fromChunkX, final int fromChunkZ, final int toChunkX, final int toChunkZ,
-                                  final Consumer<Set<ThreadedRegion<R, S>>> consumer) {
+                                 final Consumer<Set<ThreadedRegion<R, S>>> consumer) {
         final int shift = this.sectionChunkShift;
         final int fromSectionX = fromChunkX >> shift;
         final int fromSectionZ = fromChunkZ >> shift;

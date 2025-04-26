@@ -53,7 +53,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
     private final int threadCount;
     public final ScheduledTaskThreadPool scheduler;
     public final DedicatedServer server;
-    public BigDecimal tpsBase;
+    public final BigDecimal tpsBase;
     private int tickRate;
 
     public TickScheduler(int threadCount, DedicatedServer server) {
@@ -65,7 +65,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
             TimeUnit.MILLISECONDS.toNanos(3L), TimeUnit.MILLISECONDS.toNanos(2L)
         );
         this.setTickRate(20); // default tick rate
-        this.tpsBase = new BigDecimal("1E9").multiply(new java.math.BigDecimal(getTickRate()));
+        this.tpsBase = new BigDecimal("1E9").multiply(new java.math.BigDecimal(SAMPLE_RATE));
         INSTANCE = this;
     }
 
@@ -137,9 +137,9 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
     @Override
     public void setTickRate(final int tickRate) {
+        if (tickRate <= 0) throw new IllegalArgumentException("Cannot set non-positive value for tickrate");
         // this will automatically update the schedulers, given they depend on this value
         this.tickRate = tickRate;
-        this.tpsBase = new BigDecimal("1E9").multiply(new java.math.BigDecimal(getTickRate()));
         this.server.tickRateManager().setTickRate(tickRate); // update main thread
         // reset tick times, as this is now technically inaccurate now
         for (final FullTick<?> fullTick : FullTick.ALL_REGISTERED) {
@@ -277,30 +277,19 @@ public class TickScheduler implements MultithreadedTickScheduler {
                 long tickEnd;
                 // process overload
                 long nanosecondsOverload;
-                if (tickRateManager().isSprinting() && tickRateManager().checkShouldSprintThisTick()) {
+                if (!this.server.isPaused() && this.server.tickRateManager().isSprinting() && this.server.tickRateManager().checkShouldSprintThisTick()) {
                     nanosecondsOverload = 0L;
                     this.nextTickTimeNanos = Util.getNanos();
                     this.lastOverloadWarningNanos = this.nextTickTimeNanos;
                 } else {
-                    nanosecondsOverload = tickRateManager().nanosecondsPerTick();
-                    long diff = Util.getNanos() - this.nextTickTimeNanos;
-
-                    if (diff > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * nanosecondsOverload && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * nanosecondsOverload) {
-                        long ticksBehind = diff / nanosecondsOverload;
-
-                        if (server.server.getWarnOnOverload()) {
-                            MinecraftServer.LOGGER.warn("Can't keep up! Is the {} overloaded? Running {}ms or {} ticks behind", this.getLocation(), diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind);
-                            if (Config.INSTANCE.broadcastServerTicksBehindToOps) {
-                                for (final ServerPlayer player : server.getPlayerList().players) {
-                                    if (player.getBukkitEntity().isOp()) {
-                                        player.getBukkitEntity().sendMessage(
-                                            Component.text(String.format("Can't keep up! Is the %s overloaded? Running %sms or %s ticks behind", this.getLocation(), diff / TimeUtil.NANOSECONDS_PER_MILLISECOND, ticksBehind), TextColor.color(255, 161, 14), TextDecoration.BOLD)
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        this.nextTickTimeNanos += ticksBehind * nanosecondsOverload;
+                    nanosecondsOverload = getScheduler().getTimeBetweenTicks();
+                    long l1 = Util.getNanos() - this.nextTickTimeNanos;
+                    if (l1 > MinecraftServer.OVERLOADED_THRESHOLD_NANOS + 20L * nanosecondsOverload
+                        && this.nextTickTimeNanos - this.lastOverloadWarningNanos >= MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS + 100L * nanosecondsOverload) {
+                        long l2 = l1 / nanosecondsOverload;
+                        if (this.server.server.getWarnOnOverload())
+                            LOGGER.warn("Can't keep up! Is the {} overloaded? Running {}ms or {} ticks behind", this, l1 / TimeUtil.NANOSECONDS_PER_MILLISECOND, l2);
+                        this.nextTickTimeNanos += l2 * nanosecondsOverload;
                         this.lastOverloadWarningNanos = this.nextTickTimeNanos;
                     }
                 }
@@ -324,7 +313,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
                     }
                     try {
                         tickStart = Util.getNanos();
-                        if (!this.tick.blockTick(this, doesntHaveTime ? () -> false : this::haveTime, this.tickCount++)) this.retire();
+                        if (!this.tick.blockTick(this, doesntHaveTime ? () -> false : this::haveTime, this.tickCount)) this.retire();
                         tickEnd = Util.getNanos();
                     } catch (Exception e) {
                         MultiWatchdogThread.WATCHDOG.undock(runningTick); // don't continue dock on watchdog if we fail to tick.
@@ -413,14 +402,8 @@ public class TickScheduler implements MultithreadedTickScheduler {
         }
 
         private void tickTps(long start) {
-            if (++tickCount % getScheduler().getTickRate() == 0) {
+            if (++tickCount % SAMPLE_RATE == 0) {
                 final long diff = start - tickSection;
-
-                if (diff <= 0L || diff > RollingAverage.SEC_IN_NANO * 10L) {
-                    tickSection = start;
-                    return;
-                }
-
                 final BigDecimal currentTps = getScheduler().getTpsBase().divide(new BigDecimal(diff), 30, RoundingMode.HALF_UP);
 
                 tps5s.add(currentTps, diff);

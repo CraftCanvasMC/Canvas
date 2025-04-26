@@ -8,6 +8,7 @@ import java.math.BigDecimal;
  * An interface into Canvas' tick scheduler
  */
 public interface MultithreadedTickScheduler {
+    int SAMPLE_RATE = 20;
 
     /**
      * Creates a new "full tick", which contains and manages logic ticking

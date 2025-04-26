@@ -8,7 +8,7 @@ public class TickTimes {
 
     public TickTimes(int length) {
         this.times = new long[length];
-        this.intervalNs = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
+        this.intervalNs = 50 * 1_000_000;
     }
 
     /**
@@ -53,6 +53,6 @@ public class TickTimes {
      */
     public void reset() {
         this.times = new long[times.length];
-        this.intervalNs = ThreadedBukkitServer.getInstance().getScheduler().getTimeBetweenTicks();
+        this.intervalNs = 50 * 1_000_000;
     }
 }
