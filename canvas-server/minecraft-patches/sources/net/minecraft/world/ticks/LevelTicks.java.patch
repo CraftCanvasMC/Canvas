@@ -1,12 +1,18 @@
 --- a/net/minecraft/world/ticks/LevelTicks.java
 +++ b/net/minecraft/world/ticks/LevelTicks.java
-@@ -1,5 +_,6 @@
+@@ -1,9 +_,12 @@
  package net.minecraft.world.ticks;
  
++import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
 +import io.canvasmc.canvas.region.ServerRegions;
  import it.unimi.dsi.fastutil.longs.Long2LongMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMaps;
  import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
++import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
+ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+ import it.unimi.dsi.fastutil.longs.Long2LongMap.Entry;
+ import it.unimi.dsi.fastutil.objects.ObjectIterator;
 @@ -16,6 +_,7 @@
  import java.util.PriorityQueue;
  import java.util.Queue;
@@ -15,6 +21,23 @@
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
+@@ -26,13 +_,15 @@
+ import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.level.ChunkPos;
++import net.minecraft.world.level.chunk.LevelChunk;
++import net.minecraft.world.level.chunk.status.ChunkStatus;
+ import net.minecraft.world.level.levelgen.structure.BoundingBox;
+ 
+ public class LevelTicks<T> implements LevelTickAccess<T> {
+     private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (levelChunkTicks, levelChunkTicks1) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER
+         .compare(levelChunkTicks.peek(), levelChunkTicks1.peek());
+     private final LongPredicate tickCheck;
+-    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = new Long2ObjectOpenHashMap<>();
++    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>()); // Canvas - synchronize
+     private final Long2LongMap nextTickForContainer = Util.make(new Long2LongOpenHashMap(), map -> map.defaultReturnValue(Long.MAX_VALUE));
+     private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
+     private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
 @@ -43,12 +_,76 @@
              this.updateContainerScheduling(scheduledTick);
          }
@@ -35,7 +58,7 @@
 +        // are all transient state, only ever non-empty during tick. But merging regions occurs while there
 +        // is no tick happening, so we assume they are empty.
 +        for (final java.util.Iterator<Long2ObjectMap.Entry<LevelChunkTicks<T>>> iterator =
-+             ((Long2ObjectOpenHashMap<LevelChunkTicks<T>>)this.allContainers).long2ObjectEntrySet().fastIterator();
++             (this.allContainers).long2ObjectEntrySet().iterator();
 +             iterator.hasNext();) {
 +            final Long2ObjectMap.Entry<LevelChunkTicks<T>> entry = iterator.next();
 +            final LevelChunkTicks<T> tickContainer = entry.getValue();
@@ -52,7 +75,7 @@
 +    public void split(final int chunkToRegionShift,
 +                      final it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<LevelTicks<T>> regionToData) {
 +        for (final java.util.Iterator<Long2ObjectMap.Entry<LevelChunkTicks<T>>> iterator =
-+             ((Long2ObjectOpenHashMap<LevelChunkTicks<T>>)this.allContainers).long2ObjectEntrySet().fastIterator();
++             (this.allContainers).long2ObjectEntrySet().iterator();
 +             iterator.hasNext();) {
 +            final Long2ObjectMap.Entry<LevelChunkTicks<T>> entry = iterator.next();
 +
@@ -94,7 +117,7 @@
          long packedChunkPos = chunkPos.toLong();
          this.allContainers.put(packedChunkPos, chunkTicks);
          ScheduledTick<T> scheduledTick = chunkTicks.peek();
-@@ -56,20 +_,32 @@
+@@ -56,30 +_,48 @@
              this.nextTickForContainer.put(packedChunkPos, scheduledTick.triggerTick());
          }
  
@@ -124,11 +147,15 @@
  
      @Override
      public void schedule(ScheduledTick<T> tick) {
-+        try { lock.lock(); // Canvas - lock
          long packedChunkPos = ChunkPos.asLong(tick.pos());
++        ChunkPos position = new ChunkPos(tick.pos());
++        LevelChunk chunk = (LevelChunk) this.world.getChunk(position.x, position.z, ChunkStatus.FULL, true);
++        if (chunk == null) throw new RuntimeException("chunk was null when scheduling");
++        if (!this.allContainers.containsKey(packedChunkPos)) chunk.registerTickContainerInLevel(this.world);
++        try { lock.lock(); // Canvas - lock
          LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(packedChunkPos);
          if (levelChunkTicks == null) {
-@@ -77,9 +_,11 @@
+             Util.logAndPauseIfInIde("Trying to schedule tick in not loaded position " + tick.pos());
          } else {
              levelChunkTicks.schedule(tick);
          }

@@ -206,7 +206,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
         protected boolean wasSleeping;
         public int tickCount;
         public final AtomicBoolean cancelled = new AtomicBoolean(false);
-        private long tickSection;
+        private volatile long tickSection;
         private long nextTickTimeNanos;
         private long lastOverloadWarningNanos;
         private boolean hasInitSchedule;
@@ -225,6 +225,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
             this.setScheduledStart(System.nanoTime() + getScheduler().getTimeBetweenTicks());
             this.tickSchedule = new Schedule(DEADLINE_NOT_SET);
             this.constructorInit = Util.getNanos();
+            this.tickSection = this.constructorInit;
         }
 
         @Override
@@ -414,7 +415,14 @@ public class TickScheduler implements MultithreadedTickScheduler {
         private void tickTps(long start) {
             if (++tickCount % getScheduler().getTickRate() == 0) {
                 final long diff = start - tickSection;
-                final BigDecimal currentTps = getScheduler().getTpsBase().divide(new BigDecimal(diff), 30, RoundingMode.HALF_UP); // Canvas - rewrite tick system
+
+                if (diff <= 0L || diff > RollingAverage.SEC_IN_NANO * 10L) {
+                    tickSection = start;
+                    return;
+                }
+
+                final BigDecimal currentTps = getScheduler().getTpsBase().divide(new BigDecimal(diff), 30, RoundingMode.HALF_UP);
+
                 tps5s.add(currentTps, diff);
                 tps1m.add(currentTps, diff);
                 tps15s.add(currentTps, diff);

@@ -241,63 +241,6 @@ public class MultiWatchdogThread extends TickThread {
                 LOGGER.error("\t\t{}", stack);
             }
         }
-        LOGGER.error(BREAK);
-        LOGGER.error("Active Chunk Workers {}", MoonriseCommon.WORKER_POOL.getAliveThreads());
-        int queuedTasks = 0;
-        for (final TickScheduler.FullTick<?> fullTick : TickScheduler.FullTick.ALL_REGISTERED) {
-            if (!fullTick.tasks.isEmpty()) {
-                LOGGER.error("{} has {} full tick tasks scheduled", fullTick, fullTick.tasks.size());
-            }
-            queuedTasks += fullTick.tasks.size();
-            if (fullTick instanceof ServerLevel level) {
-                if (!level.taskQueueRegionData.globalChunkTask.isEmpty()) {
-                    LOGGER.error("{} has {} global chunk tasks scheduled", fullTick, level.taskQueueRegionData.globalChunkTask.size());
-                }
-                queuedTasks += level.taskQueueRegionData.globalChunkTask.size();
-                if (level.getChunkSource().mainThreadProcessor.getPendingTasksCount() > 0) {
-                    LOGGER.error("{} has {} tasks pending in its main thread processor", fullTick, level.getChunkSource().mainThreadProcessor.getPendingTasksCount());
-                }
-                queuedTasks += level.getChunkSource().mainThreadProcessor.getPendingTasksCount();
-                // public boolean hasNoScheduledTasks() {
-                //         final long executedTasks = this.executedTasks.get();
-                //         final long scheduledTasks = this.scheduledTasks.get();
-                //
-                //         return executedTasks == scheduledTasks;
-                //     }
-                if (((int) (level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksScheduled() - level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksExecuted())) > 0) {
-                    LOGGER.error("{} has {} tasks pending in its chunk task scheduler", fullTick, (int) (level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksScheduled() - level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksExecuted()));
-                }
-                queuedTasks += (int) (level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksScheduled() - level.moonrise$getChunkTaskScheduler().mainThreadExecutor.getTotalTasksExecuted());
-            }
-            if (fullTick instanceof ChunkRegion region) {
-                if (region.region.getData().tickData.taskQueueData.size() > 0) {
-                    LOGGER.error("{} has {} tasks queued in its task queue", region, region.region.getData().tickData.taskQueueData.size());
-                    if (region.owner != null) {
-                        for (final StackTraceElement stackTraceElement : region.owner.getStackTrace()) {
-                            LOGGER.error("\t\t{}", stackTraceElement);
-                        }
-                    }
-                    if (region.world.owner != null) {
-                        for (final StackTraceElement stackTraceElement : region.world.owner.getStackTrace()) {
-                            LOGGER.error("\t\t{}", stackTraceElement);
-                        }
-                    }
-                }
-                queuedTasks += region.region.getData().tickData.taskQueueData.size();
-            }
-        }
-        LOGGER.error("Total tasks queued {}", queuedTasks);
-        LOGGER.error(BREAK);
-        LOGGER.error("Current Locked Entity Statuses");
-        for (final Entity entity : Entity.locked) {
-            LOGGER.error(BREAK);
-            LOGGER.error("Entity {}", entity);
-            LOGGER.error("Stack:");
-            if (entity.statusLock.getOwner() == null) continue;
-            for (final StackTraceElement stackTraceElement : entity.statusLock.getOwner().getStackTrace()) {
-                LOGGER.error("\t\t{}", stackTraceElement);
-            }
-        }
     }
 
     public void dock(final RunningTick tick) {

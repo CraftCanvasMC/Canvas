@@ -164,6 +164,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
 
     private void onRegionDestroy(final ThreadedRegion<R, S> region) {
         final ThreadedRegion<R, S> removed = this.regionsById.remove(region.id);
+        if (removed == null) return; // Canvas - it's removed already, but will cause a throw for no reason
         if (removed != region) {
             throw new IllegalStateException("Expected to remove " + region + ", but removed " + removed);
         }
@@ -836,7 +837,7 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
 
             this.regioniser.callbacks.preMerge(this, mergeTarget);
 
-            this.tryKill();
+            if (!this.tryKill()) return false; // Canvas - return if cant kill
 
             this.mergeInto(mergeTarget);
 
