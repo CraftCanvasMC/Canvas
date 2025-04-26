@@ -36,6 +36,11 @@ public class RollingAverage {
      */
     @ApiStatus.Internal
     public void add(java.math.@NotNull BigDecimal x, long t) {
+        java.math.BigDecimal maxTickRate = dec(ThreadedBukkitServer.getInstance().getScheduler().getTickRate());
+        if (x.compareTo(maxTickRate) > 0) {
+            x = maxTickRate; // clamp to tick rate
+        }
+
         time -= times[index];
         total = total.subtract(samples[index].multiply(dec(times[index])));
         samples[index] = x;

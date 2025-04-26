@@ -168,10 +168,8 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
                         processedChunkTask |= executeChunkTask;
                     } while ((executeChunkTask | executeTickTask));
 
-                    if (processedChunkTask) {
-                        // if we processed any chunk tasks, try to process ticket level updates for full status changes
-                        this.world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
-                    }
+                    // if we processed any chunk tasks, try to process ticket level updates for full status changes
+                    this.world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
                     boolean runsNormally = tickRateManager.runsNormally();
                     this.world.tickConnection(data); // tick connection on region
                     data.tpsCalculator.doTick();
