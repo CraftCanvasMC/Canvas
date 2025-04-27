@@ -19,7 +19,7 @@ public class ResendChunksCommand implements CommandInstance {
     @Override
     public LiteralCommandNode<CommandSourceStack> register(@NotNull CommandDispatcher<CommandSourceStack> dispatcher) {
         return dispatcher.register(
-            literal("resendchunks").requires(commandSourceStack -> commandSourceStack.hasPermission(3, "canvas.world.command.chunkresend"))
+            literal("resendchunks").requires(commandSourceStack -> commandSourceStack.hasPermission(3, "canvas.debug.command.chunkresend"))
                 .executes(context -> {
                     if (context.getSource().getEntity() instanceof ServerPlayer player) {
                         PlayerChunkSender sender = player.connection.chunkSender;

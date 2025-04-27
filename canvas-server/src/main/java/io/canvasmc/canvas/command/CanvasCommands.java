@@ -4,6 +4,7 @@ import com.google.common.collect.Sets;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.canvasmc.canvas.CanvasBootstrap;
+import io.canvasmc.canvas.command.debug.FlySpeedCommand;
 import io.canvasmc.canvas.command.debug.PriorityCommand;
 import io.canvasmc.canvas.command.debug.ResendChunksCommand;
 import io.canvasmc.canvas.command.debug.SenderInfoCommand;
@@ -32,11 +33,13 @@ public final class CanvasCommands {
         register(ViewDistanceCommand::new);
         register(SetMaxPlayersCommand::new);
         if (CanvasBootstrap.RUNNING_IN_IDE) {
+            CanvasBootstrap.LOGGER.info("Registering Canvas debug commands");
             register(ResendChunksCommand::new);
             register(SenderInfoCommand::new);
             register(TrackingControlCommand::new);
             register(SyncloadCommand::new);
             register(PriorityCommand::new);
+            register(FlySpeedCommand::new);
 
             CanvasBootstrap.LOGGER.info("Registering Minecraft debug commands");
             RaidCommand.register(dispatcher, context);
