@@ -113,7 +113,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             TickScheduler.setTickingData(level().levelTickData);
             ServerLevel worldserver = level();
 
-            worldserver.getChunkSource().pollTask();
+            worldserver.getChunkSource().mainThreadProcessor.pollTask(!Config.INSTANCE.ticking.enableThreadedRegionizing);
             return super.runTasks(canContinue);
         } finally {
             TickScheduler.setTickingData(null);
@@ -128,6 +128,11 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
     @Override
     public World getWorld() {
         return this.level().getWorld();
+    }
+
+    @Override
+    public boolean hasTasks() {
+        return true;
     }
 
     @Override
