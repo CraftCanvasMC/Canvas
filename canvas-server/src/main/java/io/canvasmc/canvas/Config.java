@@ -15,20 +15,11 @@ import io.canvasmc.canvas.config.annotation.numeric.Range;
 import io.canvasmc.canvas.config.impl.ConfigAccess;
 import io.canvasmc.canvas.config.internal.ConfigurationManager;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import io.canvasmc.canvas.util.YamlTextFormatter;
-import io.papermc.paper.adventure.PaperAdventure;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.minecraft.Util;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.ai.goal.Goal;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -287,7 +278,6 @@ public class Config {
     public static class Entities {
 
         public Pathfinding pathfinding = new Pathfinding();
-
         public static class Pathfinding {
             @AlwaysAtTop
             public boolean enableThreadedPathfinding = true;
@@ -340,6 +330,10 @@ public class Config {
 
         @Comment("Disables saving firework entities. This patches certain lag machines.")
         public boolean disableFireworkSaving = false;
+
+        @Range(from = -1, to = 100, inclusive = true)
+        @Comment("The chance a villager will light a firework in celebration of a raids completion. -1 to disable, must be a value between 0 and 100 inclusive.")
+        public int villagerCelebrationFireworksChance = 5;
 
         public Cramming cramming = new Cramming();
         public static class Cramming {
@@ -568,6 +562,11 @@ public class Config {
                     // build and print config tree.
                     YamlTextFormatter formatter = new YamlTextFormatter(4);
                     CanvasBootstrap.LOGGER.info(Component.text("Printing configuration tree:").appendNewline().append(formatter.apply(context.contents())));
+                }
+                if (CanvasBootstrap.RUNNING_IN_IDE) {
+                    INSTANCE.debug.regionTeleports = true;
+                    INSTANCE.debug.printConfigurationTree = true;
+                    INSTANCE.debug.taskRetire = true;
                 }
             })
             .build(config, configClass)

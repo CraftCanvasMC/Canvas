@@ -667,6 +667,7 @@ public class ServerRegions {
             // let's ensure we actually run this on the appropriate region
             if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
+                if (theRegion == null) return this.localPlayers;
                 if (theRegion.getData().tickData != this) {
                     return theRegion.getData().tickData.localPlayers;
                 }
