@@ -14,10 +14,10 @@ import io.canvasmc.canvas.config.annotation.numeric.PositiveNumericValue;
 import io.canvasmc.canvas.config.annotation.numeric.Range;
 import io.canvasmc.canvas.config.impl.ConfigAccess;
 import io.canvasmc.canvas.config.internal.ConfigurationManager;
+import io.canvasmc.canvas.util.YamlTextFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import io.canvasmc.canvas.util.YamlTextFormatter;
 import net.kyori.adventure.text.Component;
 import net.minecraft.Util;
 import org.jetbrains.annotations.NotNull;
@@ -74,6 +74,12 @@ public class Config {
 
         @Comment("The amount of time(in seconds) before watchdog starts printing error logs from slowdown")
         public long watchdogLoggingTime = 4L;
+
+        @Comment(value = {
+            "This enables the consistent use of chunk task polling/running in-between ticks",
+            "This does result in higher CPU usage, but better chunk system performance."
+        })
+        public boolean tickChunkTasksBetweenTicks = false;
     }
 
     public Chunks chunks = new Chunks();
@@ -366,17 +372,8 @@ public class Config {
         public boolean randomTickSpeedAcceleration = true;
     }
 
-    @Comment("Ignores messages like 'moved too quickly' and 'moved wrongly'")
-    public boolean alwaysAllowWeirdMovement = true;
-
     @Comment("Disables being disconnected from 'multiplayer.disconnect.invalid_player_movement', and just silently declines the packet handling.")
     public boolean gracefulTeleportHandling = true;
-
-    @Comment(value = {
-        "Ignore \"<player> moved too quickly\" if the server is lagging. Improves general",
-        "gameplay experience of the player when the server is lagging, as they wont get lagged back"
-    })
-    public boolean ignoreMovedTooQuicklyWhenLagging = true;
 
     public Networking networking = new Networking();
     public static class Networking {

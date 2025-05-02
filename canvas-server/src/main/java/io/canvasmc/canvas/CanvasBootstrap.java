@@ -1,6 +1,5 @@
 package io.canvasmc.canvas;
 
-import com.mojang.logging.LogUtils;
 import io.papermc.paper.ServerBuildInfo;
 import java.io.File;
 import java.io.IOException;
@@ -213,6 +212,7 @@ public class CanvasBootstrap {
                 System.setProperty("jdk.console", "java.base");
 
                 SharedConstants.tryDetectVersion();
+                // EULA start - copied from Main
                 Path path2 = Paths.get("eula.txt");
                 Eula eula = new Eula(path2);
                 boolean eulaAgreed = Boolean.getBoolean("com.mojang.eula.agree");
@@ -225,6 +225,7 @@ public class CanvasBootstrap {
                     LOGGER.info("You need to agree to the EULA in order to run the server. Go to eula.txt for more info.");
                     System.exit(0);
                 }
+                // EULA end
 
                 getStartupVersionMessages().forEach(LOGGER::info);
             } catch (Throwable t) {

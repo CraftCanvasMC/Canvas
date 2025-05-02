@@ -1,16 +1,13 @@
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -13,6 +_,16 @@
+@@ -13,6 +_,13 @@
  import com.mojang.jtracy.DiscontinuousFrame;
  import com.mojang.jtracy.TracyClient;
  import com.mojang.logging.LogUtils;
 +import io.canvasmc.canvas.Config;
-+import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
 +import io.canvasmc.canvas.scheduler.TickScheduler;
-+import io.canvasmc.canvas.server.AverageTickTimeAccessor;
 +import io.canvasmc.canvas.server.MultiWatchdogThread;
 +import io.canvasmc.canvas.server.ThreadedServer;
-+import io.canvasmc.canvas.server.level.TickRateManagerInstance;
 +import io.canvasmc.canvas.util.ConnectionPool;
 +import io.canvasmc.canvas.util.TPSCalculator;
 +import io.canvasmc.canvas.util.AsyncProcessor;
@@ -25,11 +22,10 @@
  import java.util.List;
  import java.util.Locale;
  import java.util.Map;
-@@ -42,7 +_,8 @@
- import java.util.Map.Entry;
+@@ -43,6 +_,8 @@
  import java.util.concurrent.CompletableFuture;
  import java.util.concurrent.Executor;
--import java.util.concurrent.RejectedExecutionException;
+ import java.util.concurrent.RejectedExecutionException;
 +import java.util.concurrent.Executors;
 +import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicReference;
@@ -51,14 +47,7 @@
  import net.minecraft.server.level.DemoMode;
  import net.minecraft.server.level.PlayerRespawnLogic;
  import net.minecraft.server.level.ServerChunkCache;
-@@ -129,13 +_,13 @@
- import net.minecraft.util.profiling.metrics.storage.MetricsPersister;
- import net.minecraft.util.thread.ReentrantBlockableEventLoop;
- import net.minecraft.world.Difficulty;
--import net.minecraft.world.RandomSequences;
- import net.minecraft.world.entity.ai.village.VillageSiege;
- import net.minecraft.world.entity.npc.CatSpawner;
- import net.minecraft.world.entity.npc.WanderingTraderSpawner;
+@@ -136,6 +_,7 @@
  import net.minecraft.world.entity.player.Player;
  import net.minecraft.world.flag.FeatureFlagSet;
  import net.minecraft.world.flag.FeatureFlags;
@@ -66,22 +55,6 @@
  import net.minecraft.world.item.alchemy.PotionBrewing;
  import net.minecraft.world.item.crafting.RecipeManager;
  import net.minecraft.world.level.ChunkPos;
-@@ -150,7 +_,6 @@
- import net.minecraft.world.level.biome.BiomeManager;
- import net.minecraft.world.level.block.Block;
- import net.minecraft.world.level.block.entity.FuelValues;
--import net.minecraft.world.level.border.BorderChangeListener;
- import net.minecraft.world.level.border.WorldBorder;
- import net.minecraft.world.level.chunk.storage.ChunkIOErrorReporter;
- import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
-@@ -161,7 +_,6 @@
- import net.minecraft.world.level.levelgen.WorldOptions;
- import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
- import net.minecraft.world.level.storage.CommandStorage;
--import net.minecraft.world.level.storage.DerivedLevelData;
- import net.minecraft.world.level.storage.DimensionDataStorage;
- import net.minecraft.world.level.storage.LevelData;
- import net.minecraft.world.level.storage.LevelResource;
 @@ -171,18 +_,21 @@
  import net.minecraft.world.level.storage.WorldData;
  import net.minecraft.world.phys.Vec2;
@@ -90,8 +63,7 @@
 +import org.bukkit.event.player.PlayerRespawnEvent;
  import org.slf4j.Logger;
  
--public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer { // Paper - rewrite chunk system
-+public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer, TickRateManagerInstance, AverageTickTimeAccessor { // Paper - rewrite chunk system // Canvas - Threaded Dimensions
+ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTask> implements ServerInfo, ChunkIOErrorReporter, CommandSource, ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer { // Paper - rewrite chunk system
      private static MinecraftServer SERVER; // Paper
 +    private static ThreadedServer THREADED_SERVER; // Canvas
      public static final Logger LOGGER = LogUtils.getLogger();
@@ -111,7 +83,7 @@
      public LevelStorageSource.LevelStorageAccess storageSource;
      public final PlayerDataStorage playerDataStorage;
      private final List<Runnable> tickables = Lists.newArrayList();
-+    public volatile boolean notifyStop; // Canvas - volatile
++    public volatile boolean notifyStop; // Canvas - better notification of stop - volatile
      private MetricsRecorder metricsRecorder = InactiveMetricsRecorder.INSTANCE;
      private Consumer<ProfileResults> onMetricsRecordingStopped = results -> this.stopRecordingMetrics();
      private Consumer<Path> onMetricsRecordingFinished = path -> {};
@@ -168,40 +140,32 @@
      @Deprecated(forRemoval = true) // Paper
      public final double[] recentTps = new double[4]; // Purpur - Add 5 second tps average in /tps
      // Spigot end
-@@ -302,17 +_,40 @@
+@@ -302,17 +_,32 @@
      public volatile Thread shutdownThread; // Paper - Improved watchdog support
      public final io.papermc.paper.configuration.PaperConfigurations paperConfigurations; // Paper - add paper configuration files
      public boolean isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
 -    private final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping
 +    public final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping // Canvas - private -> public
++    public AsyncProcessor mobSpawnExecutor = new AsyncProcessor("MobSpawning");
      public boolean lagging = false; // Purpur - Lagging threshold
      public static final long SERVER_INIT = System.nanoTime(); // Paper - Lag compensation
      protected boolean upnp = false; // Purpur - UPnP Port Forwarding
  
-+    // Canvas start - Multithreaded Dimension Ticking
++    // Canvas start - Threaded Dimensions
 +    private volatile boolean isTicking = false;
-+    public final TPSCalculator tpsCalculator = new TPSCalculator(); // Lag compensation
++    public final TPSCalculator tpsCalculator = new TPSCalculator(); // lag compensation
 +    public final ConnectionPool connectionPool = new ConnectionPool(this);
 +
 +    public boolean isTicking() {
 +        return isTicking;
 +    }
 +
-+    @Override
-+    public void broadcastPacketsToPlayers(final Packet<?> packet) {
-+        this.playerList.broadcastAll(packet);
-+    }
-+
-+    @Override
-+    public double getAverageTickTime() {
-+        return this.tickTimes5s.getAverage();
-+    }
 +    // Canvas end
      public static <S extends MinecraftServer> S spin(Function<Thread, S> threadFunction) {
          ca.spottedleaf.dataconverter.minecraft.datatypes.MCTypeRegistry.init(); // Paper - rewrite data converter system
          AtomicReference<S> atomicReference = new AtomicReference<>();
 -        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> atomicReference.get().runServer(), "Server thread");
-+        // Canvas start - Threaded Dimensions
++        // Canvas start - Threaded Server
 +        Thread thread = new ca.spottedleaf.moonrise.common.util.TickThread(() -> {
 +            THREADED_SERVER.spin();
 +        }, "Server thread");
@@ -212,15 +176,7 @@
          if (Runtime.getRuntime().availableProcessors() > 4) {
              thread.setPriority(8);
          }
-@@ -324,19 +_,19 @@
-     }
- 
-     // Paper start - rewrite chunk system
--    private volatile Throwable chunkSystemCrash;
-+    private volatile @Nullable Throwable chunkSystemCrash; // Canvas - nullable
- 
-     @Override
-     public final void moonrise$setChunkSystemCrash(final Throwable throwable) {
+@@ -331,12 +_,12 @@
          this.chunkSystemCrash = throwable;
      }
  
@@ -309,11 +265,11 @@
  
      // CraftBukkit start
 -    private boolean hasStopped = false;
-+    public volatile boolean hasStopped = false; // Canvas - private -> public // volatile
++    public volatile boolean hasStopped = false; // Canvas - private -> public - volatile
      private boolean hasLoggedStop = false; // Paper - Debugging
      private final Object stopLock = new Object();
      public final boolean hasStopped() {
-@@ -990,20 +_,70 @@
+@@ -990,19 +_,69 @@
  
      public void stopServer() {
          // CraftBukkit start - prevent double stopping on multiple threads
@@ -382,30 +338,22 @@
          }
  
 -        LOGGER.info("Stopping server");
--        Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
-+        // Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing // Canvas - move down
+         Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
          // Purpur start - UPnP Port Forwarding
          if (upnp) {
-             if (dev.omega24.upnp4j.UPnP4J.close(this.getPort(), dev.omega24.upnp4j.util.Protocol.TCP)) {
-@@ -1019,6 +_,7 @@
-             this.server.disablePlugins();
-             this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
+@@ -1078,12 +_,15 @@
          }
-+        Commands.COMMAND_SENDING_POOL.shutdownNow(); // Canvas - move after plugins disable
-         // CraftBukkit end
-         if (io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper != null) io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper.shutdown(); // Paper - Plugin remapping
-         this.getConnection().stop();
-@@ -1079,11 +_,13 @@
          // Paper end - rewrite chunk system
          // Paper start - Improved watchdog support - move final shutdown items here
++        LOGGER.info("Shutting down executors"); // Canvas - better shutdown logging
          Util.shutdownExecutors();
-+        LOGGER.info("Shutdown executors"); // Canvas - better shutdown logging
++        this.mobSpawnExecutor.shutdown(); // Canvas - async mob spawning
          try {
              net.minecrell.terminalconsole.TerminalConsoleAppender.close(); // Paper - Use TerminalConsoleAppender
          } catch (final Exception ignored) {
          }
          io.papermc.paper.log.CustomLogManager.forceReset(); // Paper - Reset loggers after shutdown
-+        LOGGER.info("Exiting server..."); // Canvas - better shutdown logging
++        LOGGER.info("Exiting server"); // Canvas - better shutdown logging
          this.onServerExit();
          // Paper end - Improved watchdog support - move final shutdown items here
      }
@@ -430,15 +378,6 @@
  
      public static class RollingAverage {
          private final int size;
-@@ -1139,7 +_,7 @@
-         private final java.math.BigDecimal[] samples;
-         private final long[] times;
- 
--        RollingAverage(int size) {
-+        public RollingAverage(int size) { // Canvas - public
-             this.size = size;
-             this.time = size * SEC_IN_NANO;
-             this.total = dec(TPS).multiply(dec(SEC_IN_NANO)).multiply(dec(size));
 @@ -1170,10 +_,11 @@
              return total.divide(dec(time), 30, java.math.RoundingMode.HALF_UP).doubleValue();
          }
@@ -498,9 +437,9 @@
 +        }
 +
 +        currentTime = Util.getNanos();
-+        if (++MinecraftServer.currentTick % getThreadedServer().getScheduler().getTickRate() == 0) { // Canvas - rewrite tick system - sample interval == tick rate
++        if (++MinecraftServer.currentTick % getThreadedServer().getScheduler().getSampleRate() == 0) {
 +            final long diff = currentTime - tickSection;
-+            final java.math.BigDecimal currentTps = getThreadedServer().getScheduler().getTpsBase().divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP); // Canvas - rewrite tick system
++            final java.math.BigDecimal currentTps = getThreadedServer().getScheduler().getTpsBase().divide(new java.math.BigDecimal(diff), 30, java.math.RoundingMode.HALF_UP);
 +            tps5s.add(currentTps, diff);
 +            tps1.add(currentTps, diff);
 +            tps5.add(currentTps, diff);
@@ -778,18 +717,18 @@
  
          profilerFiller.popPush("connection");
          this.tickConnection();
-@@ -1797,9 +_,8 @@
+@@ -1797,10 +_,7 @@
  
          profilerFiller.popPush("send chunks");
  
 -        for (ServerPlayer serverPlayer : this.playerList.getPlayers()) {
 -            serverPlayer.connection.chunkSender.sendNextChunks(serverPlayer);
 -            serverPlayer.connection.resumeFlushing();
-+        for (final ServerPlayer serverPlayer : this.playerList.players) {
-+            // Canvas - Threaded Dimensions
-         }
+-        }
++        // Canvas - Threaded Dimensions
  
          profilerFiller.pop();
+     }
 @@ -1810,6 +_,12 @@
      }
  
@@ -812,61 +751,13 @@
          }
  
          profilerFiller.pop();
-@@ -1863,6 +_,7 @@
-         Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
-         newLevels.put(level.dimension(), level);
-         this.levels = Collections.unmodifiableMap(newLevels);
-+        getThreadedServer().loadLevel(level); // Canvas - add level to threaded context
-     }
- 
-     public void removeLevel(ServerLevel level) {
 @@ -1870,6 +_,7 @@
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.remove(level.dimension());
          this.levels = Collections.unmodifiableMap(newLevels);
-+        getThreadedServer().stopLevel(level); // Canvas - remove level from threaded context
++        level.retire(); // Canvas - Threaded Dimensions
      }
      // CraftBukkit end
- 
-@@ -2200,6 +_,13 @@
-     public Thread getRunningThread() {
-         return this.serverThread;
-     }
-+    // Canvas start - Threaded Dimensions - Improve Watchdog
-+
-+    @Override
-+    public String getName() {
-+        return "server";
-+    }
-+    // Canvas end
- 
-     public int getCompressionThreshold() {
-         return 256;
-@@ -2303,6 +_,7 @@
-         if (this.isSameThread()) {
-             this.managedBlock(completableFuture::isDone);
-         }
-+        // Canvas end
- 
-         return completableFuture;
-     }
-@@ -2497,7 +_,17 @@
-         return this.smoothedTickTimeMillis;
-     }
- 
-+    // Canvas start
-+
-+    @Override
-+    public void skipTickWait() {
-+        this.delayedTasksMaxNextTickTimeNanos = Util.getNanos();
-+        this.nextTickTimeNanos = Util.getNanos();
-+    }
-+
-+    @Override
-     public ServerTickRateManager tickRateManager() {
-+    // Canvas end
-         return this.tickRateManager;
-     }
  
 @@ -2638,6 +_,12 @@
      public static MinecraftServer getServer() {

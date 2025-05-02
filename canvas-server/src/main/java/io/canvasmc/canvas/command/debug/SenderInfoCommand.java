@@ -81,7 +81,6 @@ public class SenderInfoCommand implements CommandInstance {
                             }
                         }
                         player.sendSystemMessage(Component.literal("Dumped current pending tasks to console with further debug information."));
-                        player.sendSystemMessage(Component.literal("Pending full: " + player.serverLevel().moonrise$getChunkTaskScheduler().chunkHolderManager.getCurrentRegionData().pendingFullLoadUpdate.size()));
                         /* Connection connection = player.connection.connection;
                         ChunkPos chunkPos = player.chunkPosition();
                         ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = player.serverLevel().regioniser.getRegionAtUnsynchronised(chunkPos.x, chunkPos.z);

@@ -49,13 +49,12 @@
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicBoolean;
  import java.util.concurrent.atomic.AtomicReference;
-@@ -71,36 +_,114 @@
+@@ -71,36 +_,79 @@
      private static final long PROBE_MARKER = Long.MIN_VALUE + 1;
      public final ReentrantAreaLock ticketLockArea;
  
 -    private final ConcurrentLong2ReferenceChainedHashTable<SortedArraySet<Ticket<?>>> tickets = new ConcurrentLong2ReferenceChainedHashTable<>();
 -    private final ConcurrentLong2ReferenceChainedHashTable<Long2IntOpenHashMap> sectionToChunkToExpireCount = new ConcurrentLong2ReferenceChainedHashTable<>();
-+    // TODO - replace ConcurrentLong2ReferenceChainedHashTables with Agrona, need threadsafe iterator. // Canvas
 +    private final ConcurrentLong2ReferenceChainedHashTable<SortedArraySet<Ticket<?>>> tickets = ConcurrentLong2ReferenceChainedHashTable.createWithCapacity(20, 0.9F); // Canvas - improve
 +    private final ConcurrentLong2ReferenceChainedHashTable<Long2IntOpenHashMap> sectionToChunkToExpireCount = ConcurrentLong2ReferenceChainedHashTable.createWithCapacity(20, 0.9F); // Canvas - improve
      final ChunkUnloadQueue unloadQueue;
@@ -89,7 +88,7 @@
 -    });
 +    // Canvas start - Threaded Regions
 +    public static final class HolderManagerRegionData {
-+        public final Deque<NewChunkHolder> pendingFullLoadUpdate = new ConcurrentLinkedDeque<>();
++        private final ArrayDeque<NewChunkHolder> pendingFullLoadUpdate = new ArrayDeque<>();
 +        private final ConcurrentSkipListSet<NewChunkHolder> autoSaveQueue = new ConcurrentSkipListSet<>((final NewChunkHolder c1, final NewChunkHolder c2) -> {
 +            if (c1 == c2) {
 +                return 0;
@@ -152,40 +151,6 @@
 +        return ServerRegions.getTickData(this.world).getHolderManagerRegionData();
 +    }
 +    // Canvas end
-+
-+    // Canvas start
-+    /* // split this per-level to avoid race conditions where multiple levels write/read to the queues // Canvas - Threaded Regions
-+    public static class LevelHolderData {
-+        private final ConcurrentLinkedDeque<NewChunkHolder> pendingFullLoadUpdate = new ConcurrentLinkedDeque<>(); // Canvas - concurrent
-+        private final ObjectRBTreeSet<NewChunkHolder> autoSaveQueue = new ObjectRBTreeSet<>((final NewChunkHolder c1, final NewChunkHolder c2) -> {
-+            if (c1 == c2) {
-+                return 0;
-+            }
-+
-+            final int saveTickCompare = Long.compare(c1.lastAutoSave, c2.lastAutoSave);
-+
-+            if (saveTickCompare != 0) {
-+                return saveTickCompare;
-+            }
-+
-+            final long coord1 = CoordinateUtils.getChunkKey(c1.chunkX, c1.chunkZ);
-+            final long coord2 = CoordinateUtils.getChunkKey(c2.chunkX, c2.chunkZ);
-+
-+            if (coord1 == coord2) {
-+                throw new IllegalStateException("Duplicate chunkholder in auto save queue");
-+            }
-+
-+            return Long.compare(coord1, coord2);
-+        });
-+    }
-+
-+    public LevelHolderData getData() {
-+        if (this.world == null) {
-+            throw new RuntimeException("World was null!");
-+        }
-+        return world.chunkHolderData;
-+    }
-+    */ // Canvas end // Canvas - Threaded Regions
  
      public ChunkHolderManager(final ServerLevel world, final ChunkTaskScheduler taskScheduler) {
          this.world = world;
@@ -242,19 +207,6 @@
                      lastLog = currTime;
                      LOGGER.info(
                              "Saved " + savedChunk + " block chunks, " + savedEntity + " entity chunks, " + savedPoi
-@@ -425,8 +_,10 @@
-         final Long2ObjectOpenHashMap<SortedArraySet<Ticket<?>>> ret = new Long2ObjectOpenHashMap<>();
-         final Long2ObjectOpenHashMap<LongArrayList> sections = new Long2ObjectOpenHashMap<>();
-         final int sectionShift = this.taskScheduler.getChunkSystemLockShift();
--        for (final PrimitiveIterator.OfLong iterator = this.tickets.keyIterator(); iterator.hasNext();) {
--            final long coord = iterator.nextLong();
-+        // Canvas start
-+        for (final Iterator<Long> iterator = this.tickets.keyIterator(); iterator.hasNext();) {
-+            final long coord = iterator.next();
-+        // Canvas end
-             sections.computeIfAbsent(
-                 CoordinateUtils.getChunkKey(
-                     CoordinateUtils.getChunkX(coord) >> sectionShift,
 @@ -523,7 +_,7 @@
              chunkZ >> sectionShift
          );
@@ -273,30 +225,6 @@
                  return SortedArraySet.create(4);
              });
  
-@@ -697,8 +_,10 @@
- 
-         final Long2ObjectOpenHashMap<LongArrayList> sections = new Long2ObjectOpenHashMap<>();
-         final int sectionShift = this.taskScheduler.getChunkSystemLockShift();
--        for (final PrimitiveIterator.OfLong iterator = this.tickets.keyIterator(); iterator.hasNext();) {
--            final long coord = iterator.nextLong();
-+        // Canvas start
-+        for (final Iterator<Long> iterator = this.tickets.keyIterator(); iterator.hasNext();) {
-+            final long coord = iterator.next();
-+        // Canvas end
-             sections.computeIfAbsent(
-                     CoordinateUtils.getChunkKey(
-                             CoordinateUtils.getChunkX(coord) >> sectionShift,
-@@ -746,8 +_,8 @@
-             return removeDelay <= 0L;
-         };
- 
--        for (final PrimitiveIterator.OfLong iterator = this.sectionToChunkToExpireCount.keyIterator(); iterator.hasNext();) {
--            final long sectionKey = iterator.nextLong();
-+        for (final Iterator<Long> iterator = this.sectionToChunkToExpireCount.keyIterator(); iterator.hasNext();) { // Canvas
-+            final long sectionKey = iterator.next(); // Canvas
- 
-             if (!this.sectionToChunkToExpireCount.containsKey(sectionKey)) {
-                 // removed concurrently
 @@ -1031,17 +_,20 @@
          if (changedFullStatus.isEmpty()) {
              return;
@@ -336,15 +264,27 @@
          PlatformHooks.get().onChunkHolderDelete(this.world, holder.vanillaChunkHolder);
          this.chunkHolders.remove(CoordinateUtils.getChunkKey(holder.chunkX, holder.chunkZ));
      }
-@@ -1143,7 +_,7 @@
+@@ -1063,7 +_,7 @@
+             throw new IllegalStateException("Cannot unload chunks recursively");
+         }
+         final int sectionShift = this.unloadQueue.coordinateShift; // sectionShift <= lock shift
+-        final List<ChunkUnloadQueue.SectionToUnload> unloadSectionsForRegion = this.unloadQueue.retrieveForAllRegions();
++        final List<ChunkUnloadQueue.SectionToUnload> unloadSectionsForRegion = this.unloadQueue.retrieveForCurrentRegion(this.world);
+         int unloadCountTentative = 0;
+         for (final ChunkUnloadQueue.SectionToUnload sectionRef : unloadSectionsForRegion) {
+             final ChunkUnloadQueue.UnloadSection section
+@@ -1143,10 +_,7 @@
                      for (int i = 0, len = stage1.size(); i < len; ++i) {
                          final NewChunkHolder chunkHolder = stage1.get(i);
                          chunkHolder.removeFromUnloadQueue();
 -                        if (chunkHolder.isSafeToUnload() != null) {
-+                        if (chunkHolder.isSafeToUnload() != null && !Objects.equals(chunkHolder.isSafeToUnload(), "ticket_level")) { // Canvas
-                             LOGGER.error("Chunkholder " + chunkHolder + " is not safe to unload but is inside the unload queue?");
-                             continue;
-                         }
+-                            LOGGER.error("Chunkholder " + chunkHolder + " is not safe to unload but is inside the unload queue?");
+-                            continue;
+-                        }
++                        // Canvas - trust us.
+                         final NewChunkHolder.UnloadState state = chunkHolder.unloadStage1();
+                         if (state == null) {
+                             // can unload immediately
 @@ -1207,6 +_,33 @@
              }
          }
@@ -390,21 +330,8 @@
 +            LOGGER.info("Current region data was null when attempting to process full pending update.");
 +            return false;
 +        }
-+        final Deque<NewChunkHolder> pendingFullLoadUpdate = data.pendingFullLoadUpdate;
++        final ArrayDeque<NewChunkHolder> pendingFullLoadUpdate = data.pendingFullLoadUpdate;
 +        // Canvas end
  
          boolean ret = false;
- 
-@@ -1417,9 +_,10 @@
-         final JsonArray allTicketsJson = new JsonArray();
-         ret.add("tickets", allTicketsJson);
- 
--        for (final Iterator<ConcurrentLong2ReferenceChainedHashTable.TableEntry<SortedArraySet<Ticket<?>>>> iterator = this.tickets.entryIterator();
--            iterator.hasNext();) {
-+        // Canvas start
-+        for (final Iterator<ConcurrentLong2ReferenceChainedHashTable.TableEntry<SortedArraySet<Ticket<?>>>> iterator = this.tickets.entryIterator(); iterator.hasNext();) {
-             final ConcurrentLong2ReferenceChainedHashTable.TableEntry<SortedArraySet<Ticket<?>>> coordinateTickets = iterator.next();
-+        // Canvas end
-             final long coordinate = coordinateTickets.getKey();
-             final SortedArraySet<Ticket<?>> tickets = coordinateTickets.getValue();
  

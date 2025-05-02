@@ -1,8 +1,8 @@
 package io.canvasmc.canvas.server.chunk;
 
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
-import net.minecraft.server.level.ServerLevel;
 import java.lang.invoke.VarHandle;
+import net.minecraft.server.level.ServerLevel;
 
 public class ChunkRunnable implements Runnable {
     public final int chunkX;

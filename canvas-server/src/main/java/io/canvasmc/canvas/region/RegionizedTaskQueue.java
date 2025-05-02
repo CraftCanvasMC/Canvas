@@ -2,11 +2,9 @@ package io.canvasmc.canvas.region;
 
 import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
-import ca.spottedleaf.concurrentutil.map.ConcurrentLong2ReferenceChainedHashTable;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
-import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
@@ -14,15 +12,13 @@ import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import java.lang.invoke.VarHandle;
 import java.util.ArrayDeque;
 import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.TicketType;
-import net.minecraft.util.Unit;
 
 public final class RegionizedTaskQueue {
-
-    private static final TicketType<Unit> TASK_QUEUE_TICKET = TicketType.create("task_queue_ticket", (a, b) -> 0);
 
     public PrioritisedExecutor.PrioritisedTask createChunkTask(final ServerLevel world, final int chunkX, final int chunkZ,
                                                                final Runnable run) {
@@ -75,7 +71,7 @@ public final class RegionizedTaskQueue {
     public static final class WorldRegionTaskData {
         private final ServerLevel world;
         public final MultiThreadedQueue<Runnable> globalChunkTask = new MultiThreadedQueue<>();
-        private final ConcurrentLong2ReferenceChainedHashTable<ReferenceCountData> referenceCounters = new ConcurrentLong2ReferenceChainedHashTable<>();
+        private final Map<Long, ReferenceCountData> referenceCounters = new ConcurrentHashMap<>();
 
         public WorldRegionTaskData(final ServerLevel world) {
             this.world = world;
@@ -110,15 +106,11 @@ public final class RegionizedTaskQueue {
         }
 
         private void removeTicket(final long coord) {
-            this.world.moonrise$getChunkTaskScheduler().chunkHolderManager.removeTicketAtLevel(
-                TASK_QUEUE_TICKET, coord, ChunkHolderManager.MAX_TICKET_LEVEL, Unit.INSTANCE
-            );
+            // removed
         }
 
         private void addTicket(final long coord) {
-            this.world.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
-                TASK_QUEUE_TICKET, coord, ChunkHolderManager.MAX_TICKET_LEVEL, Unit.INSTANCE
-            );
+            // removed
         }
 
         private void processTicketUpdates(final long coord) {
@@ -126,10 +118,11 @@ public final class RegionizedTaskQueue {
         }
 
         // note: only call on acquired referenceCountData
-        private void ensureTicketAdded(final long coord, final ReferenceCountData referenceCountData) {
+        private void ensureTicketAdded(final long coord, final ReferenceCountData referenceCountData, final int chunkX, final int chunkZ) {
             if (!referenceCountData.addedTicket) {
                 // fine if multiple threads do this, no removeTicket may be called for this coord due to reference count inc
                 this.addTicket(coord);
+                this.processTicketUpdates(coord);
                 referenceCountData.addedTicket = true;
             }
         }
@@ -141,7 +134,7 @@ public final class RegionizedTaskQueue {
 
             // note: it is possible that another thread increments and then removes the reference before we can, so
             //       use ifPresent
-            this.referenceCounters.computeIfPresent(coord, (final long keyInMap, final ReferenceCountData valueInMap) -> {
+            this.referenceCounters.computeIfPresent(coord, (keyInMap, valueInMap) -> {
                 if (valueInMap.referenceCount.get() != 0L) {
                     return valueInMap;
                 }
@@ -155,15 +148,15 @@ public final class RegionizedTaskQueue {
             });
         }
 
-        private ReferenceCountData incrementReference(final long coord) {
+        private ReferenceCountData incrementReference(final long coord, final int chunkX, final int chunkZ) {
             ReferenceCountData referenceCountData = this.referenceCounters.get(coord);
 
             if (referenceCountData != null && referenceCountData.addCount()) {
-                this.ensureTicketAdded(coord, referenceCountData);
+                this.ensureTicketAdded(coord, referenceCountData, chunkX, chunkZ);
                 return referenceCountData;
             }
 
-            referenceCountData = this.referenceCounters.compute(coord, (final long keyInMap, final ReferenceCountData valueInMap) -> {
+            referenceCountData = this.referenceCounters.compute(coord, (keyInMap, valueInMap) -> {
                 if (valueInMap == null) {
                     // sets reference count to 1
                     return new ReferenceCountData();
@@ -174,7 +167,7 @@ public final class RegionizedTaskQueue {
                 return valueInMap;
             });
 
-            this.ensureTicketAdded(coord, referenceCountData);
+            this.ensureTicketAdded(coord, referenceCountData, chunkX, chunkZ);
 
             return referenceCountData;
         }
@@ -239,7 +232,7 @@ public final class RegionizedTaskQueue {
         }
 
         public boolean executeChunkTask() {
-            return this.chunkQueue.executeTask(null);
+            return this.worldRegionTaskData.executeGlobalChunkTask() || this.chunkQueue.executeTask(null);
         }
 
         void split(final ThreadedRegionizer<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> regioniser,
@@ -277,6 +270,14 @@ public final class RegionizedTaskQueue {
 
         public int size() {
             return this.tickTaskQueue.getScheduledTasks() + this.chunkQueue.getScheduledTasks();
+        }
+
+        public int tickTaskSize() {
+            return this.tickTaskQueue.getScheduledTasks();
+        }
+
+        public int chunkTaskSize() {
+            return this.chunkQueue.getScheduledTasks();
         }
 
         public boolean hasTasks() {
@@ -581,7 +582,7 @@ public final class RegionizedTaskQueue {
                     return false;
                 }
 
-                final ReferenceCountData referenceCounter = this.world.incrementReference(this.sectionLowerLeftCoord);
+                final ReferenceCountData referenceCounter = this.world.incrementReference(this.sectionLowerLeftCoord, this.chunkX, this.chunkZ);
                 if (this.compareAndExchangeReferenceCounter(REFERENCE_COUNTER_NOT_SET, referenceCounter) != REFERENCE_COUNTER_NOT_SET) {
                     // we don't expect race conditions here, so it is OK if we have to needlessly reference count
                     this.world.decrementReference(referenceCounter, this.sectionLowerLeftCoord);

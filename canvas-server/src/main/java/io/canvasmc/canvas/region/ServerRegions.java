@@ -34,17 +34,13 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Queue;
-import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
-import net.minecraft.network.Connection;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ChunkHolder;
@@ -591,6 +587,9 @@ public class ServerRegions {
         public int wanderingTraderSpawnDelay;
         public int wanderingTraderSpawnChance;
         public VillageSiegeState villageSiegeState = new VillageSiegeState();
+        // async mob spawning
+        public boolean firstRunSpawnCounts = true;
+        public final AtomicBoolean spawnCountsReady = new AtomicBoolean(false);
 
         public static final class VillageSiegeState {
             public boolean hasSetupSiege;
@@ -611,11 +610,11 @@ public class ServerRegions {
 
         public WorldTickData(ServerLevel world, final @Nullable ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
             this.world = world;
-            this.blockLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, true);
-            this.fluidLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, false);
+            this.region = region;
+            this.blockLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, true, this.region == null);
+            this.fluidLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, false, this.region == null);
             this.nearbyPlayers = new NearbyPlayers(world);
             this.wireHandler = new WireHandler(world);
-            this.region = region;
             this.turbo = new RedstoneWireTurbo((RedStoneWireBlock) Blocks.REDSTONE_WIRE);
             this.taskQueueData = new RegionizedTaskQueue.RegionTaskQueueData(this.world.taskQueueRegionData);
         }

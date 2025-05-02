@@ -2,8 +2,8 @@ package io.canvasmc.canvas.command.debug;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.tree.LiteralCommandNode;
-import java.util.concurrent.TimeUnit;
 import io.canvasmc.canvas.command.CommandInstance;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.coordinates.ColumnPosArgument;

@@ -1,13 +1,12 @@
 package io.canvasmc.canvas.util;
 
+import java.util.List;
+import java.util.Map;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import org.jetbrains.annotations.NotNull;
 import org.yaml.snakeyaml.Yaml;
-
-import java.util.List;
-import java.util.Map;
 
 public class YamlTextFormatter {
 

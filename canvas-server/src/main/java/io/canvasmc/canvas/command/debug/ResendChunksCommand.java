@@ -2,8 +2,8 @@ package io.canvasmc.canvas.command.debug;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.tree.LiteralCommandNode;
-import java.util.stream.Collectors;
 import io.canvasmc.canvas.command.CommandInstance;
+import java.util.stream.Collectors;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;

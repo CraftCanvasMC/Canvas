@@ -1,6 +1,5 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
-import kotlin.system.measureTimeMillis
 
 plugins {
     java
@@ -72,7 +71,7 @@ subprojects {
     }
 
     val subproject = this;
-    // we don't have any form of publishing for canvas-server, because thats the dev bundle
+    // we don't have any form of publishing for canvas-server, because that's the dev bundle
     if (subproject.name == "canvas-api") {
         publishing {
             repositories {

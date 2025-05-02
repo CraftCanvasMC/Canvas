@@ -94,4 +94,13 @@ public interface MultithreadedTickScheduler {
      * @return tps base
      */
     BigDecimal getTpsBase();
+
+    /**
+     * Gets the "sample rate" which is used for how often we tick TPS
+     * and other data
+     * @return the sample rate
+     */
+    default int getSampleRate() {
+        return SAMPLE_RATE;
+    }
 }

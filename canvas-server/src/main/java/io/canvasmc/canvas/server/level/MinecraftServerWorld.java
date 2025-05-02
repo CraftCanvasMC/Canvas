@@ -54,6 +54,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPre = new ConcurrentLinkedQueue<>();
     protected final CraftScheduler bukkitScheduler;
     public long emptyTicks = 0L;
+    protected boolean hasTasks = true;
 
     public MinecraftServerWorld(final ResourceLocation worldIdentifier) {
         super((DedicatedServer) MinecraftServer.getServer(), worldIdentifier, new TickHandle());
@@ -78,6 +79,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
                 TickScheduler.setTickingData(null);
                 return !thisAsTickable.cancelled.get();
             }
+            thisAsTickable.hasTasks = true;
             int i = server.pauseWhileEmptySeconds() * 20;
             if (Config.INSTANCE.ticking.emptySleepPerWorlds && i > 0) {
                 if (thisAsTickable.players().isEmpty() && !thisAsTickable.tickRateManager().isSprinting() && server.pluginsBlockingSleep.isEmpty()) {
@@ -114,6 +116,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             ServerLevel worldserver = level();
 
             worldserver.getChunkSource().mainThreadProcessor.pollTask(!Config.INSTANCE.ticking.enableThreadedRegionizing);
+            hasTasks = false;
             return super.runTasks(canContinue);
         } finally {
             TickScheduler.setTickingData(null);
@@ -132,7 +135,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
 
     @Override
     public boolean hasTasks() {
-        return true;
+        return hasTasks || Config.INSTANCE.ticking.tickChunkTasksBetweenTicks;
     }
 
     @Override
@@ -230,13 +233,13 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             .append(ThreadedServerHealthDump.NEW_LINE)
             .append(doEntityInfo())
             .append(ThreadedServerHealthDump.NEW_LINE);
-        basic.append(Component.text("Neighbor Updates", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
-            .append(ThreadedServerHealthDump.NEW_LINE)
-            .append(doNeighborInfo());
+        // basic.append(Component.text("Neighbor Updates", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
+        //     .append(ThreadedServerHealthDump.NEW_LINE)
+        //     .append(doNeighborInfo());
         return basic.build();
     }
 
-    private @NotNull Component doNeighborInfo() {
+    /* private @NotNull Component doNeighborInfo() {
         TextComponent.@NotNull Builder root = text();
         ServerLevel world = this.level();
         List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
@@ -350,7 +353,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             retVal.put(neighborUpdate.getClass(), retVal.get(neighborUpdate.getClass()) + 1);
         }
         return retVal;
-    }
+    } */
 
     private @NotNull Component doTileEntityInfo() {
         TextComponent.@NotNull Builder root = text();

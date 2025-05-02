@@ -1,9 +1,9 @@
 package io.canvasmc.canvas.entity;
 
-import net.minecraft.server.level.ServerChunkCache;
-import net.minecraft.world.entity.Entity;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
+import net.minecraft.server.level.ServerChunkCache;
+import net.minecraft.world.entity.Entity;
 
 // basically a stutter-lock, where we try and acquire a lock
 // for a certain amount of time, and if we can't, we run a poll
@@ -35,7 +35,7 @@ public class EntityStatusLock extends ReentrantLock {
                 break;
             }
             LockSupport.parkNanos("wait for acquire", this.waitNanos);
-            if (pollTasks) this.entity.level().level().getChunkSource().mainThreadProcessor.pollTask(false);
+            if (pollTasks) this.entity.level().level().getChunkSource().mainThreadProcessor.pollTask();
         }
     }
 

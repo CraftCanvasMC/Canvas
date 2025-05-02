@@ -11,7 +11,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.FullChunkStatus;
 import net.minecraft.server.level.ServerLevel;
@@ -25,7 +24,7 @@ public class ThreadedTracker {
         Config.INSTANCE.entities.entityTracking.maxProcessors,
         Config.INSTANCE.entities.entityTracking.keepAlive, TimeUnit.SECONDS,
         new LinkedBlockingQueue<>(),
-        new NamedAgnosticThreadFactory<>("entity_tracker", TrackerThread::new, Thread.NORM_PRIORITY - 2)
+        new NamedAgnosticThreadFactory<>("EntityTracking", TrackerThread::new, Thread.NORM_PRIORITY - 2)
     );
     public static ThreadedTracker INSTANCE = new ThreadedTracker(Config.INSTANCE.entities.entityTracking.enableThreadedTracking);
     private final boolean enableThreading;

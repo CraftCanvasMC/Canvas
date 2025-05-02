@@ -3,12 +3,12 @@ package io.canvasmc.canvas.util;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.server.network.ConnectionHandlePhases;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 import net.minecraft.network.Connection;
 import net.minecraft.server.MinecraftServer;
 import org.agrona.collections.ObjectHashSet;
 import org.jetbrains.annotations.NotNull;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 public class ConnectionPool {
     private final Set<Connection> backend = new CopyOnWriteArraySet<>();

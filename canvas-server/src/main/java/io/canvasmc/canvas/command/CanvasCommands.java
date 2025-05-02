@@ -9,7 +9,10 @@ import io.canvasmc.canvas.command.debug.PriorityCommand;
 import io.canvasmc.canvas.command.debug.ResendChunksCommand;
 import io.canvasmc.canvas.command.debug.SenderInfoCommand;
 import io.canvasmc.canvas.command.debug.SyncloadCommand;
+import io.canvasmc.canvas.command.debug.TasksCommand;
 import io.canvasmc.canvas.command.debug.TrackingControlCommand;
+import java.util.Set;
+import java.util.function.Supplier;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.commands.DebugMobSpawningCommand;
@@ -19,9 +22,6 @@ import net.minecraft.server.commands.ServerPackCommand;
 import net.minecraft.server.commands.SpawnArmorTrimsCommand;
 import net.minecraft.server.commands.WardenSpawnTrackerCommand;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.Set;
-import java.util.function.Supplier;
 
 public final class CanvasCommands {
     private static final Set<LiteralCommandNode<CommandSourceStack>> ALL = Sets.newHashSet();
@@ -40,6 +40,7 @@ public final class CanvasCommands {
             register(SyncloadCommand::new);
             register(PriorityCommand::new);
             register(FlySpeedCommand::new);
+            register(TasksCommand::new);
 
             CanvasBootstrap.LOGGER.info("Registering Minecraft debug commands");
             RaidCommand.register(dispatcher, context);

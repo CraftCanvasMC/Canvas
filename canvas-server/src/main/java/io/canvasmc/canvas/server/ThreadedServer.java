@@ -15,6 +15,9 @@ import io.canvasmc.canvas.region.ServerRegions;
 import io.canvasmc.canvas.scheduler.MultithreadedTickScheduler;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.spark.MultiLoopThreadDumper;
+import io.papermc.paper.ServerBuildInfo;
+import io.papermc.paper.threadedregions.ThreadedRegionizer;
+import io.papermc.paper.util.MCUtil;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -28,9 +31,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import io.papermc.paper.ServerBuildInfo;
-import io.papermc.paper.threadedregions.ThreadedRegionizer;
-import io.papermc.paper.util.MCUtil;
 import net.minecraft.CrashReport;
 import net.minecraft.ReportType;
 import net.minecraft.Util;
@@ -50,7 +50,6 @@ import org.slf4j.LoggerFactory;
 public class ThreadedServer implements ThreadedBukkitServer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ThreadedServer");
     public static BooleanSupplier SHOULD_KEEP_TICKING;
-    private final List<ServerLevel> levels = new CopyOnWriteArrayList<>();
     private final DedicatedServer server;
     public final TickScheduler scheduler;
     protected long tickSection;
@@ -65,7 +64,7 @@ public class ThreadedServer implements ThreadedBukkitServer {
 
     @Override
     public @Unmodifiable List<World> getWorlds() {
-        return this.levels.stream().map(Level::getWorld).collect(Collectors.toUnmodifiableList());
+        return this.server.server.getWorlds();
     }
 
     @Override
@@ -89,10 +88,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
         return region == null ? null : region.getData();
     }
 
-    public List<ServerLevel> getThreadedWorlds() {
-        return levels;
-    }
-
     public boolean hasStarted() {
         return started;
     }
@@ -106,6 +101,8 @@ public class ThreadedServer implements ThreadedBukkitServer {
             MultiLoopThreadDumper.REGISTRY.add(Thread.currentThread().getName());
             MultiLoopThreadDumper.REGISTRY.add("ls_wg "); // add linear-scaling world-gen workers
             MultiLoopThreadDumper.REGISTRY.add("Tick Runner ");
+            MultiLoopThreadDumper.REGISTRY.add("EntityTracking");
+            MultiLoopThreadDumper.REGISTRY.add("MobSpawning");
 
             if (!server.initServer()) {
                 throw new IllegalStateException("Failed to initialize server");
@@ -157,6 +154,9 @@ public class ThreadedServer implements ThreadedBukkitServer {
             performVersionCheck();
             while (this.server.isRunning()) {
                 tickSection = this.getServer().tick(tickSection);
+                for (final ServerLevel level : this.server.getAllLevels()) {
+                    level.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
+                }
             }
         } catch (Throwable throwable2) {
             //noinspection removal
@@ -192,17 +192,8 @@ public class ThreadedServer implements ThreadedBukkitServer {
         }
     }
 
-    public void loadLevel(@NotNull ServerLevel level) {
-        this.levels.add(level);
-    }
-
     public String getName() {
         return Thread.currentThread().getName();
-    }
-
-    public void stopLevel(@NotNull ServerLevel level) {
-        this.levels.remove(level);
-        level.retire();
     }
 
     public Collection<ServerLevel> getAllLevels() {

@@ -1,9 +1,7 @@
 package io.canvasmc.canvas.server;
 
-import ca.spottedleaf.moonrise.common.util.MoonriseCommon;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.region.ChunkRegion;
 import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.papermc.paper.FeatureHooks;
 import io.papermc.paper.ServerBuildInfo;
@@ -21,18 +19,14 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.CraftServer;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spigotmc.AsyncCatcher;
 import org.spigotmc.RestartCommand;
 import org.spigotmc.SpigotConfig;
-import org.spigotmc.WatchdogThread;
 
 // heavily modified version of the WatchdogThread class allowing multi-registration
 // of threads through dedicated registration and docking/undocking

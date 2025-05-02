@@ -7,12 +7,14 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
 import io.canvasmc.canvas.server.level.distance.command.CommandUtils;
-import io.canvasmc.canvas.server.level.distance.component.WorldSpecificViewDistanceComponents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.DimensionArgument;
+import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.Properties;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -91,20 +93,18 @@ public final class SimulationDistanceCommand implements CommandInstance {
         CommandSourceStack src = ctx.getSource();
         int simDist = IntegerArgumentType.getInteger(ctx, "simulationDistance");
 
-        if (src.getServer().isDedicatedServer()) {
-            src.getServer().getPlayerList().setSimulationDistance(simDist - 1);
+        // 'global' is technically the server.properties
+        // this does *not* update automatically
+        DedicatedServer server = (DedicatedServer) src.getServer();
+        Properties properties = server.getProperties().properties;
+        properties.setProperty("simulation-distance", String.valueOf(simDist));
+        server.settings.getProperties().simulationDistance = simDist;
+        server.settings.forceSave();
 
-            src.sendSuccess(() -> CommandUtils.getMessage("Set server-wide simulation distance to %d", simDist), true);
+        if (simDist != 0) {
+            src.sendSuccess(() -> CommandUtils.getMessage("Set save/server-wide simulation distance to %d", simDist), true);
         } else {
-            var component = WorldSpecificViewDistanceComponents.GLOBAL_DISTANCES.get(src.getServer().getWorldData());
-
-            component.globalSimulationDistance = simDist;
-
-            if (simDist != 0) {
-                src.sendSuccess(() -> CommandUtils.getMessage("Set save simulation distance to %d", simDist), true);
-            } else {
-                src.sendSuccess(() -> CommandUtils.getMessage("Unset save simulation distance"), true);
-            }
+            src.sendSuccess(() -> CommandUtils.getMessage("Unset save simulation distance"), true);
         }
 
         return 1;

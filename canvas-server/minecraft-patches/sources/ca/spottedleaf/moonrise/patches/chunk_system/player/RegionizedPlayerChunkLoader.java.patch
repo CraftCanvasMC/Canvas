@@ -23,7 +23,7 @@
  import java.util.concurrent.TimeUnit;
  import java.util.concurrent.atomic.AtomicLong;
  import java.util.function.Function;
-@@ -189,21 +_,33 @@
+@@ -189,13 +_,25 @@
          }
  
          if (((ChunkSystemServerPlayer)player).moonrise$getChunkLoader() != null) {
@@ -51,10 +51,9 @@
      }
  
      public void updatePlayer(final ServerPlayer player) {
-         final PlayerChunkLoaderData loader = ((ChunkSystemServerPlayer)player).moonrise$getChunkLoader();
+@@ -203,7 +_,7 @@
          if (loader != null) {
--            loader.update();
-+            // loader.update(); // Canvas - no
+             loader.update();
              // update view distances for nearby players
 -            ((ChunkSystemServerLevel)loader.world).moonrise$getNearbyPlayers().tickPlayer(player);
 +            (loader.world).moonrise$getNearbyPlayers(player.chunkPosition()).tickPlayer(player); // Canvas - Threaded Regions
@@ -160,25 +159,7 @@
              this.lastSentSimulationDistance = distance;
              return new ClientboundSetSimulationDistancePacket(distance);
          }
-@@ -642,7 +_,7 @@
-         void updateQueues(final long time) {
-             TickThread.ensureTickThread(this.player, "Cannot tick player chunk loader async");
-             if (this.removed) {
--                throw new IllegalStateException("Ticking removed player chunk loader");
-+                return; // Canvas - this can change mid-update, so we may crash even though previously this was fine. just return.
-             }
-             // update rate limits
-             final double loadRate = this.getMaxChunkLoadRate();
-@@ -669,7 +_,7 @@
-                 // try to move to generate queue
-                 final byte prev = this.chunkTicketStage.put(pendingLoadChunk, CHUNK_TICKET_STAGE_LOADED);
-                 if (prev != CHUNK_TICKET_STAGE_LOADING) {
--                    throw new IllegalStateException("Previous state should be " + CHUNK_TICKET_STAGE_LOADING + ", not " + prev);
-+                    continue; // Canvas - just skip
-                 }
- 
-                 if (this.canGenerateChunks || this.isLoadedChunkGeneratable(pending)) {
-@@ -679,14 +_,14 @@
+@@ -679,7 +_,7 @@
  
              // try to push more chunk loads
              final long maxLoads = Math.max(0L, Math.min(MAX_RATE, Math.min(this.loadQueue.size(), this.getMaxChunkLoads())));
@@ -187,23 +168,6 @@
              if (maxLoadsThisTick > 0) {
                  final LongArrayList chunks = new LongArrayList(maxLoadsThisTick);
                  for (int i = 0; i < maxLoadsThisTick; ++i) {
-                     final long chunk = this.loadQueue.dequeueLong();
-                     final byte prev = this.chunkTicketStage.put(chunk, CHUNK_TICKET_STAGE_LOADING);
-                     if (prev != CHUNK_TICKET_STAGE_NONE) {
--                        throw new IllegalStateException("Previous state should be " + CHUNK_TICKET_STAGE_NONE + ", not " + prev);
-+                        continue; // Canvas - just skip
-                     }
-                     this.pushDelayedTicketOp(
-                         ChunkHolderManager.TicketOperation.addOp(
-@@ -740,7 +_,7 @@
- 
-                 final byte prev = this.chunkTicketStage.put(pendingGenChunk, CHUNK_TICKET_STAGE_GENERATED);
-                 if (prev != CHUNK_TICKET_STAGE_GENERATING) {
--                    throw new IllegalStateException("Previous state should be " + CHUNK_TICKET_STAGE_GENERATING + ", not " + prev);
-+                    continue; // Canvas - just skip
-                 }
- 
-                 // try to move to send queue
 @@ -756,7 +_,7 @@
              // try to push more chunk generations
              final long maxGens = Math.max(0L, Math.min(MAX_RATE, Math.min(this.genQueue.size(), this.getMaxChunkGenerates())));
@@ -213,23 +177,7 @@
              long ratedGensThisTick = 0L;
              while (!this.genQueue.isEmpty()) {
                  final long chunkKey = this.genQueue.firstLong();
-@@ -775,7 +_,7 @@
- 
-                 final byte prev = this.chunkTicketStage.put(chunkKey, CHUNK_TICKET_STAGE_GENERATING);
-                 if (prev != CHUNK_TICKET_STAGE_LOADED) {
--                    throw new IllegalStateException("Previous state should be " + CHUNK_TICKET_STAGE_LOADED + ", not " + prev);
-+                    continue; // Canvas - just skip
-                 }
-                 this.pushDelayedTicketOp(
-                     ChunkHolderManager.TicketOperation.addAndRemove(
-@@ -812,13 +_,13 @@
-                 // note: there is no queue to add after ticking
-                 final byte prev = this.chunkTicketStage.put(pendingTicking, CHUNK_TICKET_STAGE_TICK);
-                 if (prev != CHUNK_TICKET_STAGE_GENERATED) {
--                    throw new IllegalStateException("Previous state should be " + CHUNK_TICKET_STAGE_GENERATED + ", not " + prev);
-+                    continue; // Canvas - just skip
-                 }
-             }
+@@ -818,7 +_,7 @@
  
              // try to pull sending chunks
              final long maxSends = Math.max(0L, Math.min(MAX_RATE, Integer.MAX_VALUE)); // note: no logic to track concurrent sends
@@ -238,15 +186,6 @@
              // we do not return sends that we took from the allocation back because we want to limit the max send rate, not target it
              for (int i = 0; i < maxSendsThisTick; ++i) {
                  final long pendingSend = this.sendQueue.firstLong();
-@@ -832,7 +_,7 @@
-                 }
-                 if (!((ChunkSystemLevelChunk)chunk).moonrise$isPostProcessingDone()) {
-                     // not yet post-processed, need to do this so that tile entities can properly be sent to clients
--                    chunk.postProcessGeneration(this.world);
-+                    if (!Config.INSTANCE.ticking.enableThreadedRegionizing) chunk.postProcessGeneration(this.world); // Canvas - Threaded Regions - this needs to be run on the region thread.
-                     // check if there was any recursive action
-                     if (this.removed || this.sendQueue.isEmpty() || this.sendQueue.firstLong() != pendingSend) {
-                         return;
 @@ -852,6 +_,7 @@
          }
  
@@ -263,15 +202,6 @@
          }
  
          private boolean isLoadedChunkGeneratable(final int chunkX, final int chunkZ) {
-@@ -909,7 +_,7 @@
-         void update() {
-             TickThread.ensureTickThread(this.player, "Cannot update player asynchronously");
-             if (this.removed) {
--                throw new IllegalStateException("Updating removed player chunk loader");
-+                return; // Canvas - just return...
-             }
-             final ViewDistances playerDistances = ((ChunkSystemServerPlayer)this.player).moonrise$getViewDistanceHolder().getViewDistances();
-             final ViewDistances worldDistances = ((ChunkSystemServerLevel)this.world).moonrise$getViewDistanceHolder().getViewDistances();
 @@ -1059,6 +_,7 @@
          }
  

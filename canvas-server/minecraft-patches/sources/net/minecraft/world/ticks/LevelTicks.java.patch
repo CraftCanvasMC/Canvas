@@ -22,15 +22,7 @@
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -26,13 +_,15 @@
- import net.minecraft.util.profiling.Profiler;
- import net.minecraft.util.profiling.ProfilerFiller;
- import net.minecraft.world.level.ChunkPos;
-+import net.minecraft.world.level.chunk.LevelChunk;
-+import net.minecraft.world.level.chunk.status.ChunkStatus;
- import net.minecraft.world.level.levelgen.structure.BoundingBox;
- 
- public class LevelTicks<T> implements LevelTickAccess<T> {
+@@ -32,7 +_,7 @@
      private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (levelChunkTicks, levelChunkTicks1) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER
          .compare(levelChunkTicks.peek(), levelChunkTicks1.peek());
      private final LongPredicate tickCheck;
@@ -39,7 +31,7 @@
      private final Long2LongMap nextTickForContainer = Util.make(new Long2LongOpenHashMap(), map -> map.defaultReturnValue(Long.MAX_VALUE));
      private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
      private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
-@@ -43,12 +_,100 @@
+@@ -43,12 +_,115 @@
              this.updateContainerScheduling(scheduledTick);
          }
      };
@@ -51,6 +43,7 @@
 +    // Canvas start - Threaded Regions
 +    public final net.minecraft.server.level.ServerLevel world;
 +    public final boolean isBlock;
++    public final boolean isWorldRegion;
 +    // we lock down for concurrency purposes, if we don't, we can crash anytime which very bad
 +    private final ReentrantLock lock = new ReentrantLock();
 +
@@ -110,9 +103,10 @@
 +        }
 +    }
 +
-+    public LevelTicks(LongPredicate tickCheck, net.minecraft.server.level.ServerLevel world, boolean isBlock) {
++    public LevelTicks(LongPredicate tickCheck, net.minecraft.server.level.ServerLevel world, boolean isBlock, boolean isWorldRegion) {
 +        this.world = world;
 +        this.isBlock = isBlock;
++        this.isWorldRegion = isWorldRegion;
 +        // Canvas end
          this.tickCheck = tickCheck;
      }
@@ -122,10 +116,9 @@
 +        // Canvas start - Threaded Regions
 +        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized) {
 +            // we must ensure we are regionized properly
-+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
-+            if (data.region == null) {
++            if (this.isWorldRegion) {
 +                // we are on a world data, HELL NO
-+                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = data.world.regioniser.getRegionAtUnsynchronised(chunkPos.x, chunkPos.z);
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.world.regioniser.getRegionAtUnsynchronised(chunkPos.x, chunkPos.z);
 +                if (region == null) {
 +                    throw new RuntimeException("Cannot add container to a chunk where a region does not exist!");
 +                }
@@ -135,27 +128,45 @@
 +                regionized.addContainer(chunkPos, chunkTicks);
 +                regionized.checkRegionized = true;
 +                return;
++            } else {
++                ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
++                int chunkX = chunkPos.x;
++                int chunkZ = chunkPos.z;
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> runningRegion = data.region;
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> correctRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++                if (runningRegion != correctRegion) {
++                    LevelTicks<T> regionized = (LevelTicks<T>) (this.isBlock ? correctRegion.getData().tickData.getBlockLevelTicks() : correctRegion.getData().tickData.getFluidLevelTicks());
++                    regionized.checkRegionized = false;
++                    regionized.addContainer(chunkPos, chunkTicks);
++                    regionized.checkRegionized = true;
++                    return; // if we are the same, we are regionized correctly, no need to return then
++                }
 +            }
 +        }
 +        try { lock.lock(); // Canvas - lock
++        if (this.isWorldRegion && Config.INSTANCE.ticking.enableThreadedRegionizing) throw new RuntimeException("Cannot add container to world region while regionized!");
 +        // Canvas end
          long packedChunkPos = chunkPos.toLong();
          this.allContainers.put(packedChunkPos, chunkTicks);
          ScheduledTick<T> scheduledTick = chunkTicks.peek();
-@@ -56,30 +_,87 @@
+@@ -56,30 +_,111 @@
              this.nextTickForContainer.put(packedChunkPos, scheduledTick.triggerTick());
          }
  
 -        chunkTicks.setOnTickAdded(this.chunkScheduleUpdater);
++        // Canvas start - Threaded Regions
++        // at this point, we should be properly regionized (if applicable)
++        // so we poll the tick data HERE, as we cannot trust when 'onTickAdded' is called and where
 +        final boolean isBlock = this.isBlock;
 +        final net.minecraft.server.level.ServerLevel world = this.world;
++        ServerRegions.WorldTickData worldData = ServerRegions.getTickData(world);
 +        // make sure the lambda contains no reference to this LevelTicks
 +        chunkTicks.setOnTickAdded((LevelChunkTicks<T> levelChunkTicks, ScheduledTick<T> tick) -> {
 +            if (tick.equals(levelChunkTicks.peek())) {
-+                ServerRegions.WorldTickData worldData = ServerRegions.getTickData(world);
 +                ((LevelTicks<T>)(isBlock ? worldData.getBlockLevelTicks() : worldData.getFluidLevelTicks())).updateContainerScheduling(tick);
 +            }
 +        });
++        // Canvas end
 +        } finally { lock.unlock(); } // Canvas - lock
      }
  
@@ -163,10 +174,9 @@
 +        // Canvas start - Threaded Regions
 +        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized) {
 +            // we must ensure we are regionized properly
-+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
-+            if (data.region == null) {
++            if (this.isWorldRegion) {
 +                // we are on a world data, HELL NO
-+                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = data.world.regioniser.getRegionAtUnsynchronised(chunkPos.x, chunkPos.z);
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.world.regioniser.getRegionAtUnsynchronised(chunkPos.x, chunkPos.z);
 +                if (region == null) {
 +                    throw new RuntimeException("Cannot remove container from a chunk where a region does not exist!");
 +                }
@@ -176,6 +186,19 @@
 +                regionized.removeContainer(chunkPos);
 +                regionized.checkRegionized = true;
 +                return;
++            } else {
++                ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
++                int chunkX = chunkPos.x;
++                int chunkZ = chunkPos.z;
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> runningRegion = data.region;
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> correctRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++                if (runningRegion != correctRegion) {
++                    LevelTicks<T> regionized = (LevelTicks<T>) (this.isBlock ? correctRegion.getData().tickData.getBlockLevelTicks() : correctRegion.getData().tickData.getFluidLevelTicks());
++                    regionized.checkRegionized = false;
++                    regionized.removeContainer(chunkPos);
++                    regionized.checkRegionized = true;
++                    return; // if we are the same, we are regionized correctly, no need to return then
++                }
 +            }
 +        }
 +        try { lock.lock(); // Canvas - lock
@@ -195,11 +218,10 @@
 +        // Canvas start - Threaded Regions
 +        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized) {
 +            // we must ensure we are regionized properly
-+            ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
-+            if (data.region == null) {
++            ChunkPos pos = new ChunkPos(tick.pos());
++            if (this.isWorldRegion) {
 +                // we are on a world data, HELL NO
-+                ChunkPos pos = new ChunkPos(tick.pos());
-+                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = data.world.regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = this.world.regioniser.getRegionAtUnsynchronised(pos.x, pos.z);
 +                if (region == null) {
 +                    throw new RuntimeException("Cannot schedule to a container from a chunk where a region does not exist!");
 +                }
@@ -209,12 +231,21 @@
 +                regionized.schedule(tick);
 +                regionized.checkRegionized = true;
 +                return;
++            } else {
++                ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
++                int chunkX = pos.x;
++                int chunkZ = pos.z;
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> runningRegion = data.region;
++                ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> correctRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++                if (runningRegion != correctRegion) {
++                    LevelTicks<T> regionized = (LevelTicks<T>) (this.isBlock ? correctRegion.getData().tickData.getBlockLevelTicks() : correctRegion.getData().tickData.getFluidLevelTicks());
++                    regionized.checkRegionized = false;
++                    regionized.schedule(tick);
++                    regionized.checkRegionized = true;
++                    return; // if we are the same, we are regionized correctly, no need to return then
++                }
 +            }
 +        }
-+        ChunkPos chunkPos = new ChunkPos(tick.pos());
-+        // syncload the chunk. by loading the chunk to FULL, we register it to here
-+        // already, so we don't need to manually add it.
-+        this.world.getChunk(chunkPos.x, chunkPos.z, ChunkStatus.FULL, true);
 +        try { lock.lock(); // Canvas - lock
 +        // Canvas end
          LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(packedChunkPos);

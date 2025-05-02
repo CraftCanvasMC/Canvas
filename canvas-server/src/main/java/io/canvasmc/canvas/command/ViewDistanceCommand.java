@@ -7,12 +7,14 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.canvasmc.canvas.server.level.distance.WorldSpecificViewDistancePersistentState;
 import io.canvasmc.canvas.server.level.distance.command.CommandUtils;
-import io.canvasmc.canvas.server.level.distance.component.WorldSpecificViewDistanceComponents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.DimensionArgument;
+import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.Properties;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -90,20 +92,17 @@ public final class ViewDistanceCommand implements CommandInstance {
         CommandSourceStack src = ctx.getSource();
         int viewDist = IntegerArgumentType.getInteger(ctx, "viewDistance");
 
-        if (src.getServer().isDedicatedServer()) {
-            src.getServer().getPlayerList().setViewDistance(viewDist - 1);
-
-            src.sendSuccess(() -> CommandUtils.getMessage("Set server-wide view distance to %d", viewDist), true);
+        // 'global' is technically the server.properties
+        // this does *not* update automatically
+        DedicatedServer server = (DedicatedServer) src.getServer();
+        Properties properties = server.getProperties().properties;
+        properties.setProperty("view-distance", String.valueOf(viewDist));
+        server.settings.getProperties().viewDistance = viewDist;
+        server.settings.forceSave();
+        if (viewDist != 0) {
+            src.sendSuccess(() -> CommandUtils.getMessage("Set save/server-wide view distance to %d", viewDist), true);
         } else {
-            var component = WorldSpecificViewDistanceComponents.GLOBAL_DISTANCES.get(src.getServer().getWorldData());
-
-            component.globalViewDistance = viewDist;
-
-            if (viewDist != 0) {
-                src.sendSuccess(() -> CommandUtils.getMessage("Set save view distance to %d", viewDist), true);
-            } else {
-                src.sendSuccess(() -> CommandUtils.getMessage("Unset save view distance"), true);
-            }
+            src.sendSuccess(() -> CommandUtils.getMessage("Unset save view distance"), true);
         }
         return 1;
     }
