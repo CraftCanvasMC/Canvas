@@ -73,12 +73,6 @@ public class Config {
 
         @Comment("The amount of time(in seconds) before watchdog starts printing error logs from slowdown")
         public long watchdogLoggingTime = 4L;
-
-        @Comment(value = {
-            "This enables the consistent use of chunk task polling/running in-between ticks",
-            "This does result in higher CPU usage, but dramatic improvements to the chunk system performance."
-        })
-        public boolean runChunkTasksBetweenTicks = true;
     }
 
     public Chunks chunks = new Chunks();

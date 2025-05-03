@@ -154,33 +154,35 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
                     ProfilerFiller profilerFiller = Profiler.get();
                     TickRateManager tickRateManager = this.world.tickRateManager();
                     tickHandle.runRegionTasks(hasTimeLeft);
-                    boolean runsNormally = tickRateManager.runsNormally();
-                    this.world.tickConnection(data); // tick connection on region
-                    data.tpsCalculator.doTick();
-                    this.world.updateLagCompensationTick();
-                    this.world.regionTick1(data);
-                    if (runsNormally) {
-                        data.incrementRedstoneTime();
-                    }
-                    this.world.regionTick2(profilerFiller, runsNormally, data);
-                    final ServerChunkCache chunkSource = this.world.getChunkSource();
-                    chunkSource.tick(hasTimeLeft, true);
-                    if (runsNormally) {
-                        if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
-                            this.world.runBlockEvents();
-                            this.ticksSinceLastBlockEventsTickCall = 0;
+                    tickHandle.bench(() -> {
+                        boolean runsNormally = tickRateManager.runsNormally();
+                        this.world.tickConnection(data); // tick connection on region
+                        data.tpsCalculator.doTick();
+                        this.world.updateLagCompensationTick();
+                        this.world.regionTick1(data);
+                        if (runsNormally) {
+                            data.incrementRedstoneTime();
                         }
-                    }
-                    data.setHandlingTick(false);
-                    this.world.regiontick3(profilerFiller, true, runsNormally, data);
-                    ServerRegions.getTickData(this.world).explosionDensityCache.clear();
-                    for (final ServerPlayer localPlayer : data.getLocalPlayers()) {
-                        localPlayer.connection.chunkSender.sendNextChunks(localPlayer);
-                        localPlayer.connection.resumeFlushing();
-                    }
-                    if (this.region.getData().tickHandle.cancelled.get()) {
-                        this.isActive = false;
-                    }
+                        this.world.regionTick2(profilerFiller, runsNormally, data);
+                        final ServerChunkCache chunkSource = this.world.getChunkSource();
+                        chunkSource.tick(hasTimeLeft, true);
+                        if (runsNormally) {
+                            if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
+                                this.world.runBlockEvents();
+                                this.ticksSinceLastBlockEventsTickCall = 0;
+                            }
+                        }
+                        data.setHandlingTick(false);
+                        this.world.regiontick3(profilerFiller, true, runsNormally, data);
+                        ServerRegions.getTickData(this.world).explosionDensityCache.clear();
+                        for (final ServerPlayer localPlayer : data.getLocalPlayers()) {
+                            localPlayer.connection.chunkSender.sendNextChunks(localPlayer);
+                            localPlayer.connection.resumeFlushing();
+                        }
+                        if (this.region.getData().tickHandle.cancelled.get()) {
+                            this.isActive = false;
+                        }
+                    });
                 } catch (Exception exception) {
                     TickLoopConstantsUtils.hardCrashCatch(new RegionCrash(exception, tickHandle));
                 }

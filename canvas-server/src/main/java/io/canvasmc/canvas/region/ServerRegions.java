@@ -570,11 +570,7 @@ public class ServerRegions {
         public final List<LevelChunk> temporaryChunkTickList = new ObjectArrayList<>();
         private final Set<ChunkHolder> chunkHoldersToBroadcast = new ConcurrentSet<>();
         public Set<ChunkHolder> getChunkHoldersToBroadcast() {
-            // this is processed on the async loader, which can only pull the level, so we must have it on the level
-            if (this.world.levelTickData == null) {
-                this.world.levelTickData = new WorldTickData(this.world, null);
-            }
-            return this.world.levelTickData.chunkHoldersToBroadcast;
+            return this.chunkHoldersToBroadcast;
         }
         // not transient
         public ArrayDeque<RedstoneTorchBlock.Toggle> redstoneUpdateInfos;

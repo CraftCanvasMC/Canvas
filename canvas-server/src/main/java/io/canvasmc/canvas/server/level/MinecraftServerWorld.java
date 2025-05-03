@@ -60,10 +60,8 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
         @Override
         public boolean blockTick(final WrappedTickLoop loop, final BooleanSupplier hasTimeLeft, final int tickCount) {
             ServerLevel thisAsTickable = (ServerLevel) loop; // we are extended by ServerLevel
-            if (!Config.INSTANCE.ticking.enableThreadedRegionizing) {
-                if (thisAsTickable.levelTickData == null) {
-                    thisAsTickable.levelTickData = new ServerRegions.WorldTickData(thisAsTickable, null);
-                }
+            if (thisAsTickable.levelTickData == null) {
+                thisAsTickable.levelTickData = new ServerRegions.WorldTickData(thisAsTickable, null);
             }
             TickScheduler.setTickingData(thisAsTickable.levelTickData);
             MinecraftServer server = MinecraftServer.getServer();
@@ -92,7 +90,9 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
                     }
                 }
             }
-            thisAsTickable.worldtick(hasTimeLeft, tickCount);
+            if (Config.INSTANCE.ticking.enableThreadedRegionizing && (!thisAsTickable.levelTickData.getBlockLevelTicks().allContainers.isEmpty() || !thisAsTickable.levelTickData.getFluidLevelTicks().allContainers.isEmpty()))
+                throw new IllegalStateException("Cannot register block/fluid level ticks to the world.");
+            thisAsTickable.bench(() -> thisAsTickable.worldtick(hasTimeLeft, tickCount));
             TickScheduler.setTickingData(null);
             return !thisAsTickable.cancelled.get();
         }
@@ -130,7 +130,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
 
     @Override
     public boolean hasTasks() {
-        return hasTasks || Config.INSTANCE.ticking.runChunkTasksBetweenTicks;
+        return hasTasks;
     }
 
     @Override

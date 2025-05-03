@@ -183,6 +183,8 @@ public class TickScheduler implements MultithreadedTickScheduler {
         public final T tick;
         private final Schedule tickSchedule;
         public long lastRespondedNanos = Util.getNanos();
+        protected long tickStart;
+        protected long tickEnd;
 
         // tick times
         public final RollingAverage tps5s = new RollingAverage(5);
@@ -231,6 +233,11 @@ public class TickScheduler implements MultithreadedTickScheduler {
             return reschedule;
         }
 
+        public void bench(@NotNull Runnable tick) {
+            this.tickStart = Util.getNanos();
+            tick.run();
+        }
+
         public boolean fullTick() {
             // pre-tick
             if (!hasInitSchedule) {
@@ -266,8 +273,6 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
             // ticking
             {
-                long tickStart;
-                long tickEnd;
                 // process overload
                 long nanosecondsOverload;
                 if (!this.server.isPaused() && this.server.tickRateManager().isSprinting() && this.server.tickRateManager().checkShouldSprintThisTick()) {
