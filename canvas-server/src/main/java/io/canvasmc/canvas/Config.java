@@ -64,8 +64,7 @@ public class Config {
             "recommended to use folia-compatible plugins with this option enabled.",
             "",
             "This force-modifies the following options(for stability and performance purposes):",
-            " - Enables threaded tracking",
-            " - Disables async mob spawning"
+            " - Enables threaded tracking"
         })
         public boolean enableThreadedRegionizing = false;
 
@@ -77,9 +76,9 @@ public class Config {
 
         @Comment(value = {
             "This enables the consistent use of chunk task polling/running in-between ticks",
-            "This does result in higher CPU usage, but better chunk system performance."
+            "This does result in higher CPU usage, but dramatic improvements to the chunk system performance."
         })
-        public boolean tickChunkTasksBetweenTicks = false;
+        public boolean runChunkTasksBetweenTicks = true;
     }
 
     public Chunks chunks = new Chunks();

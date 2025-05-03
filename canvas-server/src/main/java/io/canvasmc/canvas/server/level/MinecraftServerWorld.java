@@ -10,10 +10,7 @@ import io.canvasmc.canvas.scheduler.TickScheduler;
 import io.canvasmc.canvas.scheduler.WrappedTickLoop;
 import io.canvasmc.canvas.server.MultiWatchdogThread;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,12 +34,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.redstone.CollectingNeighborUpdater;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.scheduler.CraftScheduler;
-import org.bukkit.craftbukkit.util.CraftNamespacedKey;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.jetbrains.annotations.NotNull;
 
@@ -135,7 +130,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
 
     @Override
     public boolean hasTasks() {
-        return hasTasks || Config.INSTANCE.ticking.tickChunkTasksBetweenTicks;
+        return hasTasks || Config.INSTANCE.ticking.runChunkTasksBetweenTicks;
     }
 
     @Override
