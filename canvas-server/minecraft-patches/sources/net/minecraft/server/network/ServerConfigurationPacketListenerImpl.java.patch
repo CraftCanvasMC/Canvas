@@ -1,5 +1,65 @@
 --- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -1,11 +_,13 @@
+ package net.minecraft.server.network;
+ 
++import ca.spottedleaf.concurrentutil.util.Priority;
+ import com.mojang.authlib.GameProfile;
+ import com.mojang.logging.LogUtils;
+ import java.util.List;
+ import java.util.Queue;
+ import java.util.concurrent.ConcurrentLinkedQueue;
+ import javax.annotation.Nullable;
++import io.canvasmc.canvas.Config;
+ import net.minecraft.core.LayeredRegistryAccess;
+ import net.minecraft.network.Connection;
+ import net.minecraft.network.DisconnectionDetails;
+@@ -28,6 +_,7 @@
+ import net.minecraft.server.RegistryLayer;
+ import net.minecraft.server.ServerLinks;
+ import net.minecraft.server.level.ClientInformation;
++import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.network.config.JoinWorldTask;
+ import net.minecraft.server.network.config.ServerResourcePackConfigurationTask;
+@@ -35,6 +_,7 @@
+ import net.minecraft.server.packs.repository.KnownPack;
+ import net.minecraft.server.players.PlayerList;
+ import net.minecraft.world.flag.FeatureFlags;
++import net.minecraft.world.level.chunk.status.ChunkStatus;
+ import org.slf4j.Logger;
+ 
+ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketListenerImpl implements ServerConfigurationPacketListener, TickablePacketListener {
+@@ -160,7 +_,28 @@
+             }
+ 
+             ServerPlayer playerForLogin = playerList.getPlayerForLogin(this.gameProfile, this.clientInformation, this.player); // CraftBukkit
+-            playerList.placeNewPlayer(this.connection, playerForLogin, this.createCookie(this.clientInformation));
++            // Canvas start - Threaded Regions
++            final int chunkX = playerForLogin.chunkPosition().x;
++            final int chunkZ = playerForLogin.chunkPosition().z;
++            final ServerLevel world = playerForLogin.serverLevel();
++            Runnable placementTask = () -> {
++                playerList.placeNewPlayer(this.connection, playerForLogin, this.createCookie(this.clientInformation));
++            };
++            world.moonrise$getChunkTaskScheduler().scheduleChunkLoad(chunkX, chunkZ, ChunkStatus.FULL, true, Priority.HIGHER, (_) -> {
++                // place ticket
++                LOGGER.info("Queueing placement task for login event of player '{}'", playerForLogin.getName().getString());
++                // queue tick task
++                if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
++                    // regionize
++                    MinecraftServer.getThreadedServer().taskQueue.queueTickTaskQueue(
++                        world, chunkX, chunkZ,
++                        placementTask, Priority.HIGHER
++                    );
++                } else {
++                    world.pushTask(placementTask);
++                }
++            });
++            // Canvas end
+         } catch (Exception var5) {
+             LOGGER.error("Couldn't place player in world", (Throwable)var5);
+             // Paper start - Debugging
 @@ -168,8 +_,8 @@
                  var5.printStackTrace();
              }

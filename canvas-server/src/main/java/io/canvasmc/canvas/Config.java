@@ -73,6 +73,9 @@ public class Config {
 
         @Comment("The amount of time(in seconds) before watchdog starts printing error logs from slowdown")
         public long watchdogLoggingTime = 4L;
+
+        @Comment("When true, makes the world poll chunk tasks between ticks consistently. Results in higher CPU usage, but better chunk performance")
+        public boolean alwaysPollWorldTasks = false;
     }
 
     public Chunks chunks = new Chunks();
@@ -258,6 +261,14 @@ public class Config {
 
         @Comment("Makes farmland always moist, never drying out, even if it isn't near water")
         public boolean farmlandAlwaysMoist = false;
+
+        @Comment(value = {
+            "The amount of patterns that can be applied to a banner. Beyond 6, it will stop",
+            " showing suggestions, as the client only goes to 6, but the result will still be",
+            "displayed and usable. This allows for increasing or decreasing the amount of",
+            "banner patterns maximum for a banner, or disabling the loom entirely"
+        })
+        public int loomMaxPatternCount = 6;
     }
 
     @Comment(value = {
@@ -456,12 +467,6 @@ public class Config {
         "To disable all criterion triggers, input '*'"
     })
     public List<String> blacklistedCriterionTriggers = new ArrayList<>();
-
-    @Comment(value = {
-        "Broadcasts the \"server is lagging, running X ticks behind\" message from console",
-        "to all operators on the server"
-    })
-    public boolean broadcastServerTicksBehindToOps = false;
 
     public VirtualThreads virtualThreads = new VirtualThreads();
     public static class VirtualThreads {

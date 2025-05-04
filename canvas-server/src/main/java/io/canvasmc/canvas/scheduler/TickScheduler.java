@@ -313,12 +313,39 @@ public class TickScheduler implements MultithreadedTickScheduler {
                         tickStart = Util.getNanos();
                         if (!this.tick.blockTick(this, doesntHaveTime ? () -> false : this::haveTime, this.tickCount)) this.retire();
                         tickEnd = Util.getNanos();
-                    } catch (Exception e) {
+                    } catch (Throwable throwable) {
                         MultiWatchdogThread.WATCHDOG.undock(runningTick); // don't continue dock on watchdog if we fail to tick.
                         LOGGER.error("Encountered tick task crash at '{}'", this);
-                        LOGGER.error("", e);
+                        //noinspection removal
+                        if (throwable instanceof ThreadDeath) {
+                            LOGGER.error("Tick task terminated by WatchDog due to hard crash", throwable);
+                            return false;
+                        }
+                        LOGGER.error("", throwable);
+                        CrashReport crashreport = MinecraftServer.constructOrExtractCrashReport(throwable);
+
+                        this.server.fillSystemReport(crashreport.getSystemReport());
+                        Path path = this.server.getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
+
+                        if (crashreport.saveToFile(path, ReportType.CRASH)) {
+                            LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
+                        } else {
+                            LOGGER.error("We were unable to save this crash report to disk.");
+                        }
+
                         this.retire();
-                        this.server.stopServer();
+                        this.server.onServerCrash(crashreport);
+
+                        try {
+                            this.server.stopped = true;
+                            this.server.stopServer();
+                        } catch (Throwable throwable3) {
+                            LOGGER.error("Exception stopping the server via tick task", throwable3);
+                        } finally {
+                            if (server.services.profileCache() != null) {
+                                server.services.profileCache().clearExecutor();
+                            }
+                        }
                         return false;
                     }
                 } else {

@@ -231,6 +231,10 @@ public final class RegionizedTaskQueue {
             return this.tickTaskQueue.executeTask(only);
         }
 
+        public boolean executeChunkTask(Priority only) {
+            return this.worldRegionTaskData.executeGlobalChunkTask() || this.chunkQueue.executeTask(only);
+        }
+
         public boolean executeChunkTask() {
             return this.worldRegionTaskData.executeGlobalChunkTask() || this.chunkQueue.executeTask(null);
         }
