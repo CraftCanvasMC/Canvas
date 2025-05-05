@@ -75,7 +75,7 @@ public class Config {
         public long watchdogLoggingTime = 4L;
 
         @Comment("When true, makes the world poll chunk tasks between ticks consistently. Results in higher CPU usage, but better chunk performance")
-        public boolean alwaysPollWorldTasks = false;
+        public boolean dontParkBetweenTicks = false;
     }
 
     public Chunks chunks = new Chunks();

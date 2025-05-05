@@ -64,7 +64,7 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
 
     @Override
     public boolean hasTasks() {
-        return super.hasTasks() || this.region.getData().tickData.taskQueueData.hasTasks();
+        return super.hasTasks() || this.region.getData().tickData.taskQueueData.hasTasks() || Config.INSTANCE.ticking.dontParkBetweenTicks;
     }
 
     public boolean runRegionTasks(final BooleanSupplier canContinue) {
