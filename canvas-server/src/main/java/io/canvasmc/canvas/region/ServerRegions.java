@@ -951,7 +951,7 @@ public class ServerRegions {
         return level.levelTickData;
     }
 
-    private static @Nullable WorldTickData pullRegionData() {
+    public static @Nullable WorldTickData pullRegionData() {
         Thread current = Thread.currentThread();
         if (current instanceof TickScheduler.TickRunner runner) {
             // the runners CAN have a region attached to it.
