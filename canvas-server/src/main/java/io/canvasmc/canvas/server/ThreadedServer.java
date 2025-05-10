@@ -154,9 +154,6 @@ public class ThreadedServer implements ThreadedBukkitServer {
             performVersionCheck();
             while (this.server.isRunning()) {
                 tickSection = this.getServer().tick(tickSection);
-                for (final ServerLevel level : this.server.getAllLevels()) {
-                    level.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
-                }
             }
         } catch (Throwable throwable2) {
             //noinspection removal

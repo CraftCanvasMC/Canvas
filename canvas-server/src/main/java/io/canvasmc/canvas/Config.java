@@ -269,6 +269,12 @@ public class Config {
             "banner patterns maximum for a banner, or disabling the loom entirely"
         })
         public int loomMaxPatternCount = 6;
+
+        @Comment("The rebound velocity of the living entity when bouncing on a slime block")
+        public double livingEntityVelocityReboundFactor = 1.0D;
+
+        @Comment("The rebound velocity of the non living entity when bouncing on a slime block")
+        public double nonLivingEntityVelocityReboundFactor = 0.8D;
     }
 
     @Comment(value = {

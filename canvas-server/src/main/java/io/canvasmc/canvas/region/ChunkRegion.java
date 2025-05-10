@@ -64,7 +64,7 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
 
     @Override
     public boolean hasTasks() {
-        return super.hasTasks() || this.region.getData().tickData.taskQueueData.hasTasks() || Config.INSTANCE.ticking.dontParkBetweenTicks;
+        return super.hasTasks() || this.region.getData().tickData.taskQueueData.hasTasks() || (!this.world.isSleeping() && Config.INSTANCE.ticking.dontParkBetweenTicks);
     }
 
     public boolean runRegionTasks(final BooleanSupplier canContinue) {
@@ -135,6 +135,10 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
                 // region was killed
                 return false;
             }
+            // check world sleep, if the world is sleeping, we must sleep
+            if (this.world.isSleeping()) {
+                return this.markNotTicking() && !tickHandle.cancelled.get();
+            }
             // tick region
             try {
                 TickScheduler.setTickingData(this.region.getData().tickData);
@@ -151,7 +155,8 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
                 data.setHandlingTick(true);
                 ProfilerFiller profilerFiller = Profiler.get();
                 TickRateManager tickRateManager = this.world.tickRateManager();
-                tickHandle.runRegionTasks(hasTimeLeft);
+                tickHandle.runRegionTasks(hasTimeLeft); // run region tasks before ticking just in case
+                // bench this block, as technically this is the actual tick
                 tickHandle.bench(() -> {
                     boolean runsNormally = tickRateManager.runsNormally();
                     this.world.tickConnection(data); // tick connection on region

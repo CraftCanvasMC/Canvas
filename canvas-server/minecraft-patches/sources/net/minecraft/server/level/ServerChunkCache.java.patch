@@ -481,18 +481,22 @@
              // Paper start - rewrite chunk system
              final ServerChunkCache serverChunkCache = ServerChunkCache.this;
 -            if (serverChunkCache.runDistanceManagerUpdates()) {
++            final ServerLevel serverLevel = serverChunkCache.level;
++            Thread current = Thread.currentThread();
++            if (current == MinecraftServer.getServer().serverThread) {
++                // we don't want to process chunk tasks on main.
++                // wake the world regardless, we may actually need it.
++                serverLevel.wake();
++                // return us having no tasks, since technically we don't on this thread
++                // we return this early because we cannot have main run distance manager updates
++                // this ensures that ticket updates arent processed on main, since if it is, then
++                // we could cause parallelism issues with plugins requesting chunks that are waiting for load
++                return false;
++            }
 +            if (flag && serverChunkCache.runDistanceManagerUpdates()) {
                  return true;
              } else {
 -                return super.pollTask() | ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)serverChunkCache.level).moonrise$getChunkTaskScheduler().executeMainThreadTask();
-+                final ServerLevel serverLevel = serverChunkCache.level;
-+                Thread current = Thread.currentThread();
-+                if (current == MinecraftServer.getServer().serverThread) {
-+                    // we don't want to process chunk tasks on main.
-+                    // wake the world regardless, we may actually need it.
-+                    serverLevel.wake();
-+                    return false;
-+                }
 +                try {
 +                    entityOverride.add(current);
 +                    if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
@@ -502,16 +506,12 @@
 +                            // we are on a region, execute our chunk task.
 +                            // unlike Folia, we still can have tasks be submitted to the
 +                            // main thread executor, so we run 'super' poll aswell.
-+                            tryWake(() -> thisData.getTaskQueueData().executeChunkTask());
-+                            tryWake(() -> super.pollTask());
-+                            return false;
++                            return super.pollTask() | thisData.getTaskQueueData().executeChunkTask();
 +                        }
 +                    }
 +                    // not regionized OR we are on global
 +                    serverLevel.taskQueueRegionData.drainGlobalChunkTasks();
-+                    tryWake(() -> ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)serverChunkCache.level).moonrise$getChunkTaskScheduler().executeMainThreadTask());
-+                    tryWake(() -> super.pollTask());
-+                    return false;
++                    return ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)serverChunkCache.level).moonrise$getChunkTaskScheduler().executeMainThreadTask() | super.pollTask();
 +                } finally {
 +                    entityOverride.remove(current);
 +                }

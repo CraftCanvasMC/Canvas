@@ -110,6 +110,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             TickScheduler.setTickingData(level().levelTickData);
             ServerLevel worldserver = level();
 
+            // we cannot poll distance manager updates during task polls, this deadlocks the server
             worldserver.getChunkSource().mainThreadProcessor.pollTask(!Config.INSTANCE.ticking.enableThreadedRegionizing);
             hasTasks = false;
             return super.runTasks(canContinue);
@@ -130,7 +131,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
 
     @Override
     public boolean hasTasks() {
-        return hasTasks || (!Config.INSTANCE.ticking.enableThreadedRegionizing && Config.INSTANCE.ticking.dontParkBetweenTicks);
+        return hasTasks || (!Config.INSTANCE.ticking.enableThreadedRegionizing && (!this.isSleeping() && Config.INSTANCE.ticking.dontParkBetweenTicks));
     }
 
     @Override
