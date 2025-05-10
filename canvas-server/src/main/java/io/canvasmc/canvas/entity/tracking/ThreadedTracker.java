@@ -20,8 +20,8 @@ import org.jetbrains.annotations.Nullable;
 
 public class ThreadedTracker {
     private static final ThreadPoolExecutor processor = new ThreadPoolExecutor(
-        1,
         Config.INSTANCE.entities.entityTracking.maxProcessors,
+        Integer.MAX_VALUE,
         Config.INSTANCE.entities.entityTracking.keepAlive, TimeUnit.SECONDS,
         new LinkedBlockingQueue<>(),
         new NamedAgnosticThreadFactory<>("EntityTracking", TrackerThread::new, Thread.NORM_PRIORITY - 2)
