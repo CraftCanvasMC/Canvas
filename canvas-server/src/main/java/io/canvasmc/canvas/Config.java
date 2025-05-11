@@ -290,6 +290,16 @@ public class Config {
     })
     public boolean pluginCompatibilityMode = false;
 
+    public Commands commands = new Commands();
+    public static class Commands {
+        @Comment("Configurations for the 'tp' command")
+        public Teleport teleport = new Teleport();
+        public static class Teleport {
+            @Comment("Teleports the entity or entities asynchronously")
+            public boolean teleportAsync = false;
+        }
+    }
+
     public Entities entities = new Entities();
     public static class Entities {
 
