@@ -7,15 +7,20 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.lang.annotation.Annotation;
+import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import org.jetbrains.annotations.NotNull;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
@@ -23,10 +28,11 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
     private static final String NEW_LINE = "\n";
     private final Map<Class<? extends Annotation>, AnnotationContextProvider> annotationContextProviderRegistry = new HashMap<>();
     private final Map<Class<? extends Annotation>, AnnotationValidationProvider> annotationValidationProviderRegistry = new HashMap<>();
-    private final List<Consumer<PostSerializeContext<T>>> postConsumerContexts = new ArrayList<>();
+    private final List<Consumer<PostSerializeContext<T>>> postConsumerContexts = new LinkedList<>();
     private final Configuration definition;
     private final Class<T> configClass;
     private final Yaml yaml;
+    private final List<Pair<Pattern, RuntimeModifier<?>>> runtimeModifiers = new LinkedList<>();
     // only available for builders
     private String[] header;
 
@@ -47,6 +53,7 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
         this.annotationValidationProviderRegistry.putAll(builder.wrappedValidationMap());
         this.postConsumerContexts.addAll(builder.postConsumers());
         this.header = builder.header();
+        this.runtimeModifiers.addAll(builder.runtimeModifiers());
     }
 
     /**
@@ -208,12 +215,71 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
         }
     }
 
+    private <V> V applyRuntimeModifiers(String path, V value) {
+        for (Pair<Pattern, RuntimeModifier<?>> pair : runtimeModifiers) {
+            if (pair.a().matcher(path).matches()) {
+                RuntimeModifier<V> modifier = (RuntimeModifier<V>) pair.b();
+                Class<?> expected = wrapPrimitive(modifier.classType());
+                Class<?> actual = wrapPrimitive(value.getClass());
+
+                if (expected.isAssignableFrom(actual)) {
+                    value = modifier.modifier().apply(value);
+                }
+            }
+        }
+        return value;
+    }
+
+    private static Class<?> wrapPrimitive(@NotNull Class<?> clazz) {
+        if (!clazz.isPrimitive()) return clazz;
+        return switch (clazz.getName()) {
+            case "int" -> Integer.class;
+            case "long" -> Long.class;
+            case "double" -> Double.class;
+            case "float" -> Float.class;
+            case "boolean" -> Boolean.class;
+            case "char" -> Character.class;
+            case "byte" -> Byte.class;
+            case "short" -> Short.class;
+            default -> clazz;
+        };
+    }
+
+    private void applyModifiersRecursive(String currentPath, Object node, Set<Object> visited) {
+        if (node == null || visited.contains(node)) return;
+        visited.add(node);
+
+        Class<?> clazz = node.getClass();
+        for (Field field : clazz.getFields()) {
+            if (field.accessFlags().contains(AccessFlag.STATIC)) continue; // don't run on static fields
+            String path = currentPath.isEmpty() ? field.getName() : currentPath + "." + field.getName();
+            try {
+                Object value = field.get(node);
+                Object newValue = applyRuntimeModifiers(path, value);
+                if (newValue != value) {
+                    field.set(node, newValue);
+                }
+                if (newValue != null && !isPrimitiveOrWrapper(newValue.getClass()) && !(newValue instanceof String)) {
+                    applyModifiersRecursive(path, newValue, visited);
+                }
+            } catch (IllegalAccessException ignored) {
+            }
+        }
+    }
+
+    private boolean isPrimitiveOrWrapper(@NotNull Class<?> type) {
+        return type.isPrimitive() ||
+            type == Boolean.class || type == Byte.class || type == Character.class ||
+            type == Short.class || type == Integer.class || type == Long.class ||
+            type == Float.class || type == Double.class;
+    }
+
     private @NotNull Path getConfigPath() {
         return getConfigFolder().resolve(this.definition.value() + ".yml");
     }
 
     @Override
-    public void serialize(T config) throws ConfigSerializer.SerializationException {
+    public void serialize(T config) throws SerializationException {
         Path configPath = this.getConfigPath();
 
         try {
@@ -257,10 +323,11 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
                     }
                 });
             });
+            applyModifiersRecursive("", deserialized, Collections.newSetFromMap(new IdentityHashMap<>()));
             PostSerializeContext context = new PostSerializeContext<>(configPath, deserialized, createDefault(), yamlWriter.toString());
-            postConsumerContexts.forEach(consumer -> consumer.accept(context));
+            this.postConsumerContexts.forEach(consumer -> consumer.accept(context));
         } catch (IOException e) {
-            throw new ConfigSerializer.SerializationException(e);
+            throw new SerializationException(e);
         }
     }
 
@@ -274,14 +341,14 @@ public class AnnotationBasedYamlSerializer<T> implements ConfigSerializer<T> {
     }
 
     @Override
-    public T deserialize() throws ConfigSerializer.SerializationException {
+    public T deserialize() throws SerializationException {
         Path configPath = this.getConfigPath();
         if (Files.exists(configPath)) {
             try {
                 String content = Files.readString(configPath);
                 return this.yaml.load("!!" + getConfigClass().getName() + NEW_LINE + content);
             } catch (IOException e) {
-                throw new ConfigSerializer.SerializationException(e);
+                throw new SerializationException(e);
             }
         } else {
             return this.createDefault();

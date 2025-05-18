@@ -225,7 +225,7 @@
                  return SortedArraySet.create(4);
              });
  
-@@ -1031,17 +_,20 @@
+@@ -1031,17 +_,22 @@
          if (changedFullStatus.isEmpty()) {
              return;
          }
@@ -244,6 +244,8 @@
 +                int chunkX = fullStatus.chunkX;
 +                int chunkZ = fullStatus.chunkZ;
 +                this.taskScheduler.scheduleChunkTask(chunkX, chunkZ, () -> {
++                    ServerRegions.WorldTickData data = ServerRegions.getTickData(this.world);
++                    if (data.region == null && Config.INSTANCE.ticking.enableThreadedRegionizing) throw new RuntimeException("cannot attempt to add pending full update off-region");
 +                    ChunkHolderManager thisManager = ChunkHolderManager.this;
 +                    thisManager.getCurrentRegionData().pendingFullLoadUpdate.add(fullStatus);
 +                    thisManager.processPendingFullUpdate();
@@ -319,7 +321,16 @@
  
      public enum TicketOperationType {
          ADD, REMOVE, ADD_IF_REMOVED, ADD_AND_REMOVE
-@@ -1381,7 +_,14 @@
+@@ -1372,7 +_,7 @@
+             }
+         }
+ 
+-        if (canProcessFullUpdates) {
++        if (canProcessFullUpdates && (!Thread.currentThread().equals(this.world.server.serverThread))) { // Canvas - cannot run full updates on main
+             ret |= this.processPendingFullUpdate();
+         }
+ 
+@@ -1381,14 +_,42 @@
  
      // only call on tick thread
      private boolean processPendingFullUpdate() {
@@ -335,3 +346,39 @@
  
          boolean ret = false;
  
+         final List<NewChunkHolder> changedFullStatus = new ArrayList<>();
+ 
++        // Canvas start - we CANNOT let plugins run this on the wrong thread
++        ServerRegions.WorldTickData tickData = ServerRegions.getTickData(this.world);
++        ArrayDeque<NewChunkHolder> addBack = new ArrayDeque<>();
+         NewChunkHolder holder;
+         while ((holder = pendingFullLoadUpdate.poll()) != null) {
++            int chunkX = holder.chunkX;
++            int chunkZ = holder.chunkZ;
++            if (
++                (Config.INSTANCE.ticking.enableThreadedRegionizing && tickData.region == null) // on a non-region thread while regionized
++                || (Config.INSTANCE.ticking.enableThreadedRegionizing && this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ) != tickData.region) // regionized but wrong region
++            ) {
++                // on world or wrong region, fix
++                // this holder shouldn't be here, so we re-regionize
++                Objects.requireNonNull(this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ)).getData().tickData.getHolderManagerRegionData().pendingFullLoadUpdate.add(holder);
++                continue;
++            } else if (
++                (Thread.currentThread().equals(this.world.server.serverThread)) // on main thread
++                || (!Config.INSTANCE.ticking.enableThreadedRegionizing && !Thread.currentThread().equals(this.world.owner)) // not regionized and not on world thread
++            ) {
++                addBack.add(holder);
++                continue;
++            }
++        // Canvas end
+             ret |= holder.handleFullStatusChange(changedFullStatus);
+ 
+             if (!changedFullStatus.isEmpty()) {
+@@ -1398,6 +_,7 @@
+                 changedFullStatus.clear();
+             }
+         }
++        pendingFullLoadUpdate.addAll(addBack); // Canvas - add back skipped entries
+ 
+         return ret;
+     }

@@ -3,13 +3,13 @@ package io.canvasmc.canvas.config;
 import io.canvasmc.canvas.config.annotation.RegisteredHandler;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 
@@ -18,6 +18,7 @@ public class SerializationBuilder<C> {
     private final List<WrappedContextProvider> contextProviders = new LinkedList<>();
     private final List<WrappedValidationProvider> validationProviders = new LinkedList<>();
     private final List<Consumer<AnnotationBasedYamlSerializer.PostSerializeContext<C>>> postConsumers = new LinkedList<>();
+    private final List<Pair<Pattern, RuntimeModifier<?>>> runtimeModifiers = new LinkedList<>();
     private String[] header = new String[0];
     private boolean immutable = false;
 
@@ -65,13 +66,19 @@ public class SerializationBuilder<C> {
 
     public SerializationBuilder<C> post(Consumer<AnnotationBasedYamlSerializer.PostSerializeContext<C>> contextConsumer) {
         if (immutable) throw new RuntimeException("Unable to mutate builder, already built!");
-        postConsumers.add(contextConsumer);
+        this.postConsumers.add(contextConsumer);
+        return this;
+    }
+
+    public <B> SerializationBuilder<C> runtimeModifier(String pattern, RuntimeModifier<B> runtimeModifier) {
+        if (immutable) throw new RuntimeException("Unable to mutate builder, already built!");
+        this.runtimeModifiers.add(new Pair<>(Pattern.compile(pattern), runtimeModifier));
         return this;
     }
 
     public SerializationBuilder.Final<C> build(Configuration definition, Class<C> owningClass) {
         this.immutable = true;
-        return new Final<>(definition, owningClass, this.contextProviders, this.validationProviders, this.postConsumers, this.header);
+        return new Final<>(definition, owningClass, this.contextProviders, this.validationProviders, this.postConsumers, this.header, this.runtimeModifiers);
     }
 
     public record WrappedContextProvider<A extends Annotation>(AnnotationContextProvider<A> provider,
@@ -89,18 +96,21 @@ public class SerializationBuilder<C> {
         private final List<WrappedValidationProvider> validationProviders;
         private final List<Consumer<AnnotationBasedYamlSerializer.PostSerializeContext<C>>> postConsumers;
         private final String[] header;
+        private final List<Pair<Pattern, RuntimeModifier<?>>> runtimeModifiers;
 
         public Final(Configuration definition, Class<C> owningClass,
                      List<WrappedContextProvider> contextProviders,
                      List<WrappedValidationProvider> validationProviders,
                      List<Consumer<AnnotationBasedYamlSerializer.PostSerializeContext<C>>> postConsumers,
-                     String[] header) {
+                     String[] header,
+                     List<Pair<Pattern, RuntimeModifier<?>>> runtimeModifiers) {
             this.definition = definition;
             this.owningClass = owningClass;
             this.contextProviders = contextProviders;
             this.validationProviders = validationProviders;
             this.postConsumers = postConsumers;
             this.header = header;
+            this.runtimeModifiers = runtimeModifiers;
         }
 
         public Configuration definition() {
@@ -113,6 +123,10 @@ public class SerializationBuilder<C> {
 
         public List<Consumer<AnnotationBasedYamlSerializer.PostSerializeContext<C>>> postConsumers() {
             return postConsumers;
+        }
+
+        public List<Pair<Pattern, RuntimeModifier<?>>> runtimeModifiers() {
+            return runtimeModifiers;
         }
 
         public String[] header() {

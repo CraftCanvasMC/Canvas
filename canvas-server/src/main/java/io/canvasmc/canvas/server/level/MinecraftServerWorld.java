@@ -131,7 +131,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
 
     @Override
     public boolean hasTasks() {
-        return hasTasks || (!Config.INSTANCE.ticking.enableThreadedRegionizing && (!this.isSleeping() && Config.INSTANCE.ticking.dontParkBetweenTicks));
+        return hasTasks || super.hasTasks() || (!Config.INSTANCE.ticking.enableThreadedRegionizing && (!this.isSleeping()));
     }
 
     @Override

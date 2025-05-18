@@ -7,6 +7,7 @@ import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.command.debug.FlySpeedCommand;
 import io.canvasmc.canvas.command.debug.LevelTicksCommand;
 import io.canvasmc.canvas.command.debug.PriorityCommand;
+import io.canvasmc.canvas.command.debug.RandomTeleportCommand;
 import io.canvasmc.canvas.command.debug.ResendChunksCommand;
 import io.canvasmc.canvas.command.debug.SenderInfoCommand;
 import io.canvasmc.canvas.command.debug.SyncloadCommand;
@@ -43,6 +44,7 @@ public final class CanvasCommands {
             register(FlySpeedCommand::new);
             register(TasksCommand::new);
             register(LevelTicksCommand::new);
+            register(RandomTeleportCommand::new);
 
             CanvasBootstrap.LOGGER.info("Registering Minecraft debug commands");
             RaidCommand.register(dispatcher, context);

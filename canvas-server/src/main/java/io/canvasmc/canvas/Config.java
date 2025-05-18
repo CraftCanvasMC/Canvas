@@ -5,6 +5,7 @@ import io.canvasmc.canvas.config.ConfigHandlers;
 import io.canvasmc.canvas.config.ConfigSerializer;
 import io.canvasmc.canvas.config.Configuration;
 import io.canvasmc.canvas.config.ConfigurationUtils;
+import io.canvasmc.canvas.config.RuntimeModifier;
 import io.canvasmc.canvas.config.SerializationBuilder;
 import io.canvasmc.canvas.config.annotation.AlwaysAtTop;
 import io.canvasmc.canvas.config.annotation.Comment;
@@ -73,9 +74,6 @@ public class Config {
 
         @Comment("The amount of time(in seconds) before watchdog starts printing error logs from slowdown")
         public long watchdogLoggingTime = 4L;
-
-        @Comment("When true, makes the world poll chunk tasks between ticks consistently. Results in higher CPU usage, but better chunk performance")
-        public boolean dontParkBetweenTicks = false;
     }
 
     public Chunks chunks = new Chunks();
@@ -194,6 +192,8 @@ public class Config {
         public boolean taskRetire = false;
         @Comment("Prints the configuration tree at startup. Not really recommended to disable, as this helps a ton with debugging issues")
         public boolean printConfigurationTree = true;
+        @Comment("Logs teleport ticket debug when an entity is teleported")
+        public boolean logTeleportTicketDebug = false;
     }
 
     public Fixes fixes = new Fixes();
@@ -567,17 +567,13 @@ public class Config {
             .validator(ConfigHandlers.NonNegativeProcessor::new)
             .validator(ConfigHandlers.NonPositiveProcessor::new)
             .validator(ConfigHandlers.PatternProcessor::new)
+            .runtimeModifier("debug.*", new RuntimeModifier<>(boolean.class, (original) -> CanvasBootstrap.RUNNING_IN_IDE || original))
             .post(context -> {
                 INSTANCE = context.configuration();
                 if (INSTANCE.debug.printConfigurationTree) {
                     // build and print config tree.
                     YamlTextFormatter formatter = new YamlTextFormatter(4);
                     CanvasBootstrap.LOGGER.info(Component.text("Printing configuration tree:").appendNewline().append(formatter.apply(context.contents())));
-                }
-                if (CanvasBootstrap.RUNNING_IN_IDE) {
-                    INSTANCE.debug.regionTeleports = true;
-                    INSTANCE.debug.printConfigurationTree = true;
-                    INSTANCE.debug.taskRetire = true;
                 }
             })
             .build(config, configClass)
