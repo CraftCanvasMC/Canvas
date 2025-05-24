@@ -11,8 +11,8 @@ import org.jetbrains.annotations.NotNull;
 public class ChunkSendingExecutor {
     private static final ExecutorService SERVICE = Executors.newVirtualThreadPerTaskExecutor();
 
-    public static void execute(Runnable runnable, ServerLevel level) {
-        runnable = wrapRunnable(runnable, level);
+    public static void execute(ChunkRunnable runnable) {
+        runnable = wrapRunnable(runnable);
         if (Config.INSTANCE.chunks.chunkSending.asyncChunkSending) {
             SERVICE.submit(runnable);
         } else {
@@ -21,20 +21,25 @@ public class ChunkSendingExecutor {
     }
 
     @Contract(pure = true)
-    private static @NotNull Runnable wrapRunnable(Runnable runnable, final ServerLevel level) {
-        return () -> {
+    private static @NotNull ChunkRunnable wrapRunnable(@NotNull ChunkRunnable runnable) {
+        return new ChunkRunnable(runnable.chunkX, runnable.chunkZ, runnable.world, () -> {
             try {
                 runnable.run();
             } catch (Throwable throwable) {
                 MinecraftServer.LOGGER.warn("Failed to send chunk data, attempting retry, if no errors occur related to chunk sending immediately after this, the retry was successful.");
-                level.pushTask(() -> {
+                Runnable retry = () -> {
                     try {
                         runnable.run();
                     } catch (Throwable failed) {
                         MinecraftServer.LOGGER.error("Failed 2nd attempt for chunk data sending, logging stacktrace.", failed);
                     }
-                });
+                };
+                if (Config.INSTANCE.ticking.enableThreadedRegionizing) {
+                    runnable.world.server.threadedServer().taskQueue.queueChunkTask(runnable.world, runnable.chunkX, runnable.chunkZ, retry);
+                } else {
+                    runnable.world.pushTask(retry);
+                }
             }
-        };
+        });
     }
 }

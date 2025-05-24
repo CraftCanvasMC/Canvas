@@ -43,9 +43,8 @@ public class CanvasRegionScheduler implements RegionScheduler {
     }
 
     private static void scheduleInternalOnRegion(final @NotNull LocationScheduledTask task, final long delay) {
-        final ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> region = ((CraftWorld) task.world).getHandle().regioniser.getRegionAtUnsynchronised(task.chunkX, task.chunkZ);
-        if (region == null) throw new RuntimeException("Cannot schedule to a chunk that isn't owned by a region.");
-        ServerRegions.WorldTickData data = region.getData().tickData;
+        ServerRegions.WorldTickData data = ServerRegions.getTickData(((CraftWorld) task.world).getHandle());
+        if (data.region == null) throw new RuntimeException("attempted to schedule on region when we are off region");
         data.regionScheduler.queueTask(task, delay, data);
     }
 

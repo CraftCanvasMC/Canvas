@@ -1,10 +1,12 @@
 --- a/net/minecraft/world/ticks/LevelTicks.java
 +++ b/net/minecraft/world/ticks/LevelTicks.java
-@@ -1,9 +_,13 @@
+@@ -1,9 +_,15 @@
  package net.minecraft.world.ticks;
  
 +import io.canvasmc.canvas.Config;
 +import io.canvasmc.canvas.region.ServerRegions;
++import io.canvasmc.canvas.util.fastutil.Long2LongConcurrentHashMap;
++import io.canvasmc.canvas.util.fastutil.Long2ObjectConcurrentHashMap;
 +import io.papermc.paper.threadedregions.ThreadedRegionizer;
  import it.unimi.dsi.fastutil.longs.Long2LongMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMaps;
@@ -14,7 +16,7 @@
  import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  import it.unimi.dsi.fastutil.longs.Long2LongMap.Entry;
  import it.unimi.dsi.fastutil.objects.ObjectIterator;
-@@ -16,6 +_,7 @@
+@@ -16,9 +_,11 @@
  import java.util.PriorityQueue;
  import java.util.Queue;
  import java.util.Set;
@@ -22,16 +24,27 @@
  import java.util.function.BiConsumer;
  import java.util.function.LongPredicate;
  import java.util.function.Predicate;
-@@ -32,7 +_,7 @@
++import it.unimi.dsi.fastutil.objects.ObjectSets;
+ import net.minecraft.Util;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.SectionPos;
+@@ -32,23 +_,105 @@
      private static final Comparator<LevelChunkTicks<?>> CONTAINER_DRAIN_ORDER = (levelChunkTicks, levelChunkTicks1) -> ScheduledTick.INTRA_TICK_DRAIN_ORDER
          .compare(levelChunkTicks.peek(), levelChunkTicks1.peek());
      private final LongPredicate tickCheck;
 -    private final Long2ObjectMap<LevelChunkTicks<T>> allContainers = new Long2ObjectOpenHashMap<>();
-+    public final Long2ObjectMap<LevelChunkTicks<T>> allContainers = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>()); // Canvas - synchronize - private -> public
-     private final Long2LongMap nextTickForContainer = Util.make(new Long2LongOpenHashMap(), map -> map.defaultReturnValue(Long.MAX_VALUE));
-     private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
-     private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
-@@ -43,12 +_,97 @@
+-    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongOpenHashMap(), map -> map.defaultReturnValue(Long.MAX_VALUE));
+-    private final Queue<LevelChunkTicks<T>> containersToTick = new PriorityQueue<>(CONTAINER_DRAIN_ORDER);
+-    private final Queue<ScheduledTick<T>> toRunThisTick = new ArrayDeque<>();
++    public final Long2ObjectMap<LevelChunkTicks<T>> allContainers = new Long2ObjectConcurrentHashMap<>(16, 0.75F); // Canvas - concurrent - private -> public
++    private final Long2LongMap nextTickForContainer = Util.make(new Long2LongConcurrentHashMap(Long.MAX_VALUE), map -> map.defaultReturnValue(Long.MAX_VALUE)); // Canvas - concurrent
++    private final Queue<LevelChunkTicks<T>> containersToTick = com.google.common.collect.Queues.synchronizedQueue(new PriorityQueue<>(CONTAINER_DRAIN_ORDER)); // Canvas - synchronized
++    private final Queue<ScheduledTick<T>> toRunThisTick = new java.util.concurrent.ConcurrentLinkedDeque<>(); // Canvas - concurrent
+     private final List<ScheduledTick<T>> alreadyRunThisTick = new ArrayList<>();
+-    private final Set<ScheduledTick<?>> toRunThisTickSet = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
++    private final Set<ScheduledTick<?>> toRunThisTickSet = ObjectSets.synchronize(new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH)); // Canvas - synchronized
+     private final BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> chunkScheduleUpdater = (levelChunkTicks, scheduledTick) -> {
+         if (scheduledTick.equals(levelChunkTicks.peek())) {
              this.updateContainerScheduling(scheduledTick);
          }
      };
@@ -44,8 +57,6 @@
 +    public final net.minecraft.server.level.ServerLevel world;
 +    public final boolean isBlock;
 +    public final boolean isWorldRegion;
-+    // we lock down for concurrency purposes, if we don't, we can crash anytime which very bad
-+    private final ReentrantLock lock = new ReentrantLock();
 +
 +    public void merge(final LevelTicks<T> into, final long tickOffset) {
 +        // note: containersToTick, toRunThisTick, alreadyRunThisTick, toRunThisTickSet
@@ -59,7 +70,7 @@
 +            tickContainer.offsetTicks(tickOffset);
 +            into.allContainers.put(entry.getLongKey(), tickContainer);
 +        }
-+        for (final java.util.Iterator<Long2LongMap.Entry> iterator = ((Long2LongOpenHashMap)this.nextTickForContainer).long2LongEntrySet().fastIterator();
++        for (final java.util.Iterator<Long2LongMap.Entry> iterator = (this.nextTickForContainer).long2LongEntrySet().iterator();
 +             iterator.hasNext();) {
 +            final Long2LongMap.Entry entry = iterator.next();
 +            into.nextTickForContainer.put(entry.getLongKey(), entry.getLongValue() + tickOffset);
@@ -85,7 +96,7 @@
 +            if (poss == null) continue;
 +            poss.allContainers.put(chunkKey, entry.getValue());
 +        }
-+        for (final java.util.Iterator<Long2LongMap.Entry> iterator = ((Long2LongOpenHashMap)this.nextTickForContainer).long2LongEntrySet().fastIterator();
++        for (final java.util.Iterator<Long2LongMap.Entry> iterator = (this.nextTickForContainer).long2LongEntrySet().iterator();
 +             iterator.hasNext();) {
 +            final Long2LongMap.Entry entry = iterator.next();
 +            final long chunkKey = entry.getLongKey();
@@ -111,27 +122,26 @@
          this.tickCheck = tickCheck;
      }
  
-+    private volatile boolean checkRegionized = true;
++    private volatile ThreadLocal<Boolean> checkRegionized = ThreadLocal.withInitial(() -> true);
      public void addContainer(ChunkPos chunkPos, LevelChunkTicks<T> chunkTicks) {
 +        // Canvas start - Threaded Regions
-+        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized) {
++        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized.get()) {
 +            // we must ensure we are regionized properly
 +            int chunkX = chunkPos.x;
 +            int chunkZ = chunkPos.z;
 +            ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> correctRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
 +            LevelTicks<T> regionized = (LevelTicks<T>) (this.isBlock ? correctRegion.getData().tickData.getBlockLevelTicks() : correctRegion.getData().tickData.getFluidLevelTicks());
-+            regionized.checkRegionized = false;
++            regionized.checkRegionized.set(false);
 +            regionized.addContainer(chunkPos, chunkTicks);
-+            regionized.checkRegionized = true;
-+            return; // if we are the same, we are regionized correctly, no need to return then
++            regionized.checkRegionized.set(true);
++            return;
 +        }
-+        try { lock.lock(); // Canvas - lock
 +        if (this.isWorldRegion && Config.INSTANCE.ticking.enableThreadedRegionizing) throw new RuntimeException("Cannot add container to world region while regionized!");
 +        // Canvas end
          long packedChunkPos = chunkPos.toLong();
          this.allContainers.put(packedChunkPos, chunkTicks);
          ScheduledTick<T> scheduledTick = chunkTicks.peek();
-@@ -56,30 +_,75 @@
+@@ -56,10 +_,35 @@
              this.nextTickForContainer.put(packedChunkPos, scheduledTick.triggerTick());
          }
  
@@ -149,138 +159,43 @@
 +            }
 +        });
 +        // Canvas end
-+        } finally { lock.unlock(); } // Canvas - lock
      }
  
      public void removeContainer(ChunkPos chunkPos) {
 +        // Canvas start - Threaded Regions
-+        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized) {
++        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized.get()) {
 +            // we must ensure we are regionized properly
 +            int chunkX = chunkPos.x;
 +            int chunkZ = chunkPos.z;
 +            ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> correctRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
 +            LevelTicks<T> regionized = (LevelTicks<T>) (this.isBlock ? correctRegion.getData().tickData.getBlockLevelTicks() : correctRegion.getData().tickData.getFluidLevelTicks());
-+            regionized.checkRegionized = false;
++            regionized.checkRegionized.set(false);
 +            regionized.removeContainer(chunkPos);
-+            regionized.checkRegionized = true;
-+            return; // if we are the same, we are regionized correctly, no need to return then
++            regionized.checkRegionized.set(true);
++            return;
 +        }
-+        try { lock.lock(); // Canvas - lock
 +        // Canvas end
          long packedChunkPos = chunkPos.toLong();
          LevelChunkTicks<T> levelChunkTicks = this.allContainers.remove(packedChunkPos);
          this.nextTickForContainer.remove(packedChunkPos);
-         if (levelChunkTicks != null) {
-             levelChunkTicks.setOnTickAdded(null);
-         }
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
+@@ -71,6 +_,20 @@
      @Override
      public void schedule(ScheduledTick<T> tick) {
          long packedChunkPos = ChunkPos.asLong(tick.pos());
 +        // Canvas start - Threaded Regions
-+        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized) {
++        if (Config.INSTANCE.ticking.enableThreadedRegionizing && checkRegionized.get()) {
 +            // we must ensure we are regionized properly
 +            ChunkPos pos = new ChunkPos(tick.pos());
 +            int chunkX = pos.x;
 +            int chunkZ = pos.z;
 +            ThreadedRegionizer.ThreadedRegion<ServerRegions.TickRegionData, ServerRegions.TickRegionSectionData> correctRegion = this.world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
 +            LevelTicks<T> regionized = (LevelTicks<T>) (this.isBlock ? correctRegion.getData().tickData.getBlockLevelTicks() : correctRegion.getData().tickData.getFluidLevelTicks());
-+            regionized.checkRegionized = false;
++            regionized.checkRegionized.set(false);
 +            regionized.schedule(tick);
-+            regionized.checkRegionized = true;
-+            return; // if we are the same, we are regionized correctly, no need to return then
++            regionized.checkRegionized.set(true);
++            return;
 +        }
-+        try { lock.lock(); // Canvas - lock
 +        // Canvas end
          LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(packedChunkPos);
          if (levelChunkTicks == null) {
              Util.logAndPauseIfInIde("Trying to schedule tick in not loaded position " + tick.pos());
-         } else {
-             levelChunkTicks.schedule(tick);
-         }
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     public void tick(long gameTime, int maxAllowedTicks, BiConsumer<BlockPos, T> ticker) {
-+        try { lock.lock(); // Canvas - lock
-         ProfilerFiller profilerFiller = Profiler.get();
-         profilerFiller.push("collect");
-         this.collectTicks(gameTime, maxAllowedTicks, profilerFiller);
-@@ -89,6 +_,7 @@
-         profilerFiller.popPush("cleanup");
-         this.cleanupAfterTick();
-         profilerFiller.pop();
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     private void collectTicks(long gameTime, int maxAllowedTicks, ProfilerFiller profiler) {
-@@ -148,7 +_,9 @@
-     }
- 
-     private void updateContainerScheduling(ScheduledTick<T> tick) {
-+        try { lock.lock(); // Canvas - lock
-         this.nextTickForContainer.put(ChunkPos.asLong(tick.pos()), tick.triggerTick());
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     private void drainFromCurrentContainer(Queue<LevelChunkTicks<T>> containersToTick, LevelChunkTicks<T> levelChunkTicks, long gameTime, int maxAllowedTicks) {
-@@ -199,14 +_,18 @@
- 
-     @Override
-     public boolean hasScheduledTick(BlockPos pos, T type) {
-+        try { lock.lock(); // Canvas - lock
-         LevelChunkTicks<T> levelChunkTicks = this.allContainers.get(ChunkPos.asLong(pos));
-         return levelChunkTicks != null && levelChunkTicks.hasScheduledTick(pos, type);
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     @Override
-     public boolean willTickThisTick(BlockPos pos, T type) {
-+        try { lock.lock(); // Canvas - lock
-         this.calculateTickSetIfNeeded();
-         return this.toRunThisTickSet.contains(ScheduledTick.probe(type, pos));
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     private void calculateTickSetIfNeeded() {
-@@ -233,6 +_,7 @@
-     }
- 
-     public void clearArea(BoundingBox area) {
-+        try { lock.lock(); // Canvas - lock
-         Predicate<ScheduledTick<T>> predicate = scheduledTick -> area.isInside(scheduledTick.pos());
-         this.forContainersInArea(area, (pos, container) -> {
-             ScheduledTick<T> scheduledTick = container.peek();
-@@ -248,6 +_,7 @@
-         });
-         this.alreadyRunThisTick.removeIf(predicate);
-         this.toRunThisTick.removeIf(predicate);
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     public void copyArea(BoundingBox area, Vec3i offset) {
-@@ -255,6 +_,7 @@
-     }
- 
-     public void copyAreaFrom(LevelTicks<T> levelTicks, BoundingBox area, Vec3i offset) {
-+        try { lock.lock(); // Canvas - lock
-         List<ScheduledTick<T>> list = new ArrayList<>();
-         Predicate<ScheduledTick<T>> predicate = scheduledTick -> area.isInside(scheduledTick.pos());
-         levelTicks.alreadyRunThisTick.stream().filter(predicate).forEach(list::add);
-@@ -274,11 +_,14 @@
-                 )
-             )
-         );
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     @Override
-     public int count() {
-+        try { lock.lock(); // Canvas - lock
-         return this.allContainers.values().stream().mapToInt(TickAccess::count).sum();
-+        } finally { lock.unlock(); } // Canvas - lock
-     }
- 
-     @FunctionalInterface
