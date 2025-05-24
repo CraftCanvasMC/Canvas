@@ -29,7 +29,6 @@ allprojects {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
-val mcVersion = "1.21.4"
 
 subprojects {
     apply(plugin = "java-library")
