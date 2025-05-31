@@ -5,7 +5,6 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.command.debug.FlySpeedCommand;
-import io.canvasmc.canvas.command.debug.LevelTicksCommand;
 import io.canvasmc.canvas.command.debug.PriorityCommand;
 import io.canvasmc.canvas.command.debug.RandomTeleportCommand;
 import io.canvasmc.canvas.command.debug.ResendChunksCommand;
@@ -43,7 +42,6 @@ public final class CanvasCommands {
             register(PriorityCommand::new);
             register(FlySpeedCommand::new);
             register(TasksCommand::new);
-            register(LevelTicksCommand::new);
             register(RandomTeleportCommand::new);
 
             CanvasBootstrap.LOGGER.info("Registering Minecraft debug commands");

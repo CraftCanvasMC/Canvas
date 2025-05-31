@@ -44,6 +44,7 @@ import org.jetbrains.annotations.NotNull;
 import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.RED;
 
+// TODO: when regionized, remove debug data here and regionize it.
 public abstract class MinecraftServerWorld extends TickScheduler.FullTick<MinecraftServerWorld.TickHandle> implements LevelAccess {
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPost = new ConcurrentLinkedQueue<>();
     protected final ConcurrentLinkedQueue<Runnable> queuedForNextTickPre = new ConcurrentLinkedQueue<>();
@@ -90,8 +91,6 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
                     }
                 }
             }
-            if (Config.INSTANCE.ticking.enableThreadedRegionizing && (!thisAsTickable.levelTickData.getBlockLevelTicks().allContainers.isEmpty() || !thisAsTickable.levelTickData.getFluidLevelTicks().allContainers.isEmpty()))
-                throw new IllegalStateException("Cannot register block/fluid level ticks to the world.");
             thisAsTickable.bench(() -> thisAsTickable.worldtick(hasTimeLeft, tickCount));
             TickScheduler.setTickingData(null);
             return !thisAsTickable.cancelled.get();
@@ -229,127 +228,8 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             .append(ThreadedServerHealthDump.NEW_LINE)
             .append(doEntityInfo())
             .append(ThreadedServerHealthDump.NEW_LINE);
-        // basic.append(Component.text("Neighbor Updates", ThreadedServerHealthDump.HEADER, TextDecoration.BOLD))
-        //     .append(ThreadedServerHealthDump.NEW_LINE)
-        //     .append(doNeighborInfo());
         return basic.build();
     }
-
-    /* private @NotNull Component doNeighborInfo() {
-        TextComponent.@NotNull Builder root = text();
-        ServerLevel world = this.level();
-        List<CollectingNeighborUpdater.NeighborUpdates> addedThisLayer = new ArrayList<>();
-        Deque<CollectingNeighborUpdater.NeighborUpdates> stack = new ArrayDeque<>();
-        Map<ResourceLocation, Integer> blockUpdateCounts = new HashMap<>();
-        for (final CollectingNeighborUpdater updater : CollectingNeighborUpdater.COLLECTED_COLLECTING_NEIGHBOR_UPDATERS.getOrDefault(world, List.of())) {
-            addedThisLayer.addAll(updater.addedThisLayer);
-            stack.addAll(updater.stack);
-        }
-        for (final CollectingNeighborUpdater.NeighborUpdates neighborUpdates : stack) {
-            if (neighborUpdates instanceof CollectingNeighborUpdater.FullNeighborUpdate full) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(full.state().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            } else if (neighborUpdates instanceof CollectingNeighborUpdater.MultiNeighborUpdate multi) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(multi.sourceBlock.defaultBlockState().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            } else if (neighborUpdates instanceof CollectingNeighborUpdater.ShapeUpdate shape) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(shape.neighborState().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            } else if (neighborUpdates instanceof CollectingNeighborUpdater.SimpleNeighborUpdate simple) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(simple.block().defaultBlockState().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            }
-        }
-
-        Map<Class<? extends CollectingNeighborUpdater.NeighborUpdates>, Integer> stackMap = buildNeighborCounts(stack);
-        root.append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
-            .append(Component.text("Stack Count: ", ThreadedServerHealthDump.PRIME_ALT))
-            .append(Component.text(stackMap.values().stream().mapToInt(Integer::intValue).sum(), ThreadedServerHealthDump.INFORMATION))
-            .append(ThreadedServerHealthDump.NEW_LINE);
-        stackMap.forEach((clazz, count) -> root.append(Component.text("    "))
-            .append(Component.text("| " + clazz.getSimpleName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
-            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
-            .append(ThreadedServerHealthDump.NEW_LINE));
-        blockUpdateCounts.forEach((location, count) -> root.append(Component.text("    "))
-            .append(Component.text("\\ " + location.toDebugFileName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
-            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
-            .append(ThreadedServerHealthDump.NEW_LINE));
-
-        blockUpdateCounts.clear();
-        for (final CollectingNeighborUpdater.NeighborUpdates neighborUpdates : addedThisLayer) {
-            if (neighborUpdates instanceof CollectingNeighborUpdater.FullNeighborUpdate full) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(full.state().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            } else if (neighborUpdates instanceof CollectingNeighborUpdater.MultiNeighborUpdate multi) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(multi.sourceBlock.defaultBlockState().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            } else if (neighborUpdates instanceof CollectingNeighborUpdater.ShapeUpdate shape) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(shape.neighborState().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            } else if (neighborUpdates instanceof CollectingNeighborUpdater.SimpleNeighborUpdate simple) {
-                ResourceLocation location = CraftNamespacedKey.toMinecraft(simple.block().defaultBlockState().getBukkitMaterial().getKey());
-                if (blockUpdateCounts.containsKey(location)) {
-                    blockUpdateCounts.put(location, blockUpdateCounts.get(location) + 1);
-                } else {
-                    blockUpdateCounts.putIfAbsent(location, 1);
-                }
-            }
-        }
-
-        stackMap = buildNeighborCounts(addedThisLayer);
-        root.append(Component.text(" - ", ThreadedServerHealthDump.LIST, TextDecoration.BOLD))
-            .append(Component.text("AddedThisLayer Count: ", ThreadedServerHealthDump.PRIMARY))
-            .append(Component.text(stackMap.values().stream().mapToInt(Integer::intValue).sum(), ThreadedServerHealthDump.PRIMARY))
-            .append(ThreadedServerHealthDump.NEW_LINE);
-        stackMap.forEach((clazz, count) -> root.append(Component.text("    "))
-            .append(Component.text("| " + clazz.getSimpleName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
-            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
-            .append(ThreadedServerHealthDump.NEW_LINE));
-        blockUpdateCounts.forEach((location, count) -> root.append(Component.text("    "))
-            .append(Component.text("\\ " + location.toDebugFileName() + ": ", ThreadedServerHealthDump.PRIME_ALT))
-            .append(Component.text(count, ThreadedServerHealthDump.INFORMATION))
-            .append(ThreadedServerHealthDump.NEW_LINE));
-        return root.build();
-    }
-
-    private @NotNull Map<Class<? extends CollectingNeighborUpdater.NeighborUpdates>, Integer> buildNeighborCounts(@NotNull Iterable<CollectingNeighborUpdater.NeighborUpdates> updates) {
-        Map<Class<? extends CollectingNeighborUpdater.NeighborUpdates>, Integer> retVal = new HashMap<>();
-        for (final CollectingNeighborUpdater.NeighborUpdates neighborUpdate : updates) {
-            if (!retVal.containsKey(neighborUpdate.getClass())) {
-                retVal.put(neighborUpdate.getClass(), 0);
-            }
-            retVal.put(neighborUpdate.getClass(), retVal.get(neighborUpdate.getClass()) + 1);
-        }
-        return retVal;
-    } */
 
     private @NotNull Component doTileEntityInfo() {
         TextComponent.@NotNull Builder root = text();
