@@ -12,6 +12,7 @@ import com.google.common.collect.Sets;
 import io.canvasmc.canvas.CanvasBootstrap;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.entity.ai.AsyncGoalExecutor;
+import io.canvasmc.canvas.entity.ai.AsyncGoalThread;
 import io.canvasmc.canvas.event.region.RegionCreateEvent;
 import io.canvasmc.canvas.event.region.RegionDestroyEvent;
 import io.canvasmc.canvas.event.region.RegionMergeEvent;
@@ -173,6 +174,7 @@ public class ServerRegions {
 
     // Note for all isTickThreadFor checks, if the server is in shutdown, the shutdown thread is a valid thread owner.
     public static boolean isTickThreadFor(final @NotNull Level world, final @NotNull AABB aabb) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         return isTickThreadFor(
@@ -183,12 +185,14 @@ public class ServerRegions {
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final double blockX, final double blockZ) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         return isTickThreadFor(world, CoordinateUtils.getChunkCoordinate(blockX), CoordinateUtils.getChunkCoordinate(blockZ));
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final Vec3 position, final @NotNull Vec3 deltaMovement, final int buffer) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         final int fromChunkX = CoordinateUtils.getChunkX(position);
@@ -208,12 +212,14 @@ public class ServerRegions {
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final @NotNull BlockPos pos) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         return isTickThreadFor(world, pos.getX() >> 4, pos.getZ() >> 4);
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final @NotNull BlockPos pos, final int blockRadius) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         return isTickThreadFor(
@@ -224,12 +230,14 @@ public class ServerRegions {
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final @NotNull ChunkPos pos) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         return isTickThreadFor(world, pos.x, pos.z);
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final @NotNull Vec3 pos) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         return isTickThreadFor(world, net.minecraft.util.Mth.floor(pos.x) >> 4, net.minecraft.util.Mth.floor(pos.z) >> 4);
@@ -239,6 +247,7 @@ public class ServerRegions {
         if (entity == null) {
             return true;
         }
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (entity.level().server.hasStopped() && Thread.currentThread().equals(entity.level().server.shutdownThread)) return true;
         if (!entity.level().server.isRegionized()) return isTickThreadNonRegionized(entity.level());
         WorldTickData tickData = pullLocalTickDataSoft();
@@ -260,6 +269,7 @@ public class ServerRegions {
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final int chunkX, final int chunkZ) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region = pullLocalRegionSoft();
@@ -270,12 +280,14 @@ public class ServerRegions {
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final int chunkX, final int chunkZ, final int radius) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         return isTickThreadFor(world, chunkX - radius, chunkZ - radius, chunkX + radius, chunkZ + radius);
     }
 
     public static boolean isTickThreadFor(final @NotNull Level world, final int fromChunkX, final int fromChunkZ, final int toChunkX, final int toChunkZ) {
+        if (Thread.currentThread() instanceof AsyncGoalThread) return true;
         if (world.server.hasStopped() && Thread.currentThread().equals(world.server.shutdownThread)) return true;
         if (!world.server.isRegionized()) return isTickThreadNonRegionized(world);
         final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region = pullLocalRegionSoft();
@@ -855,8 +867,12 @@ public class ServerRegions {
 
         public boolean addNavigatingMob(Mob mob) {
             if (this.world.server.isRegionized()) {
+                mob.level().level().getChunkSource().getChunk(
+                    mob.chunkPosition().x,
+                    mob.chunkPosition().z,
+                    ChunkStatus.FULL, true
+                );
                 ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(mob.chunkPosition().x, mob.chunkPosition().z);
-                // the chunk has to exist for the entity to be added, so we are ok to assume non-null
                 if (theRegion.getData().tickData != this) {
                     // we are not correctly regionized, regionize here.
                     return theRegion.getData().tickData.navigatingMobs.add(mob);
