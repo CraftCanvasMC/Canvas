@@ -823,6 +823,14 @@ public class Config {
                         CanvasBootstrap.LOGGER.error("Couldn't load NativeLoader", t);
                     }
                 }
+                if (!INSTANCE.entities.asyncTargetFinding.enabled) {
+                    INSTANCE.entities.asyncTargetFinding.alertOther = false;
+                    INSTANCE.entities.asyncTargetFinding.searchEntity = false;
+                    INSTANCE.entities.asyncTargetFinding.searchBlock = false;
+                }
+                if (INSTANCE.entities.asyncTargetFinding.queueSize <= 0) {
+                    INSTANCE.entities.asyncTargetFinding.queueSize = 4096;
+                }
             })
             .build(config, configClass), changes::add
         );
