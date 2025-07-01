@@ -866,30 +866,10 @@ public class ServerRegions {
         };
 
         public boolean addNavigatingMob(Mob mob) {
-            if (this.world.server.isRegionized()) {
-                mob.level().level().getChunkSource().getChunk(
-                    mob.chunkPosition().x,
-                    mob.chunkPosition().z,
-                    ChunkStatus.FULL, true
-                );
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(mob.chunkPosition().x, mob.chunkPosition().z);
-                if (theRegion.getData().tickData != this) {
-                    // we are not correctly regionized, regionize here.
-                    return theRegion.getData().tickData.navigatingMobs.add(mob);
-                }
-            }
             return this.navigatingMobs.add(mob);
         }
 
         public boolean removeNavigatingMob(Mob mob) {
-            if (this.world.server.isRegionized()) {
-                ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> theRegion = this.world.regioniser.getRegionAtUnsynchronised(mob.chunkPosition().x, mob.chunkPosition().z);
-                // the chunk has to exist for the entity to be added, so we are ok to assume non-null
-                if (theRegion.getData().tickData != this) {
-                    // we are not correctly regionized, regionize here.
-                    return theRegion.getData().tickData.navigatingMobs.remove(mob);
-                }
-            }
             return this.navigatingMobs.remove(mob);
         }
 
