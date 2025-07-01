@@ -1182,6 +1182,7 @@ public class ServerRegions {
 
         public void forEachTickingEntity(final Consumer<Entity> action) {
             for (final Entity entity : this.entityTickList) {
+                if (entity == null) continue;
                 action.accept(entity);
             }
         }
