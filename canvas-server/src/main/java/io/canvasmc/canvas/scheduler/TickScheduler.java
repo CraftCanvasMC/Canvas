@@ -392,7 +392,9 @@ public class TickScheduler implements MultithreadedTickScheduler {
             if (alreadyScheduled) {
                 throw new RuntimeException("already scheduled " + getIdentifier());
             }
-            LOGGER.info("Scheduled tick task '{}' on scheduler", this.identifier);
+            if (Config.INSTANCE.debug.taskRetireAndSchedule) {
+                LOGGER.info("Scheduled tick task '{}' on scheduler", this.identifier);
+            }
             alreadyScheduled = true;
             scheduler.schedule(this);
             ALL_REGISTERED.add(this);
@@ -570,7 +572,7 @@ public class TickScheduler implements MultithreadedTickScheduler {
 
         @Override
         public void retire() {
-            if (Config.INSTANCE.debug.taskRetire) LOGGER.info("Retiring tick task {} from scheduler", this);
+            if (Config.INSTANCE.debug.taskRetireAndSchedule) LOGGER.info("Retiring tick task {} from scheduler", this);
             getScheduler().scheduler.cancel(this);
         }
 

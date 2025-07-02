@@ -69,8 +69,7 @@ public abstract class MinecraftServerWorld extends TickScheduler.FullTick<Minecr
             TickScheduler.setTickingData(level().levelTickData);
             ServerLevel worldserver = level();
 
-            // we cannot poll distance manager updates during task polls, this deadlocks the server
-            worldserver.getChunkSource().mainThreadProcessor.pollTask(!this.server.isRegionized());
+            worldserver.getChunkSource().mainThreadProcessor.pollTask();
             runRegionTasks(canContinue);
             hasTasks = false;
             return super.runTasks(canContinue);

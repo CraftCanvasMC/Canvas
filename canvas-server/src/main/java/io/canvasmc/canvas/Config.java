@@ -189,8 +189,8 @@ public class Config {
 
     public Debug debug = new Debug();
     public static class Debug {
-        @Comment("Logs task retiring with the tick scheduler")
-        public boolean taskRetire = false;
+        @Comment("Logs task retiring and scheduling with the tick scheduler")
+        public boolean taskRetireAndSchedule = false;
         @Comment("Prints the configuration tree at startup. Not really recommended to disable, as this helps a ton with debugging issues")
         public boolean printConfigurationTree = true;
         @Comment("Logs when a new region ticket is updated")
