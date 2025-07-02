@@ -187,51 +187,47 @@ public class ChunkRegion extends TickScheduler.FullTick<ChunkRegion.TickHandle> 
                 return this.markNotTicking() && !tickHandle.cancelled.get();
             }
             // tick region
-            try {
-                TickScheduler.setTickingData(this.region.getData().tickData);
-                if (!MinecraftServer.getServer().isTicking()) {
-                    while (hasTimeLeft.getAsBoolean()) {
-                        tickHandle.runTasks(hasTimeLeft);
-                    }
-                    TickScheduler.setTickingData(null);
-                    return this.markNotTicking() && !tickHandle.cancelled.get();
+
+            TickScheduler.setTickingData(this.region.getData().tickData);
+            if (!MinecraftServer.getServer().isTicking()) {
+                while (hasTimeLeft.getAsBoolean()) {
+                    tickHandle.runTasks(hasTimeLeft);
                 }
-                isActive = true;
-                ServerRegions.WorldTickData data = this.region.getData().tickData;
-                data.popTick();
-                data.setHandlingTick(true);
-                TickRateManager tickRateManager = this.world.tickRateManager();
-                tickHandle.runRegionTasks(hasTimeLeft); // run region tasks before ticking just in case
-                // bench this block, as technically this is the actual tick
-                tickHandle.bench(() -> {
-                    boolean runsNormally = tickRateManager.runsNormally();
-                    this.world.tickConnection(data); // tick connection on region
-                    data.tpsCalculator.doTick();
-                    this.world.updateLagCompensationTick();
-                    this.world.regionTick1(data);
-                    if (runsNormally) {
-                        data.incrementRedstoneTime();
-                    }
-                    this.world.regionTick2(runsNormally, data);
-                    final ServerChunkCache chunkSource = this.world.getChunkSource();
-                    chunkSource.tick(hasTimeLeft, true);
-                    if (runsNormally) {
-                        if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
-                            this.world.runBlockEvents();
-                            this.ticksSinceLastBlockEventsTickCall = 0;
-                        }
-                    }
-                    data.setHandlingTick(false);
-                    this.world.regiontick3(true, runsNormally, data);
-                    if (this.region.getData().tickHandle.cancelled.get()) {
-                        this.isActive = false;
-                    }
-                });
                 TickScheduler.setTickingData(null);
-            } catch (Throwable throwable) {
-                ThreadedServer.LOGGER.error("Unable to tick region surrounding {}", this.region.getCenterChunk(), throwable);
-                throw new RuntimeException(throwable);
+                return this.markNotTicking() && !tickHandle.cancelled.get();
             }
+            isActive = true;
+            ServerRegions.WorldTickData data = this.region.getData().tickData;
+            data.popTick();
+            data.setHandlingTick(true);
+            TickRateManager tickRateManager = this.world.tickRateManager();
+            tickHandle.runRegionTasks(hasTimeLeft); // run region tasks before ticking just in case
+            // bench this block, as technically this is the actual tick
+            tickHandle.bench(() -> {
+                boolean runsNormally = tickRateManager.runsNormally();
+                this.world.tickConnection(data); // tick connection on region
+                data.tpsCalculator.doTick();
+                this.world.updateLagCompensationTick();
+                this.world.regionTick1(data);
+                if (runsNormally) {
+                    data.incrementRedstoneTime();
+                }
+                this.world.regionTick2(runsNormally, data);
+                final ServerChunkCache chunkSource = this.world.getChunkSource();
+                chunkSource.tick(hasTimeLeft, true);
+                if (runsNormally) {
+                    if (this.ticksSinceLastBlockEventsTickCall++ > Config.INSTANCE.ticksBetweenBlockEvents) {
+                        this.world.runBlockEvents();
+                        this.ticksSinceLastBlockEventsTickCall = 0;
+                    }
+                }
+                data.setHandlingTick(false);
+                this.world.regiontick3(true, runsNormally, data);
+                if (this.region.getData().tickHandle.cancelled.get()) {
+                    this.isActive = false;
+                }
+            });
+            TickScheduler.setTickingData(null);
             return this.markNotTicking() && !tickHandle.cancelled.get();
         }
     }
