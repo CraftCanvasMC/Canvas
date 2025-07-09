@@ -24,7 +24,8 @@ Versions for Minecraft 1.8.x, 1.12.x, 1.16.x, 1.21.x, and onwards will be suppor
 - Get a working build functional.
 - I could not find it again but add patches from a PaperMC fork for Small Redstone Creative Server.
 - Fork patches from Pufferfish that were not added in Purpur and add them with compatible changes for other plugins.
-- 
+- Look into PlazmaBukkit/Thunderbolt, PaperBin, & Sharkur patches.
+- Add native support for Linear regions and slime regions.
 ``` 
 
 Useful links:
