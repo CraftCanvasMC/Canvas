@@ -7,9 +7,9 @@
 Canvas is currently undergoing a major Rewrite for better maintainability.
 Getting as much help as possible is incredibly important, and this project is open to contributions!
 
-Only Versions for MC 1.21.7 and onwards will be supported!
+Versions for Minecraft 1.8.x, 1.12.x, 1.16.x, 1.21.x, and onwards will be supported!
 
-## The current TODOs for the rewrite, are:
+## The current TODOs for CanvasMC are:
 
 ```
 - fix events(respawn, teleport events, etc)
@@ -21,11 +21,11 @@ Only Versions for MC 1.21.7 and onwards will be supported!
 
 Useful links:
 
-- [Website](https://canvasmc.io)
+- [Website]([https://canvasmc.io](https://sites.google.com/view/nocollision-yt/our-servers/collisionmc)
 - [Documentation](https://docs.canvasmc.io)
-- [Discord](https://canvasmc.io/discord)
+- [Discord](https://discord.gg/E6y75w3Z3Z)
 
-## Running Canvas
+## Running CollisionMc
 
 ### Requirements
 
@@ -33,9 +33,9 @@ Useful links:
 
 ### Obtaining Server Jar
 
-You can download the server jar from the [downloads page](https://canvasmc.io/downloads).
+You can download the server jar from the RESERVED.
 
-## Building Canvas
+## Building CollisionMc
 
 ### Requirements
 
@@ -60,9 +60,8 @@ It is temporarily documented in the [Website Repository](https://github.com/Craf
 
 ## Support
 
-You can help CanvasMC grow by:
+You can help CollisionMc grow by:
 
-- Supporting us on [Ko-fi](https://ko-fi.com/dueris)
 - Starring the project on GitHub
 - Contributing code or documentation
 
