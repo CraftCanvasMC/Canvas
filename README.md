@@ -5,7 +5,7 @@
 [![GitHub contributors](https://img.shields.io/github/contributors/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas/graphs/contributors)
 [![Discord](https://img.shields.io/discord/1168986665038127205?color=5865F2)](https://canvasmc.io/discord)
 
-CollisionMc is a fork of CanvasMC that aims to optimize Server-side performance for either Low-End PCs, Bad Internet Connections, or Low-Player Counts. Example: Under 16 players.
+CollisionMc is a fork of [CanvasMC](https://canvasmc.io) that aims to optimize Server-side performance for either Low-End PCs, Bad Internet Connections, or Low-Player Counts. Example: Under 16 players.
 Getting as much help as possible is incredibly important, and this project is open to contributions!
 
 Versions for Minecraft 1.8.x, 1.12.x, 1.16.x, 1.21.x, and onwards will be supported!
@@ -31,7 +31,7 @@ Versions for Minecraft 1.8.x, 1.12.x, 1.16.x, 1.21.x, and onwards will be suppor
 
 Useful links:
 
-- [Website]([https://canvasmc.io](https://sites.google.com/view/nocollision-yt/our-servers/collisionmc)
+- [Website](https://sites.google.com/view/nocollision-yt/our-servers/collisionmc)
 - [Documentation](https://docs.canvasmc.io)
 - [Discord](https://discord.gg/E6y75w3Z3Z)
 
@@ -74,6 +74,7 @@ You can help CollisionMc grow by:
 
 - Starring the project on GitHub
 - Contributing code or documentation
+- [Joining our Discord](https://discord.gg/E6y75w3Z3Z)
 
 Your support helps keep this project active and improving!
 
