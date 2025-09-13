@@ -168,6 +168,9 @@ public class Config {
         @PositiveNumericValueValidator.PositiveNumericValue
         @Comment("The interval in ticks for how often the server will tick the playerlist buckets")
         public int playerInfoSendInterval = 600;
+
+        @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
+        public boolean asyncProtocolSwitch = false;
     }
 
     @Comment("Configurations for enabling virtual threads for different thread pool executors")
