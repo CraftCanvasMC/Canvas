@@ -9,12 +9,16 @@
      private static int regionShift = 31;
  
      public static int getRegionChunkShift() {
-@@ -45,6 +_,13 @@
+@@ -45,6 +_,17 @@
          gridExponent = Math.min(31, gridExponent);
          regionShift = gridExponent;
  
 +    // Canvas start - rewrite scheduler
 +        scheduler = new TickRegionScheduler();
++        if (config.threads < 2) {
++            LOGGER.warn("Too little threads allocated, cannot enable region profiler");
++            io.canvasmc.canvas.command.ProfilerCommand.ENABLED.set(false);
++        }
 +    }
 +
 +    public static void start() {
@@ -32,7 +36,7 @@
          LOGGER.info("Regionised ticking is enabled with " + tickThreads + " tick threads");
      }
  
-@@ -76,11 +_,13 @@
+@@ -76,11 +_,20 @@
          final TickRegionData data = region.getData();
          // post-region merge/split regioninfo update
          data.getRegionStats().updateFrom(data.getOrCreateRegionizedData(data.world.worldRegionData));
@@ -43,6 +47,13 @@
      public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
          // nothing for now
 +        new io.canvasmc.canvas.event.region.RegionDestroyEvent(region.apiHandle).callEvent(); // Canvas - expand region api
++        // Canvas start - rewrite scheduler
++        TickRegionScheduler.RegionScheduleHandle scheduleHandle = region.getData().getRegionSchedulingHandle();
++        io.canvasmc.canvas.tick.ScheduledTaskThreadPool.TickThreadRunner tickThreadRunner = io.canvasmc.canvas.command.ProfilerCommand.TRACKING_THREAD.get();
++        if (scheduleHandle.isPinned() && tickThreadRunner != null) {
++            tickThreadRunner.unpin(scheduleHandle);
++        }
++        // Canvas end - rewrite scheduler
      }
  
      @Override
@@ -54,14 +65,22 @@
          scheduler.scheduleRegion(data.tickHandle);
      }
  
-@@ -96,6 +_,7 @@
+@@ -96,8 +_,15 @@
          final TickRegionData data = region.getData();
  
          scheduler.descheduleRegion(data.tickHandle);
 +        new io.canvasmc.canvas.event.region.RegionInactiveEvent(region.apiHandle).callEvent(); // Canvas - expand region api
          // old handle cannot be scheduled anymore, copy to a new handle
          data.tickHandle = data.tickHandle.copy();
++        // Canvas start - rewrite scheduler
++        io.canvasmc.canvas.tick.ScheduledTaskThreadPool.TickThreadRunner tickThreadRunner = io.canvasmc.canvas.command.ProfilerCommand.TRACKING_THREAD.get();
++        if (data.tickHandle.isPinned() && tickThreadRunner != null) {
++            tickThreadRunner.unpin(data.tickHandle);
++        }
++        // Canvas end - rewrite scheduler
      }
+ 
+     @Override
 @@ -156,7 +_,7 @@
          private final Reference2ReferenceOpenHashMap<RegionizedData<?>, Object> regionizedData = new Reference2ReferenceOpenHashMap<>();
  
@@ -147,7 +166,7 @@
              this.regionizedData.put(regionizedData, ret);
  
              return ret;
-@@ -225,6 +_,12 @@
+@@ -225,8 +_,31 @@
              for (final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region : regions) {
                  final TickRegionData data = region.getData();
                  data.tickHandle.copyDeadlineAndTickCount(this.tickHandle);
@@ -159,7 +178,26 @@
 +                // Canvas end - rewrite scheduler
              }
  
++            // Canvas start - rewrite scheduler
++            TickRegionScheduler.RegionScheduleHandle scheduleHandle = this.getRegionSchedulingHandle();
++            io.canvasmc.canvas.tick.ScheduledTaskThreadPool.TickThreadRunner tickThreadRunner = io.canvasmc.canvas.command.ProfilerCommand.TRACKING_THREAD.get();
++            if (scheduleHandle.isPinned() && tickThreadRunner != null) {
++                // a profiler IS running, split time!!
++                long[] curr = io.canvasmc.canvas.command.ProfilerCommand.PROFILING_CHUNKS.getArray();
++                net.minecraft.world.level.ChunkPos entry0 = new net.minecraft.world.level.ChunkPos(curr[0]);
++                tickThreadRunner.unpin(scheduleHandle);
++                RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                    world, entry0.x, entry0.z, () -> {
++                        tickThreadRunner.pin(
++                            java.util.Objects.requireNonNull(TickRegionScheduler.getCurrentTickingTask(), "curr ticking task cannot be null")
++                        );
++                    }
++                );
++            }
++            // Canvas end - rewrite scheduler
              // generic regionised data
+             for (final Iterator<Reference2ReferenceMap.Entry<RegionizedData<?>, Object>> dataIterator = this.regionizedData.reference2ReferenceEntrySet().fastIterator();
+                  dataIterator.hasNext();) {
 @@ -292,6 +_,12 @@
              // there's not really a great solution to the tick problem, no matter what it'll be messed up
              // we will pick the greatest time delay so that tps will not exceed TICK_RATE
@@ -173,10 +211,27 @@
  
              // generic regionised data
              final long fromTickOffset = currentTickTo - currentTickFrom; // see merge jd
-@@ -311,6 +_,14 @@
+@@ -310,7 +_,30 @@
+ 
              // task queue
              this.taskQueueData.mergeInto(data.taskQueueData);
-         }
+-        }
++            // Canvas start - rewrite scheduler
++            TickRegionScheduler.RegionScheduleHandle scheduleHandle = this.getRegionSchedulingHandle();
++            io.canvasmc.canvas.tick.ScheduledTaskThreadPool.TickThreadRunner tickThreadRunner = io.canvasmc.canvas.command.ProfilerCommand.TRACKING_THREAD.get();
++            if (scheduleHandle.isPinned() && tickThreadRunner != null) {
++                tickThreadRunner.unpin(scheduleHandle);
++                net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(io.canvasmc.canvas.command.ProfilerCommand.PROFILING_CHUNKS.getArray()[0]);
++                RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                    world, pos.x, pos.z, () -> {
++                        tickThreadRunner.pin(
++                            java.util.Objects.requireNonNull(TickRegionScheduler.getCurrentTickingTask(), "curr ticking task cannot be null")
++                        );
++                    }
++                );
++            }
++            // Canvas end - rewrite scheduler
++        }
 +        // Canvas start - fix world loading/unloading
 +        public volatile boolean isClosed = false;
 +        public volatile boolean shouldSaveNextTick = false; // Canvas - async save-all command
@@ -188,7 +243,13 @@
      }
  
      public static final class ConcreteRegionTickHandle extends TickRegionScheduler.RegionScheduleHandle { // Folia - watchdog
-@@ -333,11 +_,11 @@
+@@ -328,16 +_,17 @@
+             ret.currentTick = this.currentTick;
+             ret.lastTickStart = this.lastTickStart;
+             ret.tickSchedule.setLastPeriod(this.tickSchedule.getLastPeriod());
++            ret.setPinnedVolatile(this.getPinnedVolatile()); // Canvas - rewrite scheduler
+ 
+             return ret;
          }
  
          private void updateSchedulingToMax(final ConcreteRegionTickHandle from) {

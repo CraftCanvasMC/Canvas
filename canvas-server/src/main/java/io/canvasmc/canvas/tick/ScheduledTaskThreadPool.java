@@ -2,6 +2,8 @@ package io.canvasmc.canvas.tick;
 
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import java.lang.invoke.VarHandle;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -12,7 +14,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 
-// TODO - SAPPHIRE - discuss implementation with Root when available
 public final class ScheduledTaskThreadPool {
 
     public static final long DEADLINE_NOT_SET = Long.MIN_VALUE;
@@ -68,34 +69,80 @@ public final class ScheduledTaskThreadPool {
         }
     }
 
-    private static <K,V> K firstEntry(final ConcurrentSkipListMap<K, V> map) {
-        final Map.Entry<K,V> first = map.firstEntry();
+    private static <K, V> @Nullable K firstEntry(final @NotNull ConcurrentSkipListMap<K, V> map) {
+        final Map.Entry<K, V> first = map.firstEntry();
         return first == null ? null : first.getKey();
     }
 
-    private static ScheduledTickTask findFirstNonTaken(final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map) {
+    private static ScheduledTickTask findFirstNonTaken(
+        final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
+        final TickThreadRunner tickThreadRunner
+    ) {
         ScheduledTickTask first;
-        while ((first = firstEntry(map)) != null && first.isTaken()) {
-            map.remove(first);
-        }
-
-        return first;
-    }
-
-    private static ScheduledTickTask findFirstNonTakenNonWatched(final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map) {
-        ScheduledTickTask first;
-        while ((first = firstEntry(map)) != null && (first.isTaken() || first.isWatched())) {
-            map.remove(first);
-            if (!first.isTaken() && !first.isWatched()) {
-                // handle race condition: unwatched after removal
-                map.put(first, first);
+        while ((first = firstEntry(map)) != null) {
+            if (first.isTaken()) {
+                map.remove(first);
+                continue;
             }
+
+            if (first.tick.isPinned()) {
+                final long pinnedTo = first.tick.getPinnedVolatile();
+                if (tickThreadRunner == null || tickThreadRunner.id != pinnedTo) {
+                    map.remove(first);
+                    continue;
+                }
+            }
+
+            if (tickThreadRunner != null && tickThreadRunner.isDedicated()) {
+                if (first.owner != tickThreadRunner) {
+                    map.remove(first);
+                    continue;
+                }
+            }
+
+            return first;
         }
 
-        return first;
+        return null;
     }
 
-    private static Thread[] getThreads(final COWArrayList<TickThreadRunner> list) {
+    private static ScheduledTickTask findFirstNonTakenNonWatched(
+        final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
+        final TickThreadRunner tickThreadRunner
+    ) {
+        ScheduledTickTask first;
+        while ((first = firstEntry(map)) != null) {
+            if (first.isTaken() || first.isWatched()) {
+                map.remove(first);
+
+                if (!first.isTaken() && !first.isWatched()) {
+                    map.put(first, first);
+                }
+                continue;
+            }
+
+            if (first.tick.isPinned()) {
+                final long pinnedTo = first.tick.getPinnedVolatile();
+                if (tickThreadRunner == null || tickThreadRunner.id != pinnedTo) {
+                    map.remove(first);
+                    continue;
+                }
+            }
+
+            if (tickThreadRunner != null && tickThreadRunner.isDedicated()) {
+                if (first.owner != tickThreadRunner) {
+                    map.remove(first);
+                    continue;
+                }
+            }
+
+            return first;
+        }
+
+        return null;
+    }
+
+    private static Thread @NotNull [] getThreads(final @NotNull COWArrayList<TickThreadRunner> list) {
         final TickThreadRunner[] runners = list.getArray();
         final Thread[] ret = new Thread[runners.length];
 
@@ -109,14 +156,14 @@ public final class ScheduledTaskThreadPool {
     /**
      * Returns an array of the underlying scheduling threads.
      */
-    public Thread[] getCoreThreads() {
+    public Thread @NotNull [] getCoreThreads() {
         return getThreads(this.coreThreads);
     }
 
     /**
      * Returns an array of the underlying scheduling threads which are alive.
      */
-    public Thread[] getAliveThreads() {
+    public Thread @NotNull [] getAliveThreads() {
         return getThreads(this.aliveThreads);
     }
 
@@ -124,6 +171,7 @@ public final class ScheduledTaskThreadPool {
      * Adjusts the number of core threads to the specified threads. Has no effect if shutdown.
      * Lowering the number of core threads will cause some scheduled tasks to fail to meet their scheduled start
      * deadlines by up to the task steal time.
+     *
      * @param threads New number of threads
      * @return Returns this thread pool
      */
@@ -183,6 +231,7 @@ public final class ScheduledTaskThreadPool {
 
     /**
      * Waits until all threads in this pool have shutdown, or until the specified time has passed.
+     *
      * @param msToWait Maximum time to wait.
      * @return {@code false} if the maximum time passed, {@code true} otherwise.
      */
@@ -196,6 +245,7 @@ public final class ScheduledTaskThreadPool {
 
     /**
      * Waits until all threads in this pool have shutdown, or until the specified time has passed.
+     *
      * @param msToWait Maximum time to wait.
      * @return {@code false} if the maximum time passed, {@code true} otherwise.
      * @throws InterruptedException If this thread is interrupted.
@@ -254,7 +304,7 @@ public final class ScheduledTaskThreadPool {
         }
     }
 
-    private void insert(final SchedulableTick tick, final boolean hasTasks) {
+    private void insert(final @NotNull SchedulableTick tick, final boolean hasTasks) {
         final long scheduleTime = tick.getScheduledStart();
         final long timeNow = System.nanoTime();
 
@@ -262,15 +312,15 @@ public final class ScheduledTaskThreadPool {
             final Map.Entry<WaitState, WaitState> lastIdle = this.waitingOrIdleRunners.firstEntry();
             final WaitState waitState;
             if (lastIdle == null // no waiting threads or
-                    // scheduled time is past latest waiting time
-                    || ((waitState = lastIdle.getKey()).deadline != DEADLINE_NOT_SET && waitState.deadline - scheduleTime < 0L)) {
+                // scheduled time is past latest waiting time
+                || ((waitState = lastIdle.getKey()).deadline != DEADLINE_NOT_SET && waitState.deadline - scheduleTime < 0L)) {
                 // insert hoping to be stolen
                 final ScheduledTickTask task = tick.task = new ScheduledTickTask(
-                        tick,
-                        // offset start by steal threshold so that it will hopefully start at its scheduled time
-                        scheduleTime - this.stealThresholdNS,
-                        hasTasks ? timeNow : DEADLINE_NOT_SET,
-                        null
+                    tick,
+                    // offset start by steal threshold so that it will hopefully start at its scheduled time
+                    scheduleTime - this.stealThresholdNS,
+                    hasTasks ? timeNow : DEADLINE_NOT_SET,
+                    null
                 );
 
                 this.unwatchedScheduledTicks.put(task, task);
@@ -317,11 +367,12 @@ public final class ScheduledTaskThreadPool {
 
     /**
      * Schedules the specified task to be executed on this thread pool.
+     *
      * @param tick Specified task
      * @throws IllegalStateException If the task is already scheduled
      * @see SchedulableTick
      */
-    public void schedule(final SchedulableTick tick) {
+    public void schedule(final @NotNull SchedulableTick tick) {
         final boolean hasTasks = tick.hasTasks();
         if ((!hasTasks && !tick.setScheduled()) || (hasTasks && !tick.setScheduledTasks())) {
             throw new IllegalStateException("Task is already scheduled");
@@ -332,10 +383,11 @@ public final class ScheduledTaskThreadPool {
 
     /**
      * Indicates that intermediate tasks are available to be executed by the task.
+     *
      * @param tick The specified task
      * @see SchedulableTick
      */
-    public void notifyTasks(final SchedulableTick tick) {
+    public void notifyTasks(final @NotNull SchedulableTick tick) {
         if (!tick.isScheduled() || !tick.upgradeToScheduledTasks()) {
             return;
         }
@@ -360,7 +412,7 @@ public final class ScheduledTaskThreadPool {
      * Returns {@code false} if the task is not scheduled or is cancelled, returns {@code true} if the task was
      * cancelled by this thread
      */
-    public boolean cancel(final SchedulableTick tick) {
+    public boolean cancel(final @NotNull SchedulableTick tick) {
         final boolean ret = tick.cancel();
 
         if (!ret) {
@@ -419,11 +471,13 @@ public final class ScheduledTaskThreadPool {
         private static final int STATE_CANCELLED         = 1 << 7;
         private volatile int state = STATE_UNSCHEDULED;
         private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(SchedulableTick.class, "state", int.class);
+        private volatile long pinnedTo = -1L; // methods are public so we can pin to threads outside of this, since this needs to be an exposed API
+        private static final VarHandle PINNED_HANDLE = ConcurrentUtil.getVarHandle(SchedulableTick.class, "pinnedTo", long.class);
 
         private volatile ScheduledTickTask task;
 
         private int getStateVolatile() {
-            return (int)STATE_HANDLE.getVolatile(this);
+            return (int) STATE_HANDLE.getVolatile(this);
         }
 
         private void setStateVolatile(final int value) {
@@ -431,7 +485,23 @@ public final class ScheduledTaskThreadPool {
         }
 
         private int compareAndExchangeStateVolatile(final int expect, final int update) {
-            return (int)STATE_HANDLE.compareAndExchange(this, expect, update);
+            return (int) STATE_HANDLE.compareAndExchange(this, expect, update);
+        }
+
+        public long getPinnedVolatile() {
+            return (long) PINNED_HANDLE.getVolatile(this);
+        }
+
+        public void setPinnedVolatile(final long pinnedTo) {
+            PINNED_HANDLE.setVolatile(this, pinnedTo);
+        }
+
+        public boolean isPinned() {
+            return ((long) PINNED_HANDLE.get(this)) >= 0;
+        }
+
+        public TickThreadRunner getTickThreadRunner() {
+            return this.task.owner;
         }
 
         private boolean isScheduled() {
@@ -581,6 +651,7 @@ public final class ScheduledTaskThreadPool {
          * It is the callee's responsibility to invoke {@link #setScheduledStart(long)} to adjust the start of
          * the next tick.
          * </p>
+         *
          * @return {@code true} if the task should continue to be scheduled, {@code false} otherwise.
          */
         public abstract boolean runTick();
@@ -667,13 +738,16 @@ public final class ScheduledTaskThreadPool {
         @Override
         public String toString() {
             return "SchedulableTick:{" +
-                    "class=" + this.getClass().getName() + "," +
-                    "state=" + this.state + ","
-                    + "}";
+                "class=" + this.getClass().getName() + "," +
+                "state=" + this.state + ","
+                + "}";
         }
     }
 
-    private static final class WaitState {
+    /**
+     * @param deadline set to DEADLINE_NOT_SET if idle
+     */
+    private record WaitState(long id, long deadline, TickThreadRunner runner) {
 
         private static final Comparator<WaitState> OLDEST_FIRST = (final WaitState w1, final WaitState w2) -> {
             final long d1 = w1.deadline;
@@ -694,22 +768,13 @@ public final class ScheduledTaskThreadPool {
             return Long.signum(w2.id - w1.id);
         };
 
-        private final long id;
-        private final long deadline; // set to DEADLINE_NOT_SET if idle
-        private final TickThreadRunner runner;
-
-        private WaitState(final long id, final long deadline, final TickThreadRunner runner) {
-            this.id = id;
-            this.deadline = deadline;
-            this.runner = runner;
-        }
     }
 
     public static final class TickThreadRunner implements Runnable {
 
         private final ScheduledTaskThreadPool scheduler;
-        private final long id;
-        private Thread thread;
+        public final long id;
+        public Thread thread;
 
         // no scheduled ticks
         private static final int STATE_IDLE      = 1 << 0;
@@ -720,6 +785,8 @@ public final class ScheduledTaskThreadPool {
         private static final int STATE_HALTED    = 1 << 5;
         private volatile int state = STATE_INTERRUPT; // set to INTERRUPT initially so that tasks may be stolen on start
         private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "state", int.class);
+        private boolean dedicated = false;
+        private static final VarHandle DEDICATED_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "dedicated", boolean.class);
 
         private WaitState waitState;
         private ScheduledTickTask watch;
@@ -732,8 +799,28 @@ public final class ScheduledTaskThreadPool {
             this.id = id;
         }
 
+        public boolean isDedicated() {
+            return (boolean) DEDICATED_HANDLE.get(this);
+        }
+
+        public void setDedicated(final boolean dedicated) {
+            DEDICATED_HANDLE.setVolatile(this, dedicated);
+        }
+
+        public void pin(final ScheduledTaskThreadPool.@NotNull SchedulableTick tickTask) {
+            LockSupport.unpark(this.thread);
+            tickTask.setPinnedVolatile(id);
+            setDedicated(true);
+        }
+
+        public void unpin(final ScheduledTaskThreadPool.@NotNull SchedulableTick tickTask) {
+            LockSupport.unpark(this.thread);
+            tickTask.setPinnedVolatile(-1L);
+            setDedicated(false);
+        }
+
         private int getStateVolatile() {
-            return (int)STATE_HANDLE.getVolatile(this);
+            return (int) STATE_HANDLE.getVolatile(this);
         }
 
         private void setStateVolatile(final int value) {
@@ -741,7 +828,7 @@ public final class ScheduledTaskThreadPool {
         }
 
         private int compareAndExchangeStateVolatile(final int expect, final int update) {
-            return (int)STATE_HANDLE.compareAndExchange(this, expect, update);
+            return (int) STATE_HANDLE.compareAndExchange(this, expect, update);
         }
 
         private boolean interruptIfWaiting() {
@@ -840,10 +927,10 @@ public final class ScheduledTaskThreadPool {
             this.waitState = null;
         }
 
-        private ScheduledTickTask findTick() {
+        private @Nullable ScheduledTickTask findTick() {
             while (this.getStateVolatile() == STATE_WAITING) {
-                final ScheduledTickTask globalFirst = findFirstNonTakenNonWatched(this.scheduler.unwatchedScheduledTicks);
-                final ScheduledTickTask ourFirst = findFirstNonTaken(this.scheduledTicks);
+                final ScheduledTickTask globalFirst = findFirstNonTakenNonWatched(this.scheduler.unwatchedScheduledTicks, this);
+                final ScheduledTickTask ourFirst = findFirstNonTaken(this.scheduledTicks, this);
 
                 final ScheduledTickTask toWaitFor;
                 if (globalFirst == null) {
@@ -916,23 +1003,19 @@ public final class ScheduledTaskThreadPool {
         }
 
         private boolean findEarlierTask(final ScheduledTickTask task) {
-            final ScheduledTickTask globalFirst = findFirstNonTakenNonWatched(this.scheduler.unwatchedScheduledTicks);
-            final ScheduledTickTask ourFirst = findFirstNonTaken(this.scheduledTicks);
+            final ScheduledTickTask globalFirst = findFirstNonTakenNonWatched(this.scheduler.unwatchedScheduledTicks, this);
+            final ScheduledTickTask ourFirst = findFirstNonTaken(this.scheduledTicks, this);
 
             if (globalFirst != null && (globalFirst.tickStart + this.scheduler.stealThresholdNS) - task.tickStart < 0L) {
                 return true;
             }
 
-            if (ourFirst != null && ourFirst.tickStart - task.tickStart < 0L) {
-                return true;
-            }
-
-            return false;
+            return ourFirst != null && ourFirst.tickStart - task.tickStart < 0L;
         }
 
-        private void reinsert(final ScheduledTickTask tick, final TickThreadRunner owner) {
+        private void reinsert(final @NotNull ScheduledTickTask tick, final TickThreadRunner owner) {
             final ScheduledTickTask newTask = tick.tick.task = new ScheduledTickTask(
-                    tick.tick, tick.tick.getScheduledStart(), DEADLINE_NOT_SET, owner
+                tick.tick, tick.tick.getScheduledStart(), DEADLINE_NOT_SET, owner
             );
 
             this.scheduler.unwatchedScheduledTicks.put(newTask, newTask);
@@ -975,8 +1058,8 @@ public final class ScheduledTaskThreadPool {
             this.compareAndExchangeStateVolatile(STATE_TASKS, STATE_WAITING);
         }
 
-        private ScheduledTickTask findTaskNotBehind(final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
-                                                    final long timeNow) {
+        private @Nullable ScheduledTickTask findTaskNotBehind(final @NotNull ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
+                                                              final long timeNow) {
             for (final Iterator<ScheduledTickTask> iterator = map.keySet().iterator(); iterator.hasNext();) {
                 final ScheduledTickTask task = iterator.next();
                 if (task.isTaken()) {
@@ -998,13 +1081,14 @@ public final class ScheduledTaskThreadPool {
             return null;
         }
 
-        private ScheduledTickTask waitForTick() {
+        private @Nullable ScheduledTickTask waitForTick() {
             final ScheduledTickTask tick = this.findTick();
 
             if (tick == null) {
                 return tick;
             }
 
+            // if pinned, tick owner is this
             final long tickDeadline = tick.owner == this ? tick.tickStart : tick.tickStart + this.scheduler.stealThresholdNS;
 
             this.setupWaitState(tickDeadline);
@@ -1021,7 +1105,7 @@ public final class ScheduledTaskThreadPool {
 
                 final long timeNow = System.nanoTime();
 
-                final ScheduledTickTask ourTask = findFirstNonTaken(this.scheduledTasks);
+                final ScheduledTickTask ourTask = findFirstNonTaken(this.scheduledTasks, this);
                 // avoid stealing global tasks that are behind schedule
                 final ScheduledTickTask globalTask = this.findTaskNotBehind(this.scheduler.scheduledTasks, timeNow);
 
@@ -1106,7 +1190,7 @@ public final class ScheduledTaskThreadPool {
             }
         }
 
-        private void doTick(final ScheduledTickTask tick) {
+        private void doTick(final @NotNull ScheduledTickTask tick) {
             if (tick.tick.tick()) {
                 this.reinsert(tick, this);
             }
@@ -1233,23 +1317,23 @@ public final class ScheduledTaskThreadPool {
         }
 
         public boolean take() {
-            return !(boolean)TAKEN_HANDLE.getVolatile(this) && !(boolean)TAKEN_HANDLE.compareAndExchange(this, false, true);
+            return !(boolean) TAKEN_HANDLE.getVolatile(this) && !(boolean) TAKEN_HANDLE.compareAndExchange(this, false, true);
         }
 
         public boolean isTaken() {
-            return (boolean)TAKEN_HANDLE.getVolatile(this);
+            return (boolean) TAKEN_HANDLE.getVolatile(this);
         }
 
         public boolean watch() {
-            return !(boolean)WATCHED_HANDLE.getVolatile(this) && !(boolean)WATCHED_HANDLE.compareAndExchange(this, false, true);
+            return !(boolean) WATCHED_HANDLE.getVolatile(this) && !(boolean) WATCHED_HANDLE.compareAndExchange(this, false, true);
         }
 
         public boolean unwatch() {
-            return (boolean)WATCHED_HANDLE.compareAndExchange(this, true, false);
+            return (boolean) WATCHED_HANDLE.compareAndExchange(this, true, false);
         }
 
         public boolean isWatched() {
-            return (boolean)WATCHED_HANDLE.getVolatile(this);
+            return (boolean) WATCHED_HANDLE.getVolatile(this);
         }
 
         public long getLastTaskNotify() {
