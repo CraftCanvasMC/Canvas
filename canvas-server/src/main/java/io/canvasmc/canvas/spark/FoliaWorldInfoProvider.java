@@ -3,7 +3,7 @@ package io.canvasmc.canvas.spark;
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
 import com.mojang.datafixers.util.Pair;
-import io.canvasmc.canvas.command.ProfilerCommand;
+import io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension;
 import io.canvasmc.canvas.tick.COWLongArrayList;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
@@ -45,7 +45,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
     @Override
     public CountsResult pollCounts() {
         // Note: if we are ending a profiler, this will be cached, otherwise this is current
-        Pair<ServerLevel, COWLongArrayList> profilerResultCache = ProfilerCommand.PROFILING_RESULTS_CACHE.getCurrentOrCached();
+        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.getCurrentOrCached();
         if (profilerResultCache != null) {
             ServerLevel world = profilerResultCache.getFirst();
             COWLongArrayList chunkKeys = profilerResultCache.getSecond();
@@ -100,7 +100,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         ChunksResult<FoliaChunkInfo> data = new ChunksResult<>();
 
         // Note: if we are ending a profiler, this will be cached, otherwise this is current
-        Pair<ServerLevel, COWLongArrayList> profilerResultCache = ProfilerCommand.PROFILING_RESULTS_CACHE.getCurrentOrCached();
+        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.getCurrentOrCached();
         if (profilerResultCache != null) {
             ServerLevel world = profilerResultCache.getFirst();
             COWLongArrayList chunkKeys = profilerResultCache.getSecond();

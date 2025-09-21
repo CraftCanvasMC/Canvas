@@ -8,7 +8,7 @@ import java.util.function.Supplier;
 import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
 import com.google.common.base.Suppliers;
 import com.mojang.datafixers.util.Pair;
-import io.canvasmc.canvas.command.ProfilerCommand;
+import io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension;
 import io.canvasmc.canvas.tick.COWLongArrayList;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickData;
@@ -79,7 +79,7 @@ public class SparkTickStatistics implements TickHook.Callback, TickReporter.Call
 
     private static @NotNull List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> getRegions(Server server) {
         List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions = new ArrayList<>();
-        final Pair<ServerLevel, COWLongArrayList> activeProfiler = ProfilerCommand.PROFILING_RESULTS_CACHE.getCurrentOrCached();
+        final Pair<ServerLevel, COWLongArrayList> activeProfiler = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.getCurrentOrCached();
         if (activeProfiler != null) {
             long packedPos = activeProfiler.getSecond().getArray()[0];
             regions.add(activeProfiler.getFirst().regioniser.getRegionAtSynchronised(

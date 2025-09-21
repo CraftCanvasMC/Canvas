@@ -1,7 +1,6 @@
-package io.canvasmc.canvas.command;
+package io.canvasmc.canvas.spark.profiler;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
-import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
@@ -16,12 +15,7 @@ import io.papermc.paper.threadedregions.TickRegions;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.commands.Commands;
-import net.minecraft.commands.arguments.coordinates.ColumnPosArgument;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ColumnPos;
 import net.minecraft.server.level.ServerLevel;
@@ -30,11 +24,6 @@ import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.border.WorldBorder;
-import org.bukkit.craftbukkit.CraftServer;
-import org.jetbrains.annotations.NotNull;
-
-import static net.minecraft.commands.Commands.argument;
-import static net.minecraft.commands.Commands.literal;
 
 /**
  * <h1>Region Profiler V2</h1>
@@ -107,8 +96,8 @@ import static net.minecraft.commands.Commands.literal;
  * <p>
  * Regions behave unpredictably due to player interaction with the world. Any server could do
  * anything to the region being profiled. It may be loaded already, it may not be loaded
- * at all. So when pinning via the {@code profiler} command, we load the chunks in the area
- * via the ticket {@link TicketType#REGION_PROFILING_HOLD canvas:region_profiler_hold}, which
+ * at all. So when pinning, we load the chunks in the area via the ticket
+ * {@link TicketType#REGION_PROFILING_HOLD canvas:region_profiler_hold}, which
  * acts as a non-persistent ticket that is kept throughout runtime or until told to be removed,
  * like the {@code forced} ticket. Once all the chunks are loaded, we pin the running region to
  * a thread (any available).
@@ -119,7 +108,7 @@ import static net.minecraft.commands.Commands.literal;
  * Splits introduce complexity. Given chunks can be loaded and unloaded, the area being
  * profiled is kept loaded. This means we can encounter splits, however they can also
  * happen for a wide number of other reasons. So, we store the chunks being profiled in
- * {@link ProfilerCommand#PROFILING_CHUNKS}, so when a split occurs we can mark the region
+ * {@link SparkRegionProfilerExtension#PROFILING_CHUNKS}, so when a split occurs we can mark the region
  * with those chunks as the one needing to be pinned. The original one will be unpinned,
  * and profiling will continue as normal.
  * </p>
@@ -141,17 +130,25 @@ import static net.minecraft.commands.Commands.literal;
  * undefined state in between. This allows us to catch bugs much more quickly.
  * </p>
  *
- * <h2>Profiler Command</h2>
+ * <h2>Spark Integration</h2>
  *
  * <p>
- * The {@code profiler} command prepares the server for isolated profiling by defining
+ * We modify the class {@link me.lucko.spark.paper.common.command.modules.SamplerModule} in
+ * spark to integrate a new argument, {@code --region} to the spark profiler command. This
+ * extension takes 2 or 4 arguments, the from and to block positions of the region.
+ * This can be stopped with the normal {@code /spark profiler stop}, and started like
+ * {@code /spark profiler start --region ~ ~}.
+ * </p>
+ *
+ * <p>
+ * The {@code --region} extension prepares the server for isolated profiling by defining
  * an area to profile and pinning its region. This does <i><b>not</b></i> replace or disable
  * the existing {@code spark} command, but is designed to work <i><b>with</b></i> it to
  * support targeted profiling.
  * </p>
  *
  * <p>
- * When executed, the command first checks that the requested profiling area lies within
+ * When executed, the extension first checks that the requested profiling area lies within
  * the world border and that the number of chunks does not exceed {@code 512L} (a limit
  * which may change in the future). It then loads the chunks asynchronously if not loaded already using
  * {@link ServerLevel#moonrise$loadChunksAsync(int, int, int, int, Priority, Consumer)}
@@ -160,20 +157,9 @@ import static net.minecraft.commands.Commands.literal;
  * </p>
  *
  * <p>
- * The command provides two actions: {@code start} and {@code stop}.
- * <ul>
- *   <li>{@code start} – sets up and begins profiling in the defined region.</li>
- *   <li>{@code stop} – turns off the spark profiler, removes the region profiling tickets,
- *       and runs cleanup so the region can be safely unloaded and other profilers used.</li>
- * </ul>
- * </p>
- *
- * <h2>Spark Integration</h2>
- *
- * <p>
  * Utilizing our spark plugin internals, we create an interchangeable system that swaps
  * between REGEX pattern-based matching and thread name matching, since
- * {@link ProfilerCommand#TRACKING_THREAD} can provide us with the {@link io.canvasmc.canvas.tick.ScheduledTaskThreadPool.TickThreadRunner}
+ * {@link SparkRegionProfilerExtension#TRACKING_THREAD} can provide us with the {@link io.canvasmc.canvas.tick.ScheduledTaskThreadPool.TickThreadRunner}
  * we are actively profiling. When there are no regions pinned, the system defaults to
  * the standard REGEX pattern, {@code "Region Scheduler Thread #\d+"}.
  * </p>
@@ -192,11 +178,11 @@ import static net.minecraft.commands.Commands.literal;
  * @author Dueris
  * @version 2.0
  */
-public class ProfilerCommand {
-    public static final SimpleCommandExceptionType ERROR_OUT_OF_WORLD = new SimpleCommandExceptionType(Component.translatable("argument.pos.outofworld"));
-    public static final SimpleCommandExceptionType ERROR_ALREADY_PROFILING = new SimpleCommandExceptionType(Component.literal("Server already running a region profiler!"));
-    public static final SimpleCommandExceptionType ERROR_NOT_ENABLED = new SimpleCommandExceptionType(Component.literal("Region Specific Profiling(RSP) is unavailable during this runtime due to the absence of the internal Spark plugin. To enable RSP, please enable the builtin Spark plugin."));
-    public static final SimpleCommandExceptionType ERROR_NOT_PROFILING = new SimpleCommandExceptionType(Component.literal("Server isn't running a region profile currently!"));
+public class SparkRegionProfilerExtension {
+    public static final SimpleCommandExceptionType ERROR_OUT_OF_WORLD = new SimpleCommandExceptionType(net.minecraft.network.chat.Component.translatable("argument.pos.outofworld"));
+    public static final SimpleCommandExceptionType ERROR_ALREADY_PROFILING = new SimpleCommandExceptionType(net.minecraft.network.chat.Component.literal("Server already running a region profiler!"));
+    public static final SimpleCommandExceptionType ERROR_NOT_ENABLED = new SimpleCommandExceptionType(net.minecraft.network.chat.Component.literal("Region Specific Profiling(RSP) is unavailable during this runtime due to the absence of the internal Spark plugin. To enable RSP, please enable the builtin Spark plugin."));
+    public static final SimpleCommandExceptionType ERROR_NOT_PROFILING = new SimpleCommandExceptionType(net.minecraft.network.chat.Component.literal("Server isn't running a region profile currently!"));
     public static final COWLongArrayList PROFILING_CHUNKS = new COWLongArrayList();
     public static final AtomicReference<ServerLevel> PROFILING_LEVEL = new AtomicReference<>();
     public static final ExpiringAtomicReference<ScheduledTaskThreadPool.TickThreadRunner> TRACKING_THREAD = new ExpiringAtomicReference<>();
@@ -208,90 +194,66 @@ public class ProfilerCommand {
      */
     public static final ExpiringAtomicReference<Pair<ServerLevel, COWLongArrayList>> PROFILING_RESULTS_CACHE = new ExpiringAtomicReference<>();
     private static final Dynamic2CommandExceptionType ERROR_TOO_MANY_CHUNKS = new Dynamic2CommandExceptionType(
-        (maxChunks, specifiedChunks) -> Component.translatableEscape("commands.forceload.toobig", maxChunks, specifiedChunks)
+        (maxChunks, specifiedChunks) -> net.minecraft.network.chat.Component.translatableEscape("commands.forceload.toobig", maxChunks, specifiedChunks)
     );
 
-    public static void register(@NotNull CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(
-            literal("profiler")
-                .requires(commandSourceStack -> commandSourceStack.hasPermission(3, "canvas.command.profiler"))
-                .then(literal("start").requires(commandSourceStack -> commandSourceStack.hasPermission(3, "canvas.command.profiler.start"))
-                    .then(argument("from", ColumnPosArgument.columnPos())
-                        .executes(
-                            context -> computeProfilePin(
-                                context.getSource(),
-                                ColumnPosArgument.getColumnPos(context, "from"),
-                                ColumnPosArgument.getColumnPos(context, "from")
-                            )
-                        )
-                        .then(
-                            Commands.argument("to", ColumnPosArgument.columnPos())
-                                .executes(
-                                    context -> computeProfilePin(
-                                        context.getSource(),
-                                        ColumnPosArgument.getColumnPos(context, "from"),
-                                        ColumnPosArgument.getColumnPos(context, "to")
-                                    )
-                                )
-                        )))
-                .then(literal("stop").requires(commandSourceStack -> commandSourceStack.hasPermission(3, "canvas.command.profiler.stop"))
-                    .executes(
-                        context -> endPinning(context.getSource())
-                    )
-                )
-        );
-    }
-
-    private static int endPinning(CommandSourceStack source) throws CommandSyntaxException {
+    public static int endPinning(
+        Consumer<String> sendMessage,
+        Consumer<String> sendFailure,
+        Runnable unpinCallback
+    ) {
         if (!ENABLED.get()) {
-            throw ERROR_NOT_ENABLED.create();
+            sendFailure.accept(ERROR_NOT_ENABLED.create().getRawMessage().getString());
         }
-        RegionizedServer.getInstance().addTask(() -> {
-            try {
-                final long[] curr = PROFILING_CHUNKS.getArray();
-                if (curr.length == 0) {
-                    // we aren't profiling, don't bother canceling
-                    throw ERROR_NOT_PROFILING.create();
-                }
-                // we now know we have a profiler running, cleanup and kill
-                long packedPos = curr[0];
-                int x = (int) packedPos;
-                int z = (int) (packedPos >> 32);
-                source.sendSystemMessage(Component.literal("Attempting to cancel current profiling session"));
-                final ServerLevel level = PROFILING_LEVEL.getAndSet(null);
-                if (level == null)
-                    throw new IllegalStateException("World was null when attempting to end region profiling");
-                // use get SYNCHRONIZED so that splits and merges won't screw us over
-                ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = level.regioniser.getRegionAtSynchronised(x, z);
-                if (region == null)
-                    throw new IllegalStateException("Region must be present at the profiling coordinates");
-                ScheduledTaskThreadPool.SchedulableTick backendTask = region.getData().getRegionSchedulingHandle();
-                ScheduledTaskThreadPool.TickThreadRunner thread = TRACKING_THREAD.getAndSet(null); // this is ensured constant, we are fine
-                if (thread == null) throw new IllegalStateException("Tracking thread must not be null");
-                // unpin the task from the thread
-                thread.unpin(backendTask);
-                // kill spark, we don't care if we are still ticking or not
-                source.sendSuccess(() -> Component.literal("Marked the profiling region for unpinning and profiler shutdown"), true);
-                final CraftServer bukkitServer = MinecraftServer.getServer().server;
-                bukkitServer.dispatchCommand(bukkitServer.getConsoleSender(), "spark profiler stop --comment Region Profile @[" + x + "," + z + "]");
-                // remove tickets
-                for (long longCoord : curr) {
-                    Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
-                    level.chunkSource.ticketStorage.removeTicket(longCoord, ticket);
-                }
-                // tickets are removed, profiler has shutdown, region is unloading if needed, exit profiler
-                PROFILING_RESULTS_CACHE.clear();
-                PROFILING_CHUNKS.clear();
-            } catch (CommandSyntaxException ex) {
-                sendMessage(source, ex);
+        try {
+            final long[] curr = PROFILING_CHUNKS.getArray();
+            if (curr.length == 0) {
+                // we aren't profiling, don't bother canceling
+                throw ERROR_NOT_PROFILING.create();
             }
-        });
+            // we now know we have a profiler running, cleanup and kill
+            long packedPos = curr[0];
+            int x = (int) packedPos;
+            int z = (int) (packedPos >> 32);
+            final ServerLevel level = PROFILING_LEVEL.getAndSet(null);
+            if (level == null)
+                throw new IllegalStateException("World was null when attempting to end region profiling");
+            // use get SYNCHRONIZED so that splits and merges won't screw us over
+            ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = level.regioniser.getRegionAtSynchronised(x, z);
+            if (region == null)
+                throw new IllegalStateException("Region must be present at the profiling coordinates");
+            ScheduledTaskThreadPool.SchedulableTick backendTask = region.getData().getRegionSchedulingHandle();
+            ScheduledTaskThreadPool.TickThreadRunner thread = TRACKING_THREAD.getAndSet(null); // this is ensured constant, we are fine
+            if (thread == null) throw new IllegalStateException("Tracking thread must not be null");
+            // unpin the task from the thread
+            thread.unpin(backendTask);
+            // kill spark, we don't care if we are still ticking or not
+            sendMessage.accept("Marked the profiling region for unpinning and profiler shutdown");
+            unpinCallback.run();
+            // remove tickets
+            for (long longCoord : curr) {
+                Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
+                level.chunkSource.ticketStorage.removeTicket(longCoord, ticket);
+            }
+            // tickets are removed, profiler has shutdown, region is unloading if needed, exit profiler
+            PROFILING_RESULTS_CACHE.clear();
+            PROFILING_CHUNKS.clear();
+        } catch (CommandSyntaxException ex) {
+            sendFailure.accept(ex.getRawMessage().getString());
+        }
         return 1;
     }
 
-    private static int computeProfilePin(CommandSourceStack source, ColumnPos fromPos, ColumnPos toPos) throws CommandSyntaxException {
+    public static void computeProfilePin(
+        Consumer<String> sendMessage,
+        Consumer<String> sendFailure,
+        ColumnPos fromPos,
+        ColumnPos toPos,
+        ServerLevel world,
+        Runnable pinCallback
+    ) {
         if (!ENABLED.get()) {
-            throw ERROR_NOT_ENABLED.create();
+            sendFailure.accept(ERROR_NOT_ENABLED.create().getRawMessage().getString());
         }
         RegionizedServer.getInstance().addTask(() -> {
             try {
@@ -306,14 +268,13 @@ public class ProfilerCommand {
                 int maxZ = Math.max(fromPos.z(), toPos.z());
 
                 // convert to section coordinates
-                final ServerLevel level = source.getLevel();
                 int minChunkX = minX >> 4;
                 int minChunkZ = minZ >> 4;
                 int maxChunkX = maxX >> 4;
                 int maxChunkZ = maxZ >> 4;
 
                 // validate world bounds
-                WorldBorder border = level.getWorldBorder();
+                WorldBorder border = world.getWorldBorder();
                 double borderMinX = border.getMinX();
                 double borderMinZ = border.getMinZ();
                 double borderMaxX = border.getMaxX();
@@ -333,13 +294,13 @@ public class ProfilerCommand {
                     ChunkPos firstChangedChunk = null;
                     int changedCount = 0;
 
-                    PROFILING_LEVEL.set(level); // set the level
+                    PROFILING_LEVEL.set(world); // set the level
                     // place tickets for load
                     for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
                         for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                             final long longCoord = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
                             Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
-                            boolean flag = level.chunkSource.ticketStorage.addTicket(longCoord, ticket);
+                            boolean flag = world.chunkSource.ticketStorage.addTicket(longCoord, ticket);
                             if (flag) { // (if the ticket was changed, which honestly it shouldn't...)
                                 changedCount++;
                                 if (firstChangedChunk == null) {
@@ -350,10 +311,10 @@ public class ProfilerCommand {
                         }
                     }
 
-                    ResourceKey<Level> dimensionKey = level.dimension();
+                    ResourceKey<Level> dimensionKey = world.dimension();
                     // use get SYNCHRONIZED so that splits and merges won't screw us over
                     final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
-                        level.regioniser.getRegionAtSynchronised(minChunkX, minChunkZ);
+                        world.regioniser.getRegionAtSynchronised(minChunkX, minChunkZ);
                     if (region == null) {
                         throw new IllegalStateException("Region must be present at the profiling coordinates");
                     }
@@ -367,50 +328,31 @@ public class ProfilerCommand {
                     // pin the actual region tick to the runner
                     TRACKING_THREAD.set(thread);
                     thread.pin(schedulingHandle);
-                    // we are safe to just schedule this to the global tick, we are already pinned so we are safe to begin profiling
-                    RegionizedServer.getInstance().addTask(() -> {
-                        final CraftServer bukkitServer = MinecraftServer.getServer().server;
-                        source.sendSystemMessage(Component.literal("Cancelling currently running spark profiler and restarting"));
-                        bukkitServer.dispatchCommand(bukkitServer.getConsoleSender(), "spark profiler cancel");
-                        bukkitServer.dispatchCommand(bukkitServer.getConsoleSender(), "spark profiler start");
-                        // profiler has now started
-                    });
 
                     PROFILING_RESULTS_CACHE.set(
-                        new Pair<>(level, new COWLongArrayList(PROFILING_CHUNKS.getArray()))
+                        new Pair<>(world, new COWLongArrayList(PROFILING_CHUNKS.getArray()))
                     );
                     if (changedCount == 1) {
-                        final ChunkPos finalFirstChangedChunk = firstChangedChunk;
-                        source.sendSuccess(
-                            () -> Component.literal("Pinned region at chunk " + finalFirstChangedChunk + " in " + dimensionKey.location() + " for profiling"),
-                            true
-                        );
+                        sendMessage.accept("Pinned region at chunk " + firstChangedChunk + " in " + dimensionKey.location() + " for profiling");
                     } else {
                         ChunkPos fromChunk = new ChunkPos(minChunkX, minChunkZ);
                         ChunkPos toChunk = new ChunkPos(maxChunkX, maxChunkZ);
-                        source.sendSuccess(
-                            () -> Component.literal("Pinned chunks [from:" + fromChunk + ",to:" + toChunk + "](" + totalChunks + " chunks) in " + dimensionKey.location() + " for region profiling"),
-                            true
-                        );
+                        sendMessage.accept("Pinned chunks [from:" + fromChunk + ",to:" + toChunk + "](" + totalChunks + " chunks) in " + dimensionKey.location() + " for region profiling");
                     }
+                    pinCallback.run();
                 };
 
                 // don't bother checking if we are running this region, this is on the global tick atm
-                if (level.moonrise$areChunksLoaded(minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
+                if (world.moonrise$areChunksLoaded(minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
                     RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                        level, minChunkX, minChunkZ, callback, Priority.HIGHEST
+                        world, minChunkX, minChunkZ, callback, Priority.HIGHEST
                     );
                 } else {
-                    level.moonrise$loadChunksAsync(minChunkX, minChunkZ, maxChunkX, maxChunkZ, Priority.HIGHER, (chunks) -> callback.run());
+                    world.moonrise$loadChunksAsync(minChunkX, minChunkZ, maxChunkX, maxChunkZ, Priority.HIGHER, (chunks) -> callback.run());
                 }
             } catch (CommandSyntaxException ex) {
-                sendMessage(source, ex);
+                sendFailure.accept(ex.getRawMessage().getString());
             }
         });
-        return 1;
-    }
-
-    private static void sendMessage(@NotNull CommandSourceStack src, @NotNull CommandSyntaxException ex) {
-        src.sendFailure((Component) ex.getRawMessage());
     }
 }
