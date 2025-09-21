@@ -197,13 +197,14 @@ public class SparkRegionProfilerExtension {
         (maxChunks, specifiedChunks) -> net.minecraft.network.chat.Component.translatableEscape("commands.forceload.toobig", maxChunks, specifiedChunks)
     );
 
-    public static int endPinning(
+    public static void endPinning(
         Consumer<String> sendMessage,
         Consumer<String> sendFailure,
         Runnable unpinCallback
     ) {
         if (!ENABLED.get()) {
             sendFailure.accept(ERROR_NOT_ENABLED.create().getRawMessage().getString());
+            return;
         }
         try {
             final long[] curr = PROFILING_CHUNKS.getArray();
@@ -241,7 +242,6 @@ public class SparkRegionProfilerExtension {
         } catch (CommandSyntaxException ex) {
             sendFailure.accept(ex.getRawMessage().getString());
         }
-        return 1;
     }
 
     public static void computeProfilePin(
@@ -254,6 +254,7 @@ public class SparkRegionProfilerExtension {
     ) {
         if (!ENABLED.get()) {
             sendFailure.accept(ERROR_NOT_ENABLED.create().getRawMessage().getString());
+            return;
         }
         RegionizedServer.getInstance().addTask(() -> {
             try {
