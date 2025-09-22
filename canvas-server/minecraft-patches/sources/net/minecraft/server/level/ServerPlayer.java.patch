@@ -92,65 +92,7 @@
                  if (inChunk == null) {
                      continue;
                  }
-@@ -611,11 +_,52 @@
- 
-     }
- 
--    public void queuePacketTask(Runnable run) {
--        this.getBukkitEntity().taskScheduler.schedule((ServerPlayer player) -> {
--            run.run();
--        }, null, 1L);
--    }
-+    // Canvas start - rewrite scheduler
-+    private io.papermc.paper.threadedregions.RegionizedWorldData worldDataRef = null;
-+    private final ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<Runnable> packetTaskQueue = new ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<>();
-+
-+    /**
-+     * Realistically, this isn't crucial. This *can* be null safely, as worst case senario
-+     * this is forever as null, which shouldn't happen at all ever, but it doesn't entirely
-+     * make that much of a difference
-+     * @param worldDataRef the current regionized world data for this player
-+     */
-+    public void setRegionData(final io.papermc.paper.threadedregions.RegionizedWorldData worldDataRef) {
-+        this.worldDataRef = worldDataRef;
-+    }
-+
-+    /**
-+     * Executes a task from the packet processing queue
-+     * @return true if the queue has more tasks, false otherwise
-+     */
-+    public boolean executeOnePacketTask() {
-+        Runnable task = packetTaskQueue.poll();
-+        if (task == null) {
-+            return false;
-+        }
-+        task.run();
-+        return true;
-+    }
-+
-+    /**
-+     * Returns if the player has tasks or not
-+     * @return if the task queue has packets
-+     */
-+    public boolean hasPackets() {
-+        return !this.packetTaskQueue.isEmpty();
-+    }
-+
-+    public void queuePacketTask(Runnable task) {
-+        if (!this.packetTaskQueue.add(task)) return;
-+        if (worldDataRef != null) {
-+            // really shouldn't be null, but we check anyway just in the case it is
-+            // we also drain packets right before entity scheduler tick, so no
-+            // point in trying to send to the entity scheduler if the region is null,
-+            // since it makes no fucking sense since it will do literally the same thing
-+            worldDataRef.regionData.setHasPackets();
-+        }
-+    }
-+    // Canvas end - rewrite scheduler
-     // Folia end - region threading
- 
-     @Override
-@@ -707,6 +_,7 @@
+@@ -748,6 +_,7 @@
          this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
          this.spawnExtraParticlesOnFall = input.getBooleanOr("spawn_extra_particles_on_fall", false);
          this.raidOmenPosition = input.read("raid_omen_position", BlockPos.CODEC).orElse(null);
@@ -158,7 +100,7 @@
      }
  
      @Override
-@@ -724,6 +_,7 @@
+@@ -765,6 +_,7 @@
          output.storeNullable("raid_omen_position", BlockPos.CODEC, this.raidOmenPosition);
          this.saveEnderPearls(output);
          this.getBukkitEntity().setExtraData(output); // CraftBukkit
@@ -166,7 +108,7 @@
      }
  
      private void saveParentVehicle(ValueOutput output) {
-@@ -1301,6 +_,7 @@
+@@ -1342,6 +_,7 @@
          if (killCredit != null) {
              this.awardStat(Stats.ENTITY_KILLED_BY.get(killCredit.getType()));
              killCredit.awardKillScore(this, cause);
@@ -174,7 +116,7 @@
              this.createWitherRose(killCredit);
          }
  
-@@ -1528,16 +_,28 @@
+@@ -1569,16 +_,28 @@
       * internally for {@link #respawn(java.util.function.Consumer, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason)}
       */
      public static final long TELEPORT_FLAGS_PLAYER_RESPAWN    = Long.MIN_VALUE >>> 0;
@@ -205,7 +147,7 @@
          }, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.END_PORTAL, true);
      }
  
-@@ -1584,12 +_,27 @@
+@@ -1625,12 +_,27 @@
          boolean[] usedRespawnAnchor = new boolean[1];
  
          // set up post spawn location logic
@@ -237,7 +179,7 @@
              ServerPlayer.this.setDeltaMovement(Vec3.ZERO);
              // placeInAsync will update the world
  
-@@ -1597,7 +_,7 @@
+@@ -1638,7 +_,7 @@
                  origin,
                  // use the load chunk flag just in case the spawn loc isn't loaded, and to ensure the chunks
                  // stay loaded for a bit with the teleport ticket
@@ -246,7 +188,7 @@
                  TELEPORT_FLAG_LOAD_CHUNK | TELEPORT_FLAGS_PLAYER_RESPAWN,
                  passengerTree, // note: we expect this to just be the player, no passengers
                  (entity) -> {
-@@ -1619,12 +_,29 @@
+@@ -1660,12 +_,29 @@
                      }
                  }
              );
@@ -277,7 +219,7 @@
          } else {
              // load chunk for block
              // give at least 1 radius of loaded chunks so that we do not sync load anything
-@@ -1636,6 +_,7 @@
+@@ -1677,6 +_,7 @@
                          respawnWorld, respawnConfig, !alive
                      ).orElse(null);
                      if (spawnPos == null) {
@@ -285,7 +227,7 @@
                          // no spawn
                          ServerPlayer.this.connection.send(
                              new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F)
-@@ -1644,13 +_,14 @@
+@@ -1685,13 +_,14 @@
                              null, false, com.destroystokyo.paper.event.player.PlayerSetSpawnEvent.Cause.PLAYER_RESPAWN
                          );
                          // default to regular spawn
@@ -301,7 +243,7 @@
  
                      // finished now, pass the location on
                      spawnPosComplete.complete(
-@@ -1660,6 +_,16 @@
+@@ -1701,6 +_,16 @@
                  }
              );
          }
@@ -318,7 +260,7 @@
      }
  
      @Override
-@@ -1809,12 +_,26 @@
+@@ -1850,12 +_,26 @@
                  return false;
              }
              this.wonGame = true;
@@ -350,7 +292,7 @@
              return true;
          } else {
              return super.endPortalLogicAsync(portalPos);
-@@ -2140,7 +_,7 @@
+@@ -2181,7 +_,7 @@
          if (this.spawnExtraParticlesOnFall && onGround && this.fallDistance > 0.0) {
              Vec3 vec3 = pos.getCenter().add(0.0, 0.5, 0.0);
              int i = (int)Mth.clamp(50.0 * this.fallDistance, 0.0, 200.0);
@@ -359,7 +301,7 @@
              this.spawnExtraParticlesOnFall = false;
          }
  
-@@ -2331,7 +_,7 @@
+@@ -2372,7 +_,7 @@
                      this.awardStat(Stats.SWIM_ONE_CM, rounded);
                      this.causeFoodExhaustion(this.level().spigotConfig.swimMultiplier * (float) rounded * 0.01F, org.bukkit.event.entity.EntityExhaustionEvent.ExhaustionReason.SWIM); // CraftBukkit - EntityExhaustionEvent // Spigot
                  }
@@ -368,7 +310,7 @@
                  int rounded = Math.round((float)Math.sqrt(dx * dx + dy * dy + dz * dz) * 100.0F);
                  if (rounded > 0) {
                      this.awardStat(Stats.WALK_UNDER_WATER_ONE_CM, rounded);
-@@ -2451,7 +_,9 @@
+@@ -2492,7 +_,9 @@
  
      public void disconnect() {
          this.disconnected = true;
@@ -378,7 +320,7 @@
  
          // Paper start - Workaround vehicle not tracking the passenger disconnection dismount
          if (this.isPassenger() && this.getVehicle() instanceof ServerPlayer) {
-@@ -2652,6 +_,9 @@
+@@ -2693,6 +_,9 @@
              this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.CHANGE_GAME_MODE, gameMode.getId()));
              if (gameMode == GameType.SPECTATOR) {
                  this.removeEntitiesOnShoulder();
@@ -388,7 +330,7 @@
                  this.stopRiding();
                  EnchantmentHelper.stopLocationBasedEffects(this);
              } else {
-@@ -3284,13 +_,19 @@
+@@ -3325,13 +_,19 @@
          return getInputVector(new Vec3(f, 0.0, f1), 1.0F, this.getYRot());
      }
  
@@ -410,7 +352,7 @@
  
      public Set<ThrownEnderpearl> getEnderPearls() {
          return this.enderPearls;
-@@ -3315,7 +_,7 @@
+@@ -3356,7 +_,7 @@
      public record RespawnConfig(ResourceKey<Level> dimension, BlockPos pos, float angle, boolean forced) {
          public static final Codec<ServerPlayer.RespawnConfig> CODEC = RecordCodecBuilder.create(
              instance -> instance.group(
@@ -419,7 +361,7 @@
                      BlockPos.CODEC.fieldOf("pos").forGetter(ServerPlayer.RespawnConfig::pos),
                      Codec.FLOAT.optionalFieldOf("angle", 0.0F).forGetter(ServerPlayer.RespawnConfig::angle),
                      Codec.BOOL.optionalFieldOf("forced", false).forGetter(ServerPlayer.RespawnConfig::forced)
-@@ -3324,7 +_,7 @@
+@@ -3365,7 +_,7 @@
          );
  
          static ResourceKey<Level> getDimensionOrDefault(@Nullable ServerPlayer.RespawnConfig respawnConfig) {
