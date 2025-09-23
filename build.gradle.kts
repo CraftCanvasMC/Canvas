@@ -5,41 +5,33 @@ import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 
 plugins {
     java
-    id("io.canvasmc.weaver.patcher") version "2.3.3-SNAPSHOT"
+    id("io.canvasmc.weaver.patcher") version "2.3.2-SNAPSHOT"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
 paperweight {
-    upstreams.register("folia") {
-        repo = github("PaperMC", "Folia")
-        ref = providers.gradleProperty("foliaCommit")
+    upstreams.paper {
+        ref = providers.gradleProperty("paperCommit")
 
         patchFile {
-            path = "folia-server/build.gradle.kts"
+            path = "paper-server/build.gradle.kts"
             outputFile = file("canvas-server/build.gradle.kts")
             patchFile = file("canvas-server/build.gradle.kts.patch")
         }
         patchFile {
-            path = "folia-api/build.gradle.kts"
+            path = "paper-api/build.gradle.kts"
             outputFile = file("canvas-api/build.gradle.kts")
             patchFile = file("canvas-api/build.gradle.kts.patch")
         }
-        patchRepo("paperApi") {
+        patchDir("paperApi") {
             upstreamPath = "paper-api"
+            excludes = listOf("build.gradle.kts")
             patchesDir = file("canvas-api/paper-patches")
             additionalAts?.set(file("build-data/canvas.at"))
             outputDir = file("paper-api")
         }
-        patchDir("foliaApi") {
-            upstreamPath = "folia-api"
-            excludes = listOf("build.gradle.kts")
-            patchesDir = file("canvas-api/folia-patches")
-            additionalAts?.set(file("build-data/canvas.at"))
-            outputDir = file("folia-api")
-        }
     }
-/*
     additionalUpstreams.register("folia") {
         repo = github("PaperMC", "Folia")
         ref = providers.gradleProperty("foliaCommit")
@@ -63,7 +55,6 @@ paperweight {
             }
         }
     }
-*/
 }
 
 subprojects {
