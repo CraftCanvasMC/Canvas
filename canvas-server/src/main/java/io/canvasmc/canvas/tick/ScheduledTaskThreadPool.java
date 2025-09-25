@@ -2,8 +2,6 @@ package io.canvasmc.canvas.tick;
 
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import java.lang.invoke.VarHandle;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -13,7 +11,17 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+/**
+ * Originally based off the SpottedLeaf {@code beta/new-scheduler} branch,
+ * modified to contain fixes and improvements to internals, formatting,
+ * and expanding feature capabilities.
+ *
+ * @author dueris
+ * @author SpottedLeaf
+ */
 public final class ScheduledTaskThreadPool {
 
     public static final long DEADLINE_NOT_SET = Long.MIN_VALUE;

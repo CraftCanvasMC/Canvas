@@ -11,7 +11,12 @@ import me.lucko.spark.paper.common.sampler.ThreadDumper;
 import me.lucko.spark.paper.common.util.ThreadFinder;
 import me.lucko.spark.paper.proto.SparkSamplerProtos;
 
-// thread that only tracks region threads if no scheduler threads are pinned
+/**
+ * A {@link ThreadDumper} implementation that works similar to the {@link ThreadDumper.Regex} dumper,
+ * however it will return the tracking thread <i>only</i> if a region profiler is currently running.
+ *
+ * @author dueris
+ */
 public class PinningThreadDumper implements ThreadDumper {
     private final ThreadFinder threadFinder = new ThreadFinder();
     private final Map<Long, Boolean> cache = new HashMap<>();

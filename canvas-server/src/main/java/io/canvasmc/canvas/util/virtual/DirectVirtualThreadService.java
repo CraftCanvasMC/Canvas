@@ -1,9 +1,8 @@
 package io.canvasmc.canvas.util.virtual;
 
-import org.jetbrains.annotations.NotNull;
-
 import java.util.Objects;
 import java.util.concurrent.ThreadFactory;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * An implementation of {@link VirtualThreadService} that can create virtual threads directly.

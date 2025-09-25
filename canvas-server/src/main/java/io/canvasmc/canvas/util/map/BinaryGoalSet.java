@@ -1,10 +1,13 @@
 package io.canvasmc.canvas.util.map;
 
+import java.util.AbstractSet;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.function.Predicate;
 import net.minecraft.world.entity.ai.goal.WrappedGoal;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.*;
-import java.util.function.Predicate;
 
 public final class BinaryGoalSet extends AbstractSet<WrappedGoal> {
     private static final WrappedGoal[] EMPTY_ARRAY = {};

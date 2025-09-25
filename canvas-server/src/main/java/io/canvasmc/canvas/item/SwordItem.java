@@ -1,6 +1,8 @@
 package io.canvasmc.canvas.item;
 
 import io.canvasmc.canvas.Config;
+import java.util.List;
+import java.util.Optional;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -13,8 +15,6 @@ import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.equipment.Equippable;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
-import java.util.List;
-import java.util.Optional;
 
 public class SwordItem extends Item {
     public static final BlocksAttacks BLOCKS_ATTACKS = new BlocksAttacks(

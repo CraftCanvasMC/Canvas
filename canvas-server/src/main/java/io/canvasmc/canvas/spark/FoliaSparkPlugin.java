@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.spark;
 
+import io.canvasmc.canvas.spark.profiler.PinningThreadDumper;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
@@ -7,7 +8,6 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
-import io.canvasmc.canvas.spark.profiler.PinningThreadDumper;
 import me.lucko.spark.api.Spark;
 import me.lucko.spark.paper.PaperCommandSender;
 import me.lucko.spark.paper.PaperTickHook;

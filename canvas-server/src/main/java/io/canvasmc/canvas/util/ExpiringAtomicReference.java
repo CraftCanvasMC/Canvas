@@ -1,7 +1,7 @@
 package io.canvasmc.canvas.util;
 
-import org.jetbrains.annotations.Nullable;
 import java.util.concurrent.atomic.AtomicReference;
+import org.jetbrains.annotations.Nullable;
 
 public final class ExpiringAtomicReference<T> {
 

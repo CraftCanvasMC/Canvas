@@ -197,6 +197,12 @@ public class SparkRegionProfilerExtension {
         (maxChunks, specifiedChunks) -> net.minecraft.network.chat.Component.translatableEscape("commands.forceload.toobig", maxChunks, specifiedChunks)
     );
 
+    /**
+     * Ends pinning of the currently profiling region
+     * @param sendMessage consumer to send messages to, normally used for command feedback
+     * @param sendFailure consumer to send failure messages, normally used for command feedback
+     * @param unpinCallback callback for when the region has been fully unpinned
+     */
     public static void endPinning(
         Consumer<String> sendMessage,
         Consumer<String> sendFailure,
@@ -244,6 +250,15 @@ public class SparkRegionProfilerExtension {
         }
     }
 
+    /**
+     * Starts a region profiler process and pinning
+     * @param sendMessage consumer to send messages to, normally used for command feedback
+     * @param sendFailure consumer to send failure messages, normally used for command feedback
+     * @param fromPos the {@link ColumnPos} of the "from" position, can match the {@code toPos} argument
+     * @param toPos the {@link ColumnPos} of the "to" position, can match the {@code fromPos} argument
+     * @param world the world we are pinning in
+     * @param pinCallback callback for when the region is fully loaded and pinned
+     */
     public static void computeProfilePin(
         Consumer<String> sendMessage,
         Consumer<String> sendFailure,

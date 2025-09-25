@@ -1,8 +1,8 @@
 package io.canvasmc.canvas.util.virtual;
 
+import java.util.concurrent.ThreadFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import java.util.concurrent.ThreadFactory;
 
 /**
  * @author Martijn Muijsers

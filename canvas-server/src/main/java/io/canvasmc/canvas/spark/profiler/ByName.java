@@ -1,13 +1,19 @@
 package io.canvasmc.canvas.spark.profiler;
 
-import me.lucko.spark.paper.common.sampler.ThreadGrouper;
-import me.lucko.spark.paper.proto.SparkSamplerProtos;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import me.lucko.spark.paper.common.sampler.ThreadGrouper;
+import me.lucko.spark.paper.proto.SparkSamplerProtos;
 
+/**
+ * A {@link ThreadGrouper} implementation that strips the {@code (x#)} pattern
+ * from thread names in Spark profiler reports.
+ *
+ * @author dueris
+ */
 public class ByName implements ThreadGrouper {
     private static final Pattern PATTERN = Pattern.compile("^(.*?)[-# ]+\\d+$");
     private final Map<Long, String> cache = new ConcurrentHashMap();
