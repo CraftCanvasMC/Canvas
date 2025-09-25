@@ -64,17 +64,22 @@
          this.tickChildren(hasTimeLeft, region); // Folia - region threading
          if (false && nanos - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - region threading
              this.lastServerStatus = nanos;
-@@ -1740,6 +_,15 @@
+@@ -1740,6 +_,20 @@
          //io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue(this.tickCount); // Paper // Folia - region threading - moved to global tick
          //this.getFunctions().tick(); // Folia - region threading - TODO Purge functions
  
 +        // Canvas start - async save-all command
-+        if (region.shouldSaveNextTick) {
-+            region.shouldSaveNextTick = false;
-+
-+            LOGGER.info("Saving chunks around region around chunk {} in world '{}'", region.region.getCenterChunk(), region.region.regioniser.world.getWorld().getName());
-+            region.region.regioniser.world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(true, false, false, false, false);
-+            this.getPlayerList().saveAll();
++        io.canvasmc.canvas.command.SaveAllTicket ticket = region.saveAllTicket.getAndSet(null);
++        if (ticket != null) {
++            try {
++                LOGGER.info("Saving chunks around region around chunk {} in world '{}'", region.region.getCenterChunk(), region.region.regioniser.world.getWorld().getName());
++                region.region.regioniser.world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(true, false, false, false, false, ticket.flush());
++                this.getPlayerList().saveAll();
++            } catch (Throwable thrown) {
++                ticket.exceptionPropagator().accept(thrown);
++            } finally {
++                ticket.callback().run();
++            }
 +        }
 +        // Canvas end - async save-all command
          // CraftBukkit start
@@ -84,7 +89,7 @@
          // Send time updates to everyone, it will get the right time from the world the player is in.
          // Paper start - Perf: Optimize time updates
          for (final ServerLevel level : Arrays.asList(region.world)) { // Folia - region threading
-+            if (region.world.isUnloading) continue; // Canvas - fix world loading/unloading
++            if (region.world.checkIsUnloading.get()) continue; // Canvas - fix world loading/unloading
              final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
              final long dayTime = level.getDayTime();
              long worldTime = level.getGameTime();
@@ -93,7 +98,7 @@
              // CraftBukkit end */
  
 +            // Canvas start - fix world loading/unloading
-+            if (serverLevel.isUnloading) {
++            if (serverLevel.checkIsUnloading.get()) {
 +                // finish teleports
 +                final ChunkPos center = region.region.getCenterChunk();
 +                final List<ServerLevel.PendingTeleport> pendingTeleports = serverLevel.removeAllRegionTeleports();
@@ -144,7 +149,7 @@
 -        return this.levels.get(dimension);
 +        // Canvas start - fix world loading/unloading
 +        ServerLevel serverLevel = this.levels.get(dimension);
-+        if (serverLevel != null && serverLevel.isUnloading) return null;
++        if (serverLevel != null && serverLevel.checkIsUnloading.get()) return null;
 +        return serverLevel;
 +        // Canvas end - fix world loading/unloading
      }
