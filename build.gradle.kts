@@ -5,54 +5,38 @@ import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 
 plugins {
     java
-    id("io.canvasmc.weaver.patcher") version "2.3.2-SNAPSHOT"
+    id("io.canvasmc.weaver.patcher") version "2.3.6-SNAPSHOT"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
 paperweight {
-    upstreams.paper {
-        ref = providers.gradleProperty("paperCommit")
+    upstreams.register("folia") {
+        repo = github("PaperMC", "Folia")
+        ref = providers.gradleProperty("foliaCommit")
 
         patchFile {
-            path = "paper-server/build.gradle.kts"
+            path = "folia-server/build.gradle.kts"
             outputFile = file("canvas-server/build.gradle.kts")
             patchFile = file("canvas-server/build.gradle.kts.patch")
         }
         patchFile {
-            path = "paper-api/build.gradle.kts"
+            path = "folia-api/build.gradle.kts"
             outputFile = file("canvas-api/build.gradle.kts")
             patchFile = file("canvas-api/build.gradle.kts.patch")
         }
-        patchDir("paperApi") {
+        patchRepo("paperApi") {
             upstreamPath = "paper-api"
-            excludes = listOf("build.gradle.kts")
             patchesDir = file("canvas-api/paper-patches")
-            additionalAts?.set(file("build-data/canvas.at"))
+            additionalAts = file("build-data/canvas.at")
             outputDir = file("paper-api")
         }
-    }
-    additionalUpstreams.register("folia") {
-        repo = github("PaperMC", "Folia")
-        ref = providers.gradleProperty("foliaCommit")
-
-        sourceGeneration {
-            generationConfig.register("folia-api")
-            generationConfig.register("folia-server")
-        }
-
-        patchGeneration {
-            patchesDirOutput = true
-            outputDir.set(file("generated-patches")) // only used when patchesDirOutput is disabled
-
-            inputConfig.register("paper-api")
-            inputConfig.register("paper-server") {
-                additionalPatch.set(file("build-data/patch-gen/0001-PaperServer-Remove-Folia-Profiler.patch"))
-            }
-            inputConfig.register("minecraft") {
-                additionalAts.set(file("build-data/folia.at"))
-                additionalPatch.set(file("build-data/patch-gen/0001-Remove-Folia-Profiler.patch"))
-            }
+        patchDir("foliaApi") {
+            upstreamPath = "folia-api"
+            excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
+            patchesDir = file("canvas-api/folia-patches")
+            additionalAts = file("build-data/canvas.at")
+            outputDir = file("folia-api")
         }
     }
 }

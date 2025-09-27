@@ -1,12 +1,11 @@
 package io.canvasmc.canvas.chunk;
 
+import java.util.Objects;
+import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
-
-import java.util.Objects;
-import java.util.function.Predicate;
 
 public class CombinedHeightmapUpdate {
     public static void updateHeightmaps(Heightmap heightmap0, Heightmap heightmap1, Heightmap heightmap2, Heightmap heightmap3, LevelChunk worldChunk, final int x, final int y, final int z, BlockState state) {

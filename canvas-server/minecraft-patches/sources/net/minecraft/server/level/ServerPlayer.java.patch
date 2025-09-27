@@ -1,6 +1,6 @@
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
-@@ -265,7 +_,7 @@
+@@ -274,7 +_,7 @@
      private BlockPos raidOmenPosition;
      private Vec3 lastKnownClientMovement = Vec3.ZERO;
      private Input lastClientInput = Input.EMPTY;
@@ -9,7 +9,7 @@
      public final ContainerSynchronizer containerSynchronizer = new ContainerSynchronizer() {
          private final LoadingCache<TypedDataComponent<?>, Integer> cache = CacheBuilder.newBuilder()
              .maximumSize(256L)
-@@ -423,6 +_,41 @@
+@@ -432,6 +_,41 @@
      public boolean joining = true;
      public boolean sentListPacket = false;
      public boolean supressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
@@ -51,7 +51,7 @@
      // CraftBukkit end
      public boolean isRealPlayer; // Paper
      public @Nullable com.destroystokyo.paper.event.entity.PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
-@@ -474,6 +_,7 @@
+@@ -483,6 +_,7 @@
          this.bukkitPickUpLoot = true;
          this.maxHealthCache = this.getMaxHealth();
          // CraftBukkit end
@@ -59,22 +59,22 @@
      }
  
      // Folia start - region threading
-@@ -496,8 +_,8 @@
+@@ -505,8 +_,8 @@
          double amountX = selectMaxX - selectMinX;
          double amountZ = selectMaxZ - selectMinZ;
  
 -        int selectX = amountX < 1.0 ? Mth.floor(worldBorder.getCenterX()) : (int)Mth.floor((amountX + 1.0) * random.nextDouble() + selectMinX);
 -        int selectZ = amountZ < 1.0 ? Mth.floor(worldBorder.getCenterZ()) : (int)Mth.floor((amountZ + 1.0) * random.nextDouble() + selectMinZ);
-+        int selectX = amountX < 0.0 ? Mth.floor(worldBorder.getCenterX()) : Mth.floor(amountX * random.nextDouble() + selectMinX); // Canvas - region threading
-+        int selectZ = amountZ < 0.0 ? Mth.floor(worldBorder.getCenterZ()) : Mth.floor(amountZ * random.nextDouble() + selectMinZ); // Canvas - region threading
++        int selectX = amountX < 0.0 ? Mth.floor(worldBorder.getCenterX()) : Mth.floor(amountX * random.nextDouble() + selectMinX); // Luminol - correct respawn place
++        int selectZ = amountZ < 0.0 ? Mth.floor(worldBorder.getCenterZ()) : Mth.floor(amountZ * random.nextDouble() + selectMinZ); // Luminol - correct respawn place
  
          return new BlockPos(selectX, 0, selectZ);
      }
-@@ -508,10 +_,20 @@
+@@ -517,10 +_,20 @@
      }
  
      private static BlockPos findSpawnAround(ServerLevel world, ServerPlayer player, BlockPos selected) {
-+        // Canvas start - region threading
++        // Luminol start - correct respawn place
 +        BlockPos inChunk;
 +        inChunk = PlayerRespawnLogic.getOverworldRespawnPos(world, selected.getX(), selected.getZ());
 +        if (inChunk != null) {
@@ -83,74 +83,16 @@
 +                return inChunk;
 +            }
 +        }
-+        // Canvas end - region threading
++        // Luminol end - correct respawn place
          // try hard to find, so that we don't attempt another chunk load
          for (int dz = -SPAWN_RADIUS_SELECTION_SEARCH; dz <= SPAWN_RADIUS_SELECTION_SEARCH; ++dz) {
              for (int dx = -SPAWN_RADIUS_SELECTION_SEARCH; dx <= SPAWN_RADIUS_SELECTION_SEARCH; ++dx) {
 -                BlockPos inChunk = PlayerRespawnLogic.getOverworldRespawnPos(world, selected.getX() + dx, selected.getZ() + dz);
-+                inChunk = PlayerRespawnLogic.getOverworldRespawnPos(world, selected.getX() + dx, selected.getZ() + dz); // Canvas - region threading
++                inChunk = PlayerRespawnLogic.getOverworldRespawnPos(world, selected.getX() + dx, selected.getZ() + dz); // Luminol - correct respawn place
                  if (inChunk == null) {
                      continue;
                  }
-@@ -611,11 +_,52 @@
- 
-     }
- 
--    public void queuePacketTask(Runnable run) {
--        this.getBukkitEntity().taskScheduler.schedule((ServerPlayer player) -> {
--            run.run();
--        }, null, 1L);
--    }
-+    // Canvas start - rewrite scheduler
-+    private io.papermc.paper.threadedregions.RegionizedWorldData worldDataRef = null;
-+    private final ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<Runnable> packetTaskQueue = new ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<>();
-+
-+    /**
-+     * Realistically, this isn't crucial. This *can* be null safely, as worst case senario
-+     * this is forever as null, which shouldn't happen at all ever, but it doesn't entirely
-+     * make that much of a difference
-+     * @param worldDataRef the current regionized world data for this player
-+     */
-+    public void setRegionData(final io.papermc.paper.threadedregions.RegionizedWorldData worldDataRef) {
-+        this.worldDataRef = worldDataRef;
-+    }
-+
-+    /**
-+     * Executes a task from the packet processing queue
-+     * @return true if the queue has more tasks, false otherwise
-+     */
-+    public boolean executeOnePacketTask() {
-+        Runnable task = packetTaskQueue.poll();
-+        if (task == null) {
-+            return false;
-+        }
-+        task.run();
-+        return true;
-+    }
-+
-+    /**
-+     * Returns if the player has tasks or not
-+     * @return if the task queue has packets
-+     */
-+    public boolean hasPackets() {
-+        return !this.packetTaskQueue.isEmpty();
-+    }
-+
-+    public void queuePacketTask(Runnable task) {
-+        if (!this.packetTaskQueue.add(task)) return;
-+        if (worldDataRef != null) {
-+            // really shouldn't be null, but we check anyway just in the case it is
-+            // we also drain packets right before entity scheduler tick, so no
-+            // point in trying to send to the entity scheduler if the region is null,
-+            // since it makes no fucking sense since it will do literally the same thing
-+            worldDataRef.regionData.setHasPackets();
-+        }
-+    }
-+    // Canvas end - rewrite scheduler
-     // Folia end - region threading
- 
-     @Override
-@@ -707,6 +_,7 @@
+@@ -757,6 +_,7 @@
          this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
          this.spawnExtraParticlesOnFall = input.getBooleanOr("spawn_extra_particles_on_fall", false);
          this.raidOmenPosition = input.read("raid_omen_position", BlockPos.CODEC).orElse(null);
@@ -158,7 +100,7 @@
      }
  
      @Override
-@@ -724,6 +_,7 @@
+@@ -774,6 +_,7 @@
          output.storeNullable("raid_omen_position", BlockPos.CODEC, this.raidOmenPosition);
          this.saveEnderPearls(output);
          this.getBukkitEntity().setExtraData(output); // CraftBukkit
@@ -166,7 +108,7 @@
      }
  
      private void saveParentVehicle(ValueOutput output) {
-@@ -1301,6 +_,7 @@
+@@ -1357,6 +_,7 @@
          if (killCredit != null) {
              this.awardStat(Stats.ENTITY_KILLED_BY.get(killCredit.getType()));
              killCredit.awardKillScore(this, cause);
@@ -174,7 +116,7 @@
              this.createWitherRose(killCredit);
          }
  
-@@ -1528,16 +_,28 @@
+@@ -1584,16 +_,28 @@
       * internally for {@link #respawn(java.util.function.Consumer, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason)}
       */
      public static final long TELEPORT_FLAGS_PLAYER_RESPAWN    = Long.MIN_VALUE >>> 0;
@@ -205,7 +147,7 @@
          }, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.END_PORTAL, true);
      }
  
-@@ -1584,12 +_,27 @@
+@@ -1640,12 +_,27 @@
          boolean[] usedRespawnAnchor = new boolean[1];
  
          // set up post spawn location logic
@@ -237,7 +179,7 @@
              ServerPlayer.this.setDeltaMovement(Vec3.ZERO);
              // placeInAsync will update the world
  
-@@ -1597,7 +_,7 @@
+@@ -1653,7 +_,7 @@
                  origin,
                  // use the load chunk flag just in case the spawn loc isn't loaded, and to ensure the chunks
                  // stay loaded for a bit with the teleport ticket
@@ -246,7 +188,7 @@
                  TELEPORT_FLAG_LOAD_CHUNK | TELEPORT_FLAGS_PLAYER_RESPAWN,
                  passengerTree, // note: we expect this to just be the player, no passengers
                  (entity) -> {
-@@ -1619,12 +_,29 @@
+@@ -1675,12 +_,29 @@
                      }
                  }
              );
@@ -277,7 +219,7 @@
          } else {
              // load chunk for block
              // give at least 1 radius of loaded chunks so that we do not sync load anything
-@@ -1636,6 +_,7 @@
+@@ -1692,6 +_,7 @@
                          respawnWorld, respawnConfig, !alive
                      ).orElse(null);
                      if (spawnPos == null) {
@@ -285,7 +227,7 @@
                          // no spawn
                          ServerPlayer.this.connection.send(
                              new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F)
-@@ -1644,13 +_,14 @@
+@@ -1700,13 +_,14 @@
                              null, false, com.destroystokyo.paper.event.player.PlayerSetSpawnEvent.Cause.PLAYER_RESPAWN
                          );
                          // default to regular spawn
@@ -301,7 +243,7 @@
  
                      // finished now, pass the location on
                      spawnPosComplete.complete(
-@@ -1660,6 +_,16 @@
+@@ -1716,6 +_,16 @@
                  }
              );
          }
@@ -318,7 +260,7 @@
      }
  
      @Override
-@@ -1809,12 +_,26 @@
+@@ -1865,12 +_,26 @@
                  return false;
              }
              this.wonGame = true;
@@ -350,7 +292,7 @@
              return true;
          } else {
              return super.endPortalLogicAsync(portalPos);
-@@ -2140,7 +_,7 @@
+@@ -2199,7 +_,7 @@
          if (this.spawnExtraParticlesOnFall && onGround && this.fallDistance > 0.0) {
              Vec3 vec3 = pos.getCenter().add(0.0, 0.5, 0.0);
              int i = (int)Mth.clamp(50.0 * this.fallDistance, 0.0, 200.0);
@@ -359,7 +301,7 @@
              this.spawnExtraParticlesOnFall = false;
          }
  
-@@ -2331,7 +_,7 @@
+@@ -2390,7 +_,7 @@
                      this.awardStat(Stats.SWIM_ONE_CM, rounded);
                      this.causeFoodExhaustion(this.level().spigotConfig.swimMultiplier * (float) rounded * 0.01F, org.bukkit.event.entity.EntityExhaustionEvent.ExhaustionReason.SWIM); // CraftBukkit - EntityExhaustionEvent // Spigot
                  }
@@ -368,7 +310,7 @@
                  int rounded = Math.round((float)Math.sqrt(dx * dx + dy * dy + dz * dz) * 100.0F);
                  if (rounded > 0) {
                      this.awardStat(Stats.WALK_UNDER_WATER_ONE_CM, rounded);
-@@ -2451,7 +_,9 @@
+@@ -2513,7 +_,9 @@
  
      public void disconnect() {
          this.disconnected = true;
@@ -378,7 +320,7 @@
  
          // Paper start - Workaround vehicle not tracking the passenger disconnection dismount
          if (this.isPassenger() && this.getVehicle() instanceof ServerPlayer) {
-@@ -2652,6 +_,9 @@
+@@ -2720,6 +_,9 @@
              this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.CHANGE_GAME_MODE, gameMode.getId()));
              if (gameMode == GameType.SPECTATOR) {
                  this.removeEntitiesOnShoulder();
@@ -388,7 +330,7 @@
                  this.stopRiding();
                  EnchantmentHelper.stopLocationBasedEffects(this);
              } else {
-@@ -3284,13 +_,19 @@
+@@ -3359,13 +_,19 @@
          return getInputVector(new Vec3(f, 0.0, f1), 1.0F, this.getYRot());
      }
  
@@ -410,7 +352,7 @@
  
      public Set<ThrownEnderpearl> getEnderPearls() {
          return this.enderPearls;
-@@ -3315,7 +_,7 @@
+@@ -3390,7 +_,7 @@
      public record RespawnConfig(ResourceKey<Level> dimension, BlockPos pos, float angle, boolean forced) {
          public static final Codec<ServerPlayer.RespawnConfig> CODEC = RecordCodecBuilder.create(
              instance -> instance.group(
@@ -419,7 +361,7 @@
                      BlockPos.CODEC.fieldOf("pos").forGetter(ServerPlayer.RespawnConfig::pos),
                      Codec.FLOAT.optionalFieldOf("angle", 0.0F).forGetter(ServerPlayer.RespawnConfig::angle),
                      Codec.BOOL.optionalFieldOf("forced", false).forGetter(ServerPlayer.RespawnConfig::forced)
-@@ -3324,7 +_,7 @@
+@@ -3399,7 +_,7 @@
          );
  
          static ResourceKey<Level> getDimensionOrDefault(@Nullable ServerPlayer.RespawnConfig respawnConfig) {

@@ -5,8 +5,8 @@ import ca.spottedleaf.moonrise.patches.chunk_system.util.ParallelSearchRadiusIte
 import io.canvasmc.canvas.chunk.FluidPostProcessingMode;
 import io.canvasmc.canvas.configuration.ConfigSerializer;
 import io.canvasmc.canvas.configuration.Configuration;
-import io.canvasmc.canvas.configuration.internal.ConfigurationManager;
 import io.canvasmc.canvas.configuration.Json5Builder;
+import io.canvasmc.canvas.configuration.internal.ConfigurationManager;
 import io.canvasmc.canvas.configuration.jankson.Jankson;
 import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import io.canvasmc.canvas.configuration.validator.NamespacedKeyValidator;
@@ -17,6 +17,7 @@ import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.util.GsonTextFormatter;
+import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.file.Files;
@@ -28,7 +29,6 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.random.RandomGeneratorFactory;
-import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.minecraft.Util;
@@ -708,6 +708,10 @@ public class Config {
             }).build();
     }
 
+    /**
+     * Instantiates the CanvasMC configuration
+     * @return the loaded configuration
+     */
     public static Config init() {
         long startNanos = System.nanoTime();
         ConfigurationManager.register(Config.class, Config::buildSerializer);

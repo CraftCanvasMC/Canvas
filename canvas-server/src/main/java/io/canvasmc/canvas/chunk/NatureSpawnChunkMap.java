@@ -4,11 +4,10 @@ import ca.spottedleaf.moonrise.common.list.ReferenceList;
 import com.destroystokyo.paper.event.entity.PlayerNaturallySpawnCreaturesEvent;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
+import java.util.List;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
-
-import java.util.List;
 
 public class NatureSpawnChunkMap {
     /// breadth-first search

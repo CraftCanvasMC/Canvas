@@ -2,14 +2,13 @@ package io.canvasmc.canvas.util;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.canvasmc.canvas.Config;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.random.RandomGenerator;
+import java.util.random.RandomGeneratorFactory;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.BitRandomSource;
 import net.minecraft.world.level.levelgen.PositionalRandomFactory;
-
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.random.RandomGenerator;
-import java.util.random.RandomGeneratorFactory;
 
 public class FasterRandomSource implements BitRandomSource {
 

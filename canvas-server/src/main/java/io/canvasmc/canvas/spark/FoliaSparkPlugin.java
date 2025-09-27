@@ -1,6 +1,6 @@
 package io.canvasmc.canvas.spark;
 
-import com.google.common.collect.ImmutableSet;
+import io.canvasmc.canvas.spark.profiler.PinningThreadDumper;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
@@ -33,7 +33,6 @@ import me.lucko.spark.paper.common.util.classfinder.ClassFinder;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
-import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 
 public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
@@ -46,11 +45,6 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     private final ThreadDumper gameThreadDumper;
     private final SparkPlatform platform;
 
-    @Contract("_, _, _, _, _ -> new")
-    public static @NotNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
-        return new FoliaSparkPlugin(server, logger, scheduler, classLookup);
-    }
-
     public FoliaSparkPlugin(Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
         super();
         this.server = server;
@@ -59,8 +53,12 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.classLookup = classLookup;
         this.tickHook = new PaperTickHook();
         this.tickReporter = new PaperTickReporter();
-        this.gameThreadDumper = new ThreadDumper.Regex(ImmutableSet.of("Region Scheduler Thread #\\d+"));
+        this.gameThreadDumper = new PinningThreadDumper();
         this.platform = new SparkPlatform(this);
+    }
+
+    public static @NotNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
+        return new FoliaSparkPlugin(server, logger, scheduler, classLookup);
     }
 
     public void enable() {
@@ -113,7 +111,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     }
 
     public Stream<PaperCommandSender> getCommandSenders() {
-        return Stream.concat(this.server.getOnlinePlayers().stream(), Stream.of(this.server.getConsoleSender())).map((x$0) -> new PaperCommandSender((CommandSender)x$0));
+        return Stream.concat(this.server.getOnlinePlayers().stream(), Stream.of(this.server.getConsoleSender())).map(PaperCommandSender::new);
     }
 
     public void executeAsync(Runnable task) {

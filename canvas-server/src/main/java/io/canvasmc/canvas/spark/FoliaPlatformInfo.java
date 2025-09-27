@@ -3,12 +3,7 @@ package io.canvasmc.canvas.spark;
 import me.lucko.spark.paper.common.platform.PlatformInfo;
 import org.bukkit.Server;
 
-public class FoliaPlatformInfo implements PlatformInfo {
-    private final Server server;
-
-    public FoliaPlatformInfo(Server server) {
-        this.server = server;
-    }
+public record FoliaPlatformInfo(Server server) implements PlatformInfo {
 
     @Override
     public Type getType() {
@@ -17,7 +12,7 @@ public class FoliaPlatformInfo implements PlatformInfo {
 
     @Override
     public String getName() {
-        return "Bukkit";
+        return "Folia";
     }
 
     @Override

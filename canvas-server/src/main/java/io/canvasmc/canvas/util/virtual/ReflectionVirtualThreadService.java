@@ -1,10 +1,9 @@
 package io.canvasmc.canvas.util.virtual;
 
-import org.jetbrains.annotations.NotNull;
-
 import java.lang.reflect.Method;
 import java.util.Objects;
 import java.util.concurrent.ThreadFactory;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Martijn Muijsers

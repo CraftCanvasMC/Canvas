@@ -26,7 +26,7 @@
              // Folia end - region threading
  
              // Paper - Put world into worldlist before initing the world; move up
-@@ -1236,11 +_,7 @@
+@@ -1242,11 +_,7 @@
                  io.papermc.paper.threadedregions.RegionizedServer.getInstance().init(); // Folia - region threading - only after loading worlds
                  final long actualDoneTimeMs = System.currentTimeMillis() - org.bukkit.craftbukkit.Main.BOOT_TIME.toEpochMilli(); // Paper - Improve startup message
                  LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1000.00D)); // Paper - Improve startup message
@@ -39,7 +39,7 @@
              }
              // Folia end - region threading
              // Spigot start
-@@ -1351,7 +_,7 @@
+@@ -1357,7 +_,7 @@
              }
  
              this.onServerCrash(crashReport);
@@ -48,7 +48,7 @@
              try {
                  this.stopped = true;
                  this.stopServer();
-@@ -1592,6 +_,7 @@
+@@ -1601,6 +_,7 @@
                      LOGGER.info("Initialising world '" + region.world.getWorld().getName() + "' before it can be ticked...");
                      this.initWorld(region.world, region.world.serverLevelData, worldData, region.world.serverLevelData.worldGenOptions()); // Folia - delayed until first tick of world
                      region.world.checkInitialised.set(ServerLevel.WORLD_INIT_CHECKED);
@@ -56,15 +56,7 @@
                      LOGGER.info("Initialised world '" + region.world.getWorld().getName() + "'");
                  } // else: must be checked
              }
-@@ -1607,6 +_,7 @@
-         if (region != null) {
-             region.getTaskQueueData().drainTasks();
-             ((io.papermc.paper.threadedregions.scheduler.FoliaRegionScheduler)org.bukkit.Bukkit.getRegionScheduler()).tick();
-+            region.drainPackets(); // Canvas - rewrite scheduler
-             // now run all the entity schedulers
-             for (io.papermc.paper.threadedregions.EntityScheduler scheduler : region.world.getCurrentWorldData().entitySchedulerTickList.getAllSchedulers()) {
-                 net.minecraft.world.entity.Entity handle = scheduler.entity.getHandleRaw();
-@@ -1620,6 +_,7 @@
+@@ -1630,6 +_,7 @@
          // Folia end - region threading
          //this.tickCount++; // Folia - region threading
          //this.tickRateManager.tick(); // Folia - region threading
@@ -72,36 +64,41 @@
          this.tickChildren(hasTimeLeft, region); // Folia - region threading
          if (false && nanos - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - region threading
              this.lastServerStatus = nanos;
-@@ -1730,6 +_,15 @@
+@@ -1740,6 +_,20 @@
          //io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue(this.tickCount); // Paper // Folia - region threading - moved to global tick
          //this.getFunctions().tick(); // Folia - region threading - TODO Purge functions
  
 +        // Canvas start - async save-all command
-+        if (region.shouldSaveNextTick) {
-+            region.shouldSaveNextTick = false;
-+
-+            LOGGER.info("Saving chunks around region around chunk {} in world '{}'", region.region.getCenterChunk(), region.region.regioniser.world.getWorld().getName());
-+            region.region.regioniser.world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(true, false, false, false, false);
-+            this.getPlayerList().saveAll();
++        io.canvasmc.canvas.command.SaveAllTicket ticket = region.saveAllTicket.getAndSet(null);
++        if (ticket != null) {
++            try {
++                LOGGER.info("Saving chunks around region around chunk {} in world '{}'", region.region.getCenterChunk(), region.region.regioniser.world.getWorld().getName());
++                region.region.regioniser.world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(true, false, false, false, false, ticket.flush());
++                this.getPlayerList().saveAll();
++            } catch (Throwable thrown) {
++                ticket.exceptionPropagator().accept(thrown);
++            } finally {
++                ticket.callback().run();
++            }
 +        }
 +        // Canvas end - async save-all command
          // CraftBukkit start
          // Run tasks that are waiting on processing
          if (false) while (!this.processQueue.isEmpty()) { // Folia - region threading
-@@ -1739,6 +_,7 @@
+@@ -1749,6 +_,7 @@
          // Send time updates to everyone, it will get the right time from the world the player is in.
          // Paper start - Perf: Optimize time updates
          for (final ServerLevel level : Arrays.asList(region.world)) { // Folia - region threading
-+            if (region.world.isUnloading) continue; // Canvas - fix world loading/unloading
++            if (region.world.checkIsUnloading.get()) continue; // Canvas - fix world loading/unloading
              final boolean doDaylight = level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT);
              final long dayTime = level.getDayTime();
              long worldTime = level.getGameTime();
-@@ -1766,6 +_,48 @@
+@@ -1776,6 +_,48 @@
              }
              // CraftBukkit end */
  
 +            // Canvas start - fix world loading/unloading
-+            if (serverLevel.isUnloading) {
++            if (serverLevel.checkIsUnloading.get()) {
 +                // finish teleports
 +                final ChunkPos center = region.region.getCenterChunk();
 +                final List<ServerLevel.PendingTeleport> pendingTeleports = serverLevel.removeAllRegionTeleports();
@@ -145,14 +142,14 @@
              try {
                  serverLevel.tick(hasTimeLeft, region); // Folia - region threading
              } catch (Throwable var7) {
-@@ -1838,22 +_,31 @@
- 
+@@ -1851,22 +_,31 @@
+      */
      @Nullable
      public ServerLevel getLevel(ResourceKey<Level> dimension) {
 -        return this.levels.get(dimension);
 +        // Canvas start - fix world loading/unloading
 +        ServerLevel serverLevel = this.levels.get(dimension);
-+        if (serverLevel != null && serverLevel.isUnloading) return null;
++        if (serverLevel != null && serverLevel.checkIsUnloading.get()) return null;
 +        return serverLevel;
 +        // Canvas end - fix world loading/unloading
      }
@@ -178,7 +175,7 @@
      }
      // CraftBukkit end
  
-@@ -2202,6 +_,13 @@
+@@ -2221,6 +_,13 @@
          return 256;
      }
  
@@ -192,7 +189,7 @@
      public boolean enforceSecureProfile() {
          return false;
      }
-@@ -2708,6 +_,7 @@
+@@ -2733,6 +_,7 @@
      }
  
      public final java.util.concurrent.ExecutorService chatExecutor = java.util.concurrent.Executors.newCachedThreadPool(

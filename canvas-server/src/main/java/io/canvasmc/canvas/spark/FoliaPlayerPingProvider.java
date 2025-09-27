@@ -6,13 +6,7 @@ import me.lucko.spark.paper.common.monitor.ping.PlayerPingProvider;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
 
-public class FoliaPlayerPingProvider implements PlayerPingProvider {
-
-    private final Server server;
-
-    public FoliaPlayerPingProvider(Server server) {
-        this.server = server;
-    }
+public record FoliaPlayerPingProvider(Server server) implements PlayerPingProvider {
 
     @Override
     public Map<String, Integer> poll() {

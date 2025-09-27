@@ -1,142 +1,24 @@
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -30,8 +_,18 @@
- 
- public final class RegionizedServer {
- 
--    private static final Logger LOGGER = LogUtils.getLogger();
-+    private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger("RegionizedServer"); // Canvas - rewrite scheduler
-     private static final RegionizedServer INSTANCE = new RegionizedServer();
-+    // Canvas start - rewrite scheduler - allow runtime tick rate change
-+    public static final int DEFAULT_TICK_RATE = 20;
-+    public static final long DEFAULT_TICK_TIME_NANOS = 50_000_000; // 1_000_000_000 / 20 (20 being default tick rate)
-+
-+    // Note: used for setting new tick time nanos, not really for anything else, utility method
-+    //    this is fine for decimal rates, as we round it so if anything, we are like 1 nanosecond off... which isn't bad
-+    public static long tickTimeNanosFromRate(float rate) {
-+        return Math.round(1_000_000_000 / rate);
-+    }
-+    // Canvas end - rewrite scheduler - allow runtime tick rate change
- 
-     public final RegionizedTaskQueue taskQueue = new RegionizedTaskQueue();
- 
-@@ -56,6 +_,7 @@
- 
-     public void addWorld(final ServerLevel world) {
-         this.worlds.add(world);
-+        world.updateTickData(); // Canvas - update tick data on world add
-     }
- 
-     public void init() {
-@@ -63,9 +_,23 @@
-         new RegionizedServerInitEvent().callEvent();
- 
-         // now we can schedule
--        this.tickHandle.setInitialStart(System.nanoTime() + TickRegionScheduler.TIME_BETWEEN_TICKS);
-+        // Canvas start - rewrite scheduler
+@@ -79,6 +_,12 @@
+         // that essentially crashes the server on the first tick of a freshly generated world.
+         // This fixes it, because the race condition is caused by the global tick not being run first
+         // which is required to process ticket updates so we don't fail any thread ownership checks
 +        // validate respawn dimension config entry first
 +        net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> respawnDimension = io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey();
 +        ServerLevel level = MinecraftServer.getServer().getLevel(respawnDimension);
 +        if (level == null) {
 +            throw new IllegalStateException("Respawn dimension invalid, could not fetch dimension from value '" + respawnDimension + "'");
 +        }
-+        // Folia has a race condition in the old scheduler(which is more likely with the new scheduler)
-+        // that essentially crashes the server on the first tick of a freshly generated world.
-+        // This fixes it, because the race condition is caused by the global tick not being run first
-+        // which is required to process ticket updates so we don't fail any thread ownership checks
-+        LOGGER.info("Running first global tick before starting tick scheduler");
-+        this.globalTick((int) this.tickHandle.getCurrentTick());
-+        this.tickHandle.setInitialStart(System.nanoTime());
-+        // Canvas end - rewrite scheduler
-         TickRegions.getScheduler().scheduleRegion(this.tickHandle);
--        TickRegions.getScheduler().init();
-+        TickRegions.start(); // Canvas - rewrite scheduler
-     }
- 
-     public void invalidateStatus() {
-@@ -93,6 +_,17 @@
-         return;
-     }
- 
-+    // Canvas start - rewrite scheduler
-+    private boolean hasAnyGlobalChunkTasks() {
-+        for (final ServerLevel world : this.worlds) {
-+            if (world.taskQueueRegionData.hasGlobalChunkTasks()) {
-+                return true;
-+            }
-+        }
-+        return false;
-+    }
-+
-+    // Canvas end - rewrite scheduler
-     /**
-      * Returns the current tick of the region ticking.
-      * @throws IllegalStateException If there is no current region.
-@@ -131,7 +_,7 @@
-         private final AtomicBoolean ticking = new AtomicBoolean();
- 
-         public GlobalTickTickHandle(final RegionizedServer server) {
--            super(null, SchedulerThreadPool.DEADLINE_NOT_SET);
-+            super(null, io.canvasmc.canvas.tick.ScheduledTaskThreadPool.DEADLINE_NOT_SET); // Canvas - rewrite scheduler
-             this.server = server;
-         }
- 
-@@ -162,7 +_,7 @@
-         }
- 
-         private void drainTasks() {
--            while (this.runOneTask());
-+            while (this.runOneTask() | this.runGlobalTask()); // Canvas - rewrite scheduler
-         }
- 
-         private boolean runOneTask() {
-@@ -177,20 +_,23 @@
-             return true;
-         }
- 
--        @Override
--        protected boolean runRegionTasks(final BooleanSupplier canContinue) {
--            do {
--                if (!this.runOneTask()) {
--                    return false;
--                }
--            } while (canContinue.getAsBoolean());
-+        // Canvas start - rewrite scheduler
-+        private boolean runGlobalTask() {
-+            boolean ret = false;
-+            for (final ServerLevel world : this.server.worlds) {
-+                ret |= world.taskQueueRegionData.executeGlobalChunkTask();
-+            }
-+            return ret;
-+        }
- 
--            return true;
-+        @Override
-+        protected void runRegionTasks(final BooleanSupplier canContinue) {
-+        // Canvas end - rewrite scheduler
-         }
- 
-         @Override
-         protected boolean hasIntermediateTasks() {
--            return !this.server.globalTickQueue.isEmpty();
-+            return !this.server.globalTickQueue.isEmpty() || this.server.hasAnyGlobalChunkTasks(); // Canvas - rewrite scheduler
-         }
-     }
- 
-@@ -323,6 +_,7 @@
- 
-         // tick player ping sample
-         this.tickPlayerSample();
-+        MinecraftServer.getServer().tickRateManager().tick(); // Canvas - rewrite scheduler
- 
-         // tick worlds
-         for (final ServerLevel world : this.worlds) {
-@@ -414,6 +_,42 @@
+         this.globalTick((int) this.tickHandle.getCurrentTick());
+         this.tickHandle.setInitialStart(System.nanoTime());
+         // Canvas end - rewrite scheduler
+@@ -452,6 +_,42 @@
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final int tickCount) {
 +        // Canvas start - fix world loading/unloading
-+        if (world.isUnloading) {
++        if (world.checkIsUnloading.get()) {
 +            // we are unloading, return.
 +            AtomicBoolean isSingularRegionAlive = new AtomicBoolean(false);
 +            world.regioniser.computeForAllRegionsUnsynchronised((region) -> {
@@ -174,7 +56,7 @@
          // needs
          // worldborder tick
          // advancing the weather cycle
-@@ -442,6 +_,18 @@
+@@ -480,6 +_,18 @@
  
          // time ticking (TODO API synchronisation?)
          this.tickTime(world, tickCount);
@@ -189,7 +71,7 @@
 +            }
 +            serverPlayer.connection.keepConnectionAlive();
 +        }
-+        // Canvas end
++        // Canvas end - fix end credits
  
          world.updateTickData();
  
