@@ -70,7 +70,7 @@ index a1043c426d031755b57b77a9b2eec685e9861b13..b6788ce5f03eecf0b54cf433c7822cd5
 \ No newline at end of file
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 07038e34a21a52afe785b901046af66e7b4e40ec..7f326a41359041b7c231ceafc9dc2a28913962d5 100644
+index 07038e34a21a52afe785b901046af66e7b4e40ec..93be5483f22edc84c47856111ac8a46209dd6803 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -30,8 +30,18 @@ import java.util.function.BooleanSupplier;
@@ -120,25 +120,7 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..7f326a41359041b7c231ceafc9dc2a28
      }
  
      public void invalidateStatus() {
-@@ -93,6 +111,17 @@ public final class RegionizedServer {
-         return;
-     }
- 
-+    // Canvas start - rewrite scheduler
-+    private boolean hasAnyGlobalChunkTasks() {
-+        for (final ServerLevel world : this.worlds) {
-+            if (world.taskQueueRegionData.hasGlobalChunkTasks()) {
-+                return true;
-+            }
-+        }
-+        return false;
-+    }
-+
-+    // Canvas end - rewrite scheduler
-     /**
-      * Returns the current tick of the region ticking.
-      * @throws IllegalStateException If there is no current region.
-@@ -131,7 +160,7 @@ public final class RegionizedServer {
+@@ -131,7 +149,7 @@ public final class RegionizedServer {
          private final AtomicBoolean ticking = new AtomicBoolean();
  
          public GlobalTickTickHandle(final RegionizedServer server) {
@@ -147,42 +129,25 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..7f326a41359041b7c231ceafc9dc2a28
              this.server = server;
          }
  
-@@ -177,20 +206,28 @@ public final class RegionizedServer {
-             return true;
+@@ -178,14 +196,13 @@ public final class RegionizedServer {
          }
  
-+        // Canvas start - rewrite scheduler
-+        private boolean runGlobalTask() {
-+            boolean ret = false;
-+            for (final ServerLevel world : this.server.worlds) {
-+                ret |= world.taskQueueRegionData.executeGlobalChunkTask();
-+            }
-+            return ret;
-+        }
-+
          @Override
 -        protected boolean runRegionTasks(final BooleanSupplier canContinue) {
-+        protected void runRegionTasks(final BooleanSupplier canContinue) {
++        protected void runRegionTasks(final BooleanSupplier canContinue) { // Canvas - rewrite scheduler
              do {
--                if (!this.runOneTask()) {
+                 if (!this.runOneTask()) {
 -                    return false;
-+                if (!this.runOneTask() || !this.runGlobalTask()) {
-+                    return;
++                    return; // Canvas - rewrite scheduler
                  }
              } while (canContinue.getAsBoolean());
 -
 -            return true;
-+        // Canvas end - rewrite scheduler
++            // Canvas - rewrite scheduler
          }
  
          @Override
-         protected boolean hasIntermediateTasks() {
--            return !this.server.globalTickQueue.isEmpty();
-+            return !this.server.globalTickQueue.isEmpty() || this.server.hasAnyGlobalChunkTasks(); // Canvas - rewrite scheduler
-         }
-     }
- 
-@@ -302,6 +339,13 @@ public final class RegionizedServer {
+@@ -302,6 +319,13 @@ public final class RegionizedServer {
          // expire invalid click command callbacks
          io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.ADVENTURE_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
          io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
@@ -196,7 +161,7 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..7f326a41359041b7c231ceafc9dc2a28
  
          // scheduler
          ((FoliaGlobalRegionScheduler)Bukkit.getGlobalRegionScheduler()).tick();
-@@ -316,6 +360,7 @@ public final class RegionizedServer {
+@@ -316,6 +340,7 @@ public final class RegionizedServer {
  
          // tick player ping sample
          this.tickPlayerSample();
@@ -204,7 +169,7 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..7f326a41359041b7c231ceafc9dc2a28
  
          // tick worlds
          for (final ServerLevel world : this.worlds) {
-@@ -327,6 +372,13 @@ public final class RegionizedServer {
+@@ -327,6 +352,13 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
@@ -219,33 +184,10 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..7f326a41359041b7c231ceafc9dc2a28
  
      private void tickPlayerSample() {
 diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
-index 25a0b1d56652e4455a188d0f413581638d5ef538..3828e290986ea033426e68ae73e82889ed8ed19a 100644
+index 25a0b1d56652e4455a188d0f413581638d5ef538..59dca5af1a3089068d5deafa04015d4ff2280dd0 100644
 --- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
 +++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
-@@ -80,7 +80,13 @@ public final class RegionizedTaskQueue {
-             this.world = world;
-         }
- 
--        private boolean executeGlobalChunkTask() {
-+        // Canvas start - rewrite scheduler
-+        public boolean hasGlobalChunkTasks() {
-+            return !this.globalChunkTask.isEmpty();
-+        }
-+
-+        public boolean executeGlobalChunkTask() {
-+        // Canvas end - rewrite scheduler
-             final Runnable run = this.globalChunkTask.poll();
-             if (run != null) {
-                 run.run();
-@@ -95,6 +101,7 @@ public final class RegionizedTaskQueue {
- 
-         public void pushGlobalChunkTask(final Runnable run) {
-             this.globalChunkTask.add(run);
-+            TickRegions.getScheduler().setHasTasks(RegionizedServer.getGlobalTickData()); // Canvas - rewrite scheduler
-         }
- 
-         private PrioritisedQueue getQueue(final boolean synchronise, final int chunkX, final int chunkZ, final boolean isChunkTask) {
-@@ -225,12 +232,14 @@ public final class RegionizedTaskQueue {
+@@ -225,12 +225,14 @@ public final class RegionizedTaskQueue {
      }
  
      public static final class RegionTaskQueueData {
@@ -263,7 +205,7 @@ index 25a0b1d56652e4455a188d0f413581638d5ef538..3828e290986ea033426e68ae73e82889
          }
  
          void mergeInto(final RegionTaskQueueData into) {
-@@ -290,6 +299,15 @@ public final class RegionizedTaskQueue {
+@@ -290,6 +292,15 @@ public final class RegionizedTaskQueue {
                  this.queues[i] = new ArrayDeque<>();
              }
          }
@@ -279,7 +221,7 @@ index 25a0b1d56652e4455a188d0f413581638d5ef538..3828e290986ea033426e68ae73e82889
          private boolean isDestroyed;
  
          public int getScheduledTasks() {
-@@ -618,6 +636,7 @@ public final class RegionizedTaskQueue {
+@@ -618,6 +629,7 @@ public final class RegionizedTaskQueue {
                          continue;
                      }
  

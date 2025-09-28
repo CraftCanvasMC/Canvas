@@ -642,6 +642,16 @@ public class Config {
     @Comment("Disables non-player-entities from entering gateway portals")
     public boolean blacklistNonPlayerEntitiesFromEnteringGatewayPortals = false;
 
+    @Comment({
+        "Enables plugin compatibility mode.",
+        "Canvas includes multiple fixes for the Folia server, including fixing multiple",
+        "plugin APIs that are broken or not working in Folia. As a result, some plugins",
+        "could potentially run into issues because of the API being restored, and the plugin",
+        "not expecting said API to be restored or even working.",
+        "This option disables those fixes, so plugin compatibility will be maintained."
+    })
+    public boolean pluginCompatibilityMode = true;
+
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         return new Json5Builder<T>()
             .header("""
