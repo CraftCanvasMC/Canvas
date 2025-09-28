@@ -259,7 +259,7 @@ public class Config {
             "Fixes MC-298464 - https://bugs.mojang.com/browse/MC/issues/MC-298464",
             "Memory leak in hoglin farm due to CHANGED_DIMENSION entity removal"
         })
-        public boolean mc298464 = false;
+        public boolean mc298464 = false; // TODO - fixed by Mojang, remove.
 
         @Comment({
             "Fixes MC-223153 - https://bugs.mojang.com/browse/MC/issues/MC-223153",
@@ -271,13 +271,13 @@ public class Config {
             "Fixes MC-119417 - https://bugs.mojang.com/browse/MC/issues/MC-119417",
             "A spectator can occupy a bed if they enter it and then are switched to spectator mode"
         })
-        public boolean mc119417 = false;
+        public boolean mc119417 = false; // TODO - fixed by Mojang, remove.
 
         @Comment({
             "Fixes MC-200418 - https://bugs.mojang.com/browse/MC/issues/MC-200418",
             "Cured baby zombie villagers stay as jockey variant"
         })
-        public boolean mc200418 = false;
+        public boolean mc200418 = false; // TODO - fixed by Mojang, remove.
 
         @Comment({
             "Fixes MC-200418 - https://bugs.mojang.com/browse/MC/issues/MC-94054",
@@ -357,7 +357,7 @@ public class Config {
             "Fixes MC-69216 - https://bugs.mojang.com/browse/MC/issues/MC-69216",
             "Switching to spectator mode while fishing keeps rod cast"
         })
-        public boolean mc69216 = false;
+        public boolean mc69216 = false; // TODO - fixed by Mojang, remove.
 
         @Comment({
             "Fixes MC-30391 - https://bugs.mojang.com/browse/MC/issues/MC-30391",
@@ -369,7 +369,7 @@ public class Config {
             "Fixes MC-2025 - https://bugs.mojang.com/browse/MC/issues/MC-2025",
             "Mobs going out of fenced areas/suffocate in blocks when loading chunks"
         })
-        public boolean mc2025 = false;
+        public boolean mc2025 = false; // TODO - fixed by Mojang, remove.
 
         @Comment({
             "Fixes MC-183990 - https://bugs.mojang.com/browse/MC/issues/MC-183990",
@@ -474,6 +474,12 @@ public class Config {
 
         @Comment("Controls how many chunks a projectile can load in its lifetime before it gets automatically removed.")
         public int maxProjectileLoadsPerProjectile = 10;
+
+        @Comment({
+            "Specify which projectiles should load chunks when moving.",
+            "Only works with projectiles thrown by players."
+        })
+        public List<String> loadChunks = new ArrayList<>();
     }
 
     @Comment({
