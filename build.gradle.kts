@@ -5,14 +5,13 @@ import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 
 plugins {
     java
-    id("io.canvasmc.weaver.patcher") version "2.3.6"
+    id("io.canvasmc.weaver.patcher") version "2.3.7"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
 paperweight {
-    upstreams.register("folia") {
-        repo = github("PaperMC", "Folia")
+    upstreams.folia {
         ref = providers.gradleProperty("foliaCommit")
 
         patchFile {
@@ -84,8 +83,8 @@ subprojects {
             maven("https://maven.canvasmc.io/snapshots") {
                 name = "canvasmc"
                 credentials {
-                    username=System.getenv("PUBLISH_USER")
-                    password=System.getenv("PUBLISH_TOKEN")
+                    username = providers.environmentVariable("PUBLISH_USER").orNull
+                    password = providers.environmentVariable("PUBLISH_TOKEN").orNull
                 }
             }
         }
