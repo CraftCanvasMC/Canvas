@@ -5,7 +5,7 @@ import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 
 plugins {
     java
-    id("io.canvasmc.weaver.patcher") version "2.3.7"
+    id("io.canvasmc.weaver.patcher") version "2.3.9"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
