@@ -1,6 +1,12 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -283,9 +_,14 @@
+@@ -278,14 +_,20 @@
+     public double xOld;
+     public double yOld;
+     public double zOld;
++    public @Nullable io.canvasmc.canvas.util.ServerLocation lastTeleportOrigin = null; // Canvas - region threading
+     public boolean noPhysics;
+     public final RandomSource random = SHARED_RANDOM; // Paper - Share random for entities to make them more random
      public int tickCount;
      private int remainingFireTicks;
      public boolean wasTouchingWater;
@@ -22,7 +28,7 @@
      protected String stringUUID = this.uuid.toString();
      private boolean hasGlowingTag;
 -    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl
-+    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(it.unimi.dsi.fastutil.objects.ObjectSets.synchronize(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>()), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl // Canvas - fix commands with region threading
++    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(it.unimi.dsi.fastutil.objects.ObjectSets.synchronize(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>()), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl // Canvas - region threading - TODO - reimplement better
      private final double[] pistonDeltas = new double[]{0.0, 0.0, 0.0};
      private long pistonDeltasGameTime = Long.MIN_VALUE; // Folia - region threading
      protected EntityDimensions dimensions;
@@ -264,22 +270,22 @@
      public final boolean teleportAsync(ServerLevel destination, Vec3 pos, Float yaw, Float pitch, Vec3 velocity,
                                         org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
                                         java.util.function.Consumer<Entity> teleportComplete) {
-@@ -4369,13 +_,54 @@
-                 return false;
-             }
+@@ -4349,6 +_,53 @@
+             return false;
          }
-+        if (destination.checkIsUnloading.get()) return false; // Canvas - fix world loading/unloading
- 
-         // TODO any events that can modify go HERE
-+        // Canvas start - fix events with region threading
+         this.getBukkitEntity(); // force bukkit entity to be created before TPing
++        // Canvas start - region threading
 +        // Note: TeleportCommand.java normally calls this event for that, but we
 +        // don't need to there because it calls this method, and we handle it here
 +        Vec3 currPos = this.position();
++        // TODO - reimplement
++        /* boolean anythingCalled = false; // basically a check saying if there are any registered listeners for the event that was called
 +        if (!io.canvasmc.canvas.Config.INSTANCE.pluginCompatibilityMode) {
 +            org.bukkit.Location newLocation;
 +            org.bukkit.Location from = new org.bukkit.Location(this.level().getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +            org.bukkit.Location to = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
 +            if (!(this instanceof ServerPlayer player)) {
++                anythingCalled = org.bukkit.event.entity.EntityTeleportEvent.getHandlerList().getRegisteredListeners().length > 0;
 +                org.bukkit.event.entity.EntityTeleportEvent entityTeleportEvent = new org.bukkit.event.entity.EntityTeleportEvent(
 +                    this.getBukkitEntity(), from, to
 +                );
@@ -291,6 +297,7 @@
 +                    pitch = entityTeleportEvent.getTo().getPitch();
 +                }
 +            } else {
++                anythingCalled = org.bukkit.event.player.PlayerTeleportEvent.getHandlerList().getRegisteredListeners().length > 0;
 +                org.bukkit.event.player.PlayerTeleportEvent playerTeleportEvent = new org.bukkit.event.player.PlayerTeleportEvent(
 +                    player.getBukkitEntity(), from, to,
 +                    cause, Set.of()
@@ -308,13 +315,28 @@
 +            pos = new Vec3(
 +                newLocation.getX(), newLocation.getY(), newLocation.getZ()
 +            );
++        } */
++
++        if (destination.worldUnloadTicket.isPresent()) {
++            return false;
 +        }
-+        // Canvas end - fix events with region threading
++
+         if ((teleportFlags & TELEPORT_FLAG_UNMOUNT) == 0L) {
+             for (Entity entity : this.getIndirectPassengers()) {
+                 if (!entity.canTeleportAsync()) {
+@@ -4370,12 +_,16 @@
+             }
+         }
+ 
++        this.lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation((ServerLevel) this.level(), currPos, this.getYRot(), this.getXRot());
++        // Canvas end - region threading
++
++        // Canvas - no seriously no events that can modify should go here
+         // TODO any events that can modify go HERE
  
          // check for same region
          if (destination == this.level()) {
 -            Vec3 currPos = this.position();
-+            // Vec3 currPos = this.position(); // Canvas - fix events with region threading - move up
              if (
 +                this.checkNearbyRegions((int) pos.x, (int) pos.z) && // Canvas - region threading
                  destination.regioniser.getRegionAtUnsynchronised(
@@ -342,10 +364,18 @@
                  }
              }
          }
-+        if (to != null && to.checkIsUnloading.get()) return false; // Canvas - fix world loading/unloading
++        if (to != null && to.worldUnloadTicket.isPresent()) return false; // Canvas - rewrite world load and unload
  
          return true;
      }
+@@ -4708,6 +_,7 @@
+         EntityTreeNode passengerTree = this.detachPassengers();
+         List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
+         ServerLevel originWorld = (ServerLevel)this.level;
++        this.lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, initialPosition, this.getYRot(), this.getXRot()); // Canvas - region threading
+ 
+         for (EntityTreeNode node : fullPassengerTree) {
+             node.root.preChangeDimension();
 @@ -5032,7 +_,7 @@
  
      public boolean canTeleport(Level fromLevel, Level toLevel) {

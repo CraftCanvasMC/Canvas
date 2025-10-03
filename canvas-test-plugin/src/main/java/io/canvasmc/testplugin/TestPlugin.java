@@ -155,7 +155,6 @@ public class TestPlugin extends JavaPlugin implements Listener {
                     .type(WorldType.FLAT)
             );
             getServer().createWorld(
-                // safe blank world to test hoppers
                 new WorldCreator("world_api_test")
                     .environment(World.Environment.NORMAL)
                     .bonusChest(false)
@@ -165,13 +164,21 @@ public class TestPlugin extends JavaPlugin implements Listener {
         });
         getServer().getGlobalRegionScheduler().runDelayed(this, (task) -> {
             World apiTest = Bukkit.getWorld("world_api_test");
-            Bukkit.unloadWorldAsync(Objects.requireNonNull(apiTest, "World cannot be null"), true).thenAccept((success) -> {
-                if (success) {
-                    getLogger().info("Successfully unloaded the world load/unload api test");
-                } else {
-                    getLogger().info("Couldn't unload the world load/unload api test");
-                }
-            });
+            Player player = Bukkit.getPlayer("Dueris");
+            if (player == null) return;
+            // ignore this bullshit code, it's meant to TRY and hit race conditions...
+            player.getScheduler().run(this, (unused) -> {
+                player.teleportAsync(new Location(apiTest, 0, 90, 0)).thenAccept((success) -> {
+                    getLogger().info("Player teleport successful with completion result '" + success + "'");
+                });
+                Bukkit.unloadWorldAsync(Objects.requireNonNull(apiTest), true, (success) -> {
+                    if (success) {
+                        getLogger().info("Successfully unloaded the world load/unload api test");
+                    } else {
+                        getLogger().info("Couldn't unload the world load/unload api test");
+                    }
+                });
+            }, () -> getLog4JLogger().info("Well shit it seems that we have been retired my brothers"));
         }, 20 * 20); // 20 seconds
     }
 
