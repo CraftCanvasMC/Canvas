@@ -23,24 +23,47 @@ public class TpsBarCommand {
                 .executes((context) -> {
                     CommandSourceStack source = context.getSource();
                     final ServerPlayer player = source.getPlayer();
+
                     if (player == null || !source.isPlayer()) {
                         source.sendFailure(Component.literal("This must be run by a valid player entity"));
                         return 0;
                     }
-                    player.setTpsBarEnabled(!player.localEntry.enabled());
-                    context.getSource().sendSuccess(() -> Component.literal(
-                        (player.localEntry.enabled() ? "Enabled" : "Disabled") +
-                            " player " + player.getName().getString() + " tpsbar"), true);
+
+                    RegionizedTpsBar.DisplayManager display = player.canvas$tpsBarDisplay;
+                    RegionizedTpsBar.Entry current = display.serializeDisplay();
+
+                    RegionizedTpsBar.Entry updated = new RegionizedTpsBar.Entry(!current.enabled(), current.placement());
+                    display.updateFromEntry(updated);
+
+                    source.sendSuccess(
+                        () -> Component.literal(
+                            (updated.enabled() ? "Enabled" : "Disabled") +
+                                " TPS bar for " + player.getName().getString()
+                        ),
+                        true
+                    );
+
                     return 1;
                 }).then(argument("players", EntityArgument.players())
                     .executes((context) -> {
                         final Collection<ServerPlayer> players = EntityArgument.getPlayers(context, "players");
+
                         for (final ServerPlayer player : players) {
-                            player.setTpsBarEnabled(!player.localEntry.enabled());
-                            context.getSource().sendSuccess(() -> Component.literal(
-                                (player.localEntry.enabled() ? "Enabled" : "Disabled") +
-                                    " player " + player.getName().getString() + " tpsbar"), true);
+                            RegionizedTpsBar.DisplayManager display = player.canvas$tpsBarDisplay;
+                            RegionizedTpsBar.Entry current = display.serializeDisplay();
+
+                            RegionizedTpsBar.Entry updated = new RegionizedTpsBar.Entry(!current.enabled(), current.placement());
+                            display.updateFromEntry(updated);
+
+                            context.getSource().sendSuccess(
+                                () -> Component.literal(
+                                    (updated.enabled() ? "Enabled" : "Disabled") +
+                                        " TPS bar for " + player.getName().getString()
+                                ),
+                                true
+                            );
                         }
+
                         return 1;
                     }).then(argument("placement", StringArgumentType.word())
                         .suggests((context, builder) -> {
@@ -51,18 +74,33 @@ public class TpsBarCommand {
                         .executes((context) -> {
                             CommandSourceStack source = context.getSource();
                             final Collection<ServerPlayer> players = EntityArgument.getPlayers(context, "players");
-                            final String placement = StringArgumentType.getString(context, "placement").toLowerCase();
-                            for (final ServerPlayer player : players) {
-                                switch (placement) {
-                                    case "action_bar" -> player.setTpsBarPlacement(RegionizedTpsBar.Placement.ACTION_BAR);
-                                    case "boss_bar" -> player.setTpsBarPlacement(RegionizedTpsBar.Placement.BOSS_BAR);
-                                    default -> {
-                                        source.sendFailure(Component.literal("Not valid placement"));
-                                        return 0;
-                                    }
+                            final String placementArg = StringArgumentType.getString(context, "placement").toLowerCase();
+
+                            RegionizedTpsBar.Placement newPlacement;
+                            switch (placementArg) {
+                                case "action_bar" -> newPlacement = RegionizedTpsBar.Placement.ACTION_BAR;
+                                case "boss_bar"   -> newPlacement = RegionizedTpsBar.Placement.BOSS_BAR;
+                                default -> {
+                                    source.sendFailure(Component.literal("Not a valid placement (must be action_bar or boss_bar)"));
+                                    return 0;
                                 }
-                                source.sendSuccess(() -> Component.literal("Set player " + player.getName().getString() + " tpsbar placement to " + placement), true);
                             }
+
+                            for (final ServerPlayer player : players) {
+                                RegionizedTpsBar.DisplayManager display = player.canvas$tpsBarDisplay;
+                                RegionizedTpsBar.Entry current = display.serializeDisplay();
+
+                                RegionizedTpsBar.Entry updated = new RegionizedTpsBar.Entry(current.enabled(), newPlacement);
+                                display.updateFromEntry(updated);
+
+                                source.sendSuccess(
+                                    () -> Component.literal(
+                                        "Set TPS bar placement for " + player.getName().getString() + " to " + placementArg
+                                    ),
+                                    true
+                                );
+                            }
+
                             return 1;
                         })
                     )
