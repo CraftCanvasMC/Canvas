@@ -8,6 +8,7 @@ import org.jetbrains.annotations.NotNull;
 /**
  * Called when a region becomes inactive, but after the region is descheduled for ticking
  */
+@Deprecated(forRemoval = true)
 public class RegionInactiveEvent extends ServerEvent {
 
     private static final HandlerList HANDLER_LIST = new HandlerList();

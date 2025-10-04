@@ -8,6 +8,7 @@ import org.jetbrains.annotations.NotNull;
 /**
  * Called when a region becomes active, but before the region is scheduled to tick
  */
+@Deprecated(forRemoval = true)
 public class RegionActiveEvent extends ServerEvent {
 
     private static final HandlerList HANDLER_LIST = new HandlerList();

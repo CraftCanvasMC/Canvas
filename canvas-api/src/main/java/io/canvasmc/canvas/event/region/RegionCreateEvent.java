@@ -5,6 +5,7 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.event.server.ServerEvent;
 import org.jetbrains.annotations.NotNull;
 
+@Deprecated(forRemoval = true)
 public class RegionCreateEvent extends ServerEvent {
 
     private static final HandlerList HANDLER_LIST = new HandlerList();

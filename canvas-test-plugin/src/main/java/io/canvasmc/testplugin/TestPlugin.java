@@ -1,8 +1,8 @@
 package io.canvasmc.testplugin;
 
-import com.destroystokyo.paper.event.player.PlayerTeleportEndGatewayEvent;
 import java.util.List;
 import java.util.Objects;
+import io.canvasmc.canvas.event.EntityTeleportAsyncEvent;
 import io.canvasmc.canvas.event.WorldPreLoadEvent;
 import net.kyori.adventure.util.TriState;
 import net.minecraft.core.BlockPos;
@@ -14,7 +14,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import org.bukkit.Bukkit;
-import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -29,10 +28,6 @@ import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityTeleportEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerRespawnEvent;
-import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.generator.BiomeProvider;
 import org.bukkit.generator.WorldInfo;
@@ -164,21 +159,13 @@ public class TestPlugin extends JavaPlugin implements Listener {
         });
         getServer().getGlobalRegionScheduler().runDelayed(this, (task) -> {
             World apiTest = Bukkit.getWorld("world_api_test");
-            Player player = Bukkit.getPlayer("Dueris");
-            if (player == null) return;
-            // ignore this bullshit code, it's meant to TRY and hit race conditions...
-            player.getScheduler().run(this, (unused) -> {
-                player.teleportAsync(new Location(apiTest, 0, 90, 0)).thenAccept((success) -> {
-                    getLogger().info("Player teleport successful with completion result '" + success + "'");
-                });
-                Bukkit.unloadWorldAsync(Objects.requireNonNull(apiTest), true, (success) -> {
-                    if (success) {
-                        getLogger().info("Successfully unloaded the world load/unload api test");
-                    } else {
-                        getLogger().info("Couldn't unload the world load/unload api test");
-                    }
-                });
-            }, () -> getLog4JLogger().info("Well shit it seems that we have been retired my brothers"));
+            Bukkit.unloadWorldAsync(Objects.requireNonNull(apiTest), true, (success) -> {
+                if (success) {
+                    getLogger().info("Successfully unloaded the world load/unload api test");
+                } else {
+                    getLogger().info("Couldn't unload the world load/unload api test");
+                }
+            });
         }, 20 * 20); // 20 seconds
     }
 
@@ -203,18 +190,7 @@ public class TestPlugin extends JavaPlugin implements Listener {
     }
 
     @EventHandler
-    public void join(PlayerJoinEvent event) {
-        // Player player = event.getPlayer();
-        // RandomSource randomSource = RandomSource.create();
-        // int blockX = build(randomSource);
-        // int blockZ = build(randomSource);
-        // player.getScheduler().run(this, (task) -> {
-        //     player.teleportAsync(
-        //         new Location(
-        //             player.getWorld(), blockX, 90, blockZ, player.getYaw(), player.getPitch()
-        //         )
-        //     );
-        //     player.setGameMode(GameMode.CREATIVE);
-        // }, null);
+    public void onTeleportAsync(EntityTeleportAsyncEvent teleportAsyncEvent) {
+        getLogger().info("Called teleport async event");
     }
 }
