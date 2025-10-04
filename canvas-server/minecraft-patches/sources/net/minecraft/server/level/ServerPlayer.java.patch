@@ -92,6 +92,18 @@
                  if (inChunk == null) {
                      continue;
                  }
+@@ -656,6 +_,11 @@
+     }
+ 
+     public void queuePacketTask(Runnable task) {
++        if (this.isDisplayingEndCredits) {
++            // if displaying end credits, we want to run this on the global tick
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(task);
++            return;
++        }
+         if (!this.packetTaskQueue.add(task)) return;
+         if (worldDataRef != null) {
+             // really shouldn't be null, but we check anyway just in the case it is
 @@ -757,6 +_,7 @@
          this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
          this.spawnExtraParticlesOnFall = input.getBooleanOr("spawn_extra_particles_on_fall", false);
@@ -116,12 +128,12 @@
              this.createWitherRose(killCredit);
          }
  
-@@ -1584,16 +_,28 @@
+@@ -1584,16 +_,27 @@
       * internally for {@link #respawn(java.util.function.Consumer, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason)}
       */
      public static final long TELEPORT_FLAGS_PLAYER_RESPAWN    = Long.MIN_VALUE >>> 0;
-+    public boolean isDisplayingEndCredits = false; // Canvas - fix end credits
-+    private @Nullable Runnable exitEndCreditsCallback = null; // Canvas - fix end credits
++    public boolean isDisplayingEndCredits = false; // Canvas - region threading
++    private @Nullable Runnable exitEndCreditsCallback = null; // Canvas - region threading
  
      public void exitEndCredits() {
          if (!this.wonGame) {
@@ -129,18 +141,17 @@
              return;
          }
 -        this.wonGame = false;
-+        // Canvas start - fix end credits
++        // Canvas start - region threading
 +        if (!this.isDisplayingEndCredits) this.wonGame = false;
  
 +        if (this.exitEndCreditsCallback != null) {
 +            this.wonGame = false;
 +            this.isDisplayingEndCredits = false;
-+            this.level().getServer().getPlayerList().seeingEndCredits.remove(this);
 +            this.exitEndCreditsCallback.run();
 +            this.exitEndCreditsCallback = null;
 +            return;
 +        }
-+        // Canvas end - fix end credits
++        // Canvas end - region threading
          this.respawn((player) -> {
 -            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, Level.OVERWORLD);
 +            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()); // Canvas - default respawn dimension config
@@ -210,7 +221,7 @@
 +            // Canvas end - fix events with region threading
          });
  
-+        Runnable finalizer = () -> { // Canvas - fix end credits
++        Runnable finalizer = () -> { // Canvas - region threading
          // find and modify respawn block state
          if (respawnWorld == null || respawnConfig == null) {
              // default to regular spawn
@@ -247,7 +258,7 @@
                  }
              );
          }
-+        // Canvas start - fix end credits
++        // Canvas start - region threading
 +        };
 +        if (this.isDisplayingEndCredits) {
 +            // we need to assign to callback, we are displaying the credits
@@ -256,39 +267,29 @@
 +            // not displaying credits, run finalizer
 +            finalizer.run();
 +        }
-+        // Canvas end - fix end credits
++        // Canvas end - region threading
      }
  
      @Override
-@@ -1865,12 +_,26 @@
+@@ -1865,12 +_,17 @@
                  return false;
              }
              this.wonGame = true;
 -            // TODO is there a better solution to this that DOESN'T skip the credits?
 -            this.seenCredits = true;
 -            if (!this.seenCredits) {
--                this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
--            }
-+            // Canvas start - fix end credits
++            // Canvas start - region threading
 +            // we need to remove the player *first*, and then display
 +            // the end credits, or else we get the player stuck in the
 +            // void, and they can't escape...
-+            // Original 'showEndCredits' method:
-+            // this.unRide();
-+            // this.level().removePlayerImmediately(this, Entity.RemovalReason.CHANGED_DIMENSION);
-+            // if (!this.wonGame) {
-+            //     this.wonGame = true;
-+            //     this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
-+            //     this.seenCredits = true;
-+            // }
 +            this.isDisplayingEndCredits = !this.seenCredits && !this.level().paperConfig().misc.disableEndCredits; // ensure we respect paper config
-             this.exitEndCredits();
++            this.exitEndCredits(); // note: this calls 'unRide()'
 +            if (this.isDisplayingEndCredits) {
-+                this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
+                 this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
 +                this.seenCredits = true; // mark seen the end credits
-+                this.level().getServer().getPlayerList().seeingEndCredits.add(this);
-+            }
-+            // Canvas end - fix end credits
+             }
+-            this.exitEndCredits();
++            // Canvas end - region threading
              return true;
          } else {
              return super.endPortalLogicAsync(portalPos);
