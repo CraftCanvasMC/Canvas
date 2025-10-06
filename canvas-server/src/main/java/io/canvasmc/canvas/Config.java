@@ -207,17 +207,6 @@ public class Config {
     @Comment("Makes farmland always moist, never drying out, even if it isn't near water")
     public boolean farmlandAlwaysMoist = false;
 
-    public AsyncLocator asyncLocator = new AsyncLocator();
-    public static class AsyncLocator {
-        @PositiveNumericValueValidator.PositiveNumericValue
-        @Comment("The amount of threads allocated to the async locator")
-        public int threads = 1;
-
-        @PositiveNumericValueValidator.PositiveNumericValue
-        @Comment("The keepalive time in seconds for the async locator")
-        public int keepalive = 60;
-    }
-
     @Comment("Disables Minecraft Chat Signing to prevent player reporting")
     public boolean enableNoChatReports = false;
 
