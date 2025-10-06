@@ -112,12 +112,6 @@ public class Config {
         })
         public boolean useFasterStructureGenFutureSequencing = false;
 
-        @Comment({
-            "Makes chunk packet preparation and sending asynchronous to improve server performance.",
-            "This can significantly reduce main thread load when many players are loading chunks."
-        })
-        public boolean asyncChunkSend = false;
-
         @Comment("Whether to use a rewritten random tick system to optimize the server")
         public boolean optimizeRandomTick = false;
 
