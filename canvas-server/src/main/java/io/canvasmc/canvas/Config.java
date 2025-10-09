@@ -43,7 +43,6 @@ import org.yaml.snakeyaml.Yaml;
 public class Config {
     public static boolean ENABLE_FASTER_RANDOM = true;
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
-    public static final List<EntityNonTickableConf> NON_TICKABLES = new CopyOnWriteArrayList<>();
     public static Config INSTANCE;
 
     public Scheduler scheduler = new Scheduler();
@@ -692,18 +691,6 @@ public class Config {
                     LOGGER.error("Canvas' faster random impl is not supported by your VM, falling back to legacy random");
                     Config.ENABLE_FASTER_RANDOM = false;
                 }
-
-                LOGGER.info("Compiling entity non-tickable mappings...");
-                int i = 0;
-                for (final String nonTickableEntity : INSTANCE.nonTickableEntities) {
-                    ResourceLocation resourceLocation = ResourceLocation.parse(nonTickableEntity);
-                    LOGGER.info("Marking entity type {} as non-tickable", resourceLocation);
-                    NON_TICKABLES.add(new EntityNonTickableConf(
-                        nonTickableEntity, resourceLocation
-                    ));
-                    i++;
-                }
-                LOGGER.info("Successfully compiled {} entity non-tickable mappings", i);
             }).build();
     }
 
