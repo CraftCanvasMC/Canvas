@@ -45,7 +45,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
     @Override
     public CountsResult pollCounts() {
         // Note: if we are ending a profiler, this will be cached, otherwise this is current
-        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.getCurrentOrCached();
+        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.get();
         if (profilerResultCache != null) {
             ServerLevel world = profilerResultCache.getFirst();
             COWLongArrayList chunkKeys = profilerResultCache.getSecond();
@@ -100,7 +100,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         ChunksResult<FoliaChunkInfo> data = new ChunksResult<>();
 
         // Note: if we are ending a profiler, this will be cached, otherwise this is current
-        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.getCurrentOrCached();
+        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.get();
         if (profilerResultCache != null) {
             ServerLevel world = profilerResultCache.getFirst();
             COWLongArrayList chunkKeys = profilerResultCache.getSecond();
