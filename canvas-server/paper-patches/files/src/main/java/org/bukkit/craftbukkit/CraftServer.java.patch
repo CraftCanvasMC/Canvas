@@ -36,54 +36,25 @@
          return serverLevel.getWorld();
      }
  
--    @Override
--    public boolean unloadWorld(String name, boolean save) {
 +    // Canvas start - rewrite world load and unload
-+    @Override
+     @Override
+-    public boolean unloadWorld(String name, boolean save) {
+-        return this.unloadWorld(this.getWorld(name), save);
 +    public void unloadWorldAsync(@NotNull String name, boolean save, final @NotNull Consumer<Boolean> callback) {
 +        unloadWorldAsync(this.worlds.get(name), save, callback);
-+    }
-+
-+    @Override
-+    public void unloadWorldAsync(@NotNull World world, boolean save, final @NotNull Consumer<Boolean> callback) {
-+        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
-+        ServerLevel handle = ((CraftWorld) world).getHandle();
-+        if (
-+            handle.worldUnloadTicket.isPresent()
-+            || this.console.getLevel(handle.dimension()) == null
-+            || handle.dimension() == net.minecraft.world.level.Level.OVERWORLD
-+            || !handle.players().isEmpty()
-+            || !(new WorldUnloadEvent(handle.getWorld()).callEvent())
-+            || this.console.hasStartedShutdownThread.get()
-+        ) {
-+            callback.accept(false);
-+            return;
-+        }
-+
-+        try {
-+            net.minecraft.server.MinecraftServer.LOGGER.info("Marking world '{}' for unload", world.getName());
-+            handle.worldUnloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
-+        } catch (Throwable thrown) {
-+            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
-+        }
-+    }
-+    // Canvas end - rewrite world load and unload
-+
-+    @Override
-+    public boolean unloadWorld(@NotNull String name, boolean save) {
-         return this.unloadWorld(this.getWorld(name), save);
      }
  
      @Override
 -    public boolean unloadWorld(World world, boolean save) {
-+    public boolean unloadWorld(@NotNull World world, boolean save) {
-         if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
+-        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
 -        //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot unload a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
 -        if (world == null) {
 -            return false;
 -        }
 -
--        ServerLevel handle = ((CraftWorld) world).getHandle();
++    public void unloadWorldAsync(@NotNull World world, boolean save, final @NotNull Consumer<Boolean> callback) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
+         ServerLevel handle = ((CraftWorld) world).getHandle();
 -
 -        if (this.console.getLevel(handle.dimension()) == null) {
 -            return false;
@@ -100,9 +71,19 @@
 -        WorldUnloadEvent event = new WorldUnloadEvent(handle.getWorld());
 -        if (!event.callEvent()) {
 -            return false;
--        }
--
--        try {
++        if (
++            handle.canvas$worldUnloadTicket.isPresent()
++            || this.console.getLevel(handle.dimension()) == null
++            || handle.dimension() == net.minecraft.world.level.Level.OVERWORLD
++            || !handle.players().isEmpty()
++            || !(new WorldUnloadEvent(handle.getWorld()).callEvent())
++            || this.console.hasStartedShutdownThread.get()
++        ) {
++            callback.accept(false);
++            return;
+         }
+ 
+         try {
 -            if (save) {
 -                handle.save(null, true, false); // Paper - Fix saving in unloadWorld
 -            }
@@ -112,65 +93,27 @@
 -            handle.levelStorageAccess.close();
 -        } catch (Exception ex) {
 -            this.getLogger().log(Level.SEVERE, null, ex);
--        }
++            net.minecraft.server.MinecraftServer.LOGGER.info("Marking world '{}' for unload", world.getName());
++            handle.canvas$worldUnloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
++        } catch (Throwable thrown) {
++            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
+         }
 -
 -        this.worlds.remove(world.getName().toLowerCase(Locale.ROOT));
 -        this.console.removeLevel(handle);
 -        return true;
++    }
++    // Canvas end - rewrite world load and unload
++
++    @Override
++    public boolean unloadWorld(@NotNull String name, boolean save) {
++        return this.unloadWorld(this.getWorld(name), save);
++    }
++
++    @Override
++    public boolean unloadWorld(@NotNull World world, boolean save) {
++        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
 +        return false; // Canvas - rewrite world load and unload
      }
  
      public DedicatedServer getServer() {
-@@ -3298,6 +_,52 @@
- 
-         return getTPSFromRegion(((CraftWorld)world).getHandle(), chunkX, chunkZ);
-     }
-+    // Canvas start - expand region api
-+
-+    /**
-+     * Returns the region on the current thraed, or null if we are on the global tick thread
-+     * <br>
-+     * This will throw if not on a tick runner
-+     * @return the current region
-+     */
-+    @Override
-+    public @Nullable io.canvasmc.canvas.threadedregions.WorldRegionData getCurrentRegion() {
-+        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
-+            region = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
-+        if (region == null) {
-+            return null;
-+        } else {
-+            io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = region.regioniser.world.worldRegionData.get();
-+            if (regionizedWorldData == null) return null;
-+            return regionizedWorldData.apiHandle;
-+        }
-+    }
-+
-+    /**
-+     * Safely blocks the current thread until the given stop condition returns true.
-+     * <p>
-+     * A <i>safe block</i> pauses the current thread while still allowing region tasks
-+     * to run. This is significantly safer than using typical blocking techniques like
-+     * {@link java.util.concurrent.CompletableFuture#join()} because it allows the region
-+     * to process tasks that might be required to satisfy the condition you're waiting on.
-+     * <p>
-+     * For example, if the result you're waiting on depends on the current region's thread,
-+     * normal blocking could lead to a deadlock. This safe block approach prevents that.
-+     * <p>
-+     * <b>Note:</b> This method <b>must</b> be called from a region thread.
-+     * Calling it from any other thread will result in an exception.
-+     *
-+     * @param stopCondition the condition to evaluate repeatedly until it returns true
-+     */
-+    public void safeBlock(java.util.function.BooleanSupplier stopCondition) {
-+        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
-+            region = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
-+        if (region == null) {
-+            throw new UnsupportedOperationException("Must be run during a region tick");
-+        }
-+        region.getData().world.chunkSource.mainThreadProcessor.managedBlock(stopCondition);
-+    }
-+    // Canvas end - expand region api
- 
-     private static double[] getTPSFromRegion(ServerLevel world, int chunkX, int chunkZ) {
-         io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>

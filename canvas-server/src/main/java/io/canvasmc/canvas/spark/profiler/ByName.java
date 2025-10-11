@@ -16,8 +16,8 @@ import me.lucko.spark.paper.proto.SparkSamplerProtos;
  */
 public class ByName implements ThreadGrouper {
     private static final Pattern PATTERN = Pattern.compile("^(.*?)[-# ]+\\d+$");
-    private final Map<Long, String> cache = new ConcurrentHashMap();
-    private final Map<String, Set<Long>> seen = new ConcurrentHashMap();
+    private final Map<Long, String> cache = new ConcurrentHashMap<>();
+    private final Map<String, Set<Long>> seen = new ConcurrentHashMap<>();
 
     public String getGroup(long threadId, String threadName) {
         String cached = this.cache.get(threadId);

@@ -67,7 +67,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
                     // we only use block ticking chunks, matches with what spark does for global polling
                     for (final LevelChunk tickingChunk : localWorldData.getTickingChunks()) {
-                        tileEntities += tickingChunk.getAllBlockEntities().length;
+                        tileEntities += tickingChunk.canvas$getAllBlockEntities().length;
                     }
 
                     result.complete(new CountsResult(players, entities, tileEntities, chunks));

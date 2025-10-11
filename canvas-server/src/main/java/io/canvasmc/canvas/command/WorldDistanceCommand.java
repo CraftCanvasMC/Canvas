@@ -40,7 +40,7 @@ public class WorldDistanceCommand {
                             ServerLevel world = DimensionArgument.getDimension(context, "dimension");
                             int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE - 3);
                             type.set(world, distance);
-                            PerWorldDistanceConfig state = world.serverLevelData.distanceConfig;
+                            PerWorldDistanceConfig state = world.serverLevelData.canvas$distanceConfig;
                             int updated = Math.min(
                                 (type.equals(Type.VIEW) ?
                                     state.viewDistanceOrDefault() :
@@ -65,13 +65,13 @@ public class WorldDistanceCommand {
 
     public enum Type {
         VIEW(
-            (world) -> world.serverLevelData.distanceConfig.viewDistanceOrDefault(),
-            (world, dist) -> world.serverLevelData.distanceConfig.viewDistance().set(dist),
+            (world) -> world.serverLevelData.canvas$distanceConfig.viewDistanceOrDefault(),
+            (world, dist) -> world.serverLevelData.canvas$distanceConfig.viewDistance().set(dist),
             "View"
         ),
         SIMULATION(
-            (world) -> world.serverLevelData.distanceConfig.simulationDistanceOrDefault(),
-            (world, dist) -> world.serverLevelData.distanceConfig.simulationDistance().set(dist),
+            (world) -> world.serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault(),
+            (world, dist) -> world.serverLevelData.canvas$distanceConfig.simulationDistance().set(dist),
             "Simulation"
         );
         private final Function<ServerLevel, Integer> getter;

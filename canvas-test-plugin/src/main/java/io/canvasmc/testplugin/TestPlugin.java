@@ -108,14 +108,14 @@ public class TestPlugin extends JavaPlugin implements Listener {
                     for (int x = baseX; x < baseX + 16; x++) {
                         for (int z = baseZ; z < baseZ + 16; z++) {
                             world.getWorld().setBlockData(x, minY, z, chestData);
-                            BlockEntity be1 = nmsChunk.getFromBuckets(x, minY, z);
+                            BlockEntity be1 = nmsChunk.canvas$getFromBuckets(x, minY, z);
                             if (be1 == null) throw new IllegalStateException("Failed to fetch block entity from buckets");
                             BlockPos chestPos = new BlockPos(x, minY, z);
                             if (!be1.getBlockPos().equals(chestPos)) throw new IllegalStateException("Mismatched block entity position");
 
                             for (int y = minY + 1; y < maxY; y++) {
                                 world.getWorld().setBlockData(x, y, z, hopperData);
-                                BlockEntity be2 = nmsChunk.getFromBuckets(x, y, z);
+                                BlockEntity be2 = nmsChunk.canvas$getFromBuckets(x, y, z);
                                 if (be2 == null) throw new IllegalStateException("Failed to fetch block entity from buckets");
                                 BlockPos aPos = new BlockPos(x, y, z);
                                 if (!be2.getBlockPos().equals(aPos)) throw new IllegalStateException("Mismatched block entity position");
