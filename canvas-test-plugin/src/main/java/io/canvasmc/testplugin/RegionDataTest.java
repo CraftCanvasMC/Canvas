@@ -85,9 +85,9 @@ public class RegionDataTest implements Listener {
         private final World world;
         private final Map<Long, AtomicInteger> chunkMappingsTest = new ConcurrentHashMap<>();
 
-        public TestRegionData(@NotNull RegionTickData tickData) {
+        public TestRegionData(@NotNull RegionTickData tickData, @NotNull World world) {
             this.tickData = tickData;
-            this.world = tickData.getWorld();
+            this.world = world;
         }
 
         public RegionTickData getTickData() {
