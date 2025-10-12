@@ -8,7 +8,6 @@ import org.jspecify.annotations.Nullable;
 /**
  * Represents an interface for the Folia regionizer.
  */
-// TODO - implement regionized data
 public interface WorldRegionizer {
 
     /**
@@ -121,8 +120,6 @@ public interface WorldRegionizer {
          */
         double getDeadSectionPercent();
 
-        // TODO - utility method in 'World/CraftWorld' to get the chunk by the packed pos, 2nd one for 'if loaded'
-
         /**
          * Returns an array of all packed chunk positions owned by this region.
          *
@@ -158,17 +155,14 @@ public interface WorldRegionizer {
          */
         State getState();
 
-        /* TODO:
-            We need a method that can access the 'TickRegionData', and allow adding
-            new regionized data via basically creating their own RegionizdeData impl,
-            where this impl also contains the callback
-            this impl needs an example test in test-plugin, and very good documentation
-            because this system is very complex
-            also allow marking the region data as having tasks
-            getTickRegionData() -- possible name?
-            include 'get' method for the RegionizedData interface, allows getting the current thread implementation for that data
-            'getRegionizedData()' within 'TickRegionData' interface should ensure that we are on the region we are fetching from
+        /**
+         * Returns an interface for the region tick data of this region
+         * <br>
+         * This contains regionized data, the tick handle, etc.
+         *
+         * @return the region data
          */
+        RegionTickData getTickData();
 
         /**
          * Returns the {@link WorldRegionizer} that owns this region.

@@ -167,6 +167,7 @@ public class TestPlugin extends JavaPlugin implements Listener {
                 }
             });
         }, 20 * 20); // 20 seconds
+        RegionDataTest.init();
     }
 
     public int build(@NotNull RandomSource randomSource) {
