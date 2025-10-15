@@ -22,6 +22,7 @@ public class PlayerSaveEvent extends PlayerEvent {
     /**
      * If true, the player is being disconnected from the server,
      * otherwise we are just running autosave
+     *
      * @return if this is due to disconnect or autosave
      */
     public boolean isQuit() {

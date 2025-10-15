@@ -279,7 +279,7 @@
          if ((teleportFlags & TELEPORT_FLAG_UNMOUNT) == 0L) {
              for (Entity entity : this.getIndirectPassengers()) {
                  if (!entity.canTeleportAsync()) {
-@@ -4361,21 +_,68 @@
+@@ -4361,21 +_,69 @@
          }
  
          if ((teleportFlags & TELEPORT_FLAG_TELEPORT_PASSENGERS) != 0L) {
@@ -356,7 +356,22 @@
                  destination.regioniser.getRegionAtUnsynchronised(
                      ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(currPos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(currPos)
                  ) == destination.regioniser.getRegionAtUnsynchronised(
-@@ -4418,7 +_,7 @@
+@@ -4412,13 +_,22 @@
+                 if (teleportComplete != null) {
+                     teleportComplete.accept(this);
+                 }
++                // Canvas start - region threading
++                if (io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
++                    org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
++                    org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? 0 : yaw, pitch == null ? 0 : pitch);
++                    new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
++                        this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
++                    ).callEvent();
++                }
++                // Canvas end - region threading
+                 return true;
+             }
+         }
  
          EntityTreeNode passengerTree = this.detachPassengers();
          List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
@@ -365,6 +380,30 @@
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
+@@ -4428,7 +_,22 @@
+             node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, velocity);
+         }
+ 
+-        passengerTree.root.placeInAsync(originWorld, destination, teleportFlags, passengerTree, teleportComplete);
++        // Canvas start - region threading
++        final ServerLevel finalLevelDest = destination;
++        final Vec3 finalPos = pos;
++        final Float finalYaw = yaw;
++        final Float finalPitch = pitch;
++        passengerTree.root.placeInAsync(originWorld, destination, teleportFlags, passengerTree, (entity) -> {
++            if (teleportComplete != null) teleportComplete.accept(entity);
++            if (io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
++                org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
++                org.bukkit.Location bukkitTo = new org.bukkit.Location(finalLevelDest.getWorld(), finalPos.x, finalPos.y, finalPos.z, finalYaw == null ? 0 : finalYaw, finalPitch == null ? 0 : finalPitch);
++                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
++                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
++                ).callEvent();
++            }
++        });
++        // Canvas end - region threading
+ 
+         return true;
+     }
 @@ -4450,7 +_,7 @@
      public boolean endPortalLogicAsync(BlockPos portalPos) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
@@ -391,14 +430,81 @@
  
          return true;
      }
-@@ -4708,6 +_,7 @@
+@@ -4694,9 +_,36 @@
+     protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
+                                     PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
++        // Canvas start - region threading
+         if (!this.canPortalAsync(destination, takePassengers)) {
+             return false;
+-        }
++        } // else | we passed first go
++        // TODO - all portal events go here
++        // fire portal events
++        ServerLevel originWorld = (ServerLevel) this.level();
++        boolean shouldCallEvents =
++            // this is purely so we don't do uneeded event calls and we don't run checks twice for no reason
++            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++        if (shouldCallEvents) {
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent portalAsyncEvent = new io.canvasmc.canvas.event.EntityPortalAsyncEvent(
++                this.getBukkitEntity(), originWorld.getWorld(), destination.getWorld(),
++                switch (type) {
++                    case END -> org.bukkit.PortalType.ENDER;
++                    case NETHER -> org.bukkit.PortalType.NETHER;
++                }
++            );
++            if (!portalAsyncEvent.callEvent()) {
++                return false;
++            }
++            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
++        }
++        if (shouldCallEvents && !this.canPortalAsync(destination, takePassengers)) {
++            // plugin did something funky, kill
++            throw new TeleportValidationException();
++        }
++        final ServerLevel finalDestination = destination;
++        // Canvas end - region threading
+ 
+         Vec3 initialPosition = this.position();
+         ChunkPos initialPositionChunk = new ChunkPos(
+@@ -4707,7 +_,8 @@
+         // first, remove entity/passengers from world
          EntityTreeNode passengerTree = this.detachPassengers();
          List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
-         ServerLevel originWorld = (ServerLevel)this.level;
+-        ServerLevel originWorld = (ServerLevel)this.level;
++        // Canvas - region threading - moved up
 +        this.canvas$lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, initialPosition, this.getYRot(), this.getXRot()); // Canvas - region threading
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
+@@ -4754,7 +_,7 @@
+ 
+             // place
+             passengerTree.root.placeInAsync(
+-                originWorld, destination, Entity.TELEPORT_FLAG_LOAD_CHUNK | (takePassengers ? Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS : 0L),
++                originWorld, finalDestination, Entity.TELEPORT_FLAG_LOAD_CHUNK | (takePassengers ? Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS : 0L), // Canvas - region threading
+                 passengerTree,
+                 (Entity teleported) -> {
+                     if (info.postTeleportTransition() != null) {
+@@ -4764,6 +_,17 @@
+                     if (teleportComplete != null) {
+                         teleportComplete.accept(teleported);
+                     }
++                    // Canvas start - region threading
++                    if (io.canvasmc.canvas.event.EntityPostPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
++                        new io.canvasmc.canvas.event.EntityPostPortalAsyncEvent(
++                            this.getBukkitEntity(), originWorld.getWorld(), finalDestination.getWorld(),
++                            switch (type) {
++                                case END -> org.bukkit.PortalType.ENDER;
++                                case NETHER -> org.bukkit.PortalType.NETHER;
++                            }
++                        ).callEvent();
++                    }
++                    // Canvas end - region threading
+                 }
+             );
+         });
 @@ -5032,7 +_,7 @@
  
      public boolean canTeleport(Level fromLevel, Level toLevel) {

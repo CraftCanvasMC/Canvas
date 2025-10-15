@@ -1,39 +1,35 @@
 package io.canvasmc.canvas.event;
 
-import org.bukkit.Location;
+import org.bukkit.PortalType;
+import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.Cancellable;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.entity.EntityEvent;
-import org.bukkit.event.player.PlayerTeleportEvent;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 /**
- * Called when an entity is about to be teleported from one location to another.
- * <br>
- * This may be as a result of natural causes (Enderman, Shulker), pathfinding
- * (Wolf), or commands (/teleport).
+ * Called when an entity is about to portal from one dimension to another.
  * <br>
  * This <b>*can*</b> be a player!
  */
-public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable {
+public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
 
     private static final HandlerList HANDLER_LIST = new HandlerList();
 
-    private final Location from;
-    @NotNull
-    private final PlayerTeleportEvent.TeleportCause cause;
-    private Location to;
+    private final World from;
+    private final World to;
+    private final PortalType type;
+
     private boolean cancelled;
 
     @ApiStatus.Internal
-    public EntityTeleportAsyncEvent(@NotNull Entity entity, @NotNull Location from, @Nullable Location to, @NotNull PlayerTeleportEvent.TeleportCause cause) {
+    public EntityPortalAsyncEvent(@NotNull Entity entity, @NotNull World from, @NotNull World to, @NotNull PortalType type) {
         super(entity);
         this.from = from;
         this.to = to;
-        this.cause = cause;
+        this.type = type;
     }
 
     @NotNull
@@ -47,7 +43,7 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      * @return Location this entity moved from
      */
     @NotNull
-    public Location getFrom() {
+    public World getFrom() {
         return this.from;
     }
 
@@ -57,26 +53,17 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      * @return Location the entity moved to
      */
     @NotNull
-    public Location getTo() {
+    public World getTo() {
         return this.to;
     }
 
     /**
-     * Sets the location that this entity moved to
+     * Get the portal type relating to this event.
      *
-     * @param to New Location this entity moved to
+     * @return the portal type
      */
-    public void setTo(@NotNull Location to) {
-        this.to = to.clone();
-    }
-
-    /**
-     * Gets the cause of the entity teleport
-     *
-     * @return the teleport cause
-     */
-    public @NotNull PlayerTeleportEvent.TeleportCause getCause() {
-        return cause;
+    public @NotNull PortalType getPortalType() {
+        return this.type;
     }
 
     @Override

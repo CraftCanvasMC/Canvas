@@ -2,6 +2,8 @@ package io.canvasmc.testplugin;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Random;
+import io.canvasmc.canvas.event.EntityPortalAsyncEvent;
 import io.canvasmc.canvas.event.EntityTeleportAsyncEvent;
 import io.canvasmc.canvas.event.WorldPreLoadEvent;
 import net.kyori.adventure.util.TriState;
@@ -193,5 +195,13 @@ public class TestPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onTeleportAsync(EntityTeleportAsyncEvent teleportAsyncEvent) {
         getLogger().info("Called teleport async event");
+    }
+
+    @EventHandler
+    public void onPortalAsync(EntityPortalAsyncEvent portalAsyncEvent) {
+        if (new Random().nextBoolean()) {
+            portalAsyncEvent.setCancelled(true);
+        }
+        getLogger().info("Called portal async event");
     }
 }
