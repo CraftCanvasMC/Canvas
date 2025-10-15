@@ -79,7 +79,7 @@ public class SparkTickStatistics implements TickHook.Callback, TickReporter.Call
 
     private static @NotNull List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> getRegions(Server server) {
         List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions = new ArrayList<>();
-        final Pair<ServerLevel, COWLongArrayList> activeProfiler = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.getCurrentOrCached();
+        final Pair<ServerLevel, COWLongArrayList> activeProfiler = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.get();
         if (activeProfiler != null) {
             long packedPos = activeProfiler.getSecond().getArray()[0];
             regions.add(activeProfiler.getFirst().regioniser.getRegionAtSynchronised(

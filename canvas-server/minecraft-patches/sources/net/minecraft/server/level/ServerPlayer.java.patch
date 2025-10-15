@@ -5,49 +5,16 @@
      private Vec3 lastKnownClientMovement = Vec3.ZERO;
      private Input lastClientInput = Input.EMPTY;
 -    private final Set<ThrownEnderpearl> enderPearls = new HashSet<>();
-+    private final Set<ThrownEnderpearl> enderPearls = java.util.concurrent.ConcurrentHashMap.newKeySet(); // Canvas - restore vanilla ender pearl behavior
++    private final Set<ThrownEnderpearl> enderPearls = java.util.concurrent.ConcurrentHashMap.newKeySet(); // Canvas - region threading
      public final ContainerSynchronizer containerSynchronizer = new ContainerSynchronizer() {
          private final LoadingCache<TypedDataComponent<?>, Integer> cache = CacheBuilder.newBuilder()
              .maximumSize(256L)
-@@ -432,6 +_,41 @@
+@@ -432,6 +_,8 @@
      public boolean joining = true;
      public boolean sentListPacket = false;
      public boolean supressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
-+    // Canvas start - tpsbar
-+    // default to 'false, Placement.BOSS_BAR'
-+    public io.canvasmc.canvas.RegionizedTpsBar.Entry localEntry = io.canvasmc.canvas.RegionizedTpsBar.Entry.FALLBACK;
-+    public final net.kyori.adventure.bossbar.BossBar tpsBar =
-+        net.kyori.adventure.bossbar.BossBar.bossBar(
-+            net.kyori.adventure.text.Component.text("Waiting for region update..."),
-+            0.0F,
-+            net.kyori.adventure.bossbar.BossBar.Color.BLUE,
-+            net.kyori.adventure.bossbar.BossBar.Overlay.PROGRESS
-+        );
-+
-+    public void setTpsBarEnabled(boolean enabled) {
-+        this.localEntry = new io.canvasmc.canvas.RegionizedTpsBar.Entry(enabled, this.localEntry.placement());
-+        if (enabled && this.localEntry.placement().equals(io.canvasmc.canvas.RegionizedTpsBar.Placement.BOSS_BAR)) {
-+            this.tpsBar.addViewer(this.getBukkitEntity());
-+        } else {
-+            this.tpsBar.removeViewer(this.getBukkitEntity());
-+        }
-+        this.getBukkitEntity().sendActionBar(net.kyori.adventure.text.Component.text());
-+    }
-+
-+    public void setTpsBarPlacement(io.canvasmc.canvas.RegionizedTpsBar.Placement placement) {
-+        boolean isNew = this.localEntry.placement() != placement;
-+        this.localEntry = new io.canvasmc.canvas.RegionizedTpsBar.Entry(this.localEntry.enabled(), placement);
-+        if (isNew) {
-+            if (this.localEntry.placement().equals(io.canvasmc.canvas.RegionizedTpsBar.Placement.BOSS_BAR)) {
-+                this.tpsBar.addViewer(this.getBukkitEntity());
-+                this.getBukkitEntity().sendActionBar(net.kyori.adventure.text.Component.text());
-+            } else {
-+                this.tpsBar.removeViewer(this.getBukkitEntity());
-+            }
-+        }
-+    }
-+    // Canvas end - tpsbar
-+    public final int infoBucketIndex; // Canvas - optimize playerlist tick
++    public final io.canvasmc.canvas.RegionizedTpsBar.DisplayManager canvas$tpsBarDisplay = io.canvasmc.canvas.RegionizedTpsBar.DisplayManager.createNew(this); // Canvas - tpsbar
++    public final int canvas$infoBucketIndex; // Canvas - optimize playerlist tick
      // CraftBukkit end
      public boolean isRealPlayer; // Paper
      public @Nullable com.destroystokyo.paper.event.entity.PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
@@ -55,7 +22,7 @@
          this.bukkitPickUpLoot = true;
          this.maxHealthCache = this.getMaxHealth();
          // CraftBukkit end
-+        this.infoBucketIndex = Math.floorMod(this.uuid.hashCode(), net.minecraft.server.players.PlayerList.SEND_PLAYER_INFO_INTERVAL); // Canvas - optimize playerlist tick
++        this.canvas$infoBucketIndex = Math.floorMod(this.uuid.hashCode(), net.minecraft.server.players.PlayerList.SEND_PLAYER_INFO_INTERVAL); // Canvas - optimize playerlist tick
      }
  
      // Folia start - region threading
@@ -92,11 +59,23 @@
                  if (inChunk == null) {
                      continue;
                  }
+@@ -656,6 +_,11 @@
+     }
+ 
+     public void queuePacketTask(Runnable task) {
++        if (this.canvas$isDisplayingEndCredits) {
++            // if displaying end credits, we want to run this on the global tick
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(task);
++            return;
++        }
+         if (!this.packetTaskQueue.add(task)) return;
+         if (worldDataRef != null) {
+             // really shouldn't be null, but we check anyway just in the case it is
 @@ -757,6 +_,7 @@
          this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
          this.spawnExtraParticlesOnFall = input.getBooleanOr("spawn_extra_particles_on_fall", false);
          this.raidOmenPosition = input.read("raid_omen_position", BlockPos.CODEC).orElse(null);
-+        this.localEntry = input.read("TpsBar", io.canvasmc.canvas.RegionizedTpsBar.Entry.CODEC).orElse(io.canvasmc.canvas.RegionizedTpsBar.Entry.FALLBACK); // Canvas - tpsbar
++        this.canvas$tpsBarDisplay.updateFromEntry(input.read("TpsBar", io.canvasmc.canvas.RegionizedTpsBar.Entry.CODEC).orElse(io.canvasmc.canvas.RegionizedTpsBar.Entry.FALLBACK)); // Canvas - tpsbar
      }
  
      @Override
@@ -104,7 +83,7 @@
          output.storeNullable("raid_omen_position", BlockPos.CODEC, this.raidOmenPosition);
          this.saveEnderPearls(output);
          this.getBukkitEntity().setExtraData(output); // CraftBukkit
-+        output.store("TpsBar", io.canvasmc.canvas.RegionizedTpsBar.Entry.CODEC, this.localEntry); // Canvas - tpsbar
++        output.store("TpsBar", io.canvasmc.canvas.RegionizedTpsBar.Entry.CODEC, this.canvas$tpsBarDisplay.serializeDisplay()); // Canvas - tpsbar
      }
  
      private void saveParentVehicle(ValueOutput output) {
@@ -116,12 +95,12 @@
              this.createWitherRose(killCredit);
          }
  
-@@ -1584,16 +_,28 @@
+@@ -1584,16 +_,27 @@
       * internally for {@link #respawn(java.util.function.Consumer, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason)}
       */
      public static final long TELEPORT_FLAGS_PLAYER_RESPAWN    = Long.MIN_VALUE >>> 0;
-+    public boolean isDisplayingEndCredits = false; // Canvas - fix end credits
-+    private @Nullable Runnable exitEndCreditsCallback = null; // Canvas - fix end credits
++    public boolean canvas$isDisplayingEndCredits = false; // Canvas - region threading
++    private @Nullable Runnable canvas$exitEndCreditsCallback = null; // Canvas - region threading
  
      public void exitEndCredits() {
          if (!this.wonGame) {
@@ -129,18 +108,17 @@
              return;
          }
 -        this.wonGame = false;
-+        // Canvas start - fix end credits
-+        if (!this.isDisplayingEndCredits) this.wonGame = false;
++        // Canvas start - region threading
++        if (!this.canvas$isDisplayingEndCredits) this.wonGame = false;
  
-+        if (this.exitEndCreditsCallback != null) {
++        if (this.canvas$exitEndCreditsCallback != null) {
 +            this.wonGame = false;
-+            this.isDisplayingEndCredits = false;
-+            this.level().getServer().getPlayerList().seeingEndCredits.remove(this);
-+            this.exitEndCreditsCallback.run();
-+            this.exitEndCreditsCallback = null;
++            this.canvas$isDisplayingEndCredits = false;
++            this.canvas$exitEndCreditsCallback.run();
++            this.canvas$exitEndCreditsCallback = null;
 +            return;
 +        }
-+        // Canvas end - fix end credits
++        // Canvas end - region threading
          this.respawn((player) -> {
 -            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, Level.OVERWORLD);
 +            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()); // Canvas - default respawn dimension config
@@ -151,15 +129,15 @@
          boolean[] usedRespawnAnchor = new boolean[1];
  
          // set up post spawn location logic
-+        boolean[] isBedSpawn = new boolean[]{false}; // Canvas - fix events with region threading
-+        boolean[] missingRespawnBlock = new boolean[]{false}; // Canvas - fix events with region threading
++        boolean[] isBedSpawn = new boolean[]{false}; // Canvas - region threading
++        boolean[] missingRespawnBlock = new boolean[]{false}; // Canvas - region threading
          spawnPosComplete.addWaiter((spawnLoc, throwable) -> {
              // update pos and velocity
 -            ServerPlayer.this.setPosRaw(spawnLoc.getX(), spawnLoc.getY(), spawnLoc.getZ());
 -            ServerPlayer.this.setYRot(spawnLoc.getYaw());
 -            ServerPlayer.this.setYHeadRot(spawnLoc.getYaw());
 -            ServerPlayer.this.setXRot(spawnLoc.getPitch());
-+            // Canvas start - fix events with region threading
++            // Canvas start - region threading
 +            org.bukkit.event.player.PlayerRespawnEvent respawnEvent = new org.bukkit.event.player.PlayerRespawnEvent(
 +                ServerPlayer.this.getBukkitEntity(),
 +                spawnLoc,
@@ -175,7 +153,7 @@
 +            ServerPlayer.this.setYRot(spawnLocAtomic.get().getYaw());
 +            ServerPlayer.this.setYHeadRot(spawnLocAtomic.get().getYaw());
 +            ServerPlayer.this.setXRot(spawnLocAtomic.get().getPitch());
-+            // Canvas end - fix events with region threading
++            // Canvas end - region threading
              ServerPlayer.this.setDeltaMovement(Vec3.ZERO);
              // placeInAsync will update the world
  
@@ -184,7 +162,7 @@
                  // use the load chunk flag just in case the spawn loc isn't loaded, and to ensure the chunks
                  // stay loaded for a bit with the teleport ticket
 -                ((org.bukkit.craftbukkit.CraftWorld)spawnLoc.getWorld()).getHandle(),
-+                ((org.bukkit.craftbukkit.CraftWorld)spawnLocAtomic.get().getWorld()).getHandle(), // Canvas - fix events with region threading
++                ((org.bukkit.craftbukkit.CraftWorld)spawnLocAtomic.get().getWorld()).getHandle(), // Canvas - region threading
                  TELEPORT_FLAG_LOAD_CHUNK | TELEPORT_FLAGS_PLAYER_RESPAWN,
                  passengerTree, // note: we expect this to just be the player, no passengers
                  (entity) -> {
@@ -192,25 +170,25 @@
                      }
                  }
              );
-+            // Canvas start - fix events with region threading
++            // Canvas start - region threading
 +            };
 +            spawnLocAtomic.set(respawnEvent.getRespawnLocation());
 +            if (spawnLoc != respawnEvent.getRespawnLocation()) {
 +                // event changed the location, load async and then call finalizer
 +                // use all the events location for this, they may have changed the world
 +                ServerLevel respawnAt = ((org.bukkit.craftbukkit.CraftWorld) respawnEvent.getRespawnLocation().getWorld()).getHandle();
-+                respawnAt.moonrise$loadChunksAsync(
++                respawnAt.canvas$loadOrRunAtChunksAsync(
 +                    new BlockPos(spawnLoc.getBlockX(), spawnLoc.getBlockY(), spawnLoc.getBlockZ()),
-+                    16, ca.spottedleaf.concurrentutil.util.Priority.HIGHER, (entity1) -> finalize.run()
++                    16, ca.spottedleaf.concurrentutil.util.Priority.HIGHER, finalize
 +                );
 +            } else {
 +                // event didn't modify location, run finalizer
 +                finalize.run();
 +            }
-+            // Canvas end - fix events with region threading
++            // Canvas end - region threading
          });
  
-+        Runnable finalizer = () -> { // Canvas - fix end credits
++        Runnable finalizer = () -> { // Canvas - region threading
          // find and modify respawn block state
          if (respawnWorld == null || respawnConfig == null) {
              // default to regular spawn
@@ -223,7 +201,7 @@
                          respawnWorld, respawnConfig, !alive
                      ).orElse(null);
                      if (spawnPos == null) {
-+                        missingRespawnBlock[0] = true; // Canvas - fix events with region threading
++                        missingRespawnBlock[0] = true; // Canvas - region threading
                          // no spawn
                          ServerPlayer.this.connection.send(
                              new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F)
@@ -239,7 +217,7 @@
                      boolean isRespawnAnchor = respawnWorld.getBlockState(respawnConfig.pos()).is(net.minecraft.world.level.block.Blocks.RESPAWN_ANCHOR);
                      boolean isBed = respawnWorld.getBlockState(respawnConfig.pos()).is(net.minecraft.tags.BlockTags.BEDS);
                      usedRespawnAnchor[0] = !alive && isRespawnAnchor;
-+                    isBedSpawn[0] = isBed; // Canvas - fix events with region threading
++                    isBedSpawn[0] = isBed; // Canvas - region threading
  
                      // finished now, pass the location on
                      spawnPosComplete.complete(
@@ -247,48 +225,38 @@
                  }
              );
          }
-+        // Canvas start - fix end credits
++        // Canvas start - region threading
 +        };
-+        if (this.isDisplayingEndCredits) {
++        if (this.canvas$isDisplayingEndCredits) {
 +            // we need to assign to callback, we are displaying the credits
-+            this.exitEndCreditsCallback = finalizer;
++            this.canvas$exitEndCreditsCallback = finalizer;
 +        } else {
 +            // not displaying credits, run finalizer
 +            finalizer.run();
 +        }
-+        // Canvas end - fix end credits
++        // Canvas end - region threading
      }
  
      @Override
-@@ -1865,12 +_,26 @@
+@@ -1865,12 +_,17 @@
                  return false;
              }
              this.wonGame = true;
 -            // TODO is there a better solution to this that DOESN'T skip the credits?
 -            this.seenCredits = true;
 -            if (!this.seenCredits) {
--                this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
--            }
-+            // Canvas start - fix end credits
++            // Canvas start - region threading
 +            // we need to remove the player *first*, and then display
 +            // the end credits, or else we get the player stuck in the
 +            // void, and they can't escape...
-+            // Original 'showEndCredits' method:
-+            // this.unRide();
-+            // this.level().removePlayerImmediately(this, Entity.RemovalReason.CHANGED_DIMENSION);
-+            // if (!this.wonGame) {
-+            //     this.wonGame = true;
-+            //     this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
-+            //     this.seenCredits = true;
-+            // }
-+            this.isDisplayingEndCredits = !this.seenCredits && !this.level().paperConfig().misc.disableEndCredits; // ensure we respect paper config
-             this.exitEndCredits();
-+            if (this.isDisplayingEndCredits) {
-+                this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
++            this.canvas$isDisplayingEndCredits = !this.seenCredits && !this.level().paperConfig().misc.disableEndCredits; // ensure we respect paper config
++            this.exitEndCredits(); // note: this calls 'unRide()'
++            if (this.canvas$isDisplayingEndCredits) {
+                 this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
 +                this.seenCredits = true; // mark seen the end credits
-+                this.level().getServer().getPlayerList().seeingEndCredits.add(this);
-+            }
-+            // Canvas end - fix end credits
+             }
+-            this.exitEndCredits();
++            // Canvas end - region threading
              return true;
          } else {
              return super.endPortalLogicAsync(portalPos);
@@ -306,20 +274,18 @@
                      this.causeFoodExhaustion(this.level().spigotConfig.swimMultiplier * (float) rounded * 0.01F, org.bukkit.event.entity.EntityExhaustionEvent.ExhaustionReason.SWIM); // CraftBukkit - EntityExhaustionEvent // Spigot
                  }
 -            } else if (this.isEyeInFluid(FluidTags.WATER)) {
-+            } else if (this.isEyeInWater()) { // Canvas - optimize fluidOnEyes
++            } else if (this.canvas$isEyeInWater()) { // Canvas - optimize fluidOnEyes
                  int rounded = Math.round((float)Math.sqrt(dx * dx + dy * dy + dz * dz) * 100.0F);
                  if (rounded > 0) {
                      this.awardStat(Stats.WALK_UNDER_WATER_ONE_CM, rounded);
-@@ -2513,7 +_,9 @@
+@@ -2513,6 +_,7 @@
  
      public void disconnect() {
          this.disconnected = true;
-+        if (this.isTemporarilyBlocking) this.releaseUsingItem(); // Canvas - implement sword blocking
++        if (this.canvas$isTemporarilyBlocking) this.releaseUsingItem(); // Canvas - implement sword blocking
          this.ejectPassengers();
-+        this.tpsBar.removeViewer(this.getBukkitEntity()); // Canvas - tpsbar
  
          // Paper start - Workaround vehicle not tracking the passenger disconnection dismount
-         if (this.isPassenger() && this.getVehicle() instanceof ServerPlayer) {
 @@ -2720,6 +_,9 @@
              this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.CHANGE_GAME_MODE, gameMode.getId()));
              if (gameMode == GameType.SPECTATOR) {
@@ -334,7 +300,7 @@
          return getInputVector(new Vec3(f, 0.0, f1), 1.0F, this.getYRot());
      }
  
-+    // Canvas start - restore vanilla ender pearl behavior
++    // Canvas start - region threading
      public void registerEnderPearl(ThrownEnderpearl enderPearl) {
 -        //this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
 +        if (io.canvasmc.canvas.Config.INSTANCE.restoreVanillaEnderPearlBehavior) {
@@ -348,7 +314,7 @@
 +            this.enderPearls.remove(enderPearl);
 +        }
      }
-+    // Canvas end - restore vanilla ender pearl behavior
++    // Canvas end - region threading
  
      public Set<ThrownEnderpearl> getEnderPearls() {
          return this.enderPearls;

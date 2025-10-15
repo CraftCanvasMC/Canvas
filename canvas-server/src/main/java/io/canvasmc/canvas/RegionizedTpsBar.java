@@ -3,22 +3,25 @@ package io.canvasmc.canvas;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import io.canvasmc.canvas.util.Gradient;
+import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.TickData;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.function.Consumer;
+import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
+import org.bukkit.craftbukkit.entity.CraftPlayer;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import static net.kyori.adventure.text.Component.text;
@@ -85,18 +88,8 @@ public class RegionizedTpsBar {
                     .append(Component.text(utilizationTruncated, this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0 ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(util / 100)));
             // update players
             for (final ServerPlayer localPlayer : this.worldData.getLocalPlayers()) {
-                final Entry entry = localPlayer.localEntry;
-                if (entry.enabled()) {
-                    switch (entry.placement()) {
-                        case BOSS_BAR -> {
-                            localPlayer.tpsBar.name(textComponent);
-                            localPlayer.tpsBar.progress(Math.min((float) mspt / 50, 1.00F)); // this is a percentage, the mspt is out of 50, so divide by 50 and the max value be 1(100%)
-                        }
-                        case ACTION_BAR -> localPlayer.getBukkitEntity().sendActionBar(
-                            textComponent
-                        );
-                    }
-                }
+                localPlayer.canvas$tpsBarDisplay.setDisplay(textComponent);
+                localPlayer.canvas$tpsBarDisplay.tick();
             }
             this.nextTick = startTime + 1_000_000_000;
         }
@@ -107,71 +100,101 @@ public class RegionizedTpsBar {
         public static final Codec<Placement> CODEC = Codec.STRING.comapFlatMap((string) -> DataResult.success(Placement.valueOf(string)), Enum::name);
     }
 
-    private static final class Gradient {
+    public interface DisplayManager {
+        @Contract(value = "_ -> new", pure = true)
+        static @NotNull DisplayManager createNew(ServerPlayer entityPlayer) {
+            return new DisplayManager() {
+                private Component display = Component.text("Waiting for region update...");
+                public final BossBar tpsBar =
+                    BossBar.bossBar(
+                        this.display,
+                        0.0F,
+                        BossBar.Color.BLUE,
+                        BossBar.Overlay.PROGRESS
+                    );
 
-        private final boolean negativePhase;
-        private final TextColor[] colors;
-        private int index = 0;
-        private int colorIndex = 0;
-        private float factorStep = 0;
-        private float phase;
+                private volatile boolean enabled = false;
+                private Placement placement = Placement.BOSS_BAR;
+                private boolean dirty = true; // force initial sync
 
-        public Gradient(final @NonNull TextColor... colors) {
-            this(0, colors);
+                @Override
+                public void tick() {
+                    if (!enabled) {
+                        return;
+                    }
+
+                    switch (placement) {
+                        case BOSS_BAR -> tpsBar.name(display);
+                        case ACTION_BAR ->
+                            entityPlayer.connection.send(
+                                new ClientboundSetActionBarTextPacket(
+                                    PaperAdventure.asVanillaNullToEmpty(display)
+                                )
+                            );
+                    }
+
+                    // handle state changes if marked dirty
+                    if (dirty) {
+                        final CraftPlayer bukkitEntity = entityPlayer.getBukkitEntity();
+
+                        if (placement == Placement.BOSS_BAR) {
+                            if (enabled) {
+                                tpsBar.addViewer(bukkitEntity);
+                            } else {
+                                tpsBar.removeViewer(bukkitEntity);
+                            }
+                        } else {
+                            tpsBar.removeViewer(bukkitEntity);
+                        }
+
+                        dirty = false;
+                    }
+                }
+
+                @Override
+                public void setDisplay(final Component component) {
+                    this.display = component;
+                }
+
+                @Override
+                public void enable() {
+                    this.enabled = true;
+                    this.dirty = true;
+                }
+
+                @Override
+                public void disable() {
+                    this.enabled = false;
+                    this.dirty = true;
+                }
+
+                @Override
+                public void updateFromEntry(final Entry entry) {
+                    this.enabled = entry.enabled();
+                    this.placement = entry.placement();
+                    this.dirty = true;
+                }
+
+                @Override
+                public Entry serializeDisplay() {
+                    return new Entry(
+                        this.enabled, this.placement
+                    );
+                }
+            };
         }
 
-        public Gradient(final float phase, final @NonNull TextColor @NotNull ... colors) {
-            if (colors.length < 2) {
-                throw new IllegalArgumentException("Gradients must have at least two colors! colors=" + Arrays.toString(colors));
-            }
-            if (phase > 1.0 || phase < -1.0) {
-                throw new IllegalArgumentException(String.format("Phase must be in range [-1, 1]. '%s' is not valid.", phase));
-            }
-            this.colors = colors;
-            if (phase < 0) {
-                this.negativePhase = true;
-                this.phase = 1 + phase;
-                Collections.reverse(Arrays.asList(this.colors));
-            } else {
-                this.negativePhase = false;
-                this.phase = phase;
-            }
-        }
+        void tick();
 
-        public void length(final int size) {
-            this.colorIndex = 0;
-            this.index = 0;
-            final int sectorLength = size / (this.colors.length - 1);
-            this.factorStep = 1.0f / sectorLength;
-            this.phase = this.phase * sectorLength;
-        }
+        void setDisplay(Component component);
 
-        public @NonNull TextColor nextColor() {
-            if (this.factorStep * this.index > 1) {
-                this.colorIndex++;
-                this.index = 0;
-            }
+        void enable();
 
-            float factor = this.factorStep * (this.index++ + this.phase);
-            // loop around if needed
-            if (factor > 1) {
-                factor = 1 - (factor - 1);
-            }
-            if (this.negativePhase && this.colors.length % 2 != 0) {
-                // flip the gradient segment for to allow for looping phase -1 through 1
-                return this.interpolate(this.colors[this.colorIndex + 1], this.colors[this.colorIndex], factor);
-            } else {
-                return this.interpolate(this.colors[this.colorIndex], this.colors[this.colorIndex + 1], factor);
-            }
-        }
+        void disable();
 
-        private @NonNull TextColor interpolate(final @NonNull TextColor color1, final @NonNull TextColor color2, final float factor) {
-            return TextColor.color(
-                Math.round(color1.red() + factor * (color2.red() - color1.red())),
-                Math.round(color1.green() + factor * (color2.green() - color1.green())),
-                Math.round(color1.blue() + factor * (color2.blue() - color1.blue()))
-            );
-        }
+        void updateFromEntry(Entry entry);
+
+        Entry serializeDisplay();
     }
 
     public record Entry(boolean enabled, Placement placement) {

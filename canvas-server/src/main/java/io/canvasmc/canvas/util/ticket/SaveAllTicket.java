@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.command;
+package io.canvasmc.canvas.util.ticket;
 
 import java.util.function.Consumer;
 

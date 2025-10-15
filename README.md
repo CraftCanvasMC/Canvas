@@ -1,101 +1,130 @@
-<img src="canvas_banner.png" alt="CanvasMC Banner" width="100%"/>
+![title](./canvas_title.png)
 
-<div align="center">
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)  
+[![GitHub stars](https://img.shields.io/github/stars/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
+[![GitHub forks](https://img.shields.io/github/forks/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
 
-[![GitHub License](https://img.shields.io/github/license/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas/blob/master/LICENSE)
-[![GitHub contributors](https://img.shields.io/github/contributors/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas/graphs/contributors)
-[![Discord](https://img.shields.io/discord/1168986665038127205?color=5865F2)](https://canvasmc.io/discord)
+**CanvasMC** is a high-performance fork of the Folia Minecraft server software. It addresses gameplay inconsistencies and bugs, while introducing performance optimizations and enhancements to the dedicated server.
 
-**CanvasMC** is a fork of the Folia Minecraft server software that fixes gameplay inconsistencies, bugs, and introduces further performance enhancements to the dedicated server.
+---
+[![bStats Graph Data](https://bstats.org/signatures/server-implementation/Canvas.svg)](https://bstats.org/plugin/server-implementation/Canvas)
+---
 
-Canvas pulls some patches from [Leaf](https://github.com/Winds-Studio/Leaf) and [Lithium](https://github.com/CaffeineMC/lithium/) to assist in performance, along with a ton of our own performance patches
-</div>
+## Features & Highlights
+
+### Rewritten Scheduler
+- Canvas is primarily based on a rewritten scheduler for Folia, which makes Canvas extremely fast in comparison to other forks.
+
+### Optimized Chunk Generation
+- With fixed linear scaling through a complete rewrite of the chunk system executor, Canvas achieves **unparalleled chunk performance** compared to other forks.
+
+### Extensive Configuration
+- Fine-tune aspects of your server with fully documented configuration options and performance settings.
+
+### Proper Region Profiling
+- Canvas introduces a genuine Spark profiler that is fully compatible with region threading, replacing the limited Folia profiling engine.
+
+### Powerful and Optimized
+- By fixing **numerous** Folia bugs and crashes, Canvas delivers a high-performance, stable, and reliable experience.
 
 ---
 
-## Useful Links
+## Getting Started
 
-- [Website](https://canvasmc.io)
-- [Documentation](https://docs.canvasmc.io)
-- [Discord](https://canvasmc.io/discord)
+### Downloading & Running
 
----
+1. Download the latest server JAR from the **Downloads** page on [canvasmc.io](https://canvasmc.io/downloads).  
+2. Launch using Java (Java 21+ required) with your preferred arguments and configuration.
 
-## Running Canvas
+### Building from Source
 
-### Downloading the Server Jar
+**Requirements:**
 
-You can download the latest release from the [Downloads Page](https://canvasmc.io/downloads).
+- Java 21
+- Git (configured with name/email)
 
----
-
-## Building Canvas
-
-### Requirements
-
-- Java 22 or higher
-- Git (configured with name and email)
-- Gradle
-
-### Common Scripts
+**Common build commands:**
 
 ```bash
-./gradlew applyAllPatches         # Apply all patches
-./gradlew buildMojmapPublisherJar # Build the server jar
-./gradlew runDevServer            # Run dev server
-./rebuildPatches                  # Custom script to generate patches for modified directories
-````
+./gradlew applyAllPatches
+./gradlew buildMojmapPublisherJar
+./gradlew runDevServer
+```
+
+There is also a helper script:
+
+```bash
+./rebuildPatches
+```
+
+which regenerates patches for modified directories.
 
 ---
 
-## Using the API (Gradle)
+## Using the Canvas API in Plugins
 
-You can use the Canvas API in your own plugins via the following Gradle configuration:
-
-<details>
-<summary><code>build.gradle.kts</code></summary>
+You can use Canvas’s API in your own Minecraft plugins. Here’s an example of how to include it in your `build.gradle.kts`:
 
 ```kotlin
 repositories {
-    maven {
-        name = "Canvas" // contains Canvas artifacts
-        url = uri("https://maven.canvasmc.io/snapshots")
-    }
-    mavenCentral() // for other dependencies
-    maven("https://repo.papermc.io/repository/maven-public/")
+  maven {
+    name = "Canvas"
+    url = uri("https://maven.canvasmc.io/snapshots")
+  }
+  mavenCentral()
+  maven("https://repo.papermc.io/repository/maven-public/")
 }
-
 dependencies {
-    implementation("io.canvasmc.canvas:canvas-api:1.21.8-R0.1-SNAPSHOT")
+  implementation("io.canvasmc.canvas:canvas-api:1.21.8-R0.1-SNAPSHOT")
 }
 ```
 
-</details>
+Replace the version number with the appropriate version you want to target.
 
 ---
 
 ## REST API
 
-Canvas exposes a REST API that allows you to retrieve builds and version information.
-
-Temporary docs are available [here](https://github.com/CraftCanvasMC/Website/blob/main/docs/API.md) — these will soon be moved to the official documentation site.
+Canvas provides a REST interface to fetch build and version metadata. Documentation is available via [The docs page](https://docs.canvasmc.io/developers/rest-api)
 
 ---
 
-## Support & Contribution
+## Documentation & Resources
 
-Help CanvasMC grow by:
+* **Official Documentation**: [https://docs.canvasmc.io](https://docs.canvasmc.io)
+* **Community & Support**: Join the Canvas [Discord](https://canvasmc.io/discord)
+* **Issue Tracker / Contributing**: Use this GitHub repo for reporting bugs, proposing features, and submitting pull requests
+* **Donations / Sponsorship**: Support development on [Ko-fi](https://ko-fi.com/dueris)
 
-* Supporting us on [Ko-fi](https://ko-fi.com/dueris)
-* Starring the project on GitHub
-* Contributing code or improving documentation
+---
 
-Your support helps keep the project active and evolving!
+## Contributing
+
+We welcome many forms of contributions:
+
+* Code (bug fixes, features)
+* Documentation improvements
+* Testing & bug reporting
+* Community help & support
+* Donations to help support the developers
+
+See the [Contributing Guide](https://docs.canvasmc.io/developers/contributing) for more detail.
+
+---
+
+## Compatibility & Notes
+
+* Canvas is a fork of **Folia** and is *not* a drop-in replacement for Purpur, Paper, or other non-Folia forks. It is intended primarily for environments already using Folia or Folia-based forks.
+* The project adheres strictly to Folia’s threading and safety rules and does *not* permit bypassing them.
 
 ---
 
 ## License
 
-Canvas is licensed under the [GPL-3.0](https://github.com/CraftCanvasMC/Canvas/blob/HEAD/LICENSE).
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
 ---
+
+## Acknowledgments & Inspiration
+
+Canvas incorporates patches inspired by or derived from other high-performance projects (e.g. **Lithium**), along with its own custom optimizations.

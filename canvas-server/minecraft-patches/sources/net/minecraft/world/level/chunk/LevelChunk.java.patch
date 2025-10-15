@@ -57,7 +57,7 @@
 +        // Canvas - optimize block entities
  
 -        for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
-+        for (BlockEntity blockEntity : chunk.getAllBlockEntities()) { // Canvas - optimize block entity fetching
++        for (BlockEntity blockEntity : chunk.canvas$getAllBlockEntities()) { // Canvas - optimize block entity fetching
              this.setBlockEntity(blockEntity);
          }
  
@@ -118,7 +118,7 @@
          BlockEntity blockEntity = this.level.getCurrentWorldData().capturedTileEntities.get(pos); // Folia - region threading
          if (blockEntity == null) {
 -            blockEntity = this.blockEntities.get(pos);
-+            blockEntity = this.getFromBuckets(pos.getX(), pos.getY(), pos.getZ()); // Canvas - optimize block entities
++            blockEntity = this.canvas$getFromBuckets(pos.getX(), pos.getY(), pos.getZ()); // Canvas - optimize block entity fetching
          }
          // CraftBukkit end
          if (blockEntity == null) {
@@ -127,7 +127,7 @@
              }
          } else if (blockEntity.isRemoved()) {
 -            this.blockEntities.remove(pos);
-+            this.removeFromBuckets(pos.getX(), pos.getY(), pos.getZ()); // Canvas - optimize block entities
++            this.canvas$removeFromBuckets(pos.getX(), pos.getY(), pos.getZ()); // Canvas - optimize block entity fetching
              return null;
          }
  
@@ -136,7 +136,7 @@
              blockEntity.setLevel(this.level);
              blockEntity.clearRemoved();
 -            BlockEntity blockEntity1 = this.blockEntities.put(blockPos.immutable(), blockEntity);
-+            BlockEntity blockEntity1 = this.setBlockEntityInBuckets(blockPos.getX(), blockPos.getY(), blockPos.getZ(), blockEntity); // Canvas - optimize block entities
++            BlockEntity blockEntity1 = this.canvas$setBlockEntityInBuckets(blockPos.getX(), blockPos.getY(), blockPos.getZ(), blockEntity); // Canvas - optimize block entity fetching
              if (blockEntity1 != null && blockEntity1 != blockEntity) {
                  blockEntity1.setRemoved();
              }
@@ -145,7 +145,7 @@
      public void removeBlockEntity(BlockPos pos) {
          if (this.isInLevel()) {
 -            BlockEntity blockEntity = this.blockEntities.remove(pos);
-+            BlockEntity blockEntity = this.removeFromBuckets(pos.getX(), pos.getY(), pos.getZ());
++            BlockEntity blockEntity = this.canvas$removeFromBuckets(pos.getX(), pos.getY(), pos.getZ()); // Canvas - optimize block entity fetching
              // CraftBukkit start - SPIGOT-5561: Also remove from pending map
              if (!this.pendingBlockEntities.isEmpty()) {
                  this.pendingBlockEntities.remove(pos);
@@ -154,7 +154,7 @@
  
      public Map<BlockPos, BlockEntity> getBlockEntities() {
 -        return this.blockEntities;
-+        return this.buildBlockEntityMap(); // Canvas - optimize block entity fetching
++        return this.canvas$buildBlockEntityMap(); // Canvas - optimize block entity fetching
      }
  
      public void postProcessGeneration(ServerLevel level) {
@@ -211,15 +211,15 @@
      public void clearAllBlockEntities() {
 -        this.blockEntities.values().forEach(BlockEntity::setRemoved);
 -        this.blockEntities.clear();
-+        this.iterateOverBlockEntities(BlockEntity::setRemoved); // Canvas - optimize block entity fetching
-+        this.removeAll(); // Canvas - optimize block entity fetching
++        this.canvas$iterateOverBlockEntities(BlockEntity::setRemoved); // Canvas - optimize block entity fetching
++        this.canvas$removeAll(); // Canvas - optimize block entity fetching
          this.tickersInLevel.values().forEach(ticker -> ticker.rebind(NULL_TICKER));
          this.tickersInLevel.clear();
      }
  
      public void registerAllBlockEntitiesAfterLevelLoad() {
 -        this.blockEntities.values().forEach(blockEntity -> {
-+        this.iterateOverBlockEntities(blockEntity -> { // Canvas - optimize block entity fetching
++        this.canvas$iterateOverBlockEntities(blockEntity -> { // Canvas - optimize block entity fetching
              if (this.level instanceof ServerLevel serverLevel) {
                  this.addGameEventListener(blockEntity, serverLevel);
              }
@@ -246,13 +246,13 @@
                              return rebindableTickingBlockEntityWrapper;
                          } else {
                              return null;
-@@ -920,15 +_,72 @@
+@@ -920,15 +_,74 @@
              return this.blockEntity;
          }
          // Folia end - region threading
 +        // Canvas start - optimize block entities
 +        /*
-+            Optimizes block entity can tick checks by avoiding all math and shape checks within
++            Optimizes block entity can-tick checks by avoiding all math and shape checks within
 +            isWithinBounds by precomputing and storing a 'byte' flag per ticking block entity.
 +
 +            This means most ticks(specifically when the border isn't moving), it's just doing an
@@ -264,33 +264,35 @@
 +        private static final byte STATE_INITIALIZED = 1;
 +        private static final byte STATE_OUTSIDE = 2;
 +        private static final byte STATE_INSIDE = 4;
-+        private byte worldBorderState = 0;
-+        private long lastBorderIdentifier = Long.MIN_VALUE; // last seen identifier for stationary borders
++        private byte canvas$worldBorderState = 0;
++        private long canvas$lastBorderIdentifier = Long.MIN_VALUE; // last seen identifier for stationary borders
 +
-+        boolean isTicking(BlockPos pos) {
-+            if (this.isInsideWorldBorder()) {
-+                return LevelChunk.this.getFullStatus().isOrAfter(FullChunkStatus.BLOCK_TICKING)
-+                    && LevelChunk.this.level.areEntitiesLoaded(ChunkPos.asLong(pos));
++        boolean canvas$isTicking() {
++            if (this.canvas$isInsideWorldBorder()) {
++                // no need to check 'LevelChunk.this.level.areEntitiesLoaded', as this will
++                // always be true, since as a LevelChunk, we are always at the FULL chunk status
++                // so obviously we are loaded. we just need to check if we are block ticking now
++                return LevelChunk.this.getFullStatus().isOrAfter(FullChunkStatus.BLOCK_TICKING);
 +            }
 +            return false;
 +        }
 +
-+        private boolean isInsideWorldBorder() {
++        private boolean canvas$isInsideWorldBorder() {
 +            net.minecraft.world.level.border.WorldBorder worldBorder = LevelChunk.this.level.getWorldBorder();
 +
 +            // if the border is moving, always check in real-time, use vanilla logic fallback
-+            if (worldBorder.extent.isMoving()) {
++            if (worldBorder.extent.canvas$isMoving()) {
 +                return worldBorder.isWithinBounds(this.getPos());
 +            }
 +
 +            // stationary, check if identifier changed
-+            long currentId = worldBorder.extent.getIdentifier();
-+            if (currentId != this.lastBorderIdentifier) {
-+                this.lastBorderIdentifier = currentId;
-+                this.recomputeWorldBorderCache(worldBorder);
++            long currentId = worldBorder.extent.canvas$getIdentifier();
++            if (currentId != this.canvas$lastBorderIdentifier) {
++                this.canvas$lastBorderIdentifier = currentId;
++                this.canvas$recomputeWorldBorderCache(worldBorder);
 +            }
 +
-+            int worldBorderState = this.worldBorderState;
++            int worldBorderState = this.canvas$worldBorderState;
 +            if ((worldBorderState & (STATE_INITIALIZED | STATE_OUTSIDE)) == (STATE_INITIALIZED | STATE_OUTSIDE)
 +                || (worldBorderState & (STATE_INITIALIZED | STATE_INSIDE)) == (STATE_INITIALIZED | STATE_INSIDE)) {
 +                return (worldBorderState & STATE_INSIDE) != 0;
@@ -298,12 +300,12 @@
 +            return worldBorder.isWithinBounds(this.getPos());
 +        }
 +
-+        private void recomputeWorldBorderCache(net.minecraft.world.level.border.WorldBorder worldBorder) {
-+            this.worldBorderState = STATE_INITIALIZED;
++        private void canvas$recomputeWorldBorderCache(net.minecraft.world.level.border.WorldBorder worldBorder) {
++            this.canvas$worldBorderState = STATE_INITIALIZED;
 +            if (worldBorder.isWithinBounds(this.getPos())) {
-+                this.worldBorderState |= STATE_INSIDE;
++                this.canvas$worldBorderState |= STATE_INSIDE;
 +            } else {
-+                this.worldBorderState |= STATE_OUTSIDE;
++                this.canvas$worldBorderState |= STATE_OUTSIDE;
 +            }
 +        }
 +        // Canvas end - optimize block entities
@@ -313,11 +315,11 @@
              if (!this.blockEntity.isRemoved() && this.blockEntity.hasLevel()) {
                  BlockPos blockPos = this.blockEntity.getBlockPos();
 -                if (LevelChunk.this.isTicking(blockPos)) {
-+                if (isTicking(blockPos)) { // Canvas - optimize block entities
++                if (canvas$isTicking()) { // Canvas - optimize block entities
                      try {
                          BlockState blockState = LevelChunk.this.getBlockState(blockPos);
 -                        if (this.blockEntity.getType().isValid(blockState)) {
-+                        if (this.blockEntity.isValid) { // Canvas - optimize block entities
++                        if (this.blockEntity.canvas$isValid) { // Canvas - optimize block entities
                              this.ticker.tick(LevelChunk.this.level, this.blockEntity.getBlockPos(), blockState, this.blockEntity);
                              this.loggedInvalidBlockState = false;
                          // Paper start - Remove the Block Entity if it's invalid

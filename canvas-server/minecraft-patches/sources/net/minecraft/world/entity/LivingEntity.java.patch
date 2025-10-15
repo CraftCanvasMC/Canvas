@@ -1,20 +1,13 @@
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
-@@ -287,12 +_,14 @@
+@@ -287,6 +_,7 @@
      public List<DefaultDrop> drops = new java.util.ArrayList<>(); // Paper - Restore vanilla drops behavior
      public final org.bukkit.craftbukkit.attribute.CraftAttributeMap craftAttributes;
      public boolean collides = true;
-+    public boolean fromSpawner = false; // Canvas - spawner configs
++    public boolean canvas$fromSpawner = false; // Canvas - spawner configs
      public Set<UUID> collidableExemptions = new java.util.HashSet<>();
      public boolean bukkitPickUpLoot;
      public org.bukkit.craftbukkit.entity.CraftLivingEntity getBukkitLivingEntity() { return (org.bukkit.craftbukkit.entity.CraftLivingEntity) super.getBukkitEntity(); } // Paper
-     public boolean silentDeath = false; // Paper - mark entity as dying silently for cancellable death event
-     public net.kyori.adventure.util.TriState frictionState = net.kyori.adventure.util.TriState.NOT_SET; // Paper - Friction API
-     public int shieldBlockingDelay = this.level().paperConfig().misc.shieldBlockingDelay; // Paper - Make shield blocking delay configurable
-+    private boolean hasntResetDisabledEntityTypeMovementOnDeath = false; // Canvas - non tickable entities config
-     // CraftBukkit end
-     // Folia start - region threading
-     @Override
 @@ -401,7 +_,7 @@
          if (this.level() instanceof ServerLevel serverLevel && onGround && this.fallDistance > 0.0) {
              this.onChangedBlock(serverLevel, pos);
@@ -52,23 +45,10 @@
              }
  
 -            if (this.isEyeInFluid(FluidTags.WATER)
-+            if (this.isEyeInWater() // Canvas - optimize fluidOnEyes
++            if (this.canvas$isEyeInWater() // Canvas - optimize fluidOnEyes
                  && !serverLevel1.getBlockState(BlockPos.containing(this.getX(), this.getEyeY(), this.getZ())).is(Blocks.BUBBLE_COLUMN)) {
                  boolean flag1 = !this.canBreatheUnderwater()
                      && !MobEffectUtil.hasWaterBreathing(this)
-@@ -513,6 +_,12 @@
-         }
- 
-         if (this.isDeadOrDying() && this.level().shouldTickDeath(this)) {
-+            // Canvas start - non tickable entities config
-+            if (!this.hasntResetDisabledEntityTypeMovementOnDeath && this.getType().isDisabled()) {
-+                this.setDeltaMovement(0, 0, 0);
-+                this.hasntResetDisabledEntityTypeMovementOnDeath = true;
-+            }
-+            // Canvas end - non tickable entities config
-             this.tickDeath();
-         } else { this.broadcastedDeath = false; } // Folia - region threading
- 
 @@ -541,6 +_,19 @@
          this.yRotO = this.getYRot();
          this.xRotO = this.getXRot();
@@ -113,7 +93,7 @@
          if (this.locatorBarIcon.hasData()) {
              output.store("locator_bar_icon", Waypoint.Icon.CODEC, this.locatorBarIcon);
          }
-+        output.store("from_spawner", Codec.BOOL, this.fromSpawner); // Canvas - spawner configs
++        output.store("from_spawner", Codec.BOOL, this.canvas$fromSpawner); // Canvas - spawner configs
      }
  
      // Paper start - Extend dropItem API
@@ -121,7 +101,7 @@
          this.lastHurtByMobTimestamp = input.getIntOr("ticks_since_last_hurt_by_mob", 0) + this.tickCount;
          this.equipment.setAll(input.read("equipment", EntityEquipment.CODEC).orElseGet(EntityEquipment::new));
          this.locatorBarIcon = input.read("locator_bar_icon", Waypoint.Icon.CODEC).orElseGet(Waypoint.Icon::new);
-+        this.fromSpawner = input.read("from_spawner", Codec.BOOL).orElse(this.fromSpawner); // Canvas - spawner configs
++        this.canvas$fromSpawner = input.read("from_spawner", Codec.BOOL).orElse(this.canvas$fromSpawner); // Canvas - spawner configs
      }
  
      // CraftBukkit start
@@ -283,7 +263,7 @@
              this.moveRelative(0.02F, travelVector);
              this.move(MoverType.SELF, this.getDeltaMovement());
 -            if (this.getFluidHeight(FluidTags.LAVA) <= this.getFluidJumpThreshold()) {
-+            if (this.fluidHeightArray[1] <= this.getFluidJumpThreshold()) { // Canvas - optimize fluid height
++            if (canvas$getLavaFluidHeight() <= this.getFluidJumpThreshold()) { // Canvas - optimize fluid height
                  this.setDeltaMovement(this.getDeltaMovement().multiply(0.5, 0.8F, 0.5));
                  Vec3 fluidFallingAdjustedMovement = this.getFluidFallingAdjustedMovement(effectiveGravity, flag, this.getDeltaMovement());
                  this.setDeltaMovement(fluidFallingAdjustedMovement);
@@ -292,10 +272,10 @@
              double fluidHeight;
              if (this.isInLava()) {
 -                fluidHeight = this.getFluidHeight(FluidTags.LAVA);
-+                fluidHeight = this.fluidHeightArray[1]; // Canvas - optimize fluid height
++                fluidHeight = canvas$getLavaFluidHeight(); // Canvas - optimize fluid height
              } else {
 -                fluidHeight = this.getFluidHeight(FluidTags.WATER);
-+                fluidHeight = this.fluidHeightArray[0]; // Canvas - optimize fluid height
++                fluidHeight = canvas$getWaterFluidHeight(); // Canvas - optimize fluid height
              }
  
              boolean flag = this.isInWater() && fluidHeight > 0.0;
@@ -336,7 +316,7 @@
 -        List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox());
 +        // Canvas start - only players push config
 +        List<? extends Entity> pushableEntities = collisionMode.onlyPlayersPushable() ?
-+            this.level().getIntersectingPlayers(this, this.getBoundingBox(), EntitySelector.pushableBy(this))
++            this.level().canvas$getIntersectingPlayers(this, this.getBoundingBox(), EntitySelector.pushableBy(this))
 +            : this.level().getPushableEntities(this, this.getBoundingBox());
 +        // Canvas end - only players push config
          if (!pushableEntities.isEmpty()) {
@@ -346,7 +326,7 @@
  
      @Override
      public boolean isCollidable(boolean ignoreClimbing) {
-+        if (this.fromSpawner && io.canvasmc.canvas.Config.INSTANCE.spawner.noCollisions) return false; // Canvas - spawner configs
++        if (this.canvas$fromSpawner && io.canvasmc.canvas.Config.INSTANCE.spawner.noCollisions) return false; // Canvas - spawner configs
          return this.isAlive() && !this.isSpectator() && (ignoreClimbing || !this.onClimbable()) && this.collides; // CraftBukkit
          // Paper end - Climbing should not bypass cramming gamerule
      }

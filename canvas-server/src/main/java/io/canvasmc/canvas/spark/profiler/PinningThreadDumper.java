@@ -25,7 +25,7 @@ public class PinningThreadDumper implements ThreadDumper {
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
         ScheduledTaskThreadPool.TickThreadRunner threadRunner =
-            SparkRegionProfilerExtension.TRACKING_THREAD.getCurrentOrCached();
+            SparkRegionProfilerExtension.TRACKING_THREAD.get();
 
         if (threadRunner != null) {
             // we are profiling, use the thread we are tracking

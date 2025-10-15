@@ -1,8 +1,8 @@
 package io.canvasmc.testplugin;
 
-import com.destroystokyo.paper.event.player.PlayerTeleportEndGatewayEvent;
 import java.util.List;
 import java.util.Objects;
+import io.canvasmc.canvas.event.EntityTeleportAsyncEvent;
 import io.canvasmc.canvas.event.WorldPreLoadEvent;
 import net.kyori.adventure.util.TriState;
 import net.minecraft.core.BlockPos;
@@ -14,7 +14,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import org.bukkit.Bukkit;
-import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -29,10 +28,6 @@ import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.entity.EntityTeleportEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerRespawnEvent;
-import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.generator.BiomeProvider;
 import org.bukkit.generator.WorldInfo;
@@ -113,14 +108,14 @@ public class TestPlugin extends JavaPlugin implements Listener {
                     for (int x = baseX; x < baseX + 16; x++) {
                         for (int z = baseZ; z < baseZ + 16; z++) {
                             world.getWorld().setBlockData(x, minY, z, chestData);
-                            BlockEntity be1 = nmsChunk.getFromBuckets(x, minY, z);
+                            BlockEntity be1 = nmsChunk.canvas$getFromBuckets(x, minY, z);
                             if (be1 == null) throw new IllegalStateException("Failed to fetch block entity from buckets");
                             BlockPos chestPos = new BlockPos(x, minY, z);
                             if (!be1.getBlockPos().equals(chestPos)) throw new IllegalStateException("Mismatched block entity position");
 
                             for (int y = minY + 1; y < maxY; y++) {
                                 world.getWorld().setBlockData(x, y, z, hopperData);
-                                BlockEntity be2 = nmsChunk.getFromBuckets(x, y, z);
+                                BlockEntity be2 = nmsChunk.canvas$getFromBuckets(x, y, z);
                                 if (be2 == null) throw new IllegalStateException("Failed to fetch block entity from buckets");
                                 BlockPos aPos = new BlockPos(x, y, z);
                                 if (!be2.getBlockPos().equals(aPos)) throw new IllegalStateException("Mismatched block entity position");
@@ -155,7 +150,6 @@ public class TestPlugin extends JavaPlugin implements Listener {
                     .type(WorldType.FLAT)
             );
             getServer().createWorld(
-                // safe blank world to test hoppers
                 new WorldCreator("world_api_test")
                     .environment(World.Environment.NORMAL)
                     .bonusChest(false)
@@ -165,7 +159,7 @@ public class TestPlugin extends JavaPlugin implements Listener {
         });
         getServer().getGlobalRegionScheduler().runDelayed(this, (task) -> {
             World apiTest = Bukkit.getWorld("world_api_test");
-            Bukkit.unloadWorldAsync(Objects.requireNonNull(apiTest, "World cannot be null"), true).thenAccept((success) -> {
+            Bukkit.unloadWorldAsync(Objects.requireNonNull(apiTest), true, (success) -> {
                 if (success) {
                     getLogger().info("Successfully unloaded the world load/unload api test");
                 } else {
@@ -173,6 +167,7 @@ public class TestPlugin extends JavaPlugin implements Listener {
                 }
             });
         }, 20 * 20); // 20 seconds
+        RegionDataTest.init();
     }
 
     public int build(@NotNull RandomSource randomSource) {
@@ -196,18 +191,7 @@ public class TestPlugin extends JavaPlugin implements Listener {
     }
 
     @EventHandler
-    public void join(PlayerJoinEvent event) {
-        // Player player = event.getPlayer();
-        // RandomSource randomSource = RandomSource.create();
-        // int blockX = build(randomSource);
-        // int blockZ = build(randomSource);
-        // player.getScheduler().run(this, (task) -> {
-        //     player.teleportAsync(
-        //         new Location(
-        //             player.getWorld(), blockX, 90, blockZ, player.getYaw(), player.getPitch()
-        //         )
-        //     );
-        //     player.setGameMode(GameMode.CREATIVE);
-        // }, null);
+    public void onTeleportAsync(EntityTeleportAsyncEvent teleportAsyncEvent) {
+        getLogger().info("Called teleport async event");
     }
 }

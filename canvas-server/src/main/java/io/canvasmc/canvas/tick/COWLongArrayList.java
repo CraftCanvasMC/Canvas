@@ -11,10 +11,6 @@ public final class COWLongArrayList {
         this.array = new long[0];
     }
 
-    public COWLongArrayList(long[] array) {
-        this.array = Arrays.copyOf(array, array.length);
-    }
-
     public long[] getArray() {
         return this.array;
     }

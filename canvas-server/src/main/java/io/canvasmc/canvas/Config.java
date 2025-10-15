@@ -43,7 +43,6 @@ import org.yaml.snakeyaml.Yaml;
 public class Config {
     public static boolean ENABLE_FASTER_RANDOM = true;
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
-    public static final List<EntityNonTickableConf> NON_TICKABLES = new CopyOnWriteArrayList<>();
     public static Config INSTANCE;
 
     public Scheduler scheduler = new Scheduler();
@@ -111,12 +110,6 @@ public class Config {
             "WARNING: May cause the sequence of future compose disorder"
         })
         public boolean useFasterStructureGenFutureSequencing = false;
-
-        @Comment({
-            "Makes chunk packet preparation and sending asynchronous to improve server performance.",
-            "This can significantly reduce main thread load when many players are loading chunks."
-        })
-        public boolean asyncChunkSend = false;
 
         @Comment("Whether to use a rewritten random tick system to optimize the server")
         public boolean optimizeRandomTick = false;
@@ -212,17 +205,6 @@ public class Config {
 
     @Comment("Makes farmland always moist, never drying out, even if it isn't near water")
     public boolean farmlandAlwaysMoist = false;
-
-    public AsyncLocator asyncLocator = new AsyncLocator();
-    public static class AsyncLocator {
-        @PositiveNumericValueValidator.PositiveNumericValue
-        @Comment("The amount of threads allocated to the async locator")
-        public int threads = 1;
-
-        @PositiveNumericValueValidator.PositiveNumericValue
-        @Comment("The keepalive time in seconds for the async locator")
-        public int keepalive = 60;
-    }
 
     @Comment("Disables Minecraft Chat Signing to prevent player reporting")
     public boolean enableNoChatReports = false;
@@ -709,18 +691,6 @@ public class Config {
                     LOGGER.error("Canvas' faster random impl is not supported by your VM, falling back to legacy random");
                     Config.ENABLE_FASTER_RANDOM = false;
                 }
-
-                LOGGER.info("Compiling entity non-tickable mappings...");
-                int i = 0;
-                for (final String nonTickableEntity : INSTANCE.nonTickableEntities) {
-                    ResourceLocation resourceLocation = ResourceLocation.parse(nonTickableEntity);
-                    LOGGER.info("Marking entity type {} as non-tickable", resourceLocation);
-                    NON_TICKABLES.add(new EntityNonTickableConf(
-                        nonTickableEntity, resourceLocation
-                    ));
-                    i++;
-                }
-                LOGGER.info("Successfully compiled {} entity non-tickable mappings", i);
             }).build();
     }
 

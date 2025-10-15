@@ -5,15 +5,15 @@
      private int remainingFireTicks;
      public boolean wasTouchingWater;
 -    protected Object2DoubleMap<TagKey<Fluid>> fluidHeight = new Object2DoubleArrayMap<>(2);
-+    public double[] fluidHeightArray = new double[2]; // Canvas - optimize fluid height - protected -> public
++    public double[] canvas$fluidHeightArray = new double[2]; // Canvas - optimize fluid height - protected -> public
      protected boolean wasEyeInWater;
 -    private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
 +    // Canvas start - optimize fluidOnEyes
 +    // private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
-+    private int fluidOnEyesMask = 0;
++    private int canvas$fluidOnEyesMask = 0;
 +    private static final int EYE_IN_WATER = 1 << 0;
 +    private static final int EYE_IN_LAVA  = 1 << 1;
-+    // Canvas end
++    // Canvas end - optimize fluidOnEyes
      public int invulnerableTime;
      protected boolean firstTick = true;
      protected final SynchedEntityData entityData;
@@ -22,7 +22,7 @@
      protected String stringUUID = this.uuid.toString();
      private boolean hasGlowingTag;
 -    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl
-+    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(it.unimi.dsi.fastutil.objects.ObjectSets.synchronize(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>()), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl // Canvas - fix commands with region threading
++    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new java.util.concurrent.CopyOnWriteArraySet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl // Canvas - region threading
      private final double[] pistonDeltas = new double[]{0.0, 0.0, 0.0};
      private long pistonDeltasGameTime = Long.MIN_VALUE; // Folia - region threading
      protected EntityDimensions dimensions;
@@ -101,7 +101,7 @@
  
      protected boolean updateInWaterStateAndDoFluidPushing() {
 -        this.fluidHeight.clear();
-+        this.fluidHeightArray = new double[2]; // Canvas - optimize fluid height
++        this.canvas$fluidHeightArray = new double[2]; // Canvas - optimize fluid height
          this.updateInWaterStateAndDoWaterCurrentPushing();
          double d = this.level().dimensionType().ultraWarm() ? 0.007 : 0.0023333333333333335;
          boolean flag = this.updateFluidHeightAndDoFluidPushing(FluidTags.LAVA, d);
@@ -111,8 +111,8 @@
      private void updateFluidOnEyes() {
 -        this.wasEyeInWater = this.isEyeInFluid(FluidTags.WATER);
 -        this.fluidOnEyes.clear();
-+        this.wasEyeInWater = this.isEyeInWater(); // Canvas - optimize fluidOnEyes
-+        this.fluidOnEyesMask = 0; // Canvas - optimize fluidOnEyes
++        this.wasEyeInWater = this.canvas$isEyeInWater(); // Canvas - optimize fluidOnEyes
++        this.canvas$fluidOnEyesMask = 0; // Canvas - optimize fluidOnEyes
          double eyeY = this.getEyeY();
          if (!(
              this.getVehicle() instanceof AbstractBoat abstractBoat
@@ -122,12 +122,12 @@
              if (d > eyeY) {
 -                fluidState.getTags().forEach(this.fluidOnEyes::add);
 +                // Canvas start - optimize fluidOnEyes - remove stream and use bitmask
-+                TagKey<Fluid>[] tags = fluidState.getTagsArray();
++                TagKey<Fluid>[] tags = fluidState.canvas$getTagsArray();
 +                for (TagKey<Fluid> tag : tags) {
 +                    if (tag == FluidTags.WATER) {
-+                        this.fluidOnEyesMask |= EYE_IN_WATER;
++                        this.canvas$fluidOnEyesMask |= EYE_IN_WATER;
 +                    } else if (tag == FluidTags.LAVA) {
-+                        this.fluidOnEyesMask |= EYE_IN_LAVA;
++                        this.canvas$fluidOnEyesMask |= EYE_IN_LAVA;
 +                    }
 +                }
 +                // Canvas end - optimize fluidOnEyes - remove stream and use bitmask
@@ -136,12 +136,12 @@
      }
 +    // Canvas start - optimize fluidOnEyes
 +
-+    public boolean isEyeInWater() {
-+        return (this.fluidOnEyesMask & EYE_IN_WATER) != 0;
++    public boolean canvas$isEyeInWater() {
++        return (this.canvas$fluidOnEyesMask & EYE_IN_WATER) != 0;
 +    }
 +
-+    public boolean isEyeInLava() {
-+        return (this.fluidOnEyesMask & EYE_IN_LAVA) != 0;
++    public boolean canvas$isEyeInLava() {
++        return (this.canvas$fluidOnEyesMask & EYE_IN_LAVA) != 0;
 +    }
 +    // Canvas end - optimize fluidOnEyes
  
@@ -163,27 +163,25 @@
  
          this.gameEvent(GameEvent.SPLASH);
      }
-@@ -2069,11 +_,32 @@
+@@ -2069,11 +_,38 @@
      }
  
      public boolean isEyeInFluid(TagKey<Fluid> fluidTag) {
 -        return this.fluidOnEyes.contains(fluidTag);
 -    }
-+        // Canvas start - optimize fluidOnEyes
++    // Canvas start - optimize fluidOnEyes
 +        if (fluidTag == FluidTags.WATER) {
-+            return (this.fluidOnEyesMask & EYE_IN_WATER) != 0;
++            return (this.canvas$fluidOnEyesMask & EYE_IN_WATER) != 0;
 +        } else if (fluidTag == FluidTags.LAVA) {
-+            return (this.fluidOnEyesMask & EYE_IN_LAVA) != 0;
++            return (this.canvas$fluidOnEyesMask & EYE_IN_LAVA) != 0;
 +        }
 +        return false;
-+        // Canvas end
 +    }
-+    // Canvas start - optimize fluid height
 +
 +    // Note: realistically would want to avoid using this, just use the index
 +    //    - WATER: 0
 +    //    - LAVA: 1
-+    private int getFluidHeightIndex(TagKey<Fluid> fluidTag) {
++    private int canvas$getFluidHeightIndex(TagKey<Fluid> fluidTag) {
 +        if (fluidTag == FluidTags.WATER) {
 +            return 0;
 +        } else if (fluidTag == FluidTags.LAVA) {
@@ -191,11 +189,19 @@
 +        }
 +        throw new UnsupportedOperationException("Unknown fluid tag");
 +    }
++
++    public double canvas$getLavaFluidHeight() {
++        return this.canvas$fluidHeightArray[1];
++    }
++
++    public double canvas$getWaterFluidHeight() {
++        return this.canvas$fluidHeightArray[0];
++    }
 +    // Canvas end - optimize fluid height
  
      public boolean isInLava() {
 -        return !this.firstTick && this.fluidHeight.getDouble(FluidTags.LAVA) > 0.0;
-+        return !this.firstTick && this.fluidHeightArray[1] > 0.0; // Canvas - optimize fluid height
++        return !this.firstTick && canvas$getLavaFluidHeight() > 0.0; // Canvas - optimize fluid height
      }
  
      public void moveRelative(float amount, Vec3 relative) {
@@ -233,25 +239,21 @@
          if (level instanceof ServerLevel serverLevel) {
              for (int i = 0; i < 2; i++) {
                  serverLevel.sendParticles(
-@@ -3947,7 +_,7 @@
-             );
-     }
- 
--    public final boolean isInvulnerableToBase(DamageSource damageSource) {
-+    public boolean isInvulnerableToBase(DamageSource damageSource) { // Canvas - mutable - TODO - wideners in weaver?
-         return this.isRemoved()
-             || this.invulnerable && !damageSource.is(DamageTypeTags.BYPASSES_INVULNERABILITY) && !damageSource.isCreativePlayer()
-             || damageSource.is(DamageTypeTags.IS_FIRE) && this.fireImmune()
-@@ -4336,6 +_,21 @@
+@@ -4336,9 +_,23 @@
          );
      }
  
+-    public final boolean teleportAsync(ServerLevel destination, Vec3 pos, Float yaw, Float pitch, Vec3 velocity,
+-                                       org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
+-                                       java.util.function.Consumer<Entity> teleportComplete) {
 +    // Canvas start - region threading
-+    // based off https://github.com/LuminolMC/Luminol/blob/ver/1.21.8/luminol-server/minecraft-patches/features/0062-Fix-off-tickregion-sync-teleport.patch
-+    // modified to work better with Canvas' systems
-+    private boolean checkNearbyRegions(int destX, int destZ) {
-+        int sizeBx = Math.min(6, (int) (this.bb.maxX - this.bb.minX) + ((ServerLevel) this.level).serverLevelData.distanceConfig.simulationDistanceOrDefault());
-+        int sizeBz = Math.min(6, (int) (this.bb.maxZ - this.bb.minZ) + ((ServerLevel) this.level).serverLevelData.distanceConfig.simulationDistanceOrDefault());
++    public @Nullable io.canvasmc.canvas.util.ServerLocation canvas$lastTeleportOrigin = null;
++
++    private boolean canvas$checkNearbyRegions(int destX, int destZ) {
++        // based off https://github.com/LuminolMC/Luminol/blob/ver/1.21.8/luminol-server/minecraft-patches/features/0062-Fix-off-tickregion-sync-teleport.patch
++        // modified to work better with Canvas' systems
++        int sizeBx = Math.min(6, (int) (this.bb.maxX - this.bb.minX) + ((ServerLevel) this.level).serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault());
++        int sizeBz = Math.min(6, (int) (this.bb.maxZ - this.bb.minZ) + ((ServerLevel) this.level).serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault());
 +
 +        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level,
 +            (destX >> 4) - sizeBx,
@@ -260,66 +262,109 @@
 +            (destZ >> 4) + sizeBz);
 +    }
 +
-+    // Canvas end - region threading
-     public final boolean teleportAsync(ServerLevel destination, Vec3 pos, Float yaw, Float pitch, Vec3 velocity,
-                                        org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
-                                        java.util.function.Consumer<Entity> teleportComplete) {
-@@ -4369,13 +_,54 @@
++    private final boolean canvas$checkCanTeleportAsync(ServerLevel destination, Vec3 pos, long teleportFlags) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
+ 
+         if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
+@@ -4349,6 +_,12 @@
+             return false;
+         }
+         this.getBukkitEntity(); // force bukkit entity to be created before TPing
++
++        if (destination.canvas$worldUnloadTicket.isPresent()) {
++            // destination world unload propagated, do not teleport
++            return false;
++        }
++
+         if ((teleportFlags & TELEPORT_FLAG_UNMOUNT) == 0L) {
+             for (Entity entity : this.getIndirectPassengers()) {
+                 if (!entity.canTeleportAsync()) {
+@@ -4361,21 +_,68 @@
+         }
+ 
+         if ((teleportFlags & TELEPORT_FLAG_TELEPORT_PASSENGERS) != 0L) {
+-            if (this.isPassenger()) {
+-                return false;
+-            }
++            return !this.isPassenger();
+         } else {
+-            if (this.isVehicle() || this.isPassenger()) {
++            return !this.isVehicle() && !this.isPassenger();
++        }
++    }
++
++    public static class TeleportValidationException extends IllegalStateException {
++        @Override
++        public String getMessage() {
++            return "Teleport validation must pass before and after teleport events have been fired.";
++        }
++    }
++
++    public final boolean teleportAsync(ServerLevel destination, Vec3 pos, @Nullable Float yaw, @Nullable Float pitch, Vec3 velocity,
++                                       org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
++                                       java.util.function.Consumer<Entity> teleportComplete) {
++        if (!this.canvas$checkCanTeleportAsync(destination, pos, teleportFlags)) {
++            return false;
++        } // else | we passed first go
++        // TODO - all teleport events things actually go HERE
++        // when we call events, they need to allow destination modification but also need to account
++        // for the fact that the teleport passed BEFORE, and now we need to pass AGAIN to be considered valid still
++        // we check this because of this comment in Folia#68:
++        //     "The comment where I wrote that events may be placed there is actually wrong.
++        //     It also needs to check the preconditions for teleporting again, as plugins may
++        //     modify them. Ideally, given that this is "new" API, if any of those checks fail
++        //     (i.e wrong tick thread, entity removed, or any other check it made before) then
++        //     the code needs to throw an exception." - SpottedLeaf
++        // fire teleport events
++        Vec3 currPos = this.position();
++        ServerLevel originWorld = (ServerLevel) this.level();
++        boolean shouldCallEvents =
++            // this is purely so we don't do uneeded event calls and we don't run checks twice for no reason
++            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
++            io.canvasmc.canvas.event.EntityTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++        if (shouldCallEvents) {
++            // we have listeners, call
++            org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
++            org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? 0 : yaw, pitch == null ? 0 : pitch);
++            io.canvasmc.canvas.event.EntityTeleportAsyncEvent teleportAsyncEvent =
++                new io.canvasmc.canvas.event.EntityTeleportAsyncEvent(this.getBukkitEntity(), bukkitFrom, bukkitTo, cause);
++            if (!teleportAsyncEvent.callEvent()) {
++                // event was cancelled
                  return false;
              }
-         }
-+        if (destination.checkIsUnloading.get()) return false; // Canvas - fix world loading/unloading
- 
-         // TODO any events that can modify go HERE
-+        // Canvas start - fix events with region threading
-+        // Note: TeleportCommand.java normally calls this event for that, but we
-+        // don't need to there because it calls this method, and we handle it here
-+        Vec3 currPos = this.position();
-+        if (!io.canvasmc.canvas.Config.INSTANCE.pluginCompatibilityMode) {
-+            org.bukkit.Location newLocation;
-+            org.bukkit.Location from = new org.bukkit.Location(this.level().getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
-+            org.bukkit.Location to = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
-+            if (!(this instanceof ServerPlayer player)) {
-+                org.bukkit.event.entity.EntityTeleportEvent entityTeleportEvent = new org.bukkit.event.entity.EntityTeleportEvent(
-+                    this.getBukkitEntity(), from, to
-+                );
-+                if (!entityTeleportEvent.callEvent() || entityTeleportEvent.getTo() == null) {
-+                    return false;
-+                } else {
-+                    newLocation = entityTeleportEvent.getTo();
-+                    yaw = entityTeleportEvent.getTo().getYaw();
-+                    pitch = entityTeleportEvent.getTo().getPitch();
-+                }
-+            } else {
-+                org.bukkit.event.player.PlayerTeleportEvent playerTeleportEvent = new org.bukkit.event.player.PlayerTeleportEvent(
-+                    player.getBukkitEntity(), from, to,
-+                    cause, Set.of()
-+                );
-+
-+                if (!playerTeleportEvent.callEvent()) {
-+                    return false;
-+                } else {
-+                    newLocation = playerTeleportEvent.getTo();
-+                    yaw = playerTeleportEvent.getTo().getYaw();
-+                    pitch = playerTeleportEvent.getTo().getPitch();
-+                }
-+            }
-+
-+            pos = new Vec3(
-+                newLocation.getX(), newLocation.getY(), newLocation.getZ()
-+            );
+-        }
+-
+-        // TODO any events that can modify go HERE
++            org.bukkit.Location resultLocation = teleportAsyncEvent.getTo();
++            pos = new Vec3(teleportAsyncEvent.getTo().x(), teleportAsyncEvent.getTo().y(), teleportAsyncEvent.getTo().z());
++            destination = resultLocation.getWorld() == null ? destination : ((org.bukkit.craftbukkit.CraftWorld) resultLocation.getWorld()).getHandle();
++            yaw = resultLocation.getYaw();
++            pitch = resultLocation.getPitch();
 +        }
-+        // Canvas end - fix events with region threading
++        if (shouldCallEvents && !canvas$checkCanTeleportAsync(destination, pos, teleportFlags)) {
++            // plugin did something funky, kill
++            throw new TeleportValidationException();
++        }
++        this.canvas$lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, currPos, this.getYRot(), this.getXRot());
++    // Canvas end - region threading
  
          // check for same region
          if (destination == this.level()) {
 -            Vec3 currPos = this.position();
-+            // Vec3 currPos = this.position(); // Canvas - fix events with region threading - move up
              if (
-+                this.checkNearbyRegions((int) pos.x, (int) pos.z) && // Canvas - region threading
++                this.canvas$checkNearbyRegions((int) pos.x, (int) pos.z) && // Canvas - region threading
                  destination.regioniser.getRegionAtUnsynchronised(
                      ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(currPos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(currPos)
                  ) == destination.regioniser.getRegionAtUnsynchronised(
+@@ -4418,7 +_,7 @@
+ 
+         EntityTreeNode passengerTree = this.detachPassengers();
+         List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
+-        ServerLevel originWorld = (ServerLevel)this.level;
++        // Canvas - region threading
+ 
+         for (EntityTreeNode node : fullPassengerTree) {
+             node.root.preChangeDimension();
 @@ -4450,7 +_,7 @@
      public boolean endPortalLogicAsync(BlockPos portalPos) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
@@ -342,10 +387,18 @@
                  }
              }
          }
-+        if (to != null && to.checkIsUnloading.get()) return false; // Canvas - fix world loading/unloading
++        if (to != null && to.canvas$worldUnloadTicket.isPresent()) return false; // Canvas - region threading
  
          return true;
      }
+@@ -4708,6 +_,7 @@
+         EntityTreeNode passengerTree = this.detachPassengers();
+         List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
+         ServerLevel originWorld = (ServerLevel)this.level;
++        this.canvas$lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, initialPosition, this.getYRot(), this.getXRot()); // Canvas - region threading
+ 
+         for (EntityTreeNode node : fullPassengerTree) {
+             node.root.preChangeDimension();
 @@ -5032,7 +_,7 @@
  
      public boolean canTeleport(Level fromLevel, Level toLevel) {
@@ -370,7 +423,7 @@
  
          final net.minecraft.world.level.chunk.ChunkSource chunkSource = world.getChunkSource();
  
-+        int heightIndex = getFluidHeightIndex(fluid); // Canvas - optimize fluid height
++        int heightIndex = canvas$getFluidHeightIndex(fluid); // Canvas - optimize fluid height
          for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
              for (int currChunkX = minChunkX; currChunkX <= maxChunkX; ++currChunkX) {
 -                final net.minecraft.world.level.chunk.LevelChunkSection[] sections = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false).getSections();
@@ -390,7 +443,7 @@
                      }
                      final net.minecraft.world.level.chunk.LevelChunkSection section = sections[sectionIdx];
 -                    if (section.hasOnlyAir()) {
-+                    if (section.hasOnlyAir() || (fluid == FluidTags.WATER && section.waterCount == 0 && section.bubbleCount <= 0) || (fluid == FluidTags.LAVA && section.lavaCount == 0)) { // Canvas - optimize fluid pushing
++                    if (section.hasOnlyAir() || (fluid == FluidTags.WATER && section.canvas$waterCount == 0 && section.canvas$bubbleCount <= 0) || (fluid == FluidTags.LAVA && section.canvas$lavaCount == 0)) { // Canvas - optimize fluid pushing
                          // empty
                          continue;
                      }
@@ -399,7 +452,7 @@
          }
  
 -        this.fluidHeight.put(fluid, maxHeightDiff);
-+        this.fluidHeightArray[heightIndex] = maxHeightDiff; // Canvas - optimize fluid height
++        this.canvas$fluidHeightArray[heightIndex] = maxHeightDiff; // Canvas - optimize fluid height
  
          if (pushVector.lengthSqr() == 0.0) {
              return inFluid;
@@ -408,7 +461,7 @@
  
      public double getFluidHeight(TagKey<Fluid> fluidTag) {
 -        return this.fluidHeight.getDouble(fluidTag);
-+        return this.fluidHeightArray[getFluidHeightIndex(fluidTag)]; // Canvas - optimize fluid height
++        return this.canvas$fluidHeightArray[canvas$getFluidHeightIndex(fluidTag)]; // Canvas - optimize fluid height
      }
  
      public double getFluidJumpThreshold() {

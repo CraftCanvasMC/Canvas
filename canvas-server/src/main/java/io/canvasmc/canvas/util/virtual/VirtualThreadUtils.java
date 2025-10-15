@@ -45,4 +45,8 @@ public class VirtualThreadUtils {
         }
         return Executors.newFixedThreadPool(threads, fallbackFactory);
     }
+
+    public static @NotNull ExecutorService createPerThreadVirtualExecutor(ThreadFactory factory) {
+        return Executors.newThreadPerTaskExecutor(factory);
+    }
 }
