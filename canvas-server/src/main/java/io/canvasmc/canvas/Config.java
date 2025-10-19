@@ -446,9 +446,6 @@ public class Config {
     })
     public double itemEntitySpreadFactor = 1.0D;
 
-    @Comment("Disables Canvas' fix to waypoints. Recommended if you do not need this fix or it's causing a plugin incompatibility")
-    public boolean disableWaypointsFix = false;
-
     public Projectiles projectiles = new Projectiles();
     public static class Projectiles {
         @Comment("Controls how many chunks are allowed to be sync loaded by projectiles in a tick.")
