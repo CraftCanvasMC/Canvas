@@ -41,7 +41,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void trackWaypoint(WaypointTransmitter waypoint) {
         if (isLocatorBarDisabled()) return;
-        waypoints.add(waypoint);
+        if (!waypoints.contains(waypoint)) waypoints.add(waypoint);
 
         for (ServerPlayer player : players) {
             if (!TickThread.isTickThreadFor(player)) {
@@ -121,7 +121,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     // Note: this should be called on the 'player'
     public void addPlayer(ServerPlayer player) {
-        players.add(player);
+        if (!players.contains(player)) players.add(player);
 
         if (isLocatorBarDisabled()) return;
         for (WaypointTransmitter waypoint : waypoints) {
