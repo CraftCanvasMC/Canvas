@@ -446,9 +446,6 @@ public class Config {
     })
     public double itemEntitySpreadFactor = 1.0D;
 
-    @Comment("Disables Canvas' fix to waypoints. Recommended if you do not need this fix or it's causing a plugin incompatibility")
-    public boolean disableWaypointsFix = false;
-
     public Projectiles projectiles = new Projectiles();
     public static class Projectiles {
         @Comment("Controls how many chunks are allowed to be sync loaded by projectiles in a tick.")
@@ -625,14 +622,15 @@ public class Config {
     public boolean blacklistNonPlayerEntitiesFromEnteringGatewayPortals = false;
 
     @Comment({
-        "Enables plugin compatibility mode.",
-        "Canvas includes multiple fixes for the Folia server, including fixing multiple",
-        "plugin APIs that are broken or not working in Folia. As a result, some plugins",
-        "could potentially run into issues because of the API being restored, and the plugin",
-        "not expecting said API to be restored or even working.",
-        "This option disables those fixes, so plugin compatibility will be maintained."
+        "Controls how quickly waypoint updates fall off with distance between players.",
+        "Higher values mean updates stay frequent even across large distances, while lower values make them rarer.",
+        "4000.0 is a nice balance, far enough to avoid spamming updates, but not so far that things feel desynced.",
+        "",
+        "You can test this via https://www.desmos.com/calculator/k83i3ensfm where Y is the probability, S is the scale,",
+        "and D is the distance.",
+        "Note: teleportation forces waypoint updates, and ignores this formula."
     })
-    public boolean pluginCompatibilityMode = true;
+    public double waypointUpdateScale = 4000.0D;
 
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         return new Json5Builder<T>()
