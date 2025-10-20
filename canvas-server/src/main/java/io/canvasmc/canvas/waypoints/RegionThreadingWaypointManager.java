@@ -2,6 +2,7 @@ package io.canvasmc.canvas.waypoints;
 
 import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 import ca.spottedleaf.moonrise.common.util.TickThread;
+import io.canvasmc.canvas.Config;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -23,8 +24,24 @@ import org.jetbrains.annotations.NotNull;
  */
 public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
-    // TODO - define by config?
-    private static final double SCALE = 4000.0;
+    /**
+     * A rough distance scale that defines how often waypoint updates happen between faraway players.
+     * <p>
+     * The idea here is simple enough: as players get farther apart, updates become less frequent.
+     * This system works great for region threading, where players are usually scattered across huge distances.
+     * <br><br>
+     * In practice, it's used by {@link #shouldScheduleBasedOnDistance(ServerPlayer, ServerPlayer)} like this:
+     * <pre>{@code
+     * probability = 1 / (1 + (distance / SCALE)^2)
+     * }</pre>
+     * That means a player right next to you almost always triggers an update, while someone thousands of blocks away
+     * might only do so occasionally — depending on how unlucky (or lucky) their random roll is.
+     * <br><br>
+     * A value of {@code 4000.0} is a decent middle ground. It avoids constant update spam across regions,
+     * but still keeps nearby players synced up. The ideal value probably depends on your server’s density
+     * and how forgiving you want the update delay to be.
+     */
+    private static final double SCALE = Config.INSTANCE.waypointUpdateScale;
 
     private final MultiThreadedQueue<WaypointTransmitter> waypoints = new MultiThreadedQueue<>();
     private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
