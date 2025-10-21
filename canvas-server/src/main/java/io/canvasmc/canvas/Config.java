@@ -632,6 +632,9 @@ public class Config {
     })
     public double waypointUpdateScale = 4000.0D;
 
+    @Comment("Whether to use an alternative autosave implementation for region-threading")
+    public boolean optimizedAutoSave = false;
+
     private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
         return new Json5Builder<T>()
             .header("""
