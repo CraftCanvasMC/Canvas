@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/NaturalSpawner.java
 +++ b/net/minecraft/world/level/NaturalSpawner.java
-@@ -149,7 +_,19 @@
+@@ -149,8 +_,59 @@
          return list;
      }
  
@@ -14,29 +14,101 @@
 +                - Use optimized random source for getting the random pos between through thread-unsafe randoms in regionized data
 +                - Use optimized random source for generalized usage of randoms
 +                - Reduce chunk lookups
++                - Intervals configuration
++                - Reuse objects
 +         */
 +        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
 +            regionizedWorldData.getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
-+    // Canvas end - optimize natural spawning
++        final LevelChunk.SpawningIntervals counters = chunk.canvas$localNatSpawnIntervals;
++        final io.canvasmc.canvas.Config.SpawningIntervals config = io.canvasmc.canvas.Config.INSTANCE.naturalMobSpawnIncrements;
          for (MobCategory mobCategory : categories) {
++            boolean skip = false;
++            switch (mobCategory) {
++                case MONSTER -> {
++                    if (++counters.monster < config.monster) skip = true;
++                    else counters.monster = 0;
++                }
++                case CREATURE -> {
++                    if (++counters.creature < config.creature) skip = true;
++                    else counters.creature = 0;
++                }
++                case AMBIENT -> {
++                    if (++counters.ambient < config.ambient) skip = true;
++                    else counters.ambient = 0;
++                }
++                case AXOLOTLS -> {
++                    if (++counters.axolotls < config.axolotls) skip = true;
++                    else counters.axolotls = 0;
++                }
++                case UNDERGROUND_WATER_CREATURE -> {
++                    if (++counters.undergroundWaterCreature < config.undergroundWaterCreature) skip = true;
++                    else counters.undergroundWaterCreature = 0;
++                }
++                case WATER_CREATURE -> {
++                    if (++counters.waterCreature < config.waterCreature) skip = true;
++                    else counters.waterCreature = 0;
++                }
++                case WATER_AMBIENT -> {
++                    if (++counters.waterAmbient < config.waterAmbient) skip = true;
++                    else counters.waterAmbient = 0;
++                }
++                default -> {
++                }
++            }
++            if (skip) continue;
++            Player nearest = null;
++        // Canvas end - optimize natural spawning
              // Paper start - Optional per player mob spawns
              final boolean canSpawn;
-@@ -164,8 +_,7 @@
+             int maxSpawns = Integer.MAX_VALUE;
+@@ -162,16 +_,37 @@
+                     limit = level.getWorld().getSpawnLimit(spawnCategory);
+                 }
  
-                 // Apply per-player limit
+-                // Apply per-player limit
++                // Canvas start - optimize natural spawning
                  int minDiff = Integer.MAX_VALUE;
 -                final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
 -                    level.moonrise$getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
-+                // Canvas - optimize natural spawning - don't keep calling this, we can just call this once...
++                double nearestDistSq = Double.MAX_VALUE;
++
                  if (inRange != null) {
                      final net.minecraft.server.level.ServerPlayer[] backingSet = inRange.getRawDataUnchecked();
++                    final int chunkX = chunk.getPos().x;
++                    final int chunkZ = chunk.getPos().z;
++                    final double centerX = (chunkX << 4) + 8.0;
++                    final double centerZ = (chunkZ << 4) + 8.0;
++
                      for (int k = 0, len = inRange.size(); k < len; k++) {
+-                        minDiff = Math.min(limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory), minDiff);
++                        final net.minecraft.server.level.ServerPlayer player = backingSet[k];
++
++                        // dist^2 to chunk
++                        final double dx = player.getX() - centerX;
++                        final double dz = player.getZ() - centerZ;
++                        final double distSq = dx * dx + dz * dz;
++
++                        if (distSq < nearestDistSq) {
++                            nearestDistSq = distSq;
++                            nearest = player;
++                        }
++
++                        final int diff = limit - level.getChunkSource().chunkMap.getMobCountNear(player, mobCategory);
++                        if (diff < minDiff) {
++                            minDiff = diff;
++                        }
+                     }
+                 }
++                // Canvas end - optimize natural spawning
+ 
+                 maxSpawns = (minDiff == Integer.MAX_VALUE) ? 0 : minDiff;
+                 canSpawn = maxSpawns > 0;
 @@ -180,7 +_,7 @@
              }
              if (canSpawn) {
                  spawnCategoryForChunk(mobCategory, level, chunk, spawnState::canSpawn, spawnState::afterSpawn,
 -                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null);
-+                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null, regionizedWorldData); // Canvas - optimize natural spawning
++                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null, regionizedWorldData, nearest, inRange); // Canvas - optimize natural spawning
                  // Paper end - Optional per player mob spawns
              }
          }
@@ -45,18 +117,18 @@
      ) {
          // Paper start - Optional per player mob spawns
 -        spawnCategoryForChunk(category, level, chunk, filter, callback, Integer.MAX_VALUE, null);
-+        spawnCategoryForChunk(category, level, chunk, filter, callback, Integer.MAX_VALUE, null, level.getCurrentWorldData()); // Canvas - optimize natural spawning - don't pass this, we don't use this method anyway...
++        spawnCategoryForChunk(category, level, chunk, filter, callback, Integer.MAX_VALUE, null, level.getCurrentWorldData(), null, null); // Canvas - optimize natural spawning - don't pass this, we don't use this method anyway...
      }
      public static void spawnCategoryForChunk(
          MobCategory category, ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final Consumer<Entity> trackEntity
-+        , io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData // Canvas - optimize natural spawning
++        , io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData, Player nearest, ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange // Canvas - optimize natural spawning
      ) {
          // Paper end - Optional per player mob spawns
 -        BlockPos randomPosWithin = getRandomPosWithin(level, chunk);
 +        BlockPos randomPosWithin = getRandomPosWithin(level, chunk, regionizedWorldData); // Canvas - optimize natural spawning
          if (randomPosWithin.getY() >= level.getMinY() + 1) {
 -            spawnCategoryForPosition(category, level, chunk, randomPosWithin, filter, callback, maxSpawns, trackEntity); // Paper - Optional per player mob spawns
-+            spawnCategoryForPosition(category, level, chunk, randomPosWithin, filter, callback, maxSpawns, trackEntity, regionizedWorldData); // Paper - Optional per player mob spawns
++            spawnCategoryForPosition(category, level, chunk, randomPosWithin, filter, callback, maxSpawns, trackEntity, regionizedWorldData, nearest, inRange); // Paper - Optional per player mob spawns
          }
      }
  
@@ -65,11 +137,11 @@
          NaturalSpawner.AfterSpawnCallback callback
      ) {
 -        spawnCategoryForPosition(category, level, chunk, pos, filter, callback, Integer.MAX_VALUE, null);
-+        spawnCategoryForPosition(category, level, (LevelChunk) chunk, pos, filter, callback, Integer.MAX_VALUE, null, level.getCurrentWorldData()); // Canvas - optimize natural spawning
++        spawnCategoryForPosition(category, level, (LevelChunk) chunk, pos, filter, callback, Integer.MAX_VALUE, null, level.getCurrentWorldData(), null, null); // Canvas - optimize natural spawning
      }
      public static void spawnCategoryForPosition(
 -        MobCategory category, ServerLevel level, ChunkAccess chunk, BlockPos pos, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final @Nullable Consumer<Entity> trackEntity
-+        MobCategory category, ServerLevel level, LevelChunk chunk, BlockPos pos, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final @Nullable Consumer<Entity> trackEntity, io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData // Canvas - optimize natural spawning
++        MobCategory category, ServerLevel level, LevelChunk chunk, BlockPos pos, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final @Nullable Consumer<Entity> trackEntity, io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData, Player nearest, ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange // Canvas - optimize natural spawning
      ) {
          // Paper end - Optional per player mob spawns
          StructureManager structureManager = level.structureManager();
@@ -94,7 +166,7 @@
  
              for (int i1 = 0; i1 < 3; i1++) {
                  int x = pos.getX();
-@@ -245,33 +_,37 @@
+@@ -245,36 +_,40 @@
                  int i2 = 6;
                  MobSpawnSettings.SpawnerData spawnerData = null;
                  SpawnGroupData spawnGroupData = null;
@@ -114,7 +186,8 @@
                      mutableBlockPos.set(x, y, z);
                      double d = x + 0.5;
                      double d1 = z + 0.5;
-                     Player nearestPlayer = level.getNearestPlayer(d, y, d1, -1.0, false);
+-                    Player nearestPlayer = level.getNearestPlayer(d, y, d1, -1.0, false);
++                    Player nearestPlayer = nearest == null ? level.getNearestPlayer(d, y, d1, -1.0, false) : nearest; // Canvas - optimize natural spawning
                      if (nearestPlayer != null) {
                          double d2 = nearestPlayer.distanceToSqr(d, y, d1);
 -                        if (level.isLoadedAndInBounds(mutableBlockPos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, mutableBlockPos, d2)) { // Paper - don't load chunks for mob spawn
@@ -138,7 +211,11 @@
 +                            PreSpawnStatus doSpawning = isValidSpawnPostitionForType(level, category, structureManager, generator, spawnerData, mutableBlockPos, d2, chunk); // Canvas - optimize natural spawning
                              // Paper start - per player mob count backoff
                              if (doSpawning == PreSpawnStatus.ABORT || doSpawning == PreSpawnStatus.CANCELLED) {
-                                 level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(mutableBlockPos.getX() >> 4, mutableBlockPos.getZ() >> 4, category);
+-                                level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(mutableBlockPos.getX() >> 4, mutableBlockPos.getZ() >> 4, category);
++                                level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(category, inRange == null ? level.moonrise$getNearbyPlayers().getPlayersByChunk(mutableBlockPos.getX() >> 4, mutableBlockPos.getZ() >> 4, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE) : inRange); // Canvas - optimize natural spawning
+                             }
+                             // Paper end - per player mob count backoff
+                             if (doSpawning == PreSpawnStatus.ABORT) {
 @@ -288,7 +_,7 @@
                                      return;
                                  }
@@ -165,7 +242,7 @@
          }
      }
  
-@@ -350,6 +_,7 @@
+@@ -350,9 +_,11 @@
          MobSpawnSettings.SpawnerData data,
          BlockPos.MutableBlockPos pos,
          double distance
@@ -173,6 +250,18 @@
      ) {
          EntityType<?> entityType = data.type();
          // Paper start - PreCreatureSpawnEvent
++        if (com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent.getHandlerList().getRegisteredListeners().length != 0) { // Canvas - optimize natural spawning
+         com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event = new com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent(
+                 org.bukkit.craftbukkit.util.CraftLocation.toBukkit(pos, level),
+                 org.bukkit.craftbukkit.entity.CraftEntityType.minecraftToBukkit(entityType), org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL
+@@ -363,6 +_,7 @@
+             }
+             return PreSpawnStatus.CANCELLED;
+         }
++        } // Canvas - optimize natural spawning
+         final boolean success = entityType.getCategory() != MobCategory.MISC
+         // Paper end - PreCreatureSpawnEvent
+             && (
 @@ -370,7 +_,7 @@
                      || !(distance > entityType.getCategory().getDespawnDistance() * entityType.getCategory().getDespawnDistance())
              )
