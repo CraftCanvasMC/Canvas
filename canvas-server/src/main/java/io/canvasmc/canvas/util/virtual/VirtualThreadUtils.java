@@ -6,7 +6,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.function.Consumer;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -23,7 +22,7 @@ public class VirtualThreadUtils {
             throw new IllegalStateException("Unable to run virtual thread service on this version of Java");
         }
         SERVICE = service;
-        Config.LOGGER.info(Component.text("Virtual thread service instantiated and ready for run", NamedTextColor.GREEN));
+        Config.LOGGER.info(Component.text("Instantiated Virtual Thread Service successfully"));
     }
 
     public static @NotNull ThreadFactory buildFactory(@NotNull Consumer<Thread.Builder.OfVirtual> modifier) {

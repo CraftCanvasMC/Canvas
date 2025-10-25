@@ -1,0 +1,84 @@
+--- a/net/minecraft/server/network/ServerConnectionListener.java
++++ b/net/minecraft/server/network/ServerConnectionListener.java
+@@ -48,12 +_,31 @@
+ 
+ public class ServerConnectionListener {
+     private static final Logger LOGGER = LogUtils.getLogger();
++    // Canvas start - bump netty
++    /*
+     public static final Supplier<NioEventLoopGroup> SERVER_EVENT_GROUP = Suppliers.memoize(
+         () -> new NioEventLoopGroup(0, new ThreadFactoryBuilder().setNameFormat("Netty Server IO #%d").setDaemon(true).setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(LOGGER)).build()) // Paper
+     );
+     public static final Supplier<EpollEventLoopGroup> SERVER_EPOLL_EVENT_GROUP = Suppliers.memoize(
+         () -> new EpollEventLoopGroup(0, new ThreadFactoryBuilder().setNameFormat("Netty Epoll Server IO #%d").setDaemon(true).setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(LOGGER)).build()) // Paper
+-    );
++    );*/
++    public static final Supplier<io.netty.channel.IoHandlerFactory> NIO_FACTORY = io.netty.channel.nio.NioIoHandler::newFactory;
++    public static final Supplier<io.netty.channel.IoHandlerFactory> EPOLL_FACTORY = io.netty.channel.epoll.EpollIoHandler::newFactory;
++    public static final Supplier<io.netty.channel.IoHandlerFactory> IO_URING_FACTORY = io.netty.channel.uring.IoUringIoHandler::newFactory;
++    public static final Supplier<io.netty.channel.IoHandlerFactory> KQUEUE_FACTORY = io.netty.channel.kqueue.KQueueIoHandler::newFactory;
++
++    public EventLoopGroup createEventLoopGroup(final String name, final Supplier<io.netty.channel.IoHandlerFactory> ioHandlerFactorySupplier) {
++        LOGGER.info("Using Netty {} channel type", name);
++        return new io.netty.channel.MultiThreadIoEventLoopGroup(
++            0,
++            new ThreadFactoryBuilder().setNameFormat("Netty " + name + " Server IO #%d")
++                .setDaemon(true)
++                .setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(LOGGER))
++                .build(),
++            ioHandlerFactorySupplier.get()
++        );
++    }
++    // Canvas end - bump netty
+     /**
+      * Reference to the MinecraftServer object.
+      */
+@@ -102,7 +_,23 @@
+         synchronized (this.channels) {
+             Class<? extends io.netty.channel.ServerChannel> clazz; // Paper - Unix domain socket support
+             EventLoopGroup eventLoopGroup;
+-            if (Epoll.isAvailable() && this.server.isEpollEnabled()) {
++            // Canvas start - bump netty
++            if (io.netty.channel.uring.IoUring.isAvailable() && this.server.isIoUringEnabled()) {
++                if (address instanceof io.netty.channel.unix.DomainSocketAddress) {
++                    clazz = io.netty.channel.uring.IoUringServerDomainSocketChannel.class;
++                } else {
++                    clazz = io.netty.channel.uring.IoUringServerSocketChannel.class;
++                }
++                eventLoopGroup = createEventLoopGroup("IoUring", IO_URING_FACTORY);
++            } else if (io.netty.channel.kqueue.KQueue.isAvailable() && this.server.isKqueueEnabled()) {
++                if (address instanceof io.netty.channel.unix.DomainSocketAddress) {
++                    clazz = io.netty.channel.kqueue.KQueueServerDomainSocketChannel.class;
++                } else {
++                    clazz = io.netty.channel.kqueue.KQueueServerSocketChannel.class;
++                }
++                eventLoopGroup = createEventLoopGroup("Kqueue", KQUEUE_FACTORY);
++            } else if (Epoll.isAvailable() && this.server.isEpollEnabled()) {
++            // Canvas end - bump netty
+                 // Paper start - Unix domain socket support
+                 if (address instanceof io.netty.channel.unix.DomainSocketAddress) {
+                     clazz = io.netty.channel.epoll.EpollServerDomainSocketChannel.class;
+@@ -110,12 +_,10 @@
+                 clazz = EpollServerSocketChannel.class;
+                 }
+                 // Paper end - Unix domain socket support
+-                eventLoopGroup = SERVER_EPOLL_EVENT_GROUP.get();
+-                LOGGER.info("Using epoll channel type");
++                eventLoopGroup = createEventLoopGroup("Epoll", EPOLL_FACTORY); // Canvas - bump netty
+             } else {
+                 clazz = NioServerSocketChannel.class;
+-                eventLoopGroup = SERVER_EVENT_GROUP.get();
+-                LOGGER.info("Using default channel type");
++                eventLoopGroup = createEventLoopGroup("Nio", NIO_FACTORY); // Canvas - bump netty
+             }
+ 
+             // Paper start - Warn people with console access that HAProxy is in use.
+@@ -233,7 +_,7 @@
+                         }
+                     }
+                 )
+-                .group(SERVER_EVENT_GROUP.get())
++                // Canvas - bump netty
+                 .localAddress(LocalAddress.ANY)
+                 .bind()
+                 .syncUninterruptibly();

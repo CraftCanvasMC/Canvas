@@ -16,7 +16,6 @@ import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
-import io.canvasmc.canvas.util.GsonTextFormatter;
 import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
 import java.io.IOException;
 import java.io.StringReader;
@@ -26,10 +25,8 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.random.RandomGeneratorFactory;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.minecraft.Util;
 import net.minecraft.core.registries.Registries;
@@ -43,9 +40,105 @@ import org.yaml.snakeyaml.Yaml;
 public class Config {
     public static boolean ENABLE_FASTER_RANDOM = true;
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
-    public static Config INSTANCE;
+    // Note: this field should never be used during POST, use 'context.configuration()' instead
+    public static final Config INSTANCE;
+
+    static {
+        LOGGER.info("Instantiating Canvas configuration");
+        long startNanos = System.nanoTime();
+        INSTANCE = ConfigurationManager.register(Config.class, Config::buildSerializer).getConfig();
+        LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
+        // init parallel search radius iteration early
+        //noinspection ResultOfMethodCallIgnored
+        ParallelSearchRadiusIteration.getSearchIteration(MoonriseConstants.MAX_VIEW_DISTANCE);
+    }
+
+    private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
+        return new Json5Builder<T>()
+            .header("""
+                /*
+                  This is the main Canvas configuration file
+                  All configuration options here are made for vanilla-compatibility
+                  and not for performance. Settings must be configured specific
+                  to your hardware and server type. If you have questions
+                  join our discord at https://canvasmc.io/discord
+                  As a general rule of thumb, do NOT change a setting if
+                  you don't know what it does! If you don't know, ask!
+                
+                  This configuration file is based off of Json5, a Json
+                  syntax with Java-like comment capabilities. You are
+                  able to add your own custom comments to the configuration
+                  however there must always be 1 comment per option, however you
+                  may add as many comments as you want in the "header", or above
+                  the root json block or else your comment may be deleted. Proper
+                  indentation is forced, restarting the server will reformat your
+                  comment to include proper indentation and remove trailing
+                  whitespaces.
+                
+                  You may add comments to the header, here, remove comments anywhere,
+                  or replace them wholesale. If you have any questions, ask in our
+                  discord server.
+                */
+                """)
+            .classOf(configClass)
+            .post(context -> {
+                VirtualThreadUtils.init();
+
+                // SIMD
+                try {
+                    SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
+                } catch (NoClassDefFoundError | Exception ignored) {
+                    ignored.printStackTrace();
+                }
+
+                if (SIMDDetection.isEnabled) {
+                    LOGGER.info("SIMD operations detected as functional. Will replace some operations with faster versions.");
+                } else {
+                    LOGGER.warn("SIMD operations are available for your server, but are not configured!");
+                    LOGGER.warn("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
+                    LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
+                    LOGGER.warn("Debug: Java: " + System.getProperty("java.version") + ", test run: " + SIMDDetection.testRun);
+                }
+
+                try {
+                    RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
+                } catch (Throwable throwable) {
+                    LOGGER.error("Canvas' faster random impl is not supported by your VM, falling back to legacy random");
+                    Config.ENABLE_FASTER_RANDOM = false;
+                }
+            }).build();
+    }
+
+    public static @NotNull Config getDefault() {
+        // TODO - remove this on next Minecraft update. -- we are doing this for 1.22
+        final Path path = Paths.get("./canvas-server.yml");
+        if (Files.exists(path)) {
+            LOGGER.info("Old configuration detected, migrating.");
+            try {
+                Yaml yaml = new Yaml();
+                String yamlContent = Files.readString(path);
+                String[] lines = yamlContent.split("\n", 2);
+                String body = lines.length > 1 ? lines[1] : "";
+
+                JsonObject object = new JsonObject();
+                Map<String, Object> yamnlMap = yaml.load(new StringReader(body));
+                io.canvasmc.canvas.configuration.writer.Util.migrate(
+                    yamnlMap, object
+                );
+                Files.delete(path);
+                LOGGER.info("Migration complete, reparsing");
+                return Jankson.builder().build().fromJson(object, Config.class);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return new Config();
+    }
+
+    /* START CONFIGURATION */
 
     public Scheduler scheduler = new Scheduler();
+
     public static class Scheduler {
         @Comment({
             "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
@@ -63,6 +156,7 @@ public class Config {
     }
 
     public Chunks chunks = new Chunks();
+
     public static class Chunks {
         @Comment("Use euclidean distance squared for chunk task ordering. Makes the world load in what appears a circle rather than a diamond")
         public boolean useEuclideanDistanceSquared = true;
@@ -112,6 +206,7 @@ public class Config {
         public boolean useFasterStructureGenFutureSequencing = false;
 
         public Structures structures = new Structures();
+
         public static class Structures {
             @Comment({
                 "Whether to use an alternative strategy to make structure layouts generate slightly faster than",
@@ -133,6 +228,7 @@ public class Config {
     }
 
     public Networking networking = new Networking();
+
     public static class Networking {
         @Comment({
             "The ClientboundSetEntityMotionPacket can often cause high network (Netty) usage and consumes (on larger production servers)",
@@ -161,10 +257,14 @@ public class Config {
 
         @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
         public boolean asyncProtocolSwitch = false;
+
+        @Comment("The networking IO model for netty")
+        public NetworkIoModel networkIoModel = NetworkIoModel.EPOLL;
     }
 
     @Comment("Configurations for enabling virtual threads for different thread pool executors")
     public VirtualThreads virtualThreads = new VirtualThreads();
+
     public static class VirtualThreads {
         @Comment("Enables virtual thread usage for the async scheduler executor")
         public boolean asyncScheduler = false;
@@ -233,6 +333,7 @@ public class Config {
 
     // TODO - check these on minecraft updates
     public Fixes fixes = new Fixes();
+
     public static class Fixes {
         @Comment({
             "Fixes MC-298464 - https://bugs.mojang.com/browse/MC/issues/MC-298464",
@@ -408,6 +509,7 @@ public class Config {
     }
 
     public Containers containers = new Containers();
+
     public static class Containers {
         @Comment("The amount of rows for the barrel block")
         @RangeValidator.Range(from = 1, to = 6, inclusive = true)
@@ -444,6 +546,7 @@ public class Config {
     public double itemEntitySpreadFactor = 1.0D;
 
     public Projectiles projectiles = new Projectiles();
+
     public static class Projectiles {
         @Comment("Controls how many chunks are allowed to be sync loaded by projectiles in a tick.")
         public int maxProjectileLoadsPerTick = 10;
@@ -475,6 +578,7 @@ public class Config {
     public double skeletonAimInaccuracy = 14.0D;
 
     public Combat combat = new Combat();
+
     public static class Combat {
         @Comment("Restores 1.8 pvp mechanics for attack delays")
         public boolean disableAttackHitDelay = false;
@@ -486,6 +590,7 @@ public class Config {
         public boolean imitateSwordBlocking = false;
 
         public Mace mace = new Mace();
+
         public static class Mace {
             @Comment("Removes the fall distance amplifier with maces")
             public boolean ignoreFallDistance = false;
@@ -534,6 +639,7 @@ public class Config {
     public boolean useDirectRandomImpl = false;
 
     public Spawner spawner = new Spawner();
+
     public static class Spawner {
         @Comment("The spawner minimum spawn delay")
         public int minSpawnDelay = 200;
@@ -564,11 +670,6 @@ public class Config {
     @Comment("Disables all criterion triggers. Advancements will not work!")
     public boolean disableCriterionTrigger = false;
 
-    @NamespacedKeyValidator.NamespacedKey
-    @Comment("Defines non-tickable entities. This is defined by a leniently-parsed resource location associated with the entity type")
-    public List<String> nonTickableEntities = new ArrayList<>();
-    public record EntityNonTickableConf(String raw, ResourceLocation parsed) {}
-
     @Comment("Makes crops ignore sunlight requirements when planting")
     public boolean cropsIgnoreLightCheck = false;
 
@@ -580,6 +681,7 @@ public class Config {
 
     @Comment("It is recommended to enable these options, as the client displays most of these particles already, so the server-side particle logic is not needed")
     public Particles particles = new Particles();
+
     public static class Particles {
         @Comment("Disables entity sprinting particles")
         public boolean disableSprintParticles = false;
@@ -637,6 +739,7 @@ public class Config {
         "This can create \"pauses\" between trying to spawn mobs per-chunk"
     })
     public SpawningIntervals naturalMobSpawnIncrements = new SpawningIntervals();
+
     public static class SpawningIntervals {
         public int monster = 0;
         public int creature = 0;
@@ -645,105 +748,5 @@ public class Config {
         public int undergroundWaterCreature = 0;
         public int waterCreature = 0;
         public int waterAmbient = 0;
-    }
-
-    private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
-        return new Json5Builder<T>()
-            .header("""
-                /*
-                  This is the main Canvas configuration file
-                  All configuration options here are made for vanilla-compatibility
-                  and not for performance. Settings must be configured specific
-                  to your hardware and server type. If you have questions
-                  join our discord at https://canvasmc.io/discord
-                  As a general rule of thumb, do NOT change a setting if
-                  you don't know what it does! If you don't know, ask!
-                
-                  This configuration file is based off of Json5, a Json
-                  syntax with Java-like comment capabilities. You are
-                  able to add your own custom comments to the configuration
-                  however there must always be 1 comment per option, however you
-                  may add as many comments as you want in the "header", or above
-                  the root json block or else your comment may be deleted. Proper
-                  indentation is forced, restarting the server will reformat your
-                  comment to include proper indentation and remove trailing
-                  whitespaces.
-                
-                  You may add comments to the header, here, remove comments anywhere,
-                  or replace them wholesale. If you have any questions, ask in our
-                  discord server.
-                */
-                """)
-            .classOf(configClass)
-            .post(context -> {
-                INSTANCE = context.configuration();
-                // build and print config tree.
-                GsonTextFormatter formatter = new GsonTextFormatter(4);
-                VirtualThreadUtils.init();
-                LOGGER.info(Component.text("Printing configuration tree:").appendNewline().append(formatter.apply(context.contents())));
-
-                // SIMD
-                try {
-                    SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
-                } catch (NoClassDefFoundError | Exception ignored) {
-                    ignored.printStackTrace();
-                }
-
-                if (SIMDDetection.isEnabled) {
-                    LOGGER.info("SIMD operations detected as functional. Will replace some operations with faster versions.");
-                } else {
-                    LOGGER.warn("SIMD operations are available for your server, but are not configured!");
-                    LOGGER.warn("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
-                    LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
-                    LOGGER.warn("Debug: Java: " + System.getProperty("java.version") + ", test run: " + SIMDDetection.testRun);
-                }
-
-                try {
-                    RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
-                } catch (Throwable throwable) {
-                    LOGGER.error("Canvas' faster random impl is not supported by your VM, falling back to legacy random");
-                    Config.ENABLE_FASTER_RANDOM = false;
-                }
-            }).build();
-    }
-
-    /**
-     * Instantiates the CanvasMC configuration
-     * @return the loaded configuration
-     */
-    public static Config init() {
-        long startNanos = System.nanoTime();
-        ConfigurationManager.register(Config.class, Config::buildSerializer);
-        LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
-        // init parallel search radius iteration early
-        //noinspection ResultOfMethodCallIgnored
-        ParallelSearchRadiusIteration.getSearchIteration(MoonriseConstants.MAX_VIEW_DISTANCE);
-        return INSTANCE;
-    }
-
-    public static @NotNull Config getDefault() {
-        // TODO - remove this on next Minecraft update. -- we are doing this for 1.22
-        final Path path = Paths.get("./canvas-server.yml");
-        if (Files.exists(path)) {
-            LOGGER.info("Old configuration detected, migrating.");
-            try {
-                Yaml yaml = new Yaml();
-                String yamlContent = Files.readString(path);
-                String[] lines = yamlContent.split("\n", 2);
-                String body = lines.length > 1 ? lines[1] : "";
-
-                JsonObject object = new JsonObject();
-                Map<String, Object> yamnlMap = yaml.load(new StringReader(body));
-                io.canvasmc.canvas.configuration.writer.Util.migrate(
-                    yamnlMap, object
-                );
-                Files.delete(path);
-                LOGGER.info("Migration complete, reparsing");
-                return Jankson.builder().build().fromJson(object, Config.class);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-        return new Config();
     }
 }
