@@ -309,9 +309,6 @@ public class Config {
     @Comment("Disables Minecraft chat verification ordering")
     public boolean disableChatVerificationOrder = false;
 
-    @Comment("Restores vanilla loading and unloading behavior broken by Folia")
-    public boolean restoreVanillaEnderPearlBehavior = false;
-
     @Comment("Enables snowballs being able to knockback players")
     public boolean snowballCanKnockback = false;
 
