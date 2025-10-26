@@ -3,7 +3,7 @@ package io.canvasmc.canvas.waypoints;
 import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import io.canvasmc.canvas.Config;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -103,7 +103,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     // Note: this should be scheduled on 'player'
     private void updateWaypoint(WaypointTransmitter waypoint, @NotNull ServerPlayer player) {
-        final Object2ObjectOpenHashMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.activeWaypoints;
+        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
         final WaypointTransmitter.Connection conn = map.get(waypoint);
 
         if (conn != null) {
@@ -130,7 +130,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     // Note: this should be scheduled on the 'player'
     private void disconnectWaypoint(WaypointTransmitter waypoint, @NotNull ServerPlayer player) {
-        final Object2ObjectOpenHashMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.activeWaypoints;
+        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
         final WaypointTransmitter.Connection conn = map.remove(waypoint);
         if (conn != null) conn.disconnect();
     }
@@ -154,7 +154,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     // Note: this should be called on the 'player'
     public void updatePlayer(@NotNull ServerPlayer player) {
         if (isLocatorBarDisabled()) return;
-        final Object2ObjectOpenHashMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.activeWaypoints;
+        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
 
         for (Map.Entry<WaypointTransmitter, WaypointTransmitter.Connection> entry : map.object2ObjectEntrySet()) {
             updateConnection(player, entry.getKey(), entry.getValue());
@@ -191,7 +191,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     // Note: this should be scheduled on the 'player'
     private static void breakConnection(@NotNull ServerPlayer player) {
-        final Object2ObjectOpenHashMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.activeWaypoints;
+        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
         for (WaypointTransmitter.Connection conn : map.values()) {
             conn.disconnect();
         }
@@ -220,7 +220,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     private void createConnection(ServerPlayer player, WaypointTransmitter waypoint) {
         if (player == waypoint) return;
 
-        final Object2ObjectOpenHashMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.activeWaypoints;
+        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
 
         waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection -> {
             map.put(waypoint, connection);
@@ -235,7 +235,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     private void updateConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection connection) {
         if (player == waypoint) return;
 
-        final Object2ObjectOpenHashMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.activeWaypoints;
+        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
 
         if (!connection.isBroken()) {
             connection.update();
