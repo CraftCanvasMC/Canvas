@@ -47,7 +47,7 @@
 
 ```bash
 ./gradlew applyAllPatches
-./gradlew buildMojmapPublisherJar
+./gradlew createMojmapPublisherJar
 ./gradlew runDevServer
 ```
 
