@@ -90,16 +90,12 @@
  
      public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
      private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
-@@ -886,71 +_,91 @@
+@@ -886,71 +_,73 @@
      // Paper start - optimise random ticking
      private final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource.INSTANCE; // Folia - region threading
  
 -    private void optimiseRandomTick(final LevelChunk chunk, final int tickSpeed) {
 +    // Canvas start - optimize random tick
-+    private static final int SECTION_FILTER_BITS_STEP = 2;
-+    private static final int SECTION_FILTER_BITS_MAX = 60;
-+    private static final long SECTION_FILTER_MASK = 0b11L;
-+
 +    // the modifications in this method essentially reduce tick volume drastically without
 +    // any sort of bias or skipping important updates, and significantly reduce RNG calls
 +    private void optimiseRandomTick(final LevelChunk chunk, final int tickSpeed, io.papermc.paper.threadedregions.RegionizedWorldData worldData) {
@@ -115,9 +111,6 @@
  
 +        final net.minecraft.world.level.levelgen.BitRandomSource random = worldData.simpleUnsafeLocalRandom;
 +
-+        long cacheRandom = random.nextLong();
-+        int bitOffset = 0;
-+
          for (int sectionIndex = 0, sectionsLen = sections.length; sectionIndex < sectionsLen; sectionIndex++) {
 -            final int offsetY = (sectionIndex + minSection) << 4;
              final LevelChunkSection section = sections[sectionIndex];
@@ -127,41 +120,33 @@
              }
  
 -            final ca.spottedleaf.moonrise.common.list.ShortList tickList = ((ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection)section).moonrise$getTickingBlockList();
-+            if (bitOffset != SECTION_FILTER_BITS_MAX) {
-+                bitOffset += SECTION_FILTER_BITS_STEP;
-+            } else {
-+                bitOffset = 0;
-+                cacheRandom = random.nextLong();
-+            }
-+
-+            if ((cacheRandom & (SECTION_FILTER_MASK << bitOffset)) != 0L) {
-+                continue;
-+            }
-+
-+            final int offsetY = (sectionIndex + minSection) << 4;
-+            final var states = section.states;
-+            final var tickList = ((ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection)section).moonrise$getTickingBlockList();
-+
-+            // try and reduce RNG calls
-+            long rndCache = random.nextLong();
-+            int rndBits = 0;
- 
-             for (int i = 0; i < tickSpeed; ++i) {
-+                if (rndBits < 12) {
-+                    rndCache = random.nextLong();
-+                    rndBits = 64;
-+                }
-+                rndBits -= 12;
-+
-                 final int tickingBlocks = tickList.size();
+-
+-            for (int i = 0; i < tickSpeed; ++i) {
+-                final int tickingBlocks = tickList.size();
 -                final int index = simpleRandom.nextInt() & ((16 * 16 * 16) - 1);
-+                if (tickingBlocks == 0) continue;
- 
+-
 -                if (index >= tickingBlocks) {
 -                    // most of the time we fall here
 -                    continue;
--                }
-+                final int index = (int)(rndCache >>> rndBits) & 0xFFF;
++            final var states = section.states;
++            final var tickList = ((ca.spottedleaf.moonrise.patches.block_counting.BlockCountingChunkSection)section).moonrise$getTickingBlockList();
++            final int tickingBlocks = tickList.size();
++            if (tickingBlocks == 0) continue;
++
++            final int offsetY = (sectionIndex + minSection) << 4;
++
++            // cached rng for block selection
++            long rndCache = random.nextLong();
++            int bitsLeft = 64;
++
++            for (int i = 0; i < tickSpeed; i++) {
++                if (bitsLeft < 12) { // need 12 bits for 0-4095
++                    rndCache = random.nextLong();
++                    bitsLeft = 64;
+                 }
++                bitsLeft -= 12;
++
++                final int index = (int)((rndCache >>> bitsLeft) & 0xFFF);
 +                if (index >= tickingBlocks) continue;
  
                  final int location = (int)tickList.getRaw(index) & 0xFFFF;
