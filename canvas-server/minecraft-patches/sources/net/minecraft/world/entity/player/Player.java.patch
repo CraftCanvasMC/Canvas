@@ -1,13 +1,210 @@
 --- a/net/minecraft/world/entity/player/Player.java
 +++ b/net/minecraft/world/entity/player/Player.java
-@@ -223,6 +_,7 @@
+@@ -223,6 +_,195 @@
      public boolean affectsSpawning = true; // Paper - Affects Spawning API
      public net.kyori.adventure.util.TriState flyingFallDamage = net.kyori.adventure.util.TriState.NOT_SET; // Paper - flying fall damage
  	 public int sixRowEnderchestSlotCount = -1; // Purpur - Barrels and enderchests 6 rows
 +    public boolean canvas$isTemporarilyBlocking = false; // Canvas - implement sword blocking
++    // Canvas start - entity culling
++    private static final byte UNSET = (byte) -1;
++    private static final byte FALSE = (byte) 0;
++    private static final byte TRUE = (byte) 1;
++    private final it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap cachedIsOpaqueFullCube;
++    private int lastTick = -1;
++
++    public boolean isEntityCulled(Entity entity) {
++        if (entity == this) return false; // if we are the entity(which shouldn't happen, but we check anyway) please render us!
++        if (!((ServerPlayer) this).isRealPlayer) return true; // if we aren't real, don't track!
++
++        if (this.gameMode().getId() == 3) return false; // if we are in spectator, the entity should always render
++
++        if (entity instanceof Player player) {
++            // if the entity is a player, special handling
++            // generally speaking, all players should render, however we need
++            // to account for spectator mode being a thing
++            int otherGm = player.gameMode().getId();
++            // if the other players gamemode is spectator, we can cull them. otherwise, they need to be rendered
++            return otherGm == 3;
++        }
++
++        // Note: Bukkit canSee check is *not* covered. this will never show up here, ever.
++        //       that method is expensive AF, and shouldn't be used in a place where this
++        //       needs to be as lightweight as possible. Bukkit will handle this themselves
++        if (
++            // if entity is glowing we must render, because that can be seen through blocks
++            entity.isCurrentlyGlowing()
++            // skip armor stands being used as markers, they can be tracked
++            || (entity instanceof ArmorStand && entity.isInvisible())
++            // if custom name is always rendering(plugin?), we should render
++            || entity.isCustomNameVisible()
++            // skip display entities, they can be tracked
++            || entity instanceof net.minecraft.world.entity.Display
++        ) {
++            return false;
++        }
++
++        final double distSqr = entity.position.distanceToSqr(this.position);
++
++        if (distSqr < 6) return false; // if they are within 3 blocks, just force-render them
++        if (distSqr >= (64 * 64)) return true; // 64 blocks is good, no need to render beyond that
++
++        // if the bounding box is greater than 20, just render it, no point in trying to cull this thing...
++        final AABB box = entity.getBoundingBox().inflate(0.3);
++        if (box.getXsize() > 20 || box.getYsize() > 20 || box.getZsize() > 20)
++            return false;
++
++        // passed all exceptions, culling time
++        final Vec3 eye = this.getEyePosition(0);
++        return !canSeeAABB(eye.x, eye.y, eye.z, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ);
++    }
++
++    public boolean canSeeAABB(
++        final double eyeX, final double eyeY, final double eyeZ,
++        final double minX, final double minY, final double minZ,
++        final double maxX, final double maxY, final double maxZ
++    ) {
++        // if the AABBs are touching, they are obviously visible
++        if (eyeX >= minX && eyeX <= maxX &&
++            eyeY >= minY && eyeY <= maxY &&
++            eyeZ >= minZ && eyeZ <= maxZ)
++            return true;
++
++        // 8 targets to get all corners in the 3D box
++        final double[][] targets = {
++            {minX, minY, minZ}, {minX, minY, maxZ}, {minX, maxY, minZ}, {minX, maxY, maxZ},
++            {maxX, minY, minZ}, {maxX, minY, maxZ}, {maxX, maxY, minZ}, {maxX, maxY, maxZ}
++        };
++
++        // clear cache every tick
++        if (this.tickCount > this.lastTick) {
++            this.cachedIsOpaqueFullCube.clear();
++            this.lastTick = this.tickCount;
++        }
++
++        for (double[] t : targets) {
++            if (!raycastBlocks(eyeX, eyeY, eyeZ, t[0], t[1], t[2])) {
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    private boolean raycastBlocks(double sx, double sy, double sz, double ex, double ey, double ez) {
++        double dx = ex - sx;
++        double dy = ey - sy;
++        double dz = ez - sz;
++
++        double lenSq = dx * dx + dy * dy + dz * dz;
++        if (lenSq < 1e-9) return false;
++        double invLen = 1.0 / Math.sqrt(lenSq);
++        dx *= invLen; dy *= invLen; dz *= invLen;
++        double maxDist = Math.sqrt(lenSq);
++
++        int bx = (int) Math.floor(sx);
++        int by = (int) Math.floor(sy);
++        int bz = (int) Math.floor(sz);
++
++        final double stepX = dx > 0 ? 1.0 : -1.0;
++        final double stepY = dy > 0 ? 1.0 : -1.0;
++        final double stepZ = dz > 0 ? 1.0 : -1.0;
++
++        double tMaxX = intBound(sx, dx);
++        double tMaxY = intBound(sy, dy);
++        double tMaxZ = intBound(sz, dz);
++
++        final double tDeltaX = Math.abs(1.0 / dx);
++        final double tDeltaY = Math.abs(1.0 / dy);
++        final double tDeltaZ = Math.abs(1.0 / dz);
++
++        double dist = 0.0;
++        final double EPS = 1e-6;
++
++        int lastChunkX = bx >> 4;
++        int lastChunkZ = bz >> 4;
++        net.minecraft.world.level.chunk.LevelChunk access = level().getChunkIfLoaded(lastChunkX, lastChunkZ);
++        while (dist <= maxDist) {
++            long key = ((bx & 67108863L) << 38) | ((by &  4095L)) | ((bz & 67108863L) << 12);
++            byte a;
++            if ((a = cachedIsOpaqueFullCube.get(key)) == UNSET) {
++                int currChunkX = bx >> 4;
++                int currChunkZ = bz >> 4;
++                if (lastChunkX != currChunkX || lastChunkZ != currChunkZ) {
++                    access = level().getChunkIfLoaded(currChunkX, currChunkZ);
++                    lastChunkX = currChunkX;
++                    lastChunkZ = currChunkZ;
++                }
++                if (access != null) {
++                    boolean opaque = isOpaqueFullCube(access, bx, by, bz);
++                    cachedIsOpaqueFullCube.put(key, opaque ? TRUE : FALSE);
++                    if (opaque) return true;
++                } // else | non-opaque
++            } else if (a == TRUE) {
++                return true;
++            } // else | non-opaque
++
++            if (tMaxX < tMaxY) {
++                if (tMaxX < tMaxZ) {
++                    bx += stepX;
++                    dist = tMaxX;
++                    tMaxX += tDeltaX;
++                } else {
++                    bz += stepZ;
++                    dist = tMaxZ;
++                    tMaxZ += tDeltaZ;
++                }
++            } else {
++                if (tMaxY < tMaxZ) {
++                    by += stepY;
++                    dist = tMaxY;
++                    tMaxY += tDeltaY;
++                } else {
++                    bz += stepZ;
++                    dist = tMaxZ;
++                    tMaxZ += tDeltaZ;
++                }
++            }
++
++            if (dist > maxDist + EPS)
++                break;
++        }
++
++        return false;
++    }
++
++    private static double intBound(double s, double ds) {
++        if (ds > 0) {
++            s = s - Math.floor(s);
++            return (1.0 - s) / ds;
++        } else if (ds < 0) {
++            s = s - Math.floor(s);
++            return s / -ds;
++        } else {
++            return Double.POSITIVE_INFINITY;
++        }
++    }
++
++    public boolean isOpaqueFullCube(net.minecraft.world.level.chunk.LevelChunk access, int x, int y, int z) {
++        if (y < this.level().getMinY() || y > this.level().getMaxY()) {
++            return false; // just say we can see the entity ATP
++        } else {
++            BlockState bs = access.getBlockStateFinal(x, y, z);
++            return bs.canOcclude() && bs.isSolidRender();
++        }
++    }
++    // Canvas end - entity culling
  
      // CraftBukkit start
      public boolean fauxSleeping;
+@@ -241,6 +_,8 @@
+         this.inventory = new Inventory(this, this.equipment);
+         this.inventoryMenu = new InventoryMenu(this.inventory, !level.isClientSide, this);
+         this.containerMenu = this.inventoryMenu;
++        this.cachedIsOpaqueFullCube = new it.unimi.dsi.fastutil.longs.Long2ByteOpenHashMap(); // Canvas - entity culling
++        this.cachedIsOpaqueFullCube.defaultReturnValue(UNSET); // Canvas - entity culling
+     }
+ 
+     @Override
 @@ -355,7 +_,7 @@
              this.setPos(d, this.getY(), d1);
          }

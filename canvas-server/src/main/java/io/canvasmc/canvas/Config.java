@@ -239,6 +239,26 @@ public class Config {
         @Comment("Filters entity movement packets to reduce the amount of useless move packets sent")
         public boolean reduceUselessMovePackets = false;
 
+        @Comment({
+            "Canvas has an implementation of entity culling builtin that was made",
+            "to help cut networking bandwidth. However, this has a few pros and cons",
+            "",
+            "Generally, this should only be used if necessary. This implementation creates",
+            "a system where entity tracking contains a culling filter, so if entities cannot",
+            "be seen by a player(via a non-translucent block between the entity and player for",
+            "example), it gets removed from tracking. This also does break Vanilla compat",
+            "to a small degree, where entities may not render as far away, and the issue bellow",
+            "",
+            "This is very good for optimizing networking usage, however this causes issues with",
+            "players with higher ping. The higher the ping, the less smooth this will be.",
+            "Like if you had high ping, and looked around a corner(where an entity is), it may",
+            "take a second for it to show up again. This is just unavoidable with this impl.",
+            "",
+            "Note: players are ignored and will always be tracked no matter what, along with",
+            "some other exceptions, like entities that are glowing and such."
+        })
+        public boolean enableOptimizedEntityTracker = false;
+
         @Comment("When enabled, hides flames on entities with fire resistance")
         public boolean hideFlamesOnEntitiesWithFireResistance = false;
 
