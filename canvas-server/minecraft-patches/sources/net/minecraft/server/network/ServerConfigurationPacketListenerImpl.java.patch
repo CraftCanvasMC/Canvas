@@ -1,35 +1,43 @@
 --- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
-@@ -158,8 +_,9 @@
-     public void handleConfigurationFinished(ServerboundFinishConfigurationPacket packet) {
-         PacketUtils.ensureRunningOnSameThread(packet, this, this.server);
-         this.finishCurrentTask(JoinWorldTask.TYPE);
--        this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
-+        // Canvas start - async connection state switch
- 
-+        Runnable post = () -> {
-         try {
-             PlayerList playerList = this.server.getPlayerList();
-             if (playerList.getPlayer(this.gameProfile.getId()) != null) {
-@@ -247,6 +_,18 @@
-             this.connection.send(new ClientboundDisconnectPacket(DISCONNECT_REASON_INVALID_DATA));
-             this.connection.disconnect(DISCONNECT_REASON_INVALID_DATA);
+@@ -154,11 +_,35 @@
          }
-+        };
-+        if (!io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch) {
-+            this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
-+            post.run();
-+            return;
-+        }
-+        this.connection.canvas$setupOutboundProtocolAsync(
-+            GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())),
-+            () -> {
-+                io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(post);
-+            }, false);
-+        // Canvas end - async connection state switch
      }
  
++    private volatile boolean switchedAlready = false; // Canvas - async protocol switch
      @Override
+     public void handleConfigurationFinished(ServerboundFinishConfigurationPacket packet) {
++        // Canvas start - async protocol switch
++        if (io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch && !switchedAlready) {
++            switchedAlready = true;
++            this.finishCurrentTask(JoinWorldTask.TYPE);
++            this.connection.setupOutboundProtocolAsync(
++                GameProtocols.CLIENTBOUND_TEMPLATE.bind(
++                    RegistryFriendlyByteBuf.decorator(this.server.registryAccess())
++                )
++            ).addListener(unused -> {
++                try {
++                    // just run PacketUtils, this will schedule this to the global tick for us
++                    PacketUtils.ensureRunningOnSameThread(packet, this, this.server);
++                } catch (net.minecraft.server.RunningOnDifferentThreadException | io.papermc.paper.util.ServerStopRejectedExecutionException ignored) {
++                } catch (java.util.concurrent.RejectedExecutionException rejExc) {
++                    this.connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
++                } catch (ClassCastException castClass) {
++                    LOGGER.error("Received {} that couldn't be processed", packet.getClass(), castClass);
++                    this.connection.disconnect(Component.translatable("multiplayer.disconnect.invalid_packet"));
++                }
++            });
++            return;
++        }
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.server);
+-        this.finishCurrentTask(JoinWorldTask.TYPE);
+-        this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
++        if (!io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch) this.finishCurrentTask(JoinWorldTask.TYPE);
++        if (!io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch) this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
++        // Canvas end - async protocol switch
+ 
+         try {
+             PlayerList playerList = this.server.getPlayerList();
 @@ -279,13 +_,13 @@
      // Paper start
      @Override
