@@ -269,12 +269,6 @@ public class Config {
         @Comment("Enables virtual thread usage for the async scheduler executor")
         public boolean asyncScheduler = false;
 
-        @Comment("Enables virtual thread usage for the chat executor")
-        public boolean chatExecutor = false;
-
-        @Comment("Enables virtual thread usage for the authenticator pool")
-        public boolean authenticatorPool = false;
-
         @Comment("Enables virtual thread usage for the text filter executor")
         public boolean serverTextFilter = false;
 
