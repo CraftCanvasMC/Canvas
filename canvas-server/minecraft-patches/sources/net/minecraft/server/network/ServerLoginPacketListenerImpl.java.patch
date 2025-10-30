@@ -18,37 +18,35 @@
          }
  
          if (this.state == ServerLoginPacketListenerImpl.State.WAITING_FOR_DUPE_DISCONNECT
-@@ -412,11 +_,32 @@
-         this.disconnect(ServerCommonPacketListenerImpl.DISCONNECT_UNEXPECTED_QUERY);
-     }
- 
-+    private volatile boolean switchedAlready = false; // Canvas - async protocol switch
-     @Override
+@@ -416,14 +_,25 @@
      public void handleLoginAcknowledgement(ServerboundLoginAcknowledgedPacket packet) {
-+        // Canvas start - async protocol switch
-+        if (io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch && !switchedAlready) {
-+            switchedAlready = true;
-+            this.connection.setupOutboundProtocolAsync(ConfigurationProtocols.CLIENTBOUND)
-+                .addListener(unused -> {
-+                    try {
-+                        // just run PacketUtils, this will schedule this to the global tick for us
-+                        net.minecraft.network.protocol.PacketUtils.ensureRunningOnSameThread(packet, this, this.server);
-+                    } catch (net.minecraft.server.RunningOnDifferentThreadException | io.papermc.paper.util.ServerStopRejectedExecutionException ignored) {
-+                    } catch (java.util.concurrent.RejectedExecutionException rejExc) {
-+                        this.connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
-+                    } catch (ClassCastException castClass) {
-+                        LOGGER.error("Received {} that couldn't be processed", packet.getClass(), castClass);
-+                        this.connection.disconnect(Component.translatable("multiplayer.disconnect.invalid_packet"));
-+                    }
-+                }
-+            );
-+            return;
-+        }
          net.minecraft.network.protocol.PacketUtils.ensureRunningOnSameThread(packet, this, this.server); // CraftBukkit
          Validate.validState(this.state == ServerLoginPacketListenerImpl.State.PROTOCOL_SWITCHING, "Unexpected login acknowledgement packet");
 -        this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
-+        if (!io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch) this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
-+        // Canvas end - async protocol switch
-         CommonListenerCookie commonListenerCookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
-         ServerConfigurationPacketListenerImpl serverConfigurationPacketListenerImpl = new ServerConfigurationPacketListenerImpl(
+-        CommonListenerCookie commonListenerCookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
+-        ServerConfigurationPacketListenerImpl serverConfigurationPacketListenerImpl = new ServerConfigurationPacketListenerImpl(
++        // Canvas start - async connection state switch
++        final CommonListenerCookie commonListenerCookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
++        final ServerConfigurationPacketListenerImpl serverConfigurationPacketListenerImpl = new ServerConfigurationPacketListenerImpl(
              this.server, this.connection, commonListenerCookie
+         );
+-        this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, serverConfigurationPacketListenerImpl);
+-        serverConfigurationPacketListenerImpl.startConfiguration();
+-        this.state = ServerLoginPacketListenerImpl.State.ACCEPTED;
++
++        Runnable post = () ->
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(serverConfigurationPacketListenerImpl::startConfiguration);
++
++        if (!io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch) {
++            this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
++            this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, serverConfigurationPacketListenerImpl);
++            post.run();
++            return;
++        }
++        this.connection.canvas$setupInboundProtocolAsync(ConfigurationProtocols.SERVERBOUND, serverConfigurationPacketListenerImpl, () -> {
++            this.connection.canvas$setupOutboundProtocolAsync(ConfigurationProtocols.CLIENTBOUND, post, true);
++        }, false);
++        // Canvas end - async connection state switch
+     }
+ 
+     @Override
