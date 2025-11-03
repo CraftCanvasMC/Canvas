@@ -196,12 +196,4 @@ public class TestPlugin extends JavaPlugin implements Listener {
     public void onTeleportAsync(EntityTeleportAsyncEvent teleportAsyncEvent) {
         getLogger().info("Called teleport async event");
     }
-
-    @EventHandler
-    public void onPortalAsync(EntityPortalAsyncEvent portalAsyncEvent) {
-        if (new Random().nextBoolean()) {
-            portalAsyncEvent.setCancelled(true);
-        }
-        getLogger().info("Called portal async event");
-    }
 }
