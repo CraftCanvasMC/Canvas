@@ -611,7 +611,7 @@ public class Config {
         public int invulnerabilityTicks = 10;
 
         @Comment("Allows toggling if a fishing rod can pull entities")
-        public boolean fishingRodPulls = false;
+        public boolean fishingRodPulls = true;
 
         @Comment("Configures the damage modifier per critical hit")
         public float criticalHitMultiplier = 1.5F;
