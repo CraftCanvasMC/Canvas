@@ -2,8 +2,6 @@ package io.canvasmc.testplugin;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.Random;
-import io.canvasmc.canvas.event.EntityPortalAsyncEvent;
 import io.canvasmc.canvas.event.EntityTeleportAsyncEvent;
 import io.canvasmc.canvas.event.WorldPreLoadEvent;
 import net.kyori.adventure.util.TriState;
