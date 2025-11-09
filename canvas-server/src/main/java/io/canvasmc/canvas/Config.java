@@ -6,8 +6,6 @@ import io.canvasmc.canvas.chunk.FluidPostProcessingMode;
 import io.canvasmc.canvas.configuration.ConfigSerializer;
 import io.canvasmc.canvas.configuration.Configuration;
 import io.canvasmc.canvas.configuration.internal.ConfigurationManager;
-import io.canvasmc.canvas.configuration.jankson.Jankson;
-import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import io.canvasmc.canvas.configuration.validator.NamespacedKeyValidator;
 import io.canvasmc.canvas.configuration.validator.numeric.NonNegativeNumericValueValidator;
 import io.canvasmc.canvas.configuration.validator.numeric.PositiveNumericValueValidator;
@@ -15,22 +13,14 @@ import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
-import io.canvasmc.canvas.util.Gradient;
 import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
-import java.io.IOException;
-import java.io.StringReader;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.random.RandomGeneratorFactory;
 import io.papermc.paper.adventure.PaperAdventure;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
@@ -44,7 +34,6 @@ import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
-import org.yaml.snakeyaml.Yaml;
 
 @Configuration("canvas-server")
 public class Config {
@@ -62,12 +51,16 @@ public class Config {
 
         Component merged = component.append(text);
         LOGGER.info(merged);
-        if (Bukkit.getServer() != null) {
+        if (isServerAccessible()) {
             for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
                 player.sendSystemMessage(PaperAdventure.asVanilla(merged));
             }
         }
     };
+
+    private static boolean isServerAccessible() {
+        return Bukkit.getServer() != null;
+    }
 
     static {
         reload();
@@ -98,27 +91,34 @@ public class Config {
                 GLOBAL_BROADCAST.accept("Running post validation consumer");
                 VirtualThreadUtils.init();
 
-                // SIMD
-                try {
-                    SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
-                } catch (NoClassDefFoundError | Exception ignored) {
-                    ignored.printStackTrace();
-                }
-
-                if (SIMDDetection.isEnabled) {
-                    LOGGER.info("SIMD operations detected as functional. Will replace some operations with faster versions.");
+                if (isServerAccessible()) {
+                    for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
+                        // update all info with player, covers 1.8 combat config
+                        MinecraftServer.getServer().getPlayerList().sendAllPlayerInfo(player);
+                    }
                 } else {
-                    LOGGER.warn("SIMD operations are available for your server, but are not configured!");
-                    LOGGER.warn("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
-                    LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
-                    LOGGER.warn("Debug: Java: " + System.getProperty("java.version") + ", test run: " + SIMDDetection.testRun);
-                }
+                    // SIMD
+                    try {
+                        SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
+                    } catch (NoClassDefFoundError | Exception ignored) {
+                        ignored.printStackTrace();
+                    }
 
-                try {
-                    RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
-                } catch (Throwable throwable) {
-                    LOGGER.error("Canvas' faster random impl is not supported by your VM, falling back to legacy random");
-                    Config.ENABLE_FASTER_RANDOM = false;
+                    if (SIMDDetection.isEnabled) {
+                        LOGGER.info("SIMD operations detected as functional. Will replace some operations with faster versions.");
+                    } else {
+                        LOGGER.warn("SIMD operations are available for your server, but are not configured!");
+                        LOGGER.warn("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
+                        LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
+                        LOGGER.warn("Debug: Java: " + System.getProperty("java.version") + ", test run: " + SIMDDetection.testRun);
+                    }
+
+                    try {
+                        RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
+                    } catch (Throwable throwable) {
+                        LOGGER.error("Canvas' faster random impl is not supported by your VM, falling back to legacy random");
+                        Config.ENABLE_FASTER_RANDOM = false;
+                    }
                 }
             }).build();
     }

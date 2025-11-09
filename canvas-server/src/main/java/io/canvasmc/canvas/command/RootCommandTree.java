@@ -2,6 +2,7 @@ package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import io.canvasmc.canvas.command.sub.ReloadCommand;
 import io.canvasmc.canvas.command.sub.SetMaxPlayersCommand;
 import io.canvasmc.canvas.command.sub.TpsBarCommand;
 import io.canvasmc.canvas.command.sub.WorldDistanceCommand;
@@ -21,6 +22,7 @@ public class RootCommandTree {
         INSTANCE.register(SetMaxPlayersCommand.class);
         INSTANCE.register(TpsBarCommand.class);
         INSTANCE.register(WorldDistanceCommand.class);
+        INSTANCE.register(ReloadCommand.class);
     }
 
     private final List<Command> subCommands = new LinkedList<>();
@@ -35,11 +37,13 @@ public class RootCommandTree {
             root.then(subCommand.construct(literal(name)
                 .requires(source -> source.getSender().isOp() || source.getSender().hasPermission("canvas.command." + name))));
 
-            dispatcher.register(subCommand.construct(literal(name)
-                .requires(source -> source.getSender().isOp() || source.getSender().hasPermission("canvas.command." + name))));
+            if (subCommand.isAllowedSelfCommand()) {
+                dispatcher.register(subCommand.construct(literal(name)
+                    .requires(source -> source.getSender().isOp() || source.getSender().hasPermission("canvas.command." + name))));
 
-            dispatcher.register(subCommand.construct(literal("canvas:" + name)
-                .requires(source -> source.getSender().isOp() || source.getSender().hasPermission("canvas.command." + name))));
+                dispatcher.register(subCommand.construct(literal("canvas:" + name)
+                    .requires(source -> source.getSender().isOp() || source.getSender().hasPermission("canvas.command." + name))));
+            }
         }
 
         dispatcher.register(root);

@@ -48,4 +48,14 @@ public interface Command {
      * @return the fully constructed {@link LiteralArgumentBuilder} for registration
      */
     LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base);
+
+    /**
+     * Gets if the command can be registered on its own
+     * and not as a subcommand of `/canvas`
+     *
+     * @return if it can have a self-command
+     */
+    default boolean isAllowedSelfCommand() {
+        return true;
+    }
 }

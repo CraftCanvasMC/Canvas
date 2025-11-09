@@ -7,6 +7,7 @@ import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -260,13 +261,59 @@ public class Util {
         return sb.toString();
     }
 
+    public static @NotNull Diff diffWithValues(JsonObject oldObj, JsonObject newObj) {
+        List<String> added = Lists.newLinkedList();
+        List<String> removed = Lists.newLinkedList();
+        List<Change> changed = Lists.newLinkedList();
+
+        diffRecursiveWithValues("", oldObj, newObj, added, removed, changed);
+
+        return new Diff(List.copyOf(added), List.copyOf(removed), List.copyOf(changed));
+    }
+
+    private static void diffRecursiveWithValues(String prefix, @NotNull JsonObject oldObj, @NotNull JsonObject newObj,
+                                                List<String> added, List<String> removed, List<Change> changed) {
+        Set<String> oldKeys = oldObj.keySet();
+        Set<String> newKeys = newObj.keySet();
+
+        for (String key : newKeys) {
+            String fullKey = prefix + key;
+            if (!oldKeys.contains(key)) {
+                added.add(fullKey);
+                continue;
+            }
+
+            JsonElement oldVal = oldObj.get(key);
+            JsonElement newVal = newObj.get(key);
+
+            if (oldVal instanceof JsonObject && newVal instanceof JsonObject) {
+                diffRecursiveWithValues(fullKey + ".", (JsonObject) oldVal, (JsonObject) newVal, added, removed, changed);
+            } else if (!Objects.equals(oldVal, newVal)) {
+                changed.add(new Change(fullKey, jsonToString(oldVal), jsonToString(newVal)));
+            }
+        }
+
+        for (String key : oldKeys) {
+            if (!newKeys.contains(key)) {
+                removed.add(prefix + key);
+            }
+        }
+    }
+
+    private static String jsonToString(JsonElement element) {
+        if (element == null) return "null";
+        return element.toJson();
+    }
+
+    public record Change(String path, String from, String to) {}
+
     public static @NotNull Diff diff(JsonObject oldObj, JsonObject newObj) {
         List<String> added = Lists.newLinkedList();
         List<String> removed = Lists.newLinkedList();
 
         diffRecursive("", oldObj, newObj, added, removed);
 
-        return new Diff(List.copyOf(added), List.copyOf(removed));
+        return new Diff(List.copyOf(added), List.copyOf(removed), List.of());
     }
 
     private static void diffRecursive(String prefix, @NotNull JsonObject oldObj, @NotNull JsonObject newObj,
@@ -294,6 +341,8 @@ public class Util {
         }
     }
 
+    public record Diff(List<String> added, List<String> removed, List<Change> changed) {}
+
     public static @NotNull String wrapString(String str) {
         if (str == null || str.isEmpty()) return "";
         String[] lines = str.split("\r?\n");
@@ -308,8 +357,5 @@ public class Util {
             sb.append("*/");
             return sb.toString();
         }
-    }
-
-    public record Diff(List<String> added, List<String> removed) {
     }
 }
