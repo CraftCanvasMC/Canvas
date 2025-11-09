@@ -2,6 +2,7 @@ import java.util.Locale
 
 pluginManagement {
     repositories {
+        mavenLocal()
         gradlePluginPortal()
         maven {
             name = "canvasmc"
