@@ -31,7 +31,7 @@ import io.canvasmc.canvas.configuration.jankson.JsonNull;
 import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import io.canvasmc.canvas.configuration.jankson.JsonPrimitive;
 import io.canvasmc.canvas.configuration.jankson.annotation.Deserializer;
-import io.canvasmc.canvas.configuration.jankson.annotation.SerializedName;
+import io.canvasmc.canvas.configuration.writer.SerializedName;
 import io.canvasmc.canvas.configuration.jankson.api.DeserializationException;
 import io.canvasmc.canvas.configuration.jankson.api.Marshaller;
 import io.canvasmc.canvas.configuration.jankson.impl.serializer.DeserializerFunctionPool;

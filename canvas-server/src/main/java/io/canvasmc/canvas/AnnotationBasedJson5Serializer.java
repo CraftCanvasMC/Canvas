@@ -1,6 +1,8 @@
-package io.canvasmc.canvas.configuration;
+package io.canvasmc.canvas;
 
 import com.google.common.collect.Lists;
+import io.canvasmc.canvas.configuration.ConfigSerializer;
+import io.canvasmc.canvas.configuration.Configuration;
 import io.canvasmc.canvas.configuration.jankson.Jankson;
 import io.canvasmc.canvas.configuration.jankson.JsonArray;
 import io.canvasmc.canvas.configuration.jankson.JsonElement;
@@ -11,8 +13,6 @@ import io.canvasmc.canvas.configuration.writer.Util;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.ServiceLoader;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -31,26 +32,27 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
                                                 Jankson jankson,
                                                 List<AnnotationValidator> validators,
                                                 Consumer<Json5Builder.PostContext<C>> postInit,
-                                                String header) implements ConfigSerializer<C> {
+                                                String header,
+                                                Supplier<C> createInstance) implements ConfigSerializer<C> {
     public static final Logger LOGGER = LoggerFactory.getLogger("Json5Serializer");
 
-    public AnnotationBasedJson5Serializer(Class<C> configClass, Consumer<Json5Builder.PostContext<C>> postInit, String header, Function<Jankson.Builder, Jankson.Builder> hook) {
+    public AnnotationBasedJson5Serializer(Class<C> configClass, Consumer<Json5Builder.PostContext<C>> postInit, String header, @NotNull Function<Jankson.Builder, Jankson.Builder> hook, Supplier<C> createInstance) {
         this(
             Objects.requireNonNull(configClass.getAnnotation(Configuration.class), "Class must contain a Configuration annotation"),
-            configClass, hook.apply(Jankson.builder()).build(), floodRegistries(AnnotationValidator.class), postInit, header
+            configClass, hook.apply(Jankson.builder()).build(), buildValidators(), postInit, header, createInstance
         );
     }
 
-    private static <T> @NotNull List<T> floodRegistries(Class<T> serviceClass) {
-        List<T> services = Lists.newArrayList();
-        ServiceLoader<T> loader = ServiceLoader.load(serviceClass);
+    private static @NotNull List<AnnotationValidator> buildValidators() {
+        List<AnnotationValidator> services = Lists.newArrayList();
+        ServiceLoader<AnnotationValidator> loader = ServiceLoader.load(AnnotationValidator.class);
         if (loader.stream().toList().isEmpty()) {
-            LOGGER.warn("No services found for {}", serviceClass.getName());
+            LOGGER.warn("No services found for {}", AnnotationValidator.class.getName());
             return services;
         }
 
-        for (final T t : loader) {
-            LOGGER.info("Loading class {} into registries for {}", t.getClass().getSimpleName(), serviceClass.getName());
+        for (final AnnotationValidator t : loader) {
+            LOGGER.info("Loading class {} into registries for {}", t.getClass().getSimpleName(), AnnotationValidator.class.getName());
             services.add(t);
         }
         return services;
@@ -73,7 +75,7 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
                 BufferedWriter writer = Files.newBufferedWriter(configPath);
                 // only write header once, when we fill config.
                 // this allows people to modify or remove the header later
-                final String file = header +
+                final String file = Util.wrapString(header) + "\n" +
                     jankson.toJson(config).toJson(true, true);
                 writer.write(file);
                 writer.close();
@@ -136,7 +138,7 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
                 if (config != null) {
                     LOGGER.info("Configuration loaded successfully, running validation and post consumer");
                     boolean[] failed = new boolean[]{false};
-                    Util.compileMappings(configClass, loaded, "", (element, key, field) -> {
+                    Util.forEach(configClass, loaded, (element, key, field) -> {
                         try {
                             for (final AnnotationValidator validator : this.validators) {
                                 // field should be accessible already, no need to make it as such
@@ -151,6 +153,7 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
                                     } else toVerify.add(element);
                                     ValidationResult result = ValidationResult.PASS;
                                     for (final JsonElement jsonElement : toVerify) {
+                                        //noinspection unchecked
                                         ValidationResult vr = validator.read(annotation, jsonElement);
                                         if (vr.equals(ValidationResult.FAIL)) {
                                             result = ValidationResult.FAIL;
@@ -191,12 +194,48 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
 
     @Override
     public C createDefault() {
-        try {
-            Method method = configClass.getDeclaredMethod("getDefault");
-            method.setAccessible(true);
-            return (C) method.invoke(null);
-        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-            return constructUnsafely(configClass);
+        return createInstance.get();
+    }
+
+    public static class Json5Builder<T> {
+        private Class<T> classOf;
+        private Consumer<PostContext<T>> postInit;
+        private String header;
+        private Function<Jankson.Builder, Jankson.Builder> func = (a) -> a;
+        private Supplier<T> createDefault;
+
+        public Json5Builder<T> classOf(Class<T> clazz) {
+            this.classOf = clazz;
+            return this;
+        }
+
+        public Json5Builder<T> post(Consumer<PostContext<T>> post) {
+            this.postInit = post;
+            return this;
+        }
+
+        public Json5Builder<T> hook(Function<Jankson.Builder, Jankson.Builder> func) {
+            this.func = func;
+            return this;
+        }
+
+        public Json5Builder<T> header(String header) {
+            this.header = header;
+            return this;
+        }
+
+        public Json5Builder<T> constructor(Supplier<T> createDefault) {
+            this.createDefault = createDefault;
+            return this;
+        }
+
+        public AnnotationBasedJson5Serializer<T> build() {
+            return new AnnotationBasedJson5Serializer<>(
+                classOf, postInit, header, func, createDefault
+            );
+        }
+
+        public record PostContext<C>(C configuration, String contents) {
         }
     }
 }

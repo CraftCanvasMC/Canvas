@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package io.canvasmc.canvas.configuration.jankson.annotation;
+package io.canvasmc.canvas.configuration.writer;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

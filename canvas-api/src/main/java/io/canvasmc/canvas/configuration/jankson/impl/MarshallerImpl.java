@@ -29,7 +29,7 @@ import io.canvasmc.canvas.configuration.jankson.JsonElement;
 import io.canvasmc.canvas.configuration.jankson.JsonNull;
 import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import io.canvasmc.canvas.configuration.jankson.JsonPrimitive;
-import io.canvasmc.canvas.configuration.jankson.annotation.SerializedName;
+import io.canvasmc.canvas.configuration.writer.SerializedName;
 import io.canvasmc.canvas.configuration.jankson.api.DeserializationException;
 import io.canvasmc.canvas.configuration.jankson.api.DeserializerFunction;
 import io.canvasmc.canvas.configuration.jankson.api.Marshaller;
@@ -367,6 +367,8 @@ public class MarshallerImpl implements Marshaller {
         //Pull in public fields first
         for (Field f : obj.getClass().getFields()) {
             if (
+                (f.getModifiers() & Modifier.PUBLIC) == 0 || // Canvas - ignore non-public
+                (f.getModifiers() & Modifier.FINAL) != 0 || // Canvas - ignore final
                 Modifier.isStatic(f.getModifiers()) || // Not part of the object
                     Modifier.isTransient(f.getModifiers())) continue; //Never serialize
             f.setAccessible(true);

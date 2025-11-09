@@ -5,7 +5,6 @@ import ca.spottedleaf.moonrise.patches.chunk_system.util.ParallelSearchRadiusIte
 import io.canvasmc.canvas.chunk.FluidPostProcessingMode;
 import io.canvasmc.canvas.configuration.ConfigSerializer;
 import io.canvasmc.canvas.configuration.Configuration;
-import io.canvasmc.canvas.configuration.Json5Builder;
 import io.canvasmc.canvas.configuration.internal.ConfigurationManager;
 import io.canvasmc.canvas.configuration.jankson.Jankson;
 import io.canvasmc.canvas.configuration.jankson.JsonObject;
@@ -16,6 +15,7 @@ import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
+import io.canvasmc.canvas.util.Gradient;
 import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
 import java.io.IOException;
 import java.io.StringReader;
@@ -26,14 +26,24 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.random.RandomGeneratorFactory;
+import io.papermc.paper.adventure.PaperAdventure;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.minecraft.Util;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
+import org.bukkit.Bukkit;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Unmodifiable;
 import org.yaml.snakeyaml.Yaml;
 
 @Configuration("canvas-server")
@@ -41,47 +51,51 @@ public class Config {
     public static boolean ENABLE_FASTER_RANDOM = true;
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
     // Note: this field should never be used during POST, use 'context.configuration()' instead
-    public static final Config INSTANCE;
+    public static Config INSTANCE;
+    public static final Consumer<String> GLOBAL_BROADCAST = (msg) -> {
+        Component component = RegionizedTpsBar.gradient("[CanvasMC] ",
+            s -> s.decorate(TextDecoration.BOLD),
+            TextColor.color(0x357CEF), TextColor.color(0xF21AF4));
+
+        Component text = Component.text(msg)
+            .decoration(TextDecoration.BOLD, false);
+
+        Component merged = component.append(text);
+        LOGGER.info(merged);
+        if (Bukkit.getServer() != null) {
+            for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
+                player.sendSystemMessage(PaperAdventure.asVanilla(merged));
+            }
+        }
+    };
 
     static {
-        LOGGER.info("Instantiating Canvas configuration");
-        long startNanos = System.nanoTime();
-        INSTANCE = ConfigurationManager.register(Config.class, Config::buildSerializer).getConfig();
-        LOGGER.info("Finished Canvas config init in {}ms", TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS));
-        // init parallel search radius iteration early
+        reload();
+        // preload parallel search radius iteration early
         //noinspection ResultOfMethodCallIgnored
         ParallelSearchRadiusIteration.getSearchIteration(MoonriseConstants.MAX_VIEW_DISTANCE);
     }
 
-    private static <T extends Config> @NotNull ConfigSerializer<T> buildSerializer(Configuration config, Class<T> configClass) {
-        return new Json5Builder<T>()
+    public static void reload() {
+        GLOBAL_BROADCAST.accept("Instantiating Canvas configuration");
+        long startNanos = System.nanoTime();
+        INSTANCE = ConfigurationManager.register(Config.class, Config::buildGlobal).getConfig();
+        GLOBAL_BROADCAST.accept("Finished Canvas config init in " + TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS) + "ms");
+    }
+
+    private static @NotNull @Unmodifiable ConfigSerializer<Config> buildGlobal(Configuration config, Class<Config> configClass) {
+        return new AnnotationBasedJson5Serializer.Json5Builder<Config>()
             .header("""
-                /*
-                  This is the main Canvas configuration file
-                  All configuration options here are made for vanilla-compatibility
-                  and not for performance. Settings must be configured specific
-                  to your hardware and server type. If you have questions
-                  join our discord at https://canvasmc.io/discord
-                  As a general rule of thumb, do NOT change a setting if
-                  you don't know what it does! If you don't know, ask!
-                
-                  This configuration file is based off of Json5, a Json
-                  syntax with Java-like comment capabilities. You are
-                  able to add your own custom comments to the configuration
-                  however there must always be 1 comment per option, however you
-                  may add as many comments as you want in the "header", or above
-                  the root json block or else your comment may be deleted. Proper
-                  indentation is forced, restarting the server will reformat your
-                  comment to include proper indentation and remove trailing
-                  whitespaces.
-                
-                  You may add comments to the header, here, remove comments anywhere,
-                  or replace them wholesale. If you have any questions, ask in our
-                  discord server.
-                */
+                This is the global Canvas configuration file.
+                All configuration options here are made for vanilla-compatibility by default
+                If you have questions join our discord at https://canvasmc.io/discord
+                As a general rule of thumb, do NOT change a setting if
+                you don't know what it does! If you don't know, ask!
                 """)
             .classOf(configClass)
+            .constructor(Config::new)
             .post(context -> {
+                GLOBAL_BROADCAST.accept("Running post validation consumer");
                 VirtualThreadUtils.init();
 
                 // SIMD
@@ -107,32 +121,6 @@ public class Config {
                     Config.ENABLE_FASTER_RANDOM = false;
                 }
             }).build();
-    }
-
-    public static @NotNull Config getDefault() {
-        // TODO - remove this on next Minecraft update. -- we are doing this for 1.22
-        final Path path = Paths.get("./canvas-server.yml");
-        if (Files.exists(path)) {
-            LOGGER.info("Old configuration detected, migrating.");
-            try {
-                Yaml yaml = new Yaml();
-                String yamlContent = Files.readString(path);
-                String[] lines = yamlContent.split("\n", 2);
-                String body = lines.length > 1 ? lines[1] : "";
-
-                JsonObject object = new JsonObject();
-                Map<String, Object> yamnlMap = yaml.load(new StringReader(body));
-                io.canvasmc.canvas.configuration.writer.Util.migrate(
-                    yamnlMap, object
-                );
-                Files.delete(path);
-                LOGGER.info("Migration complete, reparsing");
-                return Jankson.builder().build().fromJson(object, Config.class);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-        return new Config();
     }
 
     /* START CONFIGURATION */

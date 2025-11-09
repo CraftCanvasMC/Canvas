@@ -119,20 +119,6 @@ public class RegionizedTpsBar {
 
                 @Override
                 public void tick() {
-                    if (!enabled) {
-                        return;
-                    }
-
-                    switch (placement) {
-                        case BOSS_BAR -> tpsBar.name(display);
-                        case ACTION_BAR ->
-                            entityPlayer.connection.send(
-                                new ClientboundSetActionBarTextPacket(
-                                    PaperAdventure.asVanillaNullToEmpty(display)
-                                )
-                            );
-                    }
-
                     // handle state changes if marked dirty
                     if (dirty) {
                         final CraftPlayer bukkitEntity = entityPlayer.getBukkitEntity();
@@ -148,6 +134,20 @@ public class RegionizedTpsBar {
                         }
 
                         dirty = false;
+                    }
+
+                    if (!enabled) {
+                        return;
+                    }
+
+                    switch (placement) {
+                        case BOSS_BAR -> tpsBar.name(display);
+                        case ACTION_BAR ->
+                            entityPlayer.connection.send(
+                                new ClientboundSetActionBarTextPacket(
+                                    PaperAdventure.asVanillaNullToEmpty(display)
+                                )
+                            );
                     }
                 }
 

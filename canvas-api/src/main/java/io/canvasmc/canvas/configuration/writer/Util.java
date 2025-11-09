@@ -2,43 +2,20 @@ package io.canvasmc.canvas.configuration.writer;
 
 import com.google.common.collect.Lists;
 import io.canvasmc.canvas.configuration.TriConsumer;
-import io.canvasmc.canvas.configuration.jankson.JsonArray;
 import io.canvasmc.canvas.configuration.jankson.JsonElement;
-import io.canvasmc.canvas.configuration.jankson.JsonNull;
 import io.canvasmc.canvas.configuration.jankson.JsonObject;
-import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import io.canvasmc.canvas.configuration.jankson.JsonPrimitive;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class Util {
     public static @NotNull String multi(String @NotNull [] strings) {
         return strings.length == 1 ? strings[0] : String.join("\n", strings);
-    }
-
-    /**
-     * Walks recursively throughout the Json Object, if an element is a Json Object, it will check its
-     * children *after* the entry consumer has accepted the root
-     *
-     * @param object       the object to walk
-     * @param forEachEntry the entry consumer
-     */
-    public static void walk(@NotNull JsonObject object, BiConsumer<JsonElement, String> forEachEntry, String root) {
-        object.forEach((name, element) -> {
-            String path = root + name;
-            forEachEntry.accept(element, path);
-
-            if (element instanceof JsonObject jsonObject) {
-                walk(jsonObject, forEachEntry, path + ".");
-            }
-        });
     }
 
     public static boolean isNestedWithin(Class<?> root, Class<?> candidate) {
@@ -85,71 +62,31 @@ public class Util {
         return null;
     }
 
-    public static void compileMappings(Class<?> clazz, JsonObject root, String pathPrefix, TriConsumer<JsonElement, String, Field> consumer) {
-        for (final Field field : clazz.getFields()) {
-            // TODO - validate class before read/write and kill if it's invalid
-            if (field.accessFlags().contains(AccessFlag.STATIC)) continue; // don't want static
-            if (field.accessFlags().contains(AccessFlag.FINAL)) continue; // don't want final
-            if (!field.accessFlags().contains(AccessFlag.PUBLIC)) continue; // must be public
-            String fieldName = field.getName();
+    public static void forEach(Class<?> clazz, JsonObject root, TriConsumer<JsonElement, String, Field> consumer) {
+        computeAll(clazz, root, "", consumer);
+    }
+
+    private static void computeAll(@NotNull Class<?> clazz, JsonObject root, String pathPrefix, TriConsumer<JsonElement, String, Field> consumer) {
+        for (final Field f : clazz.getFields()) {
+            if (
+                (f.getModifiers() & Modifier.PUBLIC) == 0 ||
+                (f.getModifiers() & Modifier.FINAL) != 0 ||
+                (f.getModifiers() & Modifier.STATIC) != 0 ||
+                (f.getModifiers() & Modifier.TRANSIENT) != 0) continue;
+            String fieldName = f.getName();
             String path = pathPrefix.isEmpty() ? fieldName : pathPrefix + "." + fieldName;
 
-            Class<?> classType = field.getType();
+            Class<?> classType = f.getType();
 
             if (Util.isNestedWithin(clazz, classType)) {
-                compileMappings(classType, root, path, consumer);
+                computeAll(classType, root, path, consumer);
             } else {
                 JsonElement value = Util.getValueByPath(root, path);
                 if (value != null) {
-                    consumer.accept(value, path, field);
+                    consumer.accept(value, path, f);
                 }
             }
         }
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    public static void migrate(Map<String, Object> yamlMap, JsonObject janksonObject) {
-        for (final Map.Entry<String, Object> entry : yamlMap.entrySet()) {
-            String key = entry.getKey();
-            Object value = entry.getValue();
-            if (value instanceof Map) {
-                // nested object
-                JsonObject child = janksonObject.getObject(key);
-                if (child == null) {
-                    child = new JsonObject();
-                    janksonObject.put(key, child);
-                }
-                migrate((Map<String, Object>) value, child);
-            } else if (value instanceof List list) {
-                JsonArray array = new JsonArray();
-                for (final Object o : list) {
-                    array.add(convertElement(o));
-                }
-                janksonObject.put(key, array);
-            } else {
-                janksonObject.put(key, convertElement(value));
-            }
-        }
-    }
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private static JsonElement convertElement(Object o) {
-        if (o == null) return JsonNull.INSTANCE;
-        if (o instanceof String
-        || o instanceof Boolean || o instanceof Number) return new JsonPrimitive(o);
-        if (o instanceof Map) {
-            JsonObject jsonObject = new JsonObject();
-            migrate((Map<String, Object>) o, jsonObject);
-            return jsonObject;
-        }
-        if (o instanceof List list) {
-            JsonArray array = new JsonArray();
-            for (final Object object : list) {
-                array.add(convertElement(object));
-            }
-            return array;
-        }
-        return new JsonPrimitive(o.toString());
     }
 
     public static @Nullable JsonElement getValueByPath(@NotNull JsonObject root, @NotNull String path) {
@@ -221,7 +158,7 @@ public class Util {
     }
 
     // Note: i=0 == head, i=1 == body
-    public static String[] splitHeader(String json5) {
+    public static String @NotNull [] splitHeader(@NotNull String json5) {
         String[] result = new String[2];
         StringBuilder header = new StringBuilder();
         StringBuilder body = new StringBuilder();
@@ -354,6 +291,22 @@ public class Util {
             if (!newKeys.contains(key)) {
                 removed.add(prefix + key);
             }
+        }
+    }
+
+    public static @NotNull String wrapString(String str) {
+        if (str == null || str.isEmpty()) return "";
+        String[] lines = str.split("\r?\n");
+        if (lines.length == 1) {
+            // single-line
+            return "// " + lines[0];
+        } else { // multiline
+            StringBuilder sb = new StringBuilder("/*\n");
+            for (String line : lines) {
+                sb.append('\t').append(line).append('\n');
+            }
+            sb.append("*/");
+            return sb.toString();
         }
     }
 

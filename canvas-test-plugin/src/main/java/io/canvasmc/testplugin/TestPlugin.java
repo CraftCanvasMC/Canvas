@@ -2,6 +2,7 @@ package io.canvasmc.testplugin;
 
 import java.util.List;
 import java.util.Objects;
+import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.event.EntityTeleportAsyncEvent;
 import io.canvasmc.canvas.event.WorldPreLoadEvent;
 import net.kyori.adventure.util.TriState;
@@ -44,6 +45,7 @@ public class TestPlugin extends JavaPlugin implements Listener {
             @Override
             public boolean execute(@NotNull final CommandSender sender, @NotNull final String commandLabel, final @NotNull String @NotNull [] args) {
                 if (sender instanceof Player player) {
+                    Config.GLOBAL_BROADCAST.accept("Running RTP for player " + player.getName());
                     RandomSource randomSource = RandomSource.create();
                     int blockX = build(randomSource);
                     int blockZ = build(randomSource);

@@ -17,17 +17,16 @@ public class ConfigurationManager {
         Objects.requireNonNull(configClass);
         Objects.requireNonNull(serializerFactory);
         if (holders.containsKey(configClass)) {
-            throw new RuntimeException(String.format("Config '%s' already registered", configClass));
+            holders.remove(configClass);
+        }
+        Configuration definition = configClass.getAnnotation(Configuration.class);
+        if (definition == null) {
+            throw new RuntimeException(String.format("No @Configuration annotation on %s!", configClass));
         } else {
-            Configuration definition = configClass.getAnnotation(Configuration.class);
-            if (definition == null) {
-                throw new RuntimeException(String.format("No @Configuration annotation on %s!", configClass));
-            } else {
-                ConfigSerializer<T> serializer = serializerFactory.create(definition, configClass);
-                InternalConfigManager<T> manager = new InternalConfigManager<>(definition, configClass, serializer);
-                holders.put(configClass, manager);
-                return manager;
-            }
+            ConfigSerializer<T> serializer = serializerFactory.create(definition, configClass);
+            InternalConfigManager<T> manager = new InternalConfigManager<>(definition, configClass, serializer);
+            holders.put(configClass, manager);
+            return manager;
         }
     }
 
