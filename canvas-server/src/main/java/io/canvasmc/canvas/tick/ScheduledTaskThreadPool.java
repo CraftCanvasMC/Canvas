@@ -86,24 +86,24 @@ public final class ScheduledTaskThreadPool {
         final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
         final TickThreadRunner tickThreadRunner
     ) {
-        ScheduledTickTask first;
-        while ((first = firstEntry(map)) != null) {
+        final Iterator<ScheduledTickTask> it = map.keySet().iterator();
+        while (it.hasNext()) {
+            final ScheduledTickTask first = it.next();
+
             if (first.isTaken()) {
-                map.remove(first);
+                it.remove();
                 continue;
             }
 
             if (first.tick.isPinned()) {
                 final long pinnedTo = first.tick.getPinnedVolatile();
                 if (tickThreadRunner == null || tickThreadRunner.id != pinnedTo) {
-                    map.remove(first);
                     continue;
                 }
             }
 
             if (tickThreadRunner != null && tickThreadRunner.isDedicated()) {
                 if (first.owner != tickThreadRunner) {
-                    map.remove(first);
                     continue;
                 }
             }
@@ -118,28 +118,24 @@ public final class ScheduledTaskThreadPool {
         final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
         final TickThreadRunner tickThreadRunner
     ) {
-        ScheduledTickTask first;
-        while ((first = firstEntry(map)) != null) {
-            if (first.isTaken() || first.isWatched()) {
-                map.remove(first);
+        final Iterator<ScheduledTickTask> it = map.keySet().iterator();
+        while (it.hasNext()) {
+            final ScheduledTickTask first = it.next();
 
-                if (!first.isTaken() && !first.isWatched()) {
-                    map.put(first, first);
-                }
+            if (first.isTaken() || first.isWatched()) {
+                it.remove();
                 continue;
             }
 
             if (first.tick.isPinned()) {
                 final long pinnedTo = first.tick.getPinnedVolatile();
                 if (tickThreadRunner == null || tickThreadRunner.id != pinnedTo) {
-                    map.remove(first);
                     continue;
                 }
             }
 
             if (tickThreadRunner != null && tickThreadRunner.isDedicated()) {
                 if (first.owner != tickThreadRunner) {
-                    map.remove(first);
                     continue;
                 }
             }
@@ -505,7 +501,7 @@ public final class ScheduledTaskThreadPool {
         }
 
         public boolean isPinned() {
-            return ((long) PINNED_HANDLE.get(this)) >= 0;
+            return ((long) PINNED_HANDLE.getVolatile(this)) >= 0;
         }
 
         public TickThreadRunner getTickThreadRunner() {
