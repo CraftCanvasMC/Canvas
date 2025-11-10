@@ -7,6 +7,13 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 
+/**
+ * Original code from the Lithium mod
+ * <br>
+ * LevelChunkMixin -- skipGetHeightmap && skipHeightmapUpdate esssentially make the code do nothing, so those bits are commented out
+ * <br>
+ * <a href="https://github.com/CaffeineMC/lithium">Repository Link</a>
+ */
 public class CombinedHeightmapUpdate {
     public static void updateHeightmaps(Heightmap heightmap0, Heightmap heightmap1, Heightmap heightmap2, Heightmap heightmap3, LevelChunk worldChunk, final int x, final int y, final int z, BlockState state) {
         final int height0 = heightmap0.getFirstAvailable(x, z);
