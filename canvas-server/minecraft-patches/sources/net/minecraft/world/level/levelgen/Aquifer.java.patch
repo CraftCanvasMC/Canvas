@@ -1,0 +1,374 @@
+--- a/net/minecraft/world/level/levelgen/Aquifer.java
++++ b/net/minecraft/world/level/levelgen/Aquifer.java
+@@ -99,6 +_,194 @@
+         private final int minGridZ;
+         private final int gridSizeX;
+         private final int gridSizeZ;
++        // Canvas start - optimize aquifer
++        private int dist1;
++        private int dist2;
++        private int dist3;
++        private long pos1;
++        private long pos2;
++        private long pos3;
++        private double mutableDoubleThingy;
++
++        private @Nullable BlockState aquiferExtracted$applyPost(DensityFunction.FunctionContext pos, double density, int j, int i, int k) {
++            Aquifer.FluidStatus fluidLevel2 = this.getAquiferStatus(this.pos1);
++            double d = similarity(this.dist1, this.dist2);
++            BlockState blockState = fluidLevel2.at(j);
++            if (d <= 0.0) {
++                this.shouldScheduleFluidUpdate = d >= FLOWING_UPDATE_SIMULARITY;
++                return blockState;
++            } else if (blockState.is(Blocks.WATER) && this.globalFluidPicker.computeFluid(i, j - 1, k).at(j - 1).is(Blocks.LAVA)) {
++                this.shouldScheduleFluidUpdate = true;
++                return blockState;
++            } else {
++                // MutableDouble mutableDouble = new MutableDouble(Double.NaN); // 234MB/s alloc rate at 480 cps
++                this.mutableDoubleThingy = Double.NaN;
++                Aquifer.FluidStatus fluidLevel3 = this.getAquiferStatus(this.pos2);
++                double e = d * this.calculateDensityModified(pos, fluidLevel2, fluidLevel3);
++                if (density + e > 0.0) {
++                    this.shouldScheduleFluidUpdate = false;
++                    return null;
++                } else {
++                    return aquiferExtracted$getFinalBlockState(pos, density, d, fluidLevel2, fluidLevel3, blockState);
++                }
++            }
++        }
++
++        private BlockState aquiferExtracted$getFinalBlockState(DensityFunction.FunctionContext pos, double density, double d, Aquifer.FluidStatus fluidLevel2, Aquifer.FluidStatus fluidLevel3, BlockState blockState) {
++            Aquifer.FluidStatus fluidLevel4 = this.getAquiferStatus(this.pos3);
++            double f = similarity(this.dist1, this.dist3);
++            if (aquiferExtracted$extractedCheckFG(pos, density, d, fluidLevel2, f, fluidLevel4)) return null;
++
++            double g = similarity(this.dist2, this.dist3);
++            if (aquiferExtracted$extractedCheckFG(pos, density, d, fluidLevel3, g, fluidLevel4)) return null;
++
++            this.shouldScheduleFluidUpdate = true;
++            return blockState;
++        }
++
++        private boolean aquiferExtracted$extractedCheckFG(DensityFunction.FunctionContext pos, double density, double d, Aquifer.FluidStatus fluidLevel2, double f, Aquifer.FluidStatus fluidLevel4) {
++            if (f > 0.0) {
++                double g = d * f * this.calculateDensityModified(pos, fluidLevel2, fluidLevel4);
++                if (density + g > 0.0) {
++                    this.shouldScheduleFluidUpdate = false;
++                    return true;
++                }
++            }
++            return false;
++        }
++
++        private void aquiferExtracted$refreshDistPosIdx(int x, int y, int z) {
++            int gx = (x - 5) >> 4;
++            int gy = Math.floorDiv(y + 1, 12);
++            int gz = (z - 5) >> 4;
++            int dist1 = Integer.MAX_VALUE;
++            int dist2 = Integer.MAX_VALUE;
++            int dist3 = Integer.MAX_VALUE;
++            long pos1 = 0;
++            long pos2 = 0;
++            long pos3 = 0;
++
++            for (int offY = -1; offY <= 1; ++offY) {
++                for (int offZ = 0; offZ <= 1; ++offZ) {
++                    for (int offX = 0; offX <= 1; ++offX) {
++                        int posIdx = this.getIndex(gx + offX, gy + offY, gz + offZ);
++
++                        long position = this.aquiferLocationCache[posIdx];
++
++                        int dx = BlockPos.getX(position) - x;
++                        int dy = BlockPos.getY(position) - y;
++                        int dz = BlockPos.getZ(position) - z;
++                        int dist = dx * dx + dy * dy + dz * dz;
++
++                        // unexplainable branch prediction magic
++                        if (dist3 >= dist) {
++                            pos3 = position;
++                            dist3 = dist;
++                        }
++                        if (dist2 >= dist) {
++                            pos3 = pos2;
++                            dist3 = dist2;
++                            pos2 = position;
++                            dist2 = dist;
++                        }
++                        if (dist1 >= dist) {
++                            pos2 = pos1;
++                            dist2 = dist1;
++                            pos1 = position;
++                            dist1 = dist;
++                        }
++                    }
++                }
++            }
++
++            this.dist1 = dist1;
++            this.dist2 = dist2;
++            this.dist3 = dist3;
++            this.pos1 = pos1;
++            this.pos2 = pos2;
++            this.pos3 = pos3;
++        }
++
++        private double calculateDensityModified(
++            DensityFunction.FunctionContext pos, Aquifer.FluidStatus fluidLevel, Aquifer.FluidStatus fluidLevel2
++        ) {
++            int i = pos.blockY();
++            BlockState blockState = fluidLevel.at(i);
++            BlockState blockState2 = fluidLevel2.at(i);
++            if ((!blockState.is(Blocks.LAVA) || !blockState2.is(Blocks.WATER)) && (!blockState.is(Blocks.WATER) || !blockState2.is(Blocks.LAVA))) {
++                int j = Math.abs(fluidLevel.fluidLevel - fluidLevel2.fluidLevel);
++                if (j == 0) {
++                    return 0.0;
++                } else {
++                    double d = 0.5 * (double)(fluidLevel.fluidLevel + fluidLevel2.fluidLevel);
++                    final double q = aquiferExtracted$getQ(i, d, j);
++
++                    return aquiferExtracted$postCalculateDensityModified(pos, q);
++                }
++            } else {
++                return 2.0;
++            }
++        }
++
++        private double aquiferExtracted$postCalculateDensity(DensityFunction.FunctionContext pos, MutableDouble mutableDouble, double q) {
++            double r;
++            if (!(q < -2.0) && !(q > 2.0)) {
++                double s = mutableDouble.getValue();
++                if (Double.isNaN(s)) {
++                    double t = this.barrierNoise.compute(pos);
++                    mutableDouble.setValue(t);
++                    r = t;
++                } else {
++                    r = s;
++                }
++            } else {
++                r = 0.0;
++            }
++
++            return 2.0 * (r + q);
++        }
++
++        private double aquiferExtracted$postCalculateDensityModified(DensityFunction.FunctionContext pos, double q) {
++            double r;
++            if (!(q < -2.0) && !(q > 2.0)) {
++                double s = this.mutableDoubleThingy;
++                if (Double.isNaN(s)) {
++                    double t = this.barrierNoise.compute(pos);
++                    this.mutableDoubleThingy = t;
++                    r = t;
++                } else {
++                    r = s;
++                }
++            } else {
++                r = 0.0;
++            }
++
++            return 2.0 * (r + q);
++        }
++
++        private static double aquiferExtracted$getQ(double i, double d, double j) {
++            double e = i + 0.5 - d;
++            double f = j / 2.0;
++            double o = f - Math.abs(e);
++            double q;
++            if (e > 0.0) {
++                if (o > 0.0) {
++                    q = o / 1.5;
++                } else {
++                    q = o / 2.5;
++                }
++            } else {
++                double p = 3.0 + o;
++                if (p > 0.0) {
++                    q = p / 3.0;
++                } else {
++                    q = p / 10.0;
++                }
++            }
++            return q;
++        }
++
++        // Canvas end - optimize aquifer
+         private static final int[][] SURFACE_SAMPLING_OFFSETS_IN_CHUNKS = new int[][]{
+             {0, 0}, {-2, -1}, {-1, -1}, {0, -1}, {1, -1}, {-3, 0}, {-2, 0}, {-1, 0}, {1, 0}, {-2, 1}, {-1, 1}, {0, 1}, {1, 1}
+         };
+@@ -134,6 +_,38 @@
+             this.aquiferCache = new Aquifer.FluidStatus[i4];
+             this.aquiferLocationCache = new long[i4];
+             Arrays.fill(this.aquiferLocationCache, Long.MAX_VALUE);
++            // Canvas start - optimize aquifer
++            if (io.canvasmc.canvas.Config.INSTANCE.chunks.optimizeAquifer) {
++                if (this.aquiferLocationCache.length % (this.gridSizeX * this.gridSizeZ) != 0) {
++                    throw new AssertionError("Array length");
++                }
++
++                int sizeY = this.aquiferLocationCache.length / (this.gridSizeX * this.gridSizeZ);
++
++                final RandomSource random = io.canvasmc.canvas.util.RandomUtils.getRandom(this.positionalRandomFactory);
++                // index: y, z, x
++                for (int y = 0; y < sizeY; y++) {
++                    for (int z = 0; z < this.gridSizeZ; z++) {
++                        for (int x = 0; x < this.gridSizeX; x++) {
++                            final int x1 = x + this.minGridX;
++                            final int y1 = y + this.minGridY;
++                            final int z1 = z + this.minGridZ;
++                            io.canvasmc.canvas.util.RandomUtils.derive(this.positionalRandomFactory, random, x1, y1, z1);
++                            int x2 = x1 * 16 + random.nextInt(10);
++                            int y2 = y1 * 12 + random.nextInt(9);
++                            int z2 = z1 * 16 + random.nextInt(10);
++                            int index = this.getIndex(x1, y1, z1);
++                            this.aquiferLocationCache[index] = BlockPos.asLong(x2, y2, z2);
++                        }
++                    }
++                }
++                for (long blockPosition : this.aquiferLocationCache) {
++                    if (blockPosition == Long.MAX_VALUE) {
++                        throw new AssertionError("Array initialization");
++                    }
++                }
++            }
++            // Canvas end - optimize aquifer
+         }
+ 
+         /**
+@@ -149,6 +_,26 @@
+         @Nullable
+         @Override
+         public BlockState computeSubstance(DensityFunction.FunctionContext context, double substance) {
++            // Canvas start - optimize aquifer
++            if (io.canvasmc.canvas.Config.INSTANCE.chunks.optimizeAquifer) {
++                int i = context.blockX();
++                int j = context.blockY();
++                int k = context.blockZ();
++                if (substance > 0.0) {
++                    this.shouldScheduleFluidUpdate = false;
++                    return null;
++                } else {
++                    Aquifer.FluidStatus fluidLevel = this.globalFluidPicker.computeFluid(i, j, k);
++                    if (fluidLevel.at(j).is(Blocks.LAVA)) {
++                        this.shouldScheduleFluidUpdate = false;
++                        return Blocks.LAVA.defaultBlockState();
++                    } else {
++                        aquiferExtracted$refreshDistPosIdx(i, j, k);
++                        return aquiferExtracted$applyPost(context, substance, j, i, k);
++                    }
++                }
++            }
++            // Canvas end - optimize aquifer
+             int i = context.blockX();
+             int i1 = context.blockY();
+             int i2 = context.blockZ();
+@@ -302,6 +_,26 @@
+         private double calculatePressure(
+             DensityFunction.FunctionContext context, MutableDouble substance, Aquifer.FluidStatus firstFluid, Aquifer.FluidStatus secondFluid
+         ) {
++            // Canvas start - optimize aquifer
++            if (io.canvasmc.canvas.Config.INSTANCE.chunks.optimizeAquifer) {
++                int i = context.blockY();
++                BlockState blockState = firstFluid.at(i);
++                BlockState blockState2 = secondFluid.at(i);
++                if ((!blockState.is(Blocks.LAVA) || !blockState2.is(Blocks.WATER)) && (!blockState.is(Blocks.WATER) || !blockState2.is(Blocks.LAVA))) {
++                    int j = Math.abs(firstFluid.fluidLevel - secondFluid.fluidLevel);
++                    if (j == 0) {
++                        return 0.0;
++                    } else {
++                        double d = 0.5 * (double)(firstFluid.fluidLevel + secondFluid.fluidLevel);
++                        final double q = aquiferExtracted$getQ(i, d, j);
++
++                        return aquiferExtracted$postCalculateDensity(context, substance, q);
++                    }
++                } else {
++                    return 2.0;
++                }
++            }
++            // Canvas end - optimize aquifer
+             int i = context.blockY();
+             BlockState blockState = firstFluid.at(i);
+             BlockState blockState1 = secondFluid.at(i);
+@@ -377,6 +_,25 @@
+          * @param packedPos The aquifer block position, packed into a {@code long}.
+          */
+         private Aquifer.FluidStatus getAquiferStatus(long packedPos) {
++            // Canvas start - optimize aquifer
++            if (io.canvasmc.canvas.Config.INSTANCE.chunks.optimizeAquifer) {
++                int i = BlockPos.getX(packedPos);
++                int j = BlockPos.getY(packedPos);
++                int k = BlockPos.getZ(packedPos);
++                int l = i >> 4; // C2ME - inline: floorDiv(i, 16)
++                int m = Math.floorDiv(j, 12); // C2ME - inline
++                int n = k >> 4; // C2ME - inline: floorDiv(k, 16)
++                int o = this.getIndex(l, m, n);
++                Aquifer.FluidStatus fluidLevel = this.aquiferCache[o];
++                if (fluidLevel != null) {
++                    return fluidLevel;
++                } else {
++                    Aquifer.FluidStatus fluidLevel2 = this.computeFluid(i, j, k);
++                    this.aquiferCache[o] = fluidLevel2;
++                    return fluidLevel2;
++                }
++            }
++            // Canvas end - optimize aquifer
+             int x = BlockPos.getX(packedPos);
+             int y = BlockPos.getY(packedPos);
+             int z = BlockPos.getZ(packedPos);
+@@ -433,6 +_,34 @@
+         }
+ 
+         private int computeSurfaceLevel(int x, int y, int z, Aquifer.FluidStatus fluidStatus, int maxSurfaceLevel, boolean fluidPresent) {
++            // Canvas start - optimize aquifer
++            if (io.canvasmc.canvas.Config.INSTANCE.chunks.optimizeAquifer) {
++                DensityFunction.SinglePointContext unblendedNoisePos = new DensityFunction.SinglePointContext(x, y, z);
++                double d;
++                double e;
++                if (OverworldBiomeBuilder.isDeepDarkRegion(this.erosion, this.depth, unblendedNoisePos)) {
++                    d = -1.0;
++                    e = -1.0;
++                } else {
++                    int i = maxSurfaceLevel + 8 - y;
++                    double f = fluidPresent ? Mth.clampedLerp(1.0, 0.0, ((double) i) / 64.0) : 0.0; // inline
++                    double g = Mth.clamp(this.fluidLevelFloodednessNoise.compute(unblendedNoisePos), -1.0, 1.0);
++                    d = g + 0.8 + (f - 1.0) * 1.2; // inline
++                    e = g + 0.3 + (f - 1.0) * 1.1; // inline
++                }
++
++                int i;
++                if (e > 0.0) {
++                    i = fluidStatus.fluidLevel;
++                } else if (d > 0.0) {
++                    i = this.computeRandomizedFluidSurfaceLevel(x, y, z, maxSurfaceLevel);
++                } else {
++                    i = DimensionType.WAY_BELOW_MIN_Y;
++                }
++
++                return i;
++            }
++            // Canvas end
+             DensityFunction.SinglePointContext singlePointContext = new DensityFunction.SinglePointContext(x, y, z);
+             double d;
+             double d1;
+@@ -477,6 +_,22 @@
+         }
+ 
+         private BlockState computeFluidType(int x, int y, int z, Aquifer.FluidStatus fluidStatus, int surfaceLevel) {
++            // Canvas start - optimize aquifer
++            if (io.canvasmc.canvas.Config.INSTANCE.chunks.optimizeAquifer) {
++                BlockState blockState = fluidStatus.fluidType;
++                if (surfaceLevel <= -10 && surfaceLevel != DimensionType.WAY_BELOW_MIN_Y && fluidStatus.fluidType != Blocks.LAVA.defaultBlockState()) {
++                    int k = x >> 6; // floorDiv(blockX, 64)
++                    int l = Math.floorDiv(y, 40);
++                    int m = z >> 6; // floorDiv(blockZ, 64)
++                    double d = this.lavaNoise.compute(new DensityFunction.SinglePointContext(k, l, m));
++                    if (Math.abs(d) > 0.3) {
++                        blockState = Blocks.LAVA.defaultBlockState();
++                    }
++                }
++
++                return blockState;
++            }
++            // Canvas end
+             BlockState blockState = fluidStatus.fluidType;
+             if (surfaceLevel <= -10 && surfaceLevel != DimensionType.WAY_BELOW_MIN_Y && fluidStatus.fluidType != Blocks.LAVA.defaultBlockState()) {
+                 int i = 64;

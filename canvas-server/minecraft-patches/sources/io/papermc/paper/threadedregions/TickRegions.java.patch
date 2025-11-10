@@ -1,275 +1,79 @@
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -21,7 +_,7 @@
- 
- public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> {
- 
--    private static final Logger LOGGER = LogUtils.getLogger();
-+    private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger("ThreadedRegions"); // Canvas - change LOGGER name
-     private static int regionShift = 31;
- 
-     public static int getRegionChunkShift() {
-@@ -45,6 +_,13 @@
-         gridExponent = Math.min(31, gridExponent);
-         regionShift = gridExponent;
- 
-+    // Canvas start - rewrite scheduler
-+        scheduler = new TickRegionScheduler();
-+    }
-+
-+    public static void start() {
-+        final GlobalConfiguration.ThreadedRegions config = GlobalConfiguration.get().threadedRegions;
-+    // Canvas end
-         int tickThreads;
-         if (config.threads <= 0) {
-             tickThreads = Runtime.getRuntime().availableProcessors() / 2;
-@@ -57,7 +_,7 @@
-             tickThreads = config.threads;
+@@ -169,7 +_,59 @@
          }
- 
--        scheduler = new TickRegionScheduler(tickThreads);
-+        scheduler.setThreads(tickThreads); // Canvas - rewrite scheduler
-         LOGGER.info("Regionised ticking is enabled with " + tickThreads + " tick threads");
      }
  
-@@ -76,11 +_,13 @@
-         final TickRegionData data = region.getData();
-         // post-region merge/split regioninfo update
-         data.getRegionStats().updateFrom(data.getOrCreateRegionizedData(data.world.worldRegionData));
-+        new io.canvasmc.canvas.event.region.RegionCreateEvent(region.apiHandle).callEvent(); // Canvas - expand region api
-     }
+-    public static final class TickRegionData implements ThreadedRegionizer.ThreadedRegionData<TickRegionData, TickRegionSectionData> {
++    // Canvas start - region threading
++    public static final class TickRegionData implements ThreadedRegionizer.ThreadedRegionData<TickRegionData, TickRegionSectionData>, io.canvasmc.canvas.region.RegionTickData {
++
++        @Override
++        public io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion getRegion() {
++            return this.region;
++        }
++
++        @Override
++        public org.bukkit.World getWorld() {
++            return this.world.getWorld();
++        }
++
++        @Override
++        public <T> T getOrCreateFromIRegionizedData(io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> regionizedData) {
++            return this.getOrCreateRegionizedData(((ApiRegionizedData<T>) regionizedData).backend());
++        }
++
++        public static <T> io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> createRegionizedDataApiHandle(java.util.function.BiFunction<io.canvasmc.canvas.region.RegionTickData, org.bukkit.World, T> supplier, io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<T> callback) {
++            RegionizedData<T> foliaRegionizedData = new RegionizedData<>(null,
++                (tickRegionData) -> supplier.apply(tickRegionData, tickRegionData.getWorld()), new RegionizedData.RegioniserCallback<T>() {
++                    @Override
++                    public void merge(final T from, final T into, final long fromTickOffset) {
++                        callback.merge(from, into, fromTickOffset);
++                    }
++
++                    @Override
++                    public void split(
++                        final T from, final int chunkToRegionShift,
++                        final Long2ReferenceOpenHashMap<T> regionToData, final ReferenceOpenHashSet<T> dataSet
++                    ) {
++                        callback.split(from, chunkToRegionShift, regionToData, dataSet);
++                    }
++                }
++            );
++            return new ApiRegionizedData<>(
++                foliaRegionizedData, callback
++            );
++        }
++
++        public record ApiRegionizedData<A>(RegionizedData<A> backend, io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<A> callback) implements io.canvasmc.canvas.region.RegionTickData.IRegionizedData<A>{
++
++            @Override
++            public A createValue(io.canvasmc.canvas.region.RegionTickData regionTickData) {
++                return backend.createNewValue((TickRegionData) regionTickData);
++            }
++
++            @Override
++            public io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<A> getCallback() {
++                return callback;
++            }
++        }
++    // Canvas end - region threading
  
-     @Override
-     public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
-         // nothing for now
-+        new io.canvasmc.canvas.event.region.RegionDestroyEvent(region.apiHandle).callEvent(); // Canvas - expand region api
-     }
- 
-     @Override
-@@ -88,6 +_,7 @@
-         final TickRegionData data = region.getData();
- 
-         data.tickHandle.checkInitialSchedule();
-+        new io.canvasmc.canvas.event.region.RegionActiveEvent(region.apiHandle).callEvent(); // Canvas - expand region api
-         scheduler.scheduleRegion(data.tickHandle);
-     }
- 
-@@ -96,6 +_,7 @@
-         final TickRegionData data = region.getData();
- 
-         scheduler.descheduleRegion(data.tickHandle);
-+        new io.canvasmc.canvas.event.region.RegionInactiveEvent(region.apiHandle).callEvent(); // Canvas - expand region api
-         // old handle cannot be scheduled anymore, copy to a new handle
-         data.tickHandle = data.tickHandle.copy();
-     }
-@@ -156,7 +_,7 @@
-         private final Reference2ReferenceOpenHashMap<RegionizedData<?>, Object> regionizedData = new Reference2ReferenceOpenHashMap<>();
- 
-         // tick data
--        private ConcreteRegionTickHandle tickHandle = new ConcreteRegionTickHandle(this, SchedulerThreadPool.DEADLINE_NOT_SET);
-+        private ConcreteRegionTickHandle tickHandle = new ConcreteRegionTickHandle(this, io.canvasmc.canvas.tick.ScheduledTaskThreadPool.DEADLINE_NOT_SET); // Canvas - rewrite scheduler
- 
-         // queue data
-         private final RegionizedTaskQueue.RegionTaskQueueData taskQueueData;
-@@ -166,14 +_,63 @@
- 
-         // async-safe read-only region data
+         private static final AtomicLong ID_GENERATOR = new AtomicLong();
+         /** Never 0L, since 0L is reserved for global region. */
+@@ -194,6 +_,15 @@
          private final RegionStats regionStats;
-+        private final java.util.concurrent.atomic.AtomicBoolean hasPackets = new java.util.concurrent.atomic.AtomicBoolean(false); // Canvas - rewrite scheduler
+         private final java.util.concurrent.atomic.AtomicBoolean hasPackets = new java.util.concurrent.atomic.AtomicBoolean(false); // Canvas - rewrite scheduler
  
++        // Canvas start - fix world load and unload
++        public volatile boolean canvas$isClosed = false;
++        public final io.canvasmc.canvas.util.ticket.TicketHolder<io.canvasmc.canvas.util.ticket.SaveAllTicket> canvas$saveAllTicket = new io.canvasmc.canvas.util.ticket.TicketHolder<>(); // Canvas - fix commands with region threading
++
++        public void canvas$markClosed() {
++            this.canvas$isClosed = true;
++        }
++
++        // Canvas end - fix world load and unload
          private TickRegionData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
              this.region = region;
              this.world = region.regioniser.world;
--            this.taskQueueData = new RegionizedTaskQueue.RegionTaskQueueData(this.world.taskQueueRegionData);
-+            this.taskQueueData = new RegionizedTaskQueue.RegionTaskQueueData(this.world.taskQueueRegionData, this); // Canvas - rewrite scheduler
-             this.regionStats = new RegionStats();
-         }
- 
-+        // Canvas start - rewrite scheduler
-+        public void setHasTasks() {
-+            TickRegions.getScheduler().setHasTasks(this.tickHandle);
-+        }
-+
-+        public void setHasPackets() {
-+            if (!this.hasPackets.get() && !this.hasPackets.compareAndExchange(false, true)) {
-+                this.setHasTasks();
-+            }
-+        }
-+
-+        public boolean drainOnePacket() {
-+            if (!this.hasPackets.get()) {
-+                return false;
-+            }
-+
-+            final RegionizedWorldData worldData = this.world.getCurrentWorldData();
-+            boolean hasPacketsNew = false;
-+
-+            for (final net.minecraft.server.level.ServerPlayer player : worldData.getLocalPlayers()) {
-+                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) {
-+                    continue;
-+                }
-+                if (player.getBukkitEntity().executeOnePacket()) {
-+                    hasPacketsNew |= player.getBukkitEntity().hasPackets();
-+                }
-+            }
-+
-+            if (!hasPacketsNew) {
-+                this.hasPackets.set(false);
-+
-+                // handle race condition: packet added during packet processing
-+                for (final net.minecraft.server.level.ServerPlayer player : worldData.getLocalPlayers()) {
-+                    if (player.getBukkitEntity().hasPackets()) {
-+                        this.hasPackets.set(true);
-+                        break;
-+                    }
-+                }
-+            }
-+
-+            return true;
-+        }
-+
-+        public void drainPackets() {
-+            while (this.drainOnePacket());
-+        }
-+
-+        // Canvas end
-         public RegionStats getRegionStats() {
-             return this.regionStats;
-         }
-@@ -196,7 +_,7 @@
-             return this.holderManagerRegionData;
-         }
- 
--        <T> T getRegionizedData(final RegionizedData<T> regionizedData) {
-+        public <T> T getRegionizedData(final RegionizedData<T> regionizedData) { // Canvas - package-private -> public
-             return (T)this.regionizedData.get(regionizedData);
-         }
- 
-@@ -207,7 +_,7 @@
-                 return ret;
-             }
- 
--            ret = regionizedData.createNewValue();
-+            ret = regionizedData.createNewValue(this); // Canvas - rewrite scheduler
-             this.regionizedData.put(regionizedData, ret);
- 
-             return ret;
-@@ -225,6 +_,12 @@
-             for (final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region : regions) {
-                 final TickRegionData data = region.getData();
-                 data.tickHandle.copyDeadlineAndTickCount(this.tickHandle);
-+                // Canvas start - rewrite scheduler
-+                // just be lazy about this one, it's not very important
-+                if (this.hasPackets.getOpaque()) {
-+                    data.hasPackets.setOpaque(true);
-+                }
-+                // Canvas end
-             }
- 
-             // generic regionised data
-@@ -292,6 +_,12 @@
-             // there's not really a great solution to the tick problem, no matter what it'll be messed up
-             // we will pick the greatest time delay so that tps will not exceed TICK_RATE
-             data.tickHandle.updateSchedulingToMax(this.tickHandle);
-+            // Canvas start - rewrite scheduler
-+            // just be lazy about this one, it's not very important
-+            if (this.hasPackets.getOpaque()) {
-+                data.hasPackets.setOpaque(true);
-+            }
-+            // Canvas end
- 
-             // generic regionised data
-             final long fromTickOffset = currentTickTo - currentTickFrom; // see merge jd
-@@ -311,6 +_,13 @@
-             // task queue
-             this.taskQueueData.mergeInto(data.taskQueueData);
-         }
-+        // Canvas start - fix world loading/unloading
-+        public volatile boolean isClosed = false;
-+
-+        public void markClosed() {
-+            this.isClosed = true;
-+        }
-+        // Canvas end
-     }
- 
-     public static final class ConcreteRegionTickHandle extends TickRegionScheduler.RegionScheduleHandle { // Folia - watchdog
-@@ -333,11 +_,11 @@
-         }
- 
-         private void updateSchedulingToMax(final ConcreteRegionTickHandle from) {
--            if (from.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
-+            if (from.getScheduledStart() == io.canvasmc.canvas.tick.ScheduledTaskThreadPool.DEADLINE_NOT_SET) { // Canvas - rewrite scheduler
-                 return;
-             }
- 
--            if (this.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
-+            if (this.getScheduledStart() == io.canvasmc.canvas.tick.ScheduledTaskThreadPool.DEADLINE_NOT_SET) { // Canvas - rewrite scheduler
-                 this.updateScheduledStart(from.getScheduledStart());
-                 return;
-             }
-@@ -348,7 +_,7 @@
-         private void copyDeadlineAndTickCount(final ConcreteRegionTickHandle from) {
-             this.currentTick = from.currentTick;
- 
--            if (from.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
-+            if (from.getScheduledStart() == io.canvasmc.canvas.tick.ScheduledTaskThreadPool.DEADLINE_NOT_SET) { // Canvas - rewrite scheduler
-                 return;
-             }
- 
-@@ -357,7 +_,7 @@
-         }
- 
-         private void checkInitialSchedule() {
--            if (this.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
-+            if (this.getScheduledStart() == io.canvasmc.canvas.tick.ScheduledTaskThreadPool.DEADLINE_NOT_SET) { // Canvas - rewrite scheduler
-                 this.updateScheduledStart(System.nanoTime() + TickRegionScheduler.TIME_BETWEEN_TICKS);
-             }
-         }
-@@ -378,32 +_,34 @@
-         }
- 
-         @Override
--        protected boolean runRegionTasks(final BooleanSupplier canContinue) {
-+        protected void runRegionTasks(final BooleanSupplier canContinue) { // Canvas - rewrite scheduler
-             final RegionizedTaskQueue.RegionTaskQueueData queue = this.region.taskQueueData;
- 
-             boolean processedChunkTask = false;
- 
--            boolean executeChunkTask = true;
--            boolean executeTickTask = true;
-+            // Canvas start - rewrite scheduler
-+            boolean executeChunkTask;
-+            boolean executeTickTask;
-+            boolean executePacketTask;
-             do {
--                if (executeTickTask) {
--                    executeTickTask = queue.executeTickTask();
--                }
--                if (executeChunkTask) {
--                    processedChunkTask |= (executeChunkTask = queue.executeChunkTask());
--                }
--            } while ((executeChunkTask | executeTickTask) && canContinue.getAsBoolean());
-+                executeTickTask = queue.executeTickTask();
-+                executeChunkTask = queue.executeChunkTask();
-+                executePacketTask = this.region.drainOnePacket();
-+
-+                processedChunkTask |= executeChunkTask;
-+            } while ((executeChunkTask | executeTickTask | executePacketTask) && canContinue.getAsBoolean());
-+            // Canvas end
- 
-             if (processedChunkTask) {
-                 // if we processed any chunk tasks, try to process ticket level updates for full status changes
-                 this.region.world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
-             }
--            return true;
-+            // Canvas - rewrite scheduler
-         }
- 
-         @Override
-         protected boolean hasIntermediateTasks() {
--            return this.region.taskQueueData.hasTasks();
-+            return this.region.taskQueueData.hasTasks() || this.region.hasPackets.get(); // Canvas - rewrite scheduler
-         }
-     }
- 

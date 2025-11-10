@@ -1,212 +1,122 @@
 --- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
 +++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
-@@ -82,7 +_,9 @@
-             // entities
-             for (final ServerPlayer player : from.localPlayers) {
-                 into.localPlayers.add(player);
-+                player.getBukkitEntity().updateRegion(into); // Canvas - rewrite scheduler
-                 into.nearbyPlayers.addPlayer(player);
-+                into.waypointManager.addPlayer(player); // Canvas - region threading - restore waypoints
+@@ -121,7 +_,13 @@
              }
-             for (final Entity entity : from.allEntities) {
-                 into.allEntities.add(entity);
-@@ -159,6 +_,10 @@
-             for (final ChunkHolder chunkHolder : from.chunkHoldersToBroadcast) {
-                 into.chunkHoldersToBroadcast.add(chunkHolder);
-             }
-+            // Canvas start - optimize entity/block ticking chunk lookups
-+            into.blockTickingChunkHolders.addAll(from.blockTickingChunkHolders);
-+            into.entityTickingChunkHolders.addAll(from.entityTickingChunkHolders);
-+            // Canvas end
-         }
- 
-         @Override
-@@ -171,8 +_,12 @@
-                 final ChunkPos pos = player.chunkPosition();
-                 // Note: It is impossible for an entity in the world to _not_ be in an entity chunk, which means
-                 // the chunk holder must _exist_, and so the region section exists.
--                regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift))
--                    .connections.add(conn);
-+                // Canvas start - region threading - restore waypoints
-+                from.waypointManager.removePlayer(player);
-+                RegionizedWorldData into = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
-+                into.connections.add(conn);
-+                into.waypointManager.addPlayer(player);
-+                // Canvas end
-             }
-             // entities
-             for (final ServerPlayer player : from.localPlayers) {
-@@ -181,6 +_,7 @@
-                 // the chunk holder must _exist_, and so the region section exists.
-                 final RegionizedWorldData into = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
-                 into.localPlayers.add(player);
-+                player.getBukkitEntity().updateRegion(into); // Canvas - rewrite scheduler
-                 into.nearbyPlayers.addPlayer(player);
-             }
-             for (final Entity entity : from.allEntities) {
-@@ -326,6 +_,22 @@
-                     into.chunkHoldersToBroadcast.add(chunkHolder);
+             for (final TickingBlockEntity tileEntityWrapped : from.blockEntityTickers) {
+                 into.blockEntityTickers.add(tileEntityWrapped);
+-                final BlockEntity tileEntity = tileEntityWrapped.getTileEntity();
++                // Canvas start - block entity sleeping
++                final BlockEntity tileEntity;
++                if (tileEntityWrapped instanceof net.minecraft.world.level.chunk.LevelChunk.RebindableTickingBlockEntityWrapper rebindable
++                    && rebindable.ticker instanceof io.canvasmc.canvas.chunk.block.SleepingBlockEntity.SleepingTicker sleepingTicker) {
++                    tileEntity = sleepingTicker.getTileEntityForRegionOperation(); // ensure we still update the entity ticks
++                } else tileEntity = tileEntityWrapped.getTileEntity();
++                // Canvas end - block entity sleeping
+                 if (tileEntity != null) {
+                     tileEntity.updateTicks(fromTickOffset, fromRedstoneTimeOffset);
                  }
+@@ -254,7 +_,18 @@
+                   //       marked as removed. So if there is no section, it's probably removed!
              }
-+            // Canvas start - optimize entity/block ticking chunk lookups
-+            // we can just use 'regionToData' to find the chunk, since
-+            // the long in this case *is* the chunk key
-+            for (final long chunkKey : from.blockTickingChunkHolders) {
-+                RegionizedWorldData worldData = regionToData.get(chunkKey);
-+                if (worldData != null) {
-+                    worldData.blockTickingChunkHolders.add(chunkKey);
+             for (final TickingBlockEntity tileEntity : from.blockEntityTickers) {
+-                final BlockPos pos = tileEntity.getPos();
++                // Canvas start - block entity sleeping
++                final BlockPos pos;
++                if (tileEntity instanceof net.minecraft.world.level.chunk.LevelChunk.RebindableTickingBlockEntityWrapper rebindable
++                    && rebindable.ticker instanceof io.canvasmc.canvas.chunk.block.SleepingBlockEntity.SleepingTicker sleepingTicker) {
++                    pos = sleepingTicker.getPosForRegionOperation(); // ensure non-null, since the sleeping ticker has getPos() return null, which will crash the server on split
++                } else {
++                    pos = tileEntity.getPos();
 +                }
-+            }
-+            for (final long chunkKey : from.entityTickingChunkHolders) {
-+                RegionizedWorldData worldData = regionToData.get(chunkKey);
-+                if (worldData != null) {
-+                    worldData.entityTickingChunkHolders.add(chunkKey);
++                if (pos == null) {
++                    throw new IllegalStateException("Pos cannot be null, class: " + tileEntity.getClass().getName());
 +                }
-+            }
-+            // Canvas end
-         }
-     };
++                // Canvas end - block entity sleeping
+                 final int chunkX = pos.getX() >> 4;
+                 final int chunkZ = pos.getZ() >> 4;
  
-@@ -348,7 +_,8 @@
-     }
+@@ -336,7 +_,7 @@
+     private RegionizedServer.WorldLevelData tickData;
  
-     // entities
--    private final List<ServerPlayer> localPlayers = new ArrayList<>();
-+    // this is copy on write to allow packet processing to iterate safely // Canvas - rewrite scheduler
-+    private final java.util.concurrent.CopyOnWriteArrayList<ServerPlayer> localPlayers = new java.util.concurrent.CopyOnWriteArrayList<>(); // Canvas - rewrite scheduler
-     private final NearbyPlayers nearbyPlayers;
-     public final io.papermc.paper.threadedregions.EntityScheduler.EntitySchedulerTickList entitySchedulerTickList = new io.papermc.paper.threadedregions.EntityScheduler.EntitySchedulerTickList();
-     private final ReferenceList<Entity> allEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
-@@ -447,7 +_,34 @@
+     // connections
+-    public final List<Connection> connections = new ArrayList<>();
++    public final List<Connection> connections = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - optimized collection
+ 
+     // misc. fields
+     private boolean isHandlingTick;
+@@ -366,8 +_,8 @@
+     private final LevelTicks<Fluid> fluidLevelTicks;
+ 
+     // tile entity ticking
+-    private final List<TickingBlockEntity> pendingBlockEntityTickers = new ArrayList<>();
+-    private final List<TickingBlockEntity> blockEntityTickers = new ArrayList<>();
++    private final List<TickingBlockEntity> pendingBlockEntityTickers = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - optimized collection
++    private final List<TickingBlockEntity> blockEntityTickers = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - optimized collection
+     private boolean tickingBlockEntities;
+ 
+     // time
+@@ -396,6 +_,7 @@
+     public boolean skipPullModeEventFire = false;
+     public boolean skipPushModeEventFire = false;
+     public boolean skipHopperEvents = false;
++    public boolean skipHopperSearchItemEvents = false; // Canvas - optimize hoppers
+     // Paper end - Optimize Hoppers
+     public long lastMidTickExecute;
+     public long lastMidTickExecuteFailure;
+@@ -404,8 +_,8 @@
+     public final NeighborUpdater neighborUpdater;
+     public boolean captureBlockStates = false;
+     public boolean captureTreeGeneration = false;
+-    public final Map<BlockPos, CraftBlockState> capturedBlockStates = new java.util.LinkedHashMap<>(); // Paper
+-    public final Map<BlockPos, BlockEntity> capturedTileEntities = new java.util.LinkedHashMap<>(); // Paper
++    public final Map<BlockPos, CraftBlockState> capturedBlockStates = new it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap<>(); // Paper // Canvas - optimized collection
++    public final Map<BlockPos, BlockEntity> capturedTileEntities = new it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap<>(); // Paper // Canvas - optimized collection
+     public List<ItemEntity> captureDrops;
+     // Paper start
+     public int wakeupInactiveRemainingAnimals;
+@@ -420,11 +_,16 @@
+     public boolean shouldSignal = true;
+     public final Map<ServerExplosion.CacheKey, Float> explosionDensityCache = new HashMap<>(64, 0.25f);
+     public final PathTypeCache pathTypesByPosCache = new PathTypeCache();
+-    public final List<LevelChunk> temporaryChunkTickList = new java.util.ArrayList<>();
++    public final List<LevelChunk> temporaryChunkTickList = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - optimized collection
+     public final Set<ChunkHolder> chunkHoldersToBroadcast = new ReferenceLinkedOpenHashSet<>();
+ 
+     // not transient
+     public java.util.ArrayDeque<net.minecraft.world.level.block.RedstoneTorchBlock.Toggle> redstoneUpdateInfos;
++    // Canvas start - optimize fluid spread
++    // this is transient
++    public it.unimi.dsi.fastutil.longs.LongSet slopeDistanceCacheVisited = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(512);
++    public net.minecraft.world.level.material.FlowingFluid.SlopeDistanceNodeDeque slopeDistanceCacheQueue = new net.minecraft.world.level.material.FlowingFluid.SlopeDistanceNodeDeque();
++    // Canvas end - optimize fluid spread
+ 
+     // Mob spawning
+     public final ca.spottedleaf.moonrise.common.misc.PositionCountingAreaMap<ServerPlayer> spawnChunkTracker = new ca.spottedleaf.moonrise.common.misc.PositionCountingAreaMap<>();
+@@ -448,6 +_,11 @@
+     // Redstone
      public final alternate.current.wire.WireHandler wireHandler;
      public final io.papermc.paper.redstone.RedstoneWireTurbo turbo;
++    public final net.minecraft.world.level.levelgen.BitRandomSource simpleUnsafeLocalRandom = io.canvasmc.canvas.Config.ENABLE_FASTER_RANDOM ? new io.canvasmc.canvas.util.FasterRandomSource(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed()) : new ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed()); // Canvas - faster unsafe random
++    public final io.canvasmc.canvas.RegionizedTpsBar tpsbar; // Canvas - tpsbar
++    public final io.canvasmc.canvas.chunk.NatureSpawnChunkMap natureSpawnChunkMap = new io.canvasmc.canvas.chunk.NatureSpawnChunkMap(); // Canvas - optimize spawn chunk collection
++    public long canvas$loadedTick = 0; // Canvas - region threading
++    public long canvas$loadedThisTick = 0; // Canvas - region threading
  
--    public RegionizedWorldData(final ServerLevel world) {
-+    public final io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData; // Canvas - rewrite scheduler
-+    public final ApiHandle apiHandle = new ApiHandle(this); // Canvas - expand region api
-+    public final net.minecraft.server.waypoints.ServerWaypointManager waypointManager = new net.minecraft.server.waypoints.ServerWaypointManager(); // Canvas - region threading - restore waypoints
-+
-+    // Canvas start - optimize entity/block ticking chunk lookups
-+    // if there's lots of chunks loaded, we don't want to search through that map to find block
-+    // ticking holders or entity ticking holders, so we cache the ones that are valid to limit the search.
-+    // the DynamicChunkPosLongSet is the fastest option for 'contains' operations(via tests conducted in V2)
-+    public final Set<Long> blockTickingChunkHolders = new io.canvasmc.canvas.chunk.DynamicChunkPosLongSet();
-+    public final Set<Long> entityTickingChunkHolders = new io.canvasmc.canvas.chunk.DynamicChunkPosLongSet();
-+
-+    public void markBlockTicking(ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder newChunkHolder) {
-+        this.blockTickingChunkHolders.add(newChunkHolder.getCachedLongPos());
-+    }
-+
-+    public void markNonBlockTickingIfPossible(ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder newChunkHolder) {
-+        this.blockTickingChunkHolders.remove(newChunkHolder.getCachedLongPos());
-+    }
-+
-+    public void markEntityTicking(ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder newChunkHolder) {
-+        this.entityTickingChunkHolders.add(newChunkHolder.getCachedLongPos());
-+    }
-+
-+    public void markNonEntityTickingIfPossible(ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder newChunkHolder) {
-+        this.entityTickingChunkHolders.remove(newChunkHolder.getCachedLongPos());
-+    }
-+    // Canvas end
-+    public RegionizedWorldData(final ServerLevel world, final io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData) { // Canvas - rewrite scheduler
-         this.world = world;
-         this.blockLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, true);
-         this.fluidLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, false);
-@@ -455,6 +_,7 @@
-         this.nearbyPlayers = new NearbyPlayers(world);
+     public final io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData; // Canvas - rewrite scheduler
+     public RegionizedWorldData(final ServerLevel world, final io.papermc.paper.threadedregions.TickRegions.TickRegionData regionData) { // Canvas - rewrite scheduler
+@@ -459,6 +_,7 @@
          this.wireHandler = new alternate.current.wire.WireHandler(world);
          this.turbo = new io.papermc.paper.redstone.RedstoneWireTurbo((RedStoneWireBlock)Blocks.REDSTONE_WIRE);
-+        this.regionData = regionData; // Canvas - rewrite scheduler
+         this.regionData = regionData; // Canvas - rewrite scheduler
++        this.tpsbar = new io.canvasmc.canvas.RegionizedTpsBar(this); // Canvas - tpsbar
  
          // tasks may be drained before the region ticks, so we must set up the tick data early just in case
          this.updateTickData();
-@@ -612,6 +_,7 @@
-         if (this.allEntities.add(entity)) {
-             if (entity instanceof ServerPlayer player) {
-                 this.localPlayers.add(player);
-+                player.getBukkitEntity().updateRegion(this); // Canvas - rewrite scheduler
-             }
-             TickRegions.RegionStats.updateCurrentRegion();
-         }
-@@ -628,6 +_,7 @@
-         if (this.allEntities.remove(entity)) {
-             if (entity instanceof ServerPlayer player) {
-                 this.localPlayers.remove(player);
-+                player.getBukkitEntity().updateRegion(null); // Canvas - rewrite scheduler
-             }
-             TickRegions.RegionStats.updateCurrentRegion();
-         }
-@@ -768,4 +_,72 @@
-     public int getChunkCount() {
-         return this.chunks.size();
+@@ -487,6 +_,7 @@
+         this.skipHopperEvents = this.world.paperConfig().hopper.disableMoveEvent || org.bukkit.event.inventory.InventoryMoveItemEvent.getHandlerList().getRegisteredListeners().length == 0; // Paper - Perf: Optimize Hoppers
+         // always subtract from server init so that the tick starts at zero, allowing us to cast to int without much worry
+         this.lagCompensationTick = (System.nanoTime() - MinecraftServer.SERVER_INIT) / TickRegionScheduler.getTimeBetweenTicks(); // Canvas - rewrite scheduler
++        this.skipHopperSearchItemEvents = org.bukkit.event.inventory.HopperInventorySearchEvent.getHandlerList().getRegisteredListeners().length == 0; // Canvas - optimize hoppers
      }
-+    // Canvas start - expand region API
-+
-+    public static class ApiHandle implements io.canvasmc.canvas.threadedregions.WorldRegionData {
-+        @Override
-+        public org.bukkit.World getWorld() {
-+            return this.worldData.world.getWorld();
-+        }
-+
-+        @Override
-+        public org.bukkit.Chunk getCenterChunk() {
-+            ChunkPos pos = this.worldData.regionData.region.getCenterChunk();
-+            return pos == null ? null : getWorld().getChunkAt(pos.longKey);
-+        }
-+
-+        @Override
-+        public List<org.bukkit.Chunk> getOwnedChunks() {
-+            it.unimi.dsi.fastutil.objects.ObjectArrayList<org.bukkit.Chunk> chunks = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
-+            for (final LevelChunk chunk : this.worldData.chunks) {
-+                chunks.add(getWorld().getChunkAt(chunk.coordinateKey));
-+            }
-+            return chunks;
-+        }
-+
-+        @Override
-+        public List<org.bukkit.Chunk> getTickingChunks() {
-+            it.unimi.dsi.fastutil.objects.ObjectArrayList<org.bukkit.Chunk> chunks = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
-+            for (final LevelChunk chunk : this.worldData.tickingChunks) {
-+                chunks.add(getWorld().getChunkAt(chunk.coordinateKey));
-+            }
-+            return chunks;
-+        }
-+
-+        @Override
-+        public int getChunkCount() {
-+            return this.worldData.getChunkCount();
-+        }
-+
-+        @Override
-+        public List<org.bukkit.entity.Player> getLocalPlayers() {
-+            it.unimi.dsi.fastutil.objects.ObjectArrayList<org.bukkit.entity.Player> players = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
-+            for (final ServerPlayer localPlayer : this.worldData.localPlayers) {
-+                players.add(localPlayer.getBukkitEntity());
-+            }
-+            return players;
-+        }
-+
-+        @Override
-+        public int getPlayerCount() {
-+            return this.worldData.getPlayerCount();
-+        }
-+
-+        @Override
-+        public int getEntityCount() {
-+            return this.worldData.getEntityCount();
-+        }
-+
-+        @Override
-+        public io.canvasmc.canvas.threadedregions.ThreadedWorldRegion getRegionizerRegion() {
-+            return this.worldData.regionData.region.apiHandle;
-+        }
-+
-+        private final RegionizedWorldData worldData;
-+
-+        public ApiHandle(RegionizedWorldData worldData) {
-+            this.worldData = worldData;
-+        }
-+    }
-+    // Canvas end
- }
+ 
+     public NearbyPlayers getNearbyPlayers() {

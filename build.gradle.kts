@@ -1,136 +1,17 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
+import io.papermc.paperweight.tasks.RebuildGitPatches
+import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 
 plugins {
     java
-    `maven-publish`
-    id("io.canvasmc.weaver.patcher") version "2.1.0-SNAPSHOT"
-}
-
-allprojects {
-    apply(plugin = "java")
-    apply(plugin = "maven-publish")
-
-    java {
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(22)
-        }
-    }
-
-    tasks.compileJava {
-        options.compilerArgs.add("-Xlint:-deprecation")
-        options.isWarnings = false
-    }
-
-    tasks.withType(JavaCompile::class.java).configureEach {
-        options.isFork = true
-        options.forkOptions.memoryMaximumSize = "4G"
-    }
+    id("io.canvasmc.weaver.patcher") version "2.3.10"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
-subprojects {
-    apply(plugin = "java-library")
-    apply(plugin = "maven-publish")
-
-    extensions.configure<JavaPluginExtension> {
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(22)
-        }
-    }
-
-    tasks.withType<JavaCompile> {
-        options.encoding = Charsets.UTF_8.name()
-        options.release = 22
-        options.isFork = true
-        options.forkOptions.memoryMaximumSize = "4g"
-    }
-    tasks.withType<Javadoc> {
-        options.encoding = Charsets.UTF_8.name()
-    }
-    tasks.withType<ProcessResources> {
-        filteringCharset = Charsets.UTF_8.name()
-    }
-    tasks.withType<Test> {
-        testLogging {
-            showStackTraces = true
-            exceptionFormat = TestExceptionFormat.FULL
-            events(TestLogEvent.STANDARD_OUT)
-        }
-    }
-
-    repositories {
-        mavenCentral()
-        maven(paperMavenPublicUrl)
-        maven("https://jitpack.io")
-        maven("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-        maven("https://maven.shedaniel.me/")
-        maven("https://maven.terraformersmc.com/releases/")
-        maven("https://central.sonatype.com/repository/maven-snapshots/")
-    }
-
-    val subproject = this;
-    // we don't have any form of publishing for canvas-server, because that's the dev bundle
-    if (subproject.name == "canvas-api") {
-        publishing {
-            repositories {
-                maven {
-                    name = "central"
-                    url = uri("https://central.sonatype.com/repository/maven-snapshots/")
-                    credentials {
-                        username=System.getenv("PUBLISH_USER")
-                        password=System.getenv("PUBLISH_TOKEN")
-                    }
-                }
-            }
-
-            publications {
-                create<MavenPublication>("mavenJava") {
-                    from(components["java"])
-
-                    afterEvaluate {
-                        pom {
-                            name.set("canvas-api")
-                            description.set(subproject.description)
-                            url.set("https://github.com/CraftCanvasMC/Canvas")
-                            licenses {
-                                license {
-                                    name.set("GNU Affero General Public License v3.0")
-                                    url.set("https://github.com/CraftCanvasMC/Canvas/blob/master/LICENSE")
-                                    distribution.set("repo")
-                                }
-                            }
-                            developers {
-                                developer {
-                                    id.set("canvas-team")
-                                    name.set("Canvas Team")
-                                    organization.set("CanvasMC")
-                                    organizationUrl.set("https://canvasmc.io")
-                                    roles.add("developer")
-                                }
-                            }
-                            scm {
-                                url.set("https://github.com/CraftCanvasMC/Canvas")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-}
-
-repositories {
-    mavenCentral()
-    jcenter()
-    maven(paperMavenPublicUrl)
-}
-
 paperweight {
-    upstreams.register("folia") {
-        repo = github("PaperMC", "Folia")
+    upstreams.folia {
         ref = providers.gradleProperty("foliaCommit")
 
         patchFile {
@@ -146,41 +27,66 @@ paperweight {
         patchRepo("paperApi") {
             upstreamPath = "paper-api"
             patchesDir = file("canvas-api/paper-patches")
+            additionalAts = file("build-data/canvas.at")
             outputDir = file("paper-api")
         }
         patchDir("foliaApi") {
             upstreamPath = "folia-api"
             excludes = listOf("build.gradle.kts", "build.gradle.kts.patch", "paper-patches")
             patchesDir = file("canvas-api/folia-patches")
+            additionalAts = file("build-data/canvas.at")
             outputDir = file("folia-api")
         }
     }
 }
 
-// build publication
-tasks.register<Jar>("createMojmapClipboardJar") {
-    dependsOn(":canvas-server:createMojmapPaperclipJar")
-}
+subprojects {
+    apply(plugin = "java-library")
+    apply(plugin = "maven-publish")
 
-tasks.register("buildPublisherJar") {
-    dependsOn(":createMojmapClipboardJar")
+    extensions.configure<JavaPluginExtension> {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
 
-    doLast {
-        val buildNumber = System.getenv("BUILD_NUMBER") ?: "local"
+    repositories {
+        mavenCentral()
+        maven(paperMavenPublicUrl)
+    }
 
-        val paperclipJarTask = project(":canvas-server").tasks.getByName("createMojmapPaperclipJar")
-        val outputJar = paperclipJarTask.outputs.files.singleFile
-        val outputDir = outputJar.parentFile
-
-        if (outputJar.exists()) {
-            val newJarName = "canvas-build.$buildNumber.jar"
-            val newJarFile = File(outputDir, newJarName)
-
-            outputDir.listFiles()
-                ?.filter { it.name.startsWith("canvas-build.") && it.name.endsWith(".jar") }
-                ?.forEach { it.delete() }
-            outputJar.renameTo(newJarFile)
-            println("Renamed ${outputJar.name} to $newJarName in ${outputDir.absolutePath}")
+    tasks.withType<AbstractArchiveTask>().configureEach {
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
+    }
+    tasks.withType<JavaCompile>().configureEach {
+        options.encoding = Charsets.UTF_8.name()
+        options.release = 21
+        options.isFork = true
+        options.compilerArgs.addAll(listOf("-Xlint:-deprecation", "-Xlint:-removal"))
+    }
+    tasks.withType<Javadoc>().configureEach {
+        options.encoding = Charsets.UTF_8.name()
+    }
+    tasks.withType<ProcessResources>().configureEach {
+        filteringCharset = Charsets.UTF_8.name()
+    }
+    tasks.withType<Test>().configureEach {
+        testLogging {
+            showStackTraces = true
+            exceptionFormat = TestExceptionFormat.FULL
+            events(TestLogEvent.STANDARD_OUT)
+        }
+    }
+    extensions.configure<PublishingExtension> {
+        repositories {
+            maven("https://maven.canvasmc.io/snapshots") {
+                name = "canvasmc"
+                credentials {
+                    username = providers.environmentVariable("PUBLISH_USER").orNull
+                    password = providers.environmentVariable("PUBLISH_TOKEN").orNull
+                }
+            }
         }
     }
 }
@@ -188,4 +94,13 @@ tasks.register("buildPublisherJar") {
 // patching scripts
 tasks.register("fixupMinecraftFilePatches") {
     dependsOn(":canvas-server:fixupMinecraftSourcePatches")
+}
+
+allprojects {
+    tasks.withType<RebuildGitPatches>().configureEach {
+        filterPatches = false
+    }
+    tasks.withType<RebuildBaseGitPatches>().configureEach {
+        filterPatches = false
+    }
 }

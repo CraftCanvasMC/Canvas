@@ -1,0 +1,77 @@
+--- a/net/minecraft/server/commands/TickCommand.java
++++ b/net/minecraft/server/commands/TickCommand.java
+@@ -32,7 +_,7 @@
+                                 .executes(commandContext -> setTickingRate(commandContext.getSource(), FloatArgumentType.getFloat(commandContext, "rate")))
+                         )
+                 )
+-                .then(
++                /* .then( // Canvas - fix commands with region threading - TODO
+                     Commands.literal("step")
+                         .executes(commandContext -> step(commandContext.getSource(), 1))
+                         .then(Commands.literal("stop").executes(commandContext -> stopStepping(commandContext.getSource())))
+@@ -43,7 +_,7 @@
+                                 )
+                                 .executes(commandContext -> step(commandContext.getSource(), IntegerArgumentType.getInteger(commandContext, "time")))
+                         )
+-                )
++                ) */ // Canvas - fix commands with region threading - TODO
+                 .then(
+                     Commands.literal("sprint")
+                         .then(Commands.literal("stop").executes(commandContext -> stopSprinting(commandContext.getSource())))
+@@ -69,14 +_,29 @@
+     private static int setTickingRate(CommandSourceStack source, float tickRate) {
+         ServerTickRateManager serverTickRateManager = source.getServer().tickRateManager();
+         serverTickRateManager.setTickRate(tickRate);
++        io.papermc.paper.threadedregions.TickRegionScheduler.modifyTickRate(tickRate); // Canvas - fix commands with region threading
+         String string = String.format(Locale.ROOT, "%.1f", tickRate);
+         source.sendSuccess(() -> Component.translatable("commands.tick.rate.success", string), true);
+         return (int)tickRate;
+     }
+ 
+     private static int tickQuery(CommandSourceStack source) {
++        // Canvas start - fix commands with region threading
++        // for tick query, we need to average all region TPS together, ignore global thread
++        it.unimi.dsi.fastutil.longs.LongArraySet arraySet = new it.unimi.dsi.fastutil.longs.LongArraySet();
++        for (final net.minecraft.server.level.ServerLevel world : net.minecraft.server.MinecraftServer.getServer().getAllLevels()) {
++            world.regioniser.computeForAllRegionsUnsynchronised((region) -> {
++                arraySet.add(
++                    (long)Math.ceil(region.getData().getRegionSchedulingHandle().getTickReport5s(System.nanoTime()).timePerTickData().segmentAll().average())
++                );
++            });
++        }
++        // build average
++        long sum = arraySet.longStream().sum();
++        long averageTickTimeNanos = Math.round((double) sum / arraySet.size());
+         ServerTickRateManager serverTickRateManager = source.getServer().tickRateManager();
+-        String string = nanosToMilisString(source.getServer().getAverageTickTimeNanos());
++        String string = nanosToMilisString(averageTickTimeNanos);
++        // Canvas end - fix commands with region threading
+         float tickrate = serverTickRateManager.tickrate();
+         String string1 = String.format(Locale.ROOT, "%.1f", tickrate);
+         if (serverTickRateManager.isSprinting()) {
+@@ -85,7 +_,7 @@
+         } else {
+             if (serverTickRateManager.isFrozen()) {
+                 source.sendSuccess(() -> Component.translatable("commands.tick.status.frozen"), false);
+-            } else if (serverTickRateManager.nanosecondsPerTick() < source.getServer().getAverageTickTimeNanos()) {
++            } else if (serverTickRateManager.nanosecondsPerTick() < averageTickTimeNanos) { // Canvas - fix commands with region threading
+                 source.sendSuccess(() -> Component.translatable("commands.tick.status.lagging"), false);
+             } else {
+                 source.sendSuccess(() -> Component.translatable("commands.tick.status.running"), false);
+@@ -106,6 +_,16 @@
+ 
+     private static int sprint(CommandSourceStack source, int sprintTime) {
+         boolean flag = source.getServer().tickRateManager().requestGameToSprint(sprintTime);
++        // Canvas start - fix commands with region threading
++        io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData().ticksToSprint = sprintTime;
++        for (final net.minecraft.server.level.ServerLevel world : net.minecraft.server.MinecraftServer.getServer().getAllLevels()) {
++            world.regioniser.computeForAllRegionsUnsynchronised((region) -> {
++                region.getData().getRegionSchedulingHandle().ticksToSprint = sprintTime;
++            });
++        }
++        source.getServer().createCommandSourceStack().sendSuccess(() -> Component.literal("Marking all current tick handles to sprint for " + sprintTime + " ticks"), true);
++        source.getServer().tickRateManager().finishTickSprint();
++        // Canvas end - fix commands with region threading
+         if (flag) {
+             source.sendSuccess(() -> Component.translatable("commands.tick.sprint.stop.success"), true);
+         }

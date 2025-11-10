@@ -1,0 +1,94 @@
+--- a/net/minecraft/world/level/ServerExplosion.java
++++ b/net/minecraft/world/level/ServerExplosion.java
+@@ -519,6 +_,27 @@
+                                         dragonPart.hurtServer(this.level, this.damageSource, this.damageCalculator.getEntityDamageAmount(this, dragonPart, f1));
+                                     }
+                                 }
++                            // Canvas start - chain end crystal explosions config
++                            } else if (io.canvasmc.canvas.Config.INSTANCE.chainEndCrystalExplosions && entity instanceof net.minecraft.world.entity.boss.enderdragon.EndCrystal endCrystal) {
++                                int chunkX = endCrystal.chunkPosition().x;
++                                int chunkZ = endCrystal.chunkPosition().z;
++                                io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                                    (ServerLevel) endCrystal.level(),
++                                    chunkX, chunkZ, () -> {
++                                        // copied from EndCrystal#hurtServer
++                                        // we don't modify the method directly in EndCrystal#hurtServer, because the chain would execute *instantly* which we do *NOT* want
++                                        // as this can cause major lag spikes given how large the chain is, so spreading this out over multiple ticks is a more efficient idea
++                                        DamageSource damageSource1 = damageSource.getEntity() != null ? endCrystal.damageSources().explosion(endCrystal, damageSource.getEntity()) : null;
++                                        org.bukkit.event.entity.ExplosionPrimeEvent event = org.bukkit.craftbukkit.event.CraftEventFactory.callExplosionPrimeEvent(endCrystal, 6.0F, false);
++                                        if (event.isCancelled()) {
++                                            return;
++                                        }
++
++                                        endCrystal.remove(Entity.RemovalReason.KILLED, org.bukkit.event.entity.EntityRemoveEvent.Cause.EXPLODE); // Paper - add Bukkit remove cause
++                                        level.explode(endCrystal, damageSource1, null, endCrystal.getX(), endCrystal.getY(), endCrystal.getZ(), event.getRadius(), event.getFire(), Level.ExplosionInteraction.BLOCK);
++                                    }
++                                );
++                            // Canvas end - chain end crystal explosions config
+                             } else {
+                                 entity.hurtServer(this.level, this.damageSource, this.damageCalculator.getEntityDamageAmount(this, entity, f1));
+                             }
+@@ -532,7 +_,7 @@
+                         double d4 = (1.0 - d) * f1 * knockbackMultiplier;
+                         double d5;
+                         if (entity instanceof LivingEntity livingEntity) {
+-                            d5 = entity instanceof Player && this.level.paperConfig().environment.disableExplosionKnockback ? 0 : d4 * (1.0 - livingEntity.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE)); // Paper
++                            d5 = entity instanceof Player && this.level.paperConfig().environment.disableExplosionKnockback ? 0 : getExplosionKnockback(livingEntity, d4); // Paper // Leaf - Old Blast Protection explosion knockback
+                         } else {
+                             d5 = d4;
+                         }
+@@ -560,6 +_,54 @@
+             }
+         }
+     }
++    // Leaf start - Old Blast Protection explosion knockback
++
++    private static double getExplosionKnockback(LivingEntity entity, double velocity) {
++        if (!io.canvasmc.canvas.Config.INSTANCE.combat.legacyBlastProtection) {
++            return velocity * (1.0 - entity.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE));
++        }
++
++        // Old BLAST_PROTECTION logic
++        // BLAST_PROTECTION used ARMOR_SLOTS for slot types
++        // See 1.20.4's ProtectionEnchantment#getExplosionKnockbackAfterDampener,
++        // EnchantmentHelper#getEnchantmentLevel, Enchantment#getSlotItems,
++        // EnchantmentHelper#getItemEnchantmentLevel, Enchantments#BLAST_PROTECTION,
++        // these methods/fields for reference.
++        Map<net.minecraft.world.entity.EquipmentSlot, ItemStack> map = com.google.common.collect.Maps.newEnumMap(net.minecraft.world.entity.EquipmentSlot.class);
++
++        for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.ARMOR_SLOTS) {
++            ItemStack itemStack = entity.getItemBySlot(slot);
++            if (!itemStack.isEmpty()) {
++                map.put(slot, itemStack);
++            }
++        }
++
++        Iterable<ItemStack> items = map.values();
++        int i = 0;
++
++        if (items == null) {
++            return 0;
++        }
++
++        for (ItemStack itemStack : items) {
++            int enchantmentLevel = net.minecraft.world.item.enchantment.EnchantmentHelper.getItemEnchantmentLevel(
++                net.minecraft.server.MinecraftServer.getServer().registryAccess()
++                    .lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
++                    .getOrThrow(net.minecraft.world.item.enchantment.Enchantments.BLAST_PROTECTION),
++                itemStack
++            );
++            if (enchantmentLevel > i) {
++                i = enchantmentLevel;
++            }
++        }
++
++        if (i > 0) {
++            velocity *= Mth.clamp(1.0 - (double) i * 0.15, 0.0, 1.0);
++        }
++
++        return velocity;
++    }
++    // Leaf end - Old Blast Protection explosion knockback
+ 
+     private void interactWithBlocks(List<BlockPos> blocks) {
+         List<ServerExplosion.StackCollector> list = new ArrayList<>();

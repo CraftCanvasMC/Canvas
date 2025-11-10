@@ -1,10 +1,246 @@
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
-@@ -341,6 +_,7 @@
-             // Folia start - rewrite login process
-             // only after setting the connection listener to game type, add the connection to this regions list
-             serverLevel.getCurrentWorldData().connections.add(connection);
-+            serverLevel.getCurrentWorldData().waypointManager.removePlayer(player); // Canvas - region threading - restore waypoints
-             // Folia end - rewrite login process
-             connection.setupInboundProtocol(
-                 GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), serverGamePacketListenerImpl),
+@@ -108,10 +_,11 @@
+     public static final Component CHAT_FILTERED_FULL = Component.translatable("chat.filtered_full");
+     public static final Component DUPLICATE_LOGIN_DISCONNECT_MESSAGE = Component.translatable("multiplayer.disconnect.duplicate_login");
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    public static final int SEND_PLAYER_INFO_INTERVAL = 600;
++    public static final int SEND_PLAYER_INFO_INTERVAL = io.canvasmc.canvas.Config.INSTANCE.networking.playerInfoSendInterval; // Canvas - optimize playerlist tick
+     private static final ThreadLocal<SimpleDateFormat> BAN_DATE_FORMAT = ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd 'at' HH:mm:ss z")); // Folia - region threading - SDF is not thread-safe
+     private final MinecraftServer server;
+     public final List<ServerPlayer> players = new java.util.concurrent.CopyOnWriteArrayList(); // CraftBukkit - ArrayList -> CopyOnWriteArrayList: Iterator safety
++    private final io.canvasmc.canvas.util.PlayerListBucket[] canvas$infoBuckets = new io.canvasmc.canvas.util.PlayerListBucket[SEND_PLAYER_INFO_INTERVAL]; // Canvas - optimize playerlist tick
+     /**
+      * A map containing the key-value pairs for UUIDs and their EntityPlayerMP objects.
+      */
+@@ -153,17 +_,7 @@
+             conflictingId = this.connectionById.get(byId);
+ 
+             if (conflictingName == null && conflictingId == null) {
+-                // Folia start - max concurrent login
+-                int loggedInCount = 0;
+-                for (Connection value : this.connectionById.values()) {
+-                    if (value.getPacketListener() instanceof ServerGamePacketListenerImpl) {
+-                        ++loggedInCount;
+-                    }
+-                }
+-                if ((this.connectionById.size() - loggedInCount) >= io.papermc.paper.configuration.GlobalConfiguration.get().misc.maxJoinsPerTick) {
+-                    return false;
+-                }
+-                // Folia end - max concurrent login
++                // Canvas - broken implementation, remove - TODO - reimplement?
+                 this.connectionByName.put(userName, conn);
+                 this.connectionById.put(byId, conn);
+             }
+@@ -276,7 +_,7 @@
+             // Paper end
+             ServerLevel level = this.server.getLevel(resourceKey);
+             ServerLevel serverLevel;
+-            if (level == null) {
++            if (level == null || level.canvas$worldUnloadTicket.isPresent()) { // Canvas - rewrite world load and unload
+                 LOGGER.warn("Unknown respawn dimension {}, defaulting to overworld", resourceKey);
+                 serverLevel = this.server.overworld();
+                 invalidPlayerWorld[0] = true; // Paper - reset to main world if no world with parsed value is found
+@@ -399,6 +_,7 @@
+ 
+             // player.connection.send(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(this.players)); // CraftBukkit - replaced with loop below
+             this.players.add(player);
++            this.canvas$pushToBuckets(player); // Canvas - optimize playerlist tick
+             this.playersByName.put(player.getScoreboardName().toLowerCase(java.util.Locale.ROOT), player); // Spigot
+             this.playersByUUID.put(player.getUUID(), player);
+             // this.broadcastAll(ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(player))); // CraftBukkit - replaced with loop below
+@@ -591,6 +_,7 @@
+         if (playerAdvancements != null) {
+             playerAdvancements.save();
+         }
++        new io.canvasmc.canvas.event.PlayerSaveEvent(player.getBukkitEntity(), false).callEvent(); // Canvas - player save event
+     }
+ 
+     public @Nullable net.kyori.adventure.text.Component remove(ServerPlayer player) { // CraftBukkit - return string // Paper - return Component
+@@ -656,7 +_,13 @@
+         for (ThrownEnderpearl thrownEnderpearl : player.getEnderPearls()) {
+             // Paper start - Allow using old ender pearl behavior
+             if (!thrownEnderpearl.level().paperConfig().misc.legacyEnderPearlBehavior) {
+-                thrownEnderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT); // CraftBukkit - add Bukkit remove cause
++                // Canvas start - region threading
++                io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                    thrownEnderpearl.level().getMinecraftWorld(), thrownEnderpearl.chunkPosition().x, thrownEnderpearl.chunkPosition().z, () -> {
++                        thrownEnderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT); // CraftBukkit - add Bukkit remove cause
++                    }
++                );
++                // Canvas end - region threading
+             }
+             // Paper end - Allow using old ender pearl behavior
+         }
+@@ -665,6 +_,7 @@
+         player.retireScheduler(); // Paper - Folia schedulers
+         player.getAdvancements().stopListening();
+         this.players.remove(player);
++        this.canvas$removeFromBuckets(player); // Canvas - optimize playerlist tick
+         this.playersByName.remove(player.getScoreboardName().toLowerCase(java.util.Locale.ROOT)); // Spigot
+         this.server.getCustomBossEvents().onPlayerDisconnect(player);
+         UUID uuid = player.getUUID();
+@@ -691,6 +_,7 @@
+         // This removes the scoreboard (and player reference) for the specific player in the manager
+         this.cserver.getScoreboardManager().removePlayer(player.getBukkitEntity());
+         // CraftBukkit end
++        new io.canvasmc.canvas.event.PlayerSaveEvent(player.getBukkitEntity(), true).callEvent(); // Canvas - player save event
+         return playerQuitEvent.quitMessage(); // Paper - Adventure
+     }
+ 
+@@ -764,6 +_,7 @@
+         // Folia end - region threading
+         player.stopRiding(); // CraftBukkit
+         this.players.remove(player);
++        this.canvas$removeFromBuckets(player); // Canvas - optimize playerlist tick
+         this.playersByName.remove(player.getScoreboardName().toLowerCase(java.util.Locale.ROOT)); // Spigot
+         player.level().removePlayerImmediately(player, reason);
+         // TeleportTransition teleportTransition = player.findRespawnPositionAndUseSpawnBlock(!keepInventory, TeleportTransition.DO_NOTHING);
+@@ -841,6 +_,7 @@
+         if (!serverPlayer.connection.isDisconnected()) {
+             level.addRespawnedPlayer(serverPlayer);
+             this.players.add(serverPlayer);
++            this.canvas$pushToBuckets(serverPlayer); // Canvas - optimize playerlist tick
+             this.playersByName.put(serverPlayer.getScoreboardName().toLowerCase(java.util.Locale.ROOT), serverPlayer); // Spigot
+             this.playersByUUID.put(serverPlayer.getUUID(), serverPlayer);
+         }
+@@ -945,6 +_,20 @@
+     }
+ 
+     public void tick() {
++        // Canvas start - optimize playerlist tick
++        if (io.canvasmc.canvas.Config.INSTANCE.networking.optimizePlayerListTicking) {
++            io.canvasmc.canvas.util.PlayerListBucket bucket = this.canvas$infoBuckets[this.sendAllPlayerInfoIn];
++
++            if (bucket != null) {
++                bucket.tick(this.players.toArray(new ServerPlayer[0]));
++            }
++
++            if (++this.sendAllPlayerInfoIn >= SEND_PLAYER_INFO_INTERVAL) {
++                this.sendAllPlayerInfoIn = 0;
++            }
++            return;
++        }
++        // Canvas end - optimize playerlist tick
+         if (++this.sendAllPlayerInfoIn > 600) {
+             // CraftBukkit start
+             ServerPlayer[] players = this.players.toArray(new ServerPlayer[0]); // Folia - region threading
+@@ -956,6 +_,45 @@
+             this.sendAllPlayerInfoIn = 0;
+         }
+     }
++    // Canvas start - optimize playerlist tick
++
++    public void canvas$pushToBuckets(ServerPlayer player) {
++        if (!io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> canvas$pushToBuckets(player));
++            return;
++        }
++        io.canvasmc.canvas.util.PlayerListBucket bucket = this.canvas$infoBuckets[player.canvas$infoBucketIndex];
++        if (bucket == null) {
++            this.canvas$infoBuckets[player.canvas$infoBucketIndex] = new io.canvasmc.canvas.util.PlayerListBucket(new ServerPlayer[]{player});
++            return;
++        }
++        this.canvas$infoBuckets[player.canvas$infoBucketIndex] = bucket = new io.canvasmc.canvas.util.PlayerListBucket(java.util.Arrays.copyOf(bucket.bucket(), bucket.bucket().length + 1));
++        bucket.bucket()[bucket.bucket().length - 1] = player;
++    }
++
++    public void canvas$removeFromBuckets(ServerPlayer player) {
++        if (!io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> canvas$removeFromBuckets(player));
++            return;
++        }
++        io.canvasmc.canvas.util.PlayerListBucket bucket = this.canvas$infoBuckets[player.canvas$infoBucketIndex];
++        if (bucket != null) {
++            if (bucket.bucket().length == 1) {
++                if (bucket.bucket()[0] == player) {
++                    this.canvas$infoBuckets[player.canvas$infoBucketIndex] = null;
++                }
++                return;
++            }
++
++            for (int i = 0; i < bucket.bucket().length; i++) {
++                if (bucket.bucket()[i] == player) {
++                    bucket.bucket()[i] = bucket.bucket()[bucket.bucket().length - 1];
++                    this.canvas$infoBuckets[player.canvas$infoBucketIndex] = new io.canvasmc.canvas.util.PlayerListBucket(java.util.Arrays.copyOf(bucket.bucket(), bucket.bucket().length - 1));
++                }
++            }
++        }
++    }
++    // Canvas end - optimize playerlist tick
+ 
+     // CraftBukkit start - add a world/entity limited version
+     public void broadcastAll(Packet packet, net.minecraft.world.entity.player.Player entityhuman) {
+@@ -1153,16 +_,19 @@
+ 
+     public void broadcast(@Nullable Player except, double x, double y, double z, double radius, ResourceKey<Level> dimension, Packet<?> packet) {
+         for (ServerPlayer serverPlayer : this.players) { // Folia - region threading
+-            // CraftBukkit start - Test if player receiving packet can see the source of the packet
+-            if (except != null && !serverPlayer.getBukkitEntity().canSee(except.getBukkitEntity())) {
+-               continue;
+-            }
+-            // CraftBukkit end
++            // Canvas - optimize - move down
+             if (serverPlayer != except && serverPlayer.level().dimension() == dimension) {
+                 double d = x - serverPlayer.getX();
+                 double d1 = y - serverPlayer.getY();
+                 double d2 = z - serverPlayer.getZ();
+                 if (d * d + d1 * d1 + d2 * d2 < radius * radius) {
++                    // Canvas start - optimize - moved down
++                    // CraftBukkit start - Test if player receiving packet can see the source of the packet
++                    if (except != null && !serverPlayer.getBukkitEntity().canSee(except.getBukkitEntity())) {
++                        continue;
++                    }
++                    // CraftBukkit end
++                    // Canvas end - optimize - moved down
+                     serverPlayer.connection.send(packet);
+                 }
+             }
+@@ -1179,9 +_,9 @@
+         int numSaved = 0;
+         final long now = System.nanoTime(); // Folia - region threading
+         long timeInterval = (long)interval * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks(); // Folia - region threading // Canvas - rewrite scheduler
+-        for (final ServerPlayer player : this.players) { // Folia - region threading
++        for (final ServerPlayer player : interval == -1 ? this.players : io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData().getLocalPlayers()) { // Folia - region threading // Canvas - optimize player save
+             // Folia start - region threading
+-            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) {
++            if (interval == -1 && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) { // Canvas - optimize player save
+                 continue;
+             }
+             // Folia end - region threading
+@@ -1416,6 +_,7 @@
+     }
+ 
+     public boolean verifyChatTrusted(PlayerChatMessage message) {
++        if (io.canvasmc.canvas.Config.INSTANCE.enableNoChatReports) return true; // Canvas - no chat reports
+         return message.hasSignature() && !message.hasExpiredServer(Instant.now());
+     }
+ 
+@@ -1466,7 +_,12 @@
+ 
+         for (ServerLevel serverLevel : this.server.getAllLevels()) {
+             if (serverLevel != null) {
+-                serverLevel.getChunkSource().setViewDistance(viewDistance);
++                // Canvas start - per world distance
++                io.canvasmc.canvas.chunk.PerWorldDistanceConfig distanceConfig = serverLevel.serverLevelData.canvas$distanceConfig;
++                if (!distanceConfig.isViewDistanceOverridden()) {
++                    serverLevel.getChunkSource().setViewDistance(viewDistance);
++                }
++                // Canvas end - per world distance
+             }
+         }
+     }
+@@ -1477,7 +_,12 @@
+ 
+         for (ServerLevel serverLevel : this.server.getAllLevels()) {
+             if (serverLevel != null) {
+-                serverLevel.getChunkSource().setSimulationDistance(simulationDistance);
++                // Canvas start - per world distance
++                io.canvasmc.canvas.chunk.PerWorldDistanceConfig distanceConfig = serverLevel.serverLevelData.canvas$distanceConfig;
++                if (!distanceConfig.isSimulationDistanceOverridden()) {
++                    serverLevel.getChunkSource().setSimulationDistance(simulationDistance);
++                }
++                // Canvas end - per world distance
+             }
+         }
+     }

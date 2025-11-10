@@ -1,0 +1,56 @@
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -154,11 +_,35 @@
+         }
+     }
+ 
++    private volatile boolean canvas$switchedAlready = false; // Canvas - async protocol switch
+     @Override
+     public void handleConfigurationFinished(ServerboundFinishConfigurationPacket packet) {
++        // Canvas start - async protocol switch
++        if (io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch && !canvas$switchedAlready) {
++            canvas$switchedAlready = true;
++            this.finishCurrentTask(JoinWorldTask.TYPE);
++            this.connection.canvas$setupOutboundProtocolAsync(
++                GameProtocols.CLIENTBOUND_TEMPLATE.bind(
++                    RegistryFriendlyByteBuf.decorator(this.server.registryAccess())
++                )
++            ).addListener(unused -> {
++                try {
++                    // just run PacketUtils, this will schedule this to the global tick for us
++                    PacketUtils.ensureRunningOnSameThread(packet, this, this.server);
++                } catch (net.minecraft.server.RunningOnDifferentThreadException | io.papermc.paper.util.ServerStopRejectedExecutionException ignored) {
++                } catch (java.util.concurrent.RejectedExecutionException rejExc) {
++                    this.connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
++                } catch (ClassCastException castClass) {
++                    LOGGER.error("Received {} that couldn't be processed", packet.getClass(), castClass);
++                    this.connection.disconnect(Component.translatable("multiplayer.disconnect.invalid_packet"));
++                }
++            });
++            return;
++        }
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.server);
+-        this.finishCurrentTask(JoinWorldTask.TYPE);
+-        this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
++        if (!io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch) this.finishCurrentTask(JoinWorldTask.TYPE);
++        if (!io.canvasmc.canvas.Config.INSTANCE.networking.asyncProtocolSwitch) this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
++        // Canvas end - async protocol switch
+ 
+         try {
+             PlayerList playerList = this.server.getPlayerList();
+@@ -279,13 +_,13 @@
+     // Paper start
+     @Override
+     public void disconnectAsync(final net.minecraft.network.DisconnectionDetails disconnectionInfo) {
+-        if (this.cserver.isPrimaryThread()) {
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) { // Canvas - region threading
+             this.disconnect(disconnectionInfo);
+             return;
+         }
+ 
+         this.connection.setReadOnly();
+-        this.server.scheduleOnMain(() -> {
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> { // Canvas - region threading
+             this.disconnect(disconnectionInfo); // Currently you cannot cancel disconnect during the config stage
+         });
+     }

@@ -1,49 +1,36 @@
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
-@@ -227,6 +_,46 @@
-     private BorderChangeListener clientWorldBorderListener = this.createWorldBorderListener();
-     public org.bukkit.event.player.PlayerResourcePackStatusEvent.Status resourcePackStatus; // Paper - more resource pack API
-     private long lastSaveTime; // Paper - getLastPlayed replacement API
-+    // Canvas start - rewrite scheduler
-+    private final ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<Runnable> packetQueue = new ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue<>();
-+    // used only to notify tasks for packets
-+    private volatile io.papermc.paper.threadedregions.RegionizedWorldData lastRegion;
-+
-+    public void stopAcceptingPackets() {
-+        this.packetQueue.preventAdds();
-+    }
-+
-+    public void updateRegion(final io.papermc.paper.threadedregions.RegionizedWorldData region) {
-+        this.lastRegion = region;
-+        if (region != null && this.hasPackets()) {
-+            region.regionData.setHasPackets();
-+        }
-+    }
-+
-+    public boolean hasPackets() {
-+        return !this.packetQueue.isEmpty();
-+    }
-+
-+    public boolean executeOnePacket() {
-+        final Runnable run = this.packetQueue.poll();
-+        if (run != null) {
-+            run.run();
-+            return true;
-+        }
-+        return false;
-+    }
-+
-+    public void addPacket(final Runnable runnable) {
-+        if (!this.packetQueue.add(runnable)) {
-+            return;
-+        }
-+
-+        final io.papermc.paper.threadedregions.RegionizedWorldData region = this.lastRegion;
-+        if (region != null) {
-+            region.regionData.setHasPackets();
-+        }
-+    }
-+    // Canvas end
+@@ -220,7 +_,7 @@
+     private long lastPlayed = 0;
+     private boolean hasPlayedBefore = false;
+     private final ConversationTracker conversationTracker = new ConversationTracker();
+-    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new HashMap<>();
++    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>(); // Canvas - optimized collection
+     private final Set<UUID> unlistedEntities = new HashSet<>(); // Paper - Add Listing API for Player
+     private static final WeakHashMap<Plugin, WeakReference<Plugin>> pluginWeakReferences = new WeakHashMap<>();
+     private int hash = 0;
+@@ -1564,6 +_,7 @@
  
-     public CraftPlayer(CraftServer server, ServerPlayer entity) {
-         super(server, entity);
+     @Override
+     public Collection<EnderPearl> getEnderPearls() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.getHandle(), "Cannot get player ender pearls off the owning thread"); // Canvas - region threading
+         return this.getHandle().getEnderPearls().stream().map((e) -> (EnderPearl) e.getBukkitEntity()).collect(Collectors.toList());
+     }
+ 
+@@ -2219,8 +_,14 @@
+ 
+     @Override
+     public boolean canSee(org.bukkit.entity.Entity entity) {
+-        return this.equals(entity) || entity.isVisibleByDefault() ^ this.invertedVisibilityEntities.containsKey(entity.getUniqueId()); // SPIGOT-7312: Can always see self
+-    }
++        return this.equals(entity) || entity.isVisibleByDefault() ^ (!invertedVisibilityEntities.isEmpty() && this.invertedVisibilityEntities.containsKey(entity.getUniqueId())); // SPIGOT-7312: Can always see self // Leaf - optimize canSee checks
++    }
++    // Leaf start - optimize canSee checks
++
++    public boolean canSeeChunkMapUpdatePlayer(org.bukkit.entity.Entity entity) {
++        return entity.isVisibleByDefault() ^ (!invertedVisibilityEntities.isEmpty() && this.invertedVisibilityEntities.containsKey(entity.getUniqueId())); // SPIGOT-7312: Can always see self // SparklyPaper - optimize canSee checks
++    }
++    // Leaf end - optimize canSee checks
+ 
+     public boolean canSeePlayer(UUID uuid) {
+         org.bukkit.entity.Entity entity = this.getServer().getPlayer(uuid);

@@ -1,0 +1,75 @@
+--- a/net/minecraft/world/entity/projectile/Projectile.java
++++ b/net/minecraft/world/entity/projectile/Projectile.java
+@@ -45,10 +_,46 @@
+     @Nullable
+     private Entity lastDeflectedBy;
+     protected boolean hitCancelled = false; // CraftBukkit
++    private long canvas$ticketTimer = 0L; // Canvas - configurable projectile types can load chunks
+ 
+     Projectile(EntityType<? extends Projectile> entityType, Level level) {
+         super(entityType, level);
+     }
++    // Pufferfish start
++
++    private int loadedLifetime = 0;
++
++    @Override
++    public void setPos(double x, double y, double z) {
++        // Canvas start - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            super.setPos(x, y, z);
++            return;
++        }
++        io.papermc.paper.threadedregions.RegionizedWorldData currWorldData = this.level().getCurrentWorldData();
++        long currentTick = currWorldData.regionData.getCurrentTick();
++        if (currWorldData.canvas$loadedTick != currentTick) {
++            currWorldData.canvas$loadedTick = currentTick;
++            currWorldData.canvas$loadedThisTick = 0;
++        }
++        // Canvas end - region threading
++        int previousX = Mth.floor(this.getX()) >> 4, previousZ = Mth.floor(this.getZ()) >> 4;
++        int newX = Mth.floor(x) >> 4, newZ = Mth.floor(z) >> 4;
++        if (previousX != newX || previousZ != newZ) {
++            boolean isLoaded = ((net.minecraft.server.level.ServerChunkCache) this.level().getChunkSource()).getChunkAtIfLoadedImmediately(newX, newZ) != null;
++            if (!isLoaded) {
++                if (currWorldData.canvas$loadedThisTick > io.canvasmc.canvas.Config.INSTANCE.projectiles.maxProjectileLoadsPerTick) { // Canvas - region threading
++                    if (++this.loadedLifetime > io.canvasmc.canvas.Config.INSTANCE.projectiles.maxProjectileLoadsPerProjectile) {
++                        this.discard();
++                    }
++                    return;
++                }
++                currWorldData.canvas$loadedThisTick++; // Canvas - region threading
++            }
++        }
++        super.setPos(x, y, z);
++    }
++    // Pufferfish end
+ 
+     protected void setOwner(@Nullable EntityReference<Entity> owner) {
+         this.owner = owner;
+@@ -134,6 +_,25 @@
+         }
+ 
+         super.tick();
++        // Canvas start - configurable projectile types can load chunks
++        if (
++            !(this instanceof ThrownEnderpearl) // ender pearls have their own logic
++            && this.isAlive()
++            && this.getType().canvas$isProjectileAndLoadsChunksOverride
++        ) {
++            BlockPos blockPos = BlockPos.containing(this.position());
++            int sectionPosX = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
++            int sectionPosZ = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
++            if ((
++                --this.canvas$ticketTimer <= 0L
++                    || sectionPosX != net.minecraft.core.SectionPos.blockToSectionCoord(blockPos.getX())
++                    || sectionPosZ != net.minecraft.core.SectionPos.blockToSectionCoord(blockPos.getZ())
++            )
++                && this.getOwner() instanceof net.minecraft.server.level.ServerPlayer) {
++                this.canvas$ticketTimer = net.minecraft.server.level.ServerPlayer.placeEnderPearlTicket((ServerLevel) this.level(), this.chunkPosition()) - 1L;
++            }
++        }
++        // Canvas end - configurable projectile types can load chunks
+     }
+ 
+     private boolean checkLeftOwner() {

@@ -1,17 +1,17 @@
 package io.canvasmc.canvas.spark;
 
-import com.google.common.collect.ImmutableSet;
-import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.spark.profiler.PinningThreadDumper;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.stream.Stream;
 import me.lucko.spark.api.Spark;
-import me.lucko.spark.paper.PaperClassSourceLookup;
 import me.lucko.spark.paper.PaperCommandSender;
-import me.lucko.spark.paper.PaperPlatformInfo;
-import me.lucko.spark.paper.PaperPlayerPingProvider;
-import me.lucko.spark.paper.PaperServerConfigProvider;
-import me.lucko.spark.paper.PaperSparkPlugin;
 import me.lucko.spark.paper.PaperTickHook;
 import me.lucko.spark.paper.PaperTickReporter;
-import me.lucko.spark.paper.PaperWorldInfoProvider;
 import me.lucko.spark.paper.api.Compatibility;
 import me.lucko.spark.paper.api.PaperClassLookup;
 import me.lucko.spark.paper.api.PaperScheduler;
@@ -19,6 +19,7 @@ import me.lucko.spark.paper.api.PaperSparkModule;
 import me.lucko.spark.paper.common.SparkPlatform;
 import me.lucko.spark.paper.common.SparkPlugin;
 import me.lucko.spark.paper.common.monitor.ping.PlayerPingProvider;
+import me.lucko.spark.paper.common.monitor.tick.SparkTickStatistics;
 import me.lucko.spark.paper.common.monitor.tick.TickStatistics;
 import me.lucko.spark.paper.common.platform.PlatformInfo;
 import me.lucko.spark.paper.common.platform.serverconfig.ServerConfigProvider;
@@ -29,19 +30,10 @@ import me.lucko.spark.paper.common.sampler.source.SourceMetadata;
 import me.lucko.spark.paper.common.tick.TickHook;
 import me.lucko.spark.paper.common.tick.TickReporter;
 import me.lucko.spark.paper.common.util.classfinder.ClassFinder;
-import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
-import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
-import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.stream.Stream;
 
 public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     private final Server server;
@@ -53,14 +45,6 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     private final ThreadDumper gameThreadDumper;
     private final SparkPlatform platform;
 
-    @Contract("_, _, _, _, _ -> new")
-    public static @NotNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
-        if (!Config.INSTANCE.useOurSparkPlugin) {
-            return new PaperSparkPlugin(server, logger, scheduler, classLookup);
-        }
-        return new FoliaSparkPlugin(server, logger, scheduler, classLookup);
-    }
-
     public FoliaSparkPlugin(Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
         super();
         this.server = server;
@@ -69,8 +53,12 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.classLookup = classLookup;
         this.tickHook = new PaperTickHook();
         this.tickReporter = new PaperTickReporter();
-        this.gameThreadDumper = new ThreadDumper.Regex(ImmutableSet.of("Region Scheduler Thread #\\d+"));
+        this.gameThreadDumper = new PinningThreadDumper();
         this.platform = new SparkPlatform(this);
+    }
+
+    public static @NotNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
+        return new FoliaSparkPlugin(server, logger, scheduler, classLookup);
     }
 
     public void enable() {
@@ -87,7 +75,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     @Override
     public TickStatistics createTickStatistics() {
-        return new FoliaTickStatistics(Bukkit.getServer());
+        return new SparkTickStatistics();
     }
 
     public List<String> tabComplete(CommandSender sender, String[] args) {
@@ -123,7 +111,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     }
 
     public Stream<PaperCommandSender> getCommandSenders() {
-        return Stream.concat(this.server.getOnlinePlayers().stream(), Stream.of(this.server.getConsoleSender())).map((x$0) -> new PaperCommandSender((CommandSender)x$0));
+        return Stream.concat(this.server.getOnlinePlayers().stream(), Stream.of(this.server.getConsoleSender())).map(PaperCommandSender::new);
     }
 
     public void executeAsync(Runnable task) {

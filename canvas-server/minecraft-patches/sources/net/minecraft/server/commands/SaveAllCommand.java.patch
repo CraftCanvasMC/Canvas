@@ -1,0 +1,36 @@
+--- a/net/minecraft/server/commands/SaveAllCommand.java
++++ b/net/minecraft/server/commands/SaveAllCommand.java
+@@ -21,14 +_,27 @@
+     }
+ 
+     private static int saveAll(CommandSourceStack source, boolean flush) throws CommandSyntaxException {
++        // Canvas start - fix commands with region threading
+         source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
+         MinecraftServer server = source.getServer();
+-        boolean flag = server.saveEverything(true, flush, true);
+-        if (!flag) {
+-            throw ERROR_FAILED.create();
+-        } else {
+-            source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
+-            return 1;
++        final java.util.concurrent.atomic.AtomicInteger rc = new java.util.concurrent.atomic.AtomicInteger();
++        Runnable callback = () -> {
++            if (rc.decrementAndGet() == 0) {
++                source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
++            }
++        };
++        for (final net.minecraft.server.level.ServerLevel world : server.getAllLevels()) {
++            world.regioniser.computeForAllRegions((region) -> {
++                rc.getAndIncrement();
++                region.getData().canvas$saveAllTicket.propagate(
++                    new io.canvasmc.canvas.util.ticket.SaveAllTicket(callback, (ex) -> {
++                        source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
++                        MinecraftServer.LOGGER.error(ERROR_FAILED.create().getMessage(), ex);
++                    }, flush)
++                );
++            });
+         }
++        return 1;
++        // Canvas end - fix commands with region threading
+     }
+ }

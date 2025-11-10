@@ -1,34 +1,340 @@
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
-@@ -1565,6 +_,7 @@
+@@ -432,6 +_,9 @@
+     public boolean joining = true;
+     public boolean sentListPacket = false;
+     public boolean supressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
++    public final io.canvasmc.canvas.RegionizedTpsBar.DisplayManager canvas$tpsBarDisplay = io.canvasmc.canvas.RegionizedTpsBar.DisplayManager.createNew(this); // Canvas - tpsbar
++    public final int canvas$infoBucketIndex; // Canvas - optimize playerlist tick
++    public final it.unimi.dsi.fastutil.objects.Object2ObjectMap<net.minecraft.world.waypoints.WaypointTransmitter, net.minecraft.world.waypoints.WaypointTransmitter.Connection> canvas$activeWaypoints = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>(); // Canvas - region threading
+     // CraftBukkit end
+     public boolean isRealPlayer; // Paper
+     public @Nullable com.destroystokyo.paper.event.entity.PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
+@@ -483,6 +_,7 @@
+         this.bukkitPickUpLoot = true;
+         this.maxHealthCache = this.getMaxHealth();
+         // CraftBukkit end
++        this.canvas$infoBucketIndex = Math.floorMod(this.uuid.hashCode(), net.minecraft.server.players.PlayerList.SEND_PLAYER_INFO_INTERVAL); // Canvas - optimize playerlist tick
+     }
+ 
+     // Folia start - region threading
+@@ -505,8 +_,8 @@
+         double amountX = selectMaxX - selectMinX;
+         double amountZ = selectMaxZ - selectMinZ;
+ 
+-        int selectX = amountX < 1.0 ? Mth.floor(worldBorder.getCenterX()) : (int)Mth.floor((amountX + 1.0) * random.nextDouble() + selectMinX);
+-        int selectZ = amountZ < 1.0 ? Mth.floor(worldBorder.getCenterZ()) : (int)Mth.floor((amountZ + 1.0) * random.nextDouble() + selectMinZ);
++        int selectX = amountX < 0.0 ? Mth.floor(worldBorder.getCenterX()) : Mth.floor(amountX * random.nextDouble() + selectMinX); // Luminol - correct respawn place
++        int selectZ = amountZ < 0.0 ? Mth.floor(worldBorder.getCenterZ()) : Mth.floor(amountZ * random.nextDouble() + selectMinZ); // Luminol - correct respawn place
+ 
+         return new BlockPos(selectX, 0, selectZ);
+     }
+@@ -517,10 +_,20 @@
+     }
+ 
+     private static BlockPos findSpawnAround(ServerLevel world, ServerPlayer player, BlockPos selected) {
++        // Luminol start - correct respawn place
++        BlockPos inChunk;
++        inChunk = PlayerRespawnLogic.getOverworldRespawnPos(world, selected.getX(), selected.getZ());
++        if (inChunk != null) {
++            AABB checkVolume = player.getBoundingBoxAt((double)inChunk.getX() + 0.5, inChunk.getY(), (double)inChunk.getZ() + 0.5);
++            if (player.noCollisionNoLiquid(world, checkVolume)) {
++                return inChunk;
++            }
++        }
++        // Luminol end - correct respawn place
+         // try hard to find, so that we don't attempt another chunk load
+         for (int dz = -SPAWN_RADIUS_SELECTION_SEARCH; dz <= SPAWN_RADIUS_SELECTION_SEARCH; ++dz) {
+             for (int dx = -SPAWN_RADIUS_SELECTION_SEARCH; dx <= SPAWN_RADIUS_SELECTION_SEARCH; ++dx) {
+-                BlockPos inChunk = PlayerRespawnLogic.getOverworldRespawnPos(world, selected.getX() + dx, selected.getZ() + dz);
++                inChunk = PlayerRespawnLogic.getOverworldRespawnPos(world, selected.getX() + dx, selected.getZ() + dz); // Luminol - correct respawn place
+                 if (inChunk == null) {
+                     continue;
+                 }
+@@ -656,6 +_,11 @@
+     }
+ 
+     public void queuePacketTask(Runnable task) {
++        if (this.canvas$isDisplayingEndCredits) {
++            // if displaying end credits, we want to run this on the global tick
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(task);
++            return;
++        }
+         if (!this.packetTaskQueue.add(task)) return;
+         if (worldDataRef != null) {
+             // really shouldn't be null, but we check anyway just in the case it is
+@@ -757,6 +_,7 @@
+         this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
+         this.spawnExtraParticlesOnFall = input.getBooleanOr("spawn_extra_particles_on_fall", false);
+         this.raidOmenPosition = input.read("raid_omen_position", BlockPos.CODEC).orElse(null);
++        this.canvas$tpsBarDisplay.updateFromEntry(input.read("TpsBar", io.canvasmc.canvas.RegionizedTpsBar.Entry.CODEC).orElse(io.canvasmc.canvas.RegionizedTpsBar.Entry.FALLBACK)); // Canvas - tpsbar
+     }
+ 
+     @Override
+@@ -774,6 +_,7 @@
+         output.storeNullable("raid_omen_position", BlockPos.CODEC, this.raidOmenPosition);
+         this.saveEnderPearls(output);
+         this.getBukkitEntity().setExtraData(output); // CraftBukkit
++        output.store("TpsBar", io.canvasmc.canvas.RegionizedTpsBar.Entry.CODEC, this.canvas$tpsBarDisplay.serializeDisplay()); // Canvas - tpsbar
+     }
+ 
+     private void saveParentVehicle(ValueOutput output) {
+@@ -1357,6 +_,7 @@
+         if (killCredit != null) {
+             this.awardStat(Stats.ENTITY_KILLED_BY.get(killCredit.getType()));
+             killCredit.awardKillScore(this, cause);
++            if (cause.is(DamageTypes.WITHER_SKULL)) this.isDyingFromWitherRose = true; // Canvas - fix Folia#388
+             this.createWitherRose(killCredit);
          }
-         // must be manually removed from connections, delay until after reset() so that we do not trip any thread checks
-         this.level().getCurrentWorldData().connections.remove(this.connection.connection);
-+        this.level().getCurrentWorldData().waypointManager.removePlayer(this); // Canvas - region threading - restore waypoints
  
-         ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> spawnPosComplete =
-             new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
-@@ -1676,6 +_,7 @@
-     protected ServerPlayer transformForAsyncTeleport(ServerLevel destination, Vec3 pos, Float yaw, Float pitch, Vec3 velocity) {
-         // must be manually removed from connections
-         this.level().getCurrentWorldData().connections.remove(this.connection.connection);
-+        this.level().getCurrentWorldData().waypointManager.removePlayer(this); // Canvas - region threading - restore waypoints
-         this.level().removePlayerImmediately(this, Entity.RemovalReason.CHANGED_DIMENSION);
+@@ -1584,16 +_,27 @@
+      * internally for {@link #respawn(java.util.function.Consumer, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason)}
+      */
+     public static final long TELEPORT_FLAGS_PLAYER_RESPAWN    = Long.MIN_VALUE >>> 0;
++    public boolean canvas$isDisplayingEndCredits = false; // Canvas - region threading
++    private @Nullable Runnable canvas$exitEndCreditsCallback = null; // Canvas - region threading
  
-         this.spawnIn(destination);
-@@ -1698,6 +_,7 @@
+     public void exitEndCredits() {
+         if (!this.wonGame) {
+             // not in the end credits anymore
+             return;
+         }
+-        this.wonGame = false;
++        // Canvas start - region threading
++        if (!this.canvas$isDisplayingEndCredits) this.wonGame = false;
  
-             // must be manually added to connections
-             this.level().getCurrentWorldData().connections.add(this.connection.connection);
-+            this.level().getCurrentWorldData().waypointManager.addPlayer(this); // Canvas - region threading - restore waypoints
++        if (this.canvas$exitEndCreditsCallback != null) {
++            this.wonGame = false;
++            this.canvas$isDisplayingEndCredits = false;
++            this.canvas$exitEndCreditsCallback.run();
++            this.canvas$exitEndCreditsCallback = null;
++            return;
++        }
++        // Canvas end - region threading
+         this.respawn((player) -> {
+-            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, Level.OVERWORLD);
++            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()); // Canvas - default respawn dimension config
+         }, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.END_PORTAL, true);
+     }
  
-             // required to set up the pending teleport stuff to the client, and to actually update
-             // the player's position clientside
-@@ -1751,6 +_,7 @@
+@@ -1640,12 +_,28 @@
+         boolean[] usedRespawnAnchor = new boolean[1];
  
-             // must be manually added to connections
-             this.level().getCurrentWorldData().connections.add(this.connection.connection);
-+            this.level().getCurrentWorldData().waypointManager.addPlayer(this); // Canvas - region threading - restore waypoints
+         // set up post spawn location logic
++        boolean[] isBedSpawn = new boolean[]{false}; // Canvas - region threading
++        boolean[] missingRespawnBlock = new boolean[]{false}; // Canvas - region threading
++        RespawnPosAngle[] respawnPosAngle = new RespawnPosAngle[1]; // Canvas - region threading
+         spawnPosComplete.addWaiter((spawnLoc, throwable) -> {
+             // update pos and velocity
+-            ServerPlayer.this.setPosRaw(spawnLoc.getX(), spawnLoc.getY(), spawnLoc.getZ());
+-            ServerPlayer.this.setYRot(spawnLoc.getYaw());
+-            ServerPlayer.this.setYHeadRot(spawnLoc.getYaw());
+-            ServerPlayer.this.setXRot(spawnLoc.getPitch());
++            // Canvas start - region threading
++            org.bukkit.event.player.PlayerRespawnEvent respawnEvent = new org.bukkit.event.player.PlayerRespawnEvent(
++                ServerPlayer.this.getBukkitEntity(),
++                spawnLoc,
++                isBedSpawn[0],
++                usedRespawnAnchor[0],
++                missingRespawnBlock[0],
++                reason
++            );
++            respawnEvent.callEvent();
++            java.util.concurrent.atomic.AtomicReference<org.bukkit.Location> spawnLocAtomic = new java.util.concurrent.atomic.AtomicReference<>();
++            Runnable finalize = () -> {
++            ServerPlayer.this.setPosRaw(spawnLocAtomic.get().getX(), spawnLocAtomic.get().getY(), spawnLocAtomic.get().getZ());
++            ServerPlayer.this.setYRot(spawnLocAtomic.get().getYaw());
++            ServerPlayer.this.setYHeadRot(spawnLocAtomic.get().getYaw());
++            ServerPlayer.this.setXRot(spawnLocAtomic.get().getPitch());
++            // Canvas end - region threading
+             ServerPlayer.this.setDeltaMovement(Vec3.ZERO);
+             // placeInAsync will update the world
  
-             // required to set up the pending teleport stuff to the client, and to actually update
-             // the player's position clientside
+@@ -1653,7 +_,7 @@
+                 origin,
+                 // use the load chunk flag just in case the spawn loc isn't loaded, and to ensure the chunks
+                 // stay loaded for a bit with the teleport ticket
+-                ((org.bukkit.craftbukkit.CraftWorld)spawnLoc.getWorld()).getHandle(),
++                ((org.bukkit.craftbukkit.CraftWorld)spawnLocAtomic.get().getWorld()).getHandle(), // Canvas - region threading
+                 TELEPORT_FLAG_LOAD_CHUNK | TELEPORT_FLAGS_PLAYER_RESPAWN,
+                 passengerTree, // note: we expect this to just be the player, no passengers
+                 (entity) -> {
+@@ -1666,6 +_,7 @@
+                                 1.0F, 1.0F, ServerPlayer.this.level().getRandom().nextLong()
+                             )
+                         );
++                        if (respawnPosAngle[0] != null && respawnPosAngle[0].consumeAnchorCharge != null) respawnPosAngle[0].consumeAnchorCharge.run();
+                     }
+                     // now the respawn logic is complete
+ 
+@@ -1675,12 +_,29 @@
+                     }
+                 }
+             );
++            // Canvas start - region threading
++            };
++            spawnLocAtomic.set(respawnEvent.getRespawnLocation());
++            if (spawnLoc != respawnEvent.getRespawnLocation()) {
++                // event changed the location, load async and then call finalizer
++                // use all the events location for this, they may have changed the world
++                ServerLevel respawnAt = ((org.bukkit.craftbukkit.CraftWorld) respawnEvent.getRespawnLocation().getWorld()).getHandle();
++                respawnAt.canvas$loadOrRunAtChunksAsync(
++                    new BlockPos(spawnLoc.getBlockX(), spawnLoc.getBlockY(), spawnLoc.getBlockZ()),
++                    16, ca.spottedleaf.concurrentutil.util.Priority.HIGHER, finalize
++                );
++            } else {
++                // event didn't modify location, run finalizer
++                finalize.run();
++            }
++            // Canvas end - region threading
+         });
+ 
++        Runnable finalizer = () -> { // Canvas - region threading
+         // find and modify respawn block state
+         if (respawnWorld == null || respawnConfig == null) {
+             // default to regular spawn
+-            fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), this, spawnPosComplete);
++            fudgeSpawnLocation(this.server.getLevel(io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()), this, spawnPosComplete); // Canvas - default respawn dimension config
+         } else {
+             // load chunk for block
+             // give at least 1 radius of loaded chunks so that we do not sync load anything
+@@ -1692,6 +_,7 @@
+                         respawnWorld, respawnConfig, !alive
+                     ).orElse(null);
+                     if (spawnPos == null) {
++                        missingRespawnBlock[0] = true; // Canvas - region threading
+                         // no spawn
+                         ServerPlayer.this.connection.send(
+                             new ClientboundGameEventPacket(ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE, 0.0F)
+@@ -1700,13 +_,15 @@
+                             null, false, com.destroystokyo.paper.event.player.PlayerSetSpawnEvent.Cause.PLAYER_RESPAWN
+                         );
+                         // default to regular spawn
+-                        fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), this, spawnPosComplete);
++                        fudgeSpawnLocation(this.server.getLevel(io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()), this, spawnPosComplete); // Canvas - default respawn dimension config
+                         return;
+                     }
+ 
+                     boolean isRespawnAnchor = respawnWorld.getBlockState(respawnConfig.pos()).is(net.minecraft.world.level.block.Blocks.RESPAWN_ANCHOR);
+                     boolean isBed = respawnWorld.getBlockState(respawnConfig.pos()).is(net.minecraft.tags.BlockTags.BEDS);
+                     usedRespawnAnchor[0] = !alive && isRespawnAnchor;
++                    isBedSpawn[0] = isBed; // Canvas - region threading
++                    respawnPosAngle[0] = spawnPos;
+ 
+                     // finished now, pass the location on
+                     spawnPosComplete.complete(
+@@ -1716,6 +_,16 @@
+                 }
+             );
+         }
++        // Canvas start - region threading
++        };
++        if (this.canvas$isDisplayingEndCredits) {
++            // we need to assign to callback, we are displaying the credits
++            this.canvas$exitEndCreditsCallback = finalizer;
++        } else {
++            // not displaying credits, run finalizer
++            finalizer.run();
++        }
++        // Canvas end - region threading
+     }
+ 
+     @Override
+@@ -1865,12 +_,17 @@
+                 return false;
+             }
+             this.wonGame = true;
+-            // TODO is there a better solution to this that DOESN'T skip the credits?
+-            this.seenCredits = true;
+-            if (!this.seenCredits) {
++            // Canvas start - region threading
++            // we need to remove the player *first*, and then display
++            // the end credits, or else we get the player stuck in the
++            // void, and they can't escape...
++            this.canvas$isDisplayingEndCredits = !this.seenCredits && !this.level().paperConfig().misc.disableEndCredits; // ensure we respect paper config
++            this.exitEndCredits(); // note: this calls 'unRide()'
++            if (this.canvas$isDisplayingEndCredits) {
+                 this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
++                this.seenCredits = true; // mark seen the end credits
+             }
+-            this.exitEndCredits();
++            // Canvas end - region threading
+             return true;
+         } else {
+             return super.endPortalLogicAsync(portalPos);
+@@ -2199,7 +_,7 @@
+         if (this.spawnExtraParticlesOnFall && onGround && this.fallDistance > 0.0) {
+             Vec3 vec3 = pos.getCenter().add(0.0, 0.5, 0.0);
+             int i = (int)Mth.clamp(50.0 * this.fallDistance, 0.0, 200.0);
+-            this.level().sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, state), vec3.x, vec3.y, vec3.z, i, 0.3F, 0.3F, 0.3F, 0.15F);
++            if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableFallParticles) this.level().sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, state), vec3.x, vec3.y, vec3.z, i, 0.3F, 0.3F, 0.3F, 0.15F); // Canvas - particles config
+             this.spawnExtraParticlesOnFall = false;
+         }
+ 
+@@ -2390,7 +_,7 @@
+                     this.awardStat(Stats.SWIM_ONE_CM, rounded);
+                     this.causeFoodExhaustion(this.level().spigotConfig.swimMultiplier * (float) rounded * 0.01F, org.bukkit.event.entity.EntityExhaustionEvent.ExhaustionReason.SWIM); // CraftBukkit - EntityExhaustionEvent // Spigot
+                 }
+-            } else if (this.isEyeInFluid(FluidTags.WATER)) {
++            } else if (this.canvas$isEyeInWater()) { // Canvas - optimize fluidOnEyes
+                 int rounded = Math.round((float)Math.sqrt(dx * dx + dy * dy + dz * dz) * 100.0F);
+                 if (rounded > 0) {
+                     this.awardStat(Stats.WALK_UNDER_WATER_ONE_CM, rounded);
+@@ -2513,6 +_,7 @@
+ 
+     public void disconnect() {
+         this.disconnected = true;
++        if (this.canvas$isTemporarilyBlocking) this.releaseUsingItem(); // Canvas - implement sword blocking
+         this.ejectPassengers();
+ 
+         // Paper start - Workaround vehicle not tracking the passenger disconnection dismount
+@@ -2720,6 +_,9 @@
+             this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.CHANGE_GAME_MODE, gameMode.getId()));
+             if (gameMode == GameType.SPECTATOR) {
+                 this.removeEntitiesOnShoulder();
++                if (io.canvasmc.canvas.Config.INSTANCE.fixes.mc119417) this.stopSleeping(); // Canvas - MC-119417
++                if (io.canvasmc.canvas.Config.INSTANCE.fixes.mc129909) this.releaseUsingItem(); // Canvas - MC-129909
++                if (io.canvasmc.canvas.Config.INSTANCE.fixes.mc69216 && this.fishing != null) this.fishing.discard(); // Canvas - MC-69216
+                 this.stopRiding();
+                 EnchantmentHelper.stopLocationBasedEffects(this);
+             } else {
+@@ -3359,13 +_,19 @@
+         return getInputVector(new Vec3(f, 0.0, f1), 1.0F, this.getYRot());
+     }
+ 
++    // Canvas start - region threading
+     public void registerEnderPearl(ThrownEnderpearl enderPearl) {
+-        //this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
++        this.scheduleToOrRun(() -> {
++            this.enderPearls.add(enderPearl);
++        });
+     }
+ 
+     public void deregisterEnderPearl(ThrownEnderpearl enderPearl) {
+-        //this.enderPearls.remove(enderPearl); // Folia - region threading - do not track ender pearls
++        this.scheduleToOrRun(() -> {
++            this.enderPearls.remove(enderPearl);
++        });
+     }
++    // Canvas end - region threading
+ 
+     public Set<ThrownEnderpearl> getEnderPearls() {
+         return this.enderPearls;
+@@ -3390,7 +_,7 @@
+     public record RespawnConfig(ResourceKey<Level> dimension, BlockPos pos, float angle, boolean forced) {
+         public static final Codec<ServerPlayer.RespawnConfig> CODEC = RecordCodecBuilder.create(
+             instance -> instance.group(
+-                    Level.RESOURCE_KEY_CODEC.optionalFieldOf("dimension", Level.OVERWORLD).forGetter(ServerPlayer.RespawnConfig::dimension),
++                    Level.RESOURCE_KEY_CODEC.optionalFieldOf("dimension", io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()).forGetter(ServerPlayer.RespawnConfig::dimension), // Canvas - default respawn dimension config
+                     BlockPos.CODEC.fieldOf("pos").forGetter(ServerPlayer.RespawnConfig::pos),
+                     Codec.FLOAT.optionalFieldOf("angle", 0.0F).forGetter(ServerPlayer.RespawnConfig::angle),
+                     Codec.BOOL.optionalFieldOf("forced", false).forGetter(ServerPlayer.RespawnConfig::forced)
+@@ -3399,7 +_,7 @@
+         );
+ 
+         static ResourceKey<Level> getDimensionOrDefault(@Nullable ServerPlayer.RespawnConfig respawnConfig) {
+-            return respawnConfig != null ? respawnConfig.dimension() : Level.OVERWORLD;
++            return respawnConfig != null ? respawnConfig.dimension() : io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey(); // Canvas - default respawn dimension config
+         }
+ 
+         public boolean isSamePosition(@Nullable ServerPlayer.RespawnConfig respawnConfig) {

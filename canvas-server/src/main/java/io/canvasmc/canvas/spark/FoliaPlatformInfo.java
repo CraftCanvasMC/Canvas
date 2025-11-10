@@ -3,15 +3,7 @@ package io.canvasmc.canvas.spark;
 import me.lucko.spark.paper.common.platform.PlatformInfo;
 import org.bukkit.Server;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
-public class FoliaPlatformInfo implements PlatformInfo {
-    private final Server server;
-
-    public FoliaPlatformInfo(Server server) {
-        this.server = server;
-    }
+public record FoliaPlatformInfo(Server server) implements PlatformInfo {
 
     @Override
     public Type getType() {
@@ -20,7 +12,7 @@ public class FoliaPlatformInfo implements PlatformInfo {
 
     @Override
     public String getName() {
-        return "Bukkit";
+        return "Folia";
     }
 
     @Override
@@ -35,28 +27,6 @@ public class FoliaPlatformInfo implements PlatformInfo {
 
     @Override
     public String getMinecraftVersion() {
-        try {
-            return this.server.getMinecraftVersion();
-        } catch (NoSuchMethodError e) {
-            // ignore
-        }
-
-        Class<? extends Server> serverClass = this.server.getClass();
-        try {
-            Field minecraftServerField = serverClass.getDeclaredField("console");
-            minecraftServerField.setAccessible(true);
-
-            Object minecraftServer = minecraftServerField.get(this.server);
-            Class<?> minecraftServerClass = minecraftServer.getClass();
-
-            Method getVersionMethod = minecraftServerClass.getDeclaredMethod("getVersion");
-            getVersionMethod.setAccessible(true);
-
-            return (String) getVersionMethod.invoke(minecraftServer);
-        } catch (Exception e) {
-            // ignore
-        }
-
-        return serverClass.getPackage().getName().split("\\.")[3];
+        return this.server.getMinecraftVersion();
     }
 }

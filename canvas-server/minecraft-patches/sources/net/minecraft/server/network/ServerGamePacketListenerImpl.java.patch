@@ -1,10 +1,52 @@
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-@@ -2776,6 +_,7 @@
-         } finally { // Folia start - rewrite login process - move connection ownership to global region
-             io.papermc.paper.threadedregions.RegionizedWorldData worldData = this.player.level().getCurrentWorldData();
-             worldData.connections.remove(this.connection);
-+            worldData.waypointManager.removePlayer(this.player); // Canvas - region threading - restore waypoints
-             // once waitingForSwitchToConfig is set, the global tick thread will own the connection
-         } // Folia end - rewrite login process - move connection ownership to global region
-         this.waitingForSwitchToConfig = true; // Folia - rewrite login process - fix bad ordering of this field write - moved down
+@@ -330,7 +_,7 @@
+         this.player = player;
+         player.connection = this;
+         player.getTextFilter().join();
+-        this.signedMessageDecoder = SignedMessageChain.Decoder.unsigned(player.getUUID(), server::enforceSecureProfile);
++        this.signedMessageDecoder = SignedMessageChain.Decoder.unsigned(player.getUUID(), server::canvas$ncrEnforceSecureProfile); // Canvas - no chat reports
+         this.chatMessageChain = new FutureChain(server.chatExecutor); // CraftBukkit - async chat
+         this.tickEndEvent = new io.papermc.paper.event.packet.ClientTickEndEvent(player.getBukkitEntity()); // Paper - add client tick end event
+         this.playerGameConnection =  new io.papermc.paper.connection.PaperPlayerGameConnection(this); // Paper
+@@ -852,8 +_,11 @@
+     }
+ 
+     // Paper start - AsyncTabCompleteEvent
+-    private static final java.util.concurrent.ExecutorService TAB_COMPLETE_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(4,
+-        new com.google.common.util.concurrent.ThreadFactoryBuilder().setDaemon(true).setNameFormat("Async Tab Complete Thread - #%d").setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(MinecraftServer.LOGGER)).build());
++    // Canvas start - virtual threads
++    private static final java.util.concurrent.ExecutorService TAB_COMPLETE_EXECUTOR = io.canvasmc.canvas.util.virtual.VirtualThreadUtils.createFixedExecutor(4, io.canvasmc.canvas.Config.INSTANCE.virtualThreads.tabCompleteExecutor,
++        new com.google.common.util.concurrent.ThreadFactoryBuilder().setDaemon(true).setNameFormat("Async Tab Complete Thread - #%d").setUncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(MinecraftServer.LOGGER)).build(),
++        io.canvasmc.canvas.util.virtual.VirtualThreadUtils.buildFactory((virtual) -> virtual.uncaughtExceptionHandler(new net.minecraft.DefaultUncaughtExceptionHandlerWithName(MinecraftServer.LOGGER))));
++    // Canvas end - virtual threads
+     // Paper end - AsyncTabCompleteEvent
+ 
+     /**
+@@ -2317,7 +_,7 @@
+     public void handleChat(ServerboundChatPacket packet) {
+         // CraftBukkit start - async chat
+         // SPIGOT-3638
+-        if (this.server.isStopped()) {
++        if (io.papermc.paper.threadedregions.RegionShutdownThread.canvas$isShutdown()) { // Canvas - region threading
+             return;
+         }
+         // CraftBukkit end
+@@ -2372,7 +_,7 @@
+         command = event.getMessage().substring(1);
+         // CraftBukkit end
+         ParseResults<CommandSourceStack> parseResults = this.parseCommand(command);
+-        if (this.server.enforceSecureProfile() && SignableCommand.hasSignableArguments(parseResults)) {
++        if (this.server.canvas$ncrEnforceSecureProfile() && SignableCommand.hasSignableArguments(parseResults)) { // Canvas - no chat reports
+             LOGGER.error(
+                 "Received unsigned command packet from {}, but the command requires signable arguments: {}", this.player.getGameProfile().getName(), command
+             );
+@@ -3704,7 +_,7 @@
+     private void resetPlayerChatState(RemoteChatSession chatSession) {
+         this.chatSession = chatSession;
+         this.hasLoggedExpiry = false; // Paper - Prevent causing expired keys from impacting new joins
+-        this.signedMessageDecoder = chatSession.createMessageDecoder(this.player.getUUID());
++        if (!io.canvasmc.canvas.Config.INSTANCE.enableNoChatReports) this.signedMessageDecoder = chatSession.createMessageDecoder(this.player.getUUID()); // Canvas - no chat reports
+         this.chatMessageChain
+             .append(
+                 () -> {

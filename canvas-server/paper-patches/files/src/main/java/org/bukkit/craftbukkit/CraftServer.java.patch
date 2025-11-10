@@ -1,130 +1,135 @@
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -286,7 +_,7 @@
-     private final StructureManager structureManager;
-     final DedicatedServer console;
-     private final DedicatedPlayerList playerList;
--    private final Map<String, World> worlds = new LinkedHashMap<>();
-+    public final Map<String, World> worlds = it.unimi.dsi.fastutil.objects.Object2ObjectMaps.synchronize(new it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap<>()); // Canvas - private -> public - fastutil - synchronized
-     private YamlConfiguration configuration;
-     private YamlConfiguration commandsConfiguration;
-     private final Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
-@@ -1259,7 +_,6 @@
+@@ -1262,7 +_,7 @@
  
      @Override
      public World createWorld(WorldCreator creator) {
 -        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only create worlds on global tick"); // Canvas - region threading
          Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
          //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
          Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
-@@ -1438,7 +_,20 @@
+@@ -1441,7 +_,21 @@
          }
  
          this.console.addLevel(serverLevel); // Paper - Put world into worldlist before initing the world; move up
 -        this.console.initWorld(serverLevel, primaryLevelData, primaryLevelData, primaryLevelData.worldGenOptions());
-+        // Canvas start - fix world loading/unloading
++        // Canvas start - rewrite world load and unload
++        // creating worlds isn't too hard, we just need to delay world init
 +        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addWorld(serverLevel);
 +        int loadRegionRadius = 1024 >> 4;
 +        serverLevel.randomSpawnSelection = new net.minecraft.world.level.ChunkPos(serverLevel.getChunkSource().randomState().sampler().findSpawnPosition());
 +        for (int currX = -loadRegionRadius; currX <= loadRegionRadius; ++currX) {
 +            for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
-+                net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(currX, currZ);
++                net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(currX + serverLevel.randomSpawnSelection.x, currZ + serverLevel.randomSpawnSelection.z);
 +                serverLevel.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
 +                    net.minecraft.server.level.TicketType.UNKNOWN, pos, ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, null
 +                );
 +            }
 +        }
 +        // this.console.initWorld(serverLevel, primaryLevelData, primaryLevelData, primaryLevelData.worldGenOptions());
-+        // Canvas end
++        // Canvas end - rewrite world load and unload
  
          serverLevel.setSpawnSettings(true);
          // Paper - Put world into worldlist before initing the world; move up
-@@ -1457,13 +_,13 @@
+@@ -1453,53 +_,46 @@
+         return serverLevel.getWorld();
+     }
+ 
+-    @Override
+-    public boolean unloadWorld(String name, boolean save) {
++    // Canvas start - rewrite world load and unload
++    @Override
++    public void unloadWorldAsync(@NotNull String name, boolean save, final @NotNull Consumer<Boolean> callback) {
++        unloadWorldAsync(this.worlds.get(name), save, callback);
++    }
++
++    @Override
++    public void unloadWorldAsync(@NotNull World world, boolean save, final @NotNull Consumer<Boolean> callback) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
++        ServerLevel handle = ((CraftWorld) world).getHandle();
++        if (
++            handle.canvas$worldUnloadTicket.isPresent()
++            || this.console.getLevel(handle.dimension()) == null
++            || handle.dimension() == net.minecraft.world.level.Level.OVERWORLD
++            || !handle.players().isEmpty()
++            || !(new WorldUnloadEvent(handle.getWorld()).callEvent())
++            || this.console.hasStartedShutdownThread.get()
++        ) {
++            callback.accept(false);
++            return;
++        }
++
++        try {
++            net.minecraft.server.MinecraftServer.LOGGER.info("Marking world '{}' for unload", world.getName());
++            handle.canvas$worldUnloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
++        } catch (Throwable thrown) {
++            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
++        }
++    }
++    // Canvas end - rewrite world load and unload
++
++    @Override
++    public boolean unloadWorld(@NotNull String name, boolean save) {
+         return this.unloadWorld(this.getWorld(name), save);
+     }
  
      @Override
-     public boolean unloadWorld(World world, boolean save) {
--        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
-         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot unload a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
-         if (world == null) {
-             return false;
-         }
- 
-         ServerLevel handle = ((CraftWorld) world).getHandle();
-+        if (handle.isUnloading) return false; // Canvas - fix world loading/unloading - we are already unloading
- 
-         if (this.console.getLevel(handle.dimension()) == null) {
-             return false;
-@@ -1483,19 +_,19 @@
-         }
- 
-         try {
+-    public boolean unloadWorld(World world, boolean save) {
++    public boolean unloadWorld(@NotNull World world, boolean save) {
+         if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
+-        //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot unload a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+-        if (world == null) {
+-            return false;
+-        }
+-
+-        ServerLevel handle = ((CraftWorld) world).getHandle();
+-
+-        if (this.console.getLevel(handle.dimension()) == null) {
+-            return false;
+-        }
+-
+-        if (handle.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
+-            return false;
+-        }
+-
+-        if (!handle.players().isEmpty()) {
+-            return false;
+-        }
+-
+-        WorldUnloadEvent event = new WorldUnloadEvent(handle.getWorld());
+-        if (!event.callEvent()) {
+-            return false;
+-        }
+-
+-        try {
 -            if (save) {
 -                handle.save(null, true, false); // Paper - Fix saving in unloadWorld
 -            }
-+            // Canvas start - fix world loading/unloading
-+            if (this.console.hasStartedShutdownThread.get()) return false; // don't unload during shutdown
-+            MinecraftServer.LOGGER.info("Beginning unload for World '" + world.getName() + "'");
-+            handle.isUnloading = true;
-+            // moved to regions
- 
+-
 -            handle.getChunkSource().close(save);
 -            io.papermc.paper.FeatureHooks.closeEntityManager(handle, save); // SPIGOT-6722: close entityManager // Paper - chunk system
 -            handle.levelStorageAccess.close();
-+            // moved to global tick
-+            // Canvas end
-         } catch (Exception ex) {
-             this.getLogger().log(Level.SEVERE, null, ex);
-         }
- 
+-        } catch (Exception ex) {
+-            this.getLogger().log(Level.SEVERE, null, ex);
+-        }
+-
 -        this.worlds.remove(world.getName().toLowerCase(Locale.ROOT));
 -        this.console.removeLevel(handle);
-+        // Canvas - fix world loading/unloading - moved to global tick
-         return true;
+-        return true;
++        return false; // Canvas - rewrite world load and unload
      }
  
-@@ -2954,7 +_,7 @@
-     @Override
-     public double getAverageTickTime() {
-         // Folia start - region threading
--        ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
-+        io.canvasmc.canvas.tick.ScheduledTaskThreadPool.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask(); // Canvas - rewrite scheduler
-         if (task == null) {
-             // might be on the shutdown thread, try retrieving the current region
-             if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null) {
-@@ -3027,7 +_,7 @@
-     @Override
-     public double[] getTPS() {
-         // Folia start - region threading
--        ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
-+        io.canvasmc.canvas.tick.ScheduledTaskThreadPool.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask(); // Canvas - rewrite scheduler
-         if (task == null) {
-             // might be on the shutdown thread, try retrieving the current region
-             if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null) {
-@@ -3295,6 +_,27 @@
- 
-         return getTPSFromRegion(((CraftWorld)world).getHandle(), chunkX, chunkZ);
+     public DedicatedServer getServer() {
+@@ -3318,4 +_,11 @@
+         }
      }
-+    // Canvas start - expand region api
-+
-+    /**
-+     * Returns the region on the current thraed, or null if we are on the global tick thread
-+     * <br>
-+     * This will throw if not on a tick runner
-+     * @return the current region
-+     */
+     // Folia end - region TPS API
++    // Canvas start - region threading
++    // note: in impl the world is provided, same as 'getWorld()'
 +    @Override
-+    public @Nullable io.canvasmc.canvas.threadedregions.WorldRegionData getCurrentRegion() {
-+        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
-+            region = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
-+        if (region == null) {
-+            return null;
-+        } else {
-+            io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = region.regioniser.world.worldRegionData.get();
-+            if (regionizedWorldData == null) return null;
-+            return regionizedWorldData.apiHandle;
-+        }
++    public <T> io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> createRegionizedData(java.util.function.BiFunction<io.canvasmc.canvas.region.RegionTickData, org.bukkit.World, T> supplier, io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<T> callback) {
++        return io.papermc.paper.threadedregions.TickRegions.TickRegionData.createRegionizedDataApiHandle(supplier, callback);
 +    }
-+    // Canvas end
- 
-     private static double[] getTPSFromRegion(ServerLevel world, int chunkX, int chunkZ) {
-         io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
++    // Canvas end - region threading
+ }

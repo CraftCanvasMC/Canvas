@@ -1,110 +1,62 @@
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -56,6 +_,7 @@
- 
-     public void addWorld(final ServerLevel world) {
-         this.worlds.add(world);
-+        world.updateTickData(); // Canvas - update tick data on world add
-     }
- 
-     public void init() {
-@@ -65,7 +_,7 @@
-         // now we can schedule
-         this.tickHandle.setInitialStart(System.nanoTime() + TickRegionScheduler.TIME_BETWEEN_TICKS);
-         TickRegions.getScheduler().scheduleRegion(this.tickHandle);
--        TickRegions.getScheduler().init();
-+        TickRegions.start(); // Canvas - rewrite scheduler
-     }
- 
-     public void invalidateStatus() {
-@@ -93,6 +_,17 @@
-         return;
-     }
- 
-+    // Canvas start - rewrite scheduler
-+    private boolean hasAnyGlobalChunkTasks() {
-+        for (final ServerLevel world : this.worlds) {
-+            if (world.taskQueueRegionData.hasGlobalChunkTasks()) {
-+                return true;
-+            }
+@@ -79,6 +_,12 @@
+         // that essentially crashes the server on the first tick of a freshly generated world.
+         // This fixes it, because the race condition is caused by the global tick not being run first
+         // which is required to process ticket updates so we don't fail any thread ownership checks
++        // validate respawn dimension config entry first
++        net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> respawnDimension = io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey();
++        ServerLevel level = MinecraftServer.getServer().getLevel(respawnDimension);
++        if (level == null) {
++            throw new IllegalStateException("Respawn dimension invalid, could not fetch dimension from value '" + respawnDimension + "'");
 +        }
-+        return false;
-+    }
-+
-+    // Canvas end
-     /**
-      * Returns the current tick of the region ticking.
-      * @throws IllegalStateException If there is no current region.
-@@ -131,7 +_,7 @@
-         private final AtomicBoolean ticking = new AtomicBoolean();
+         // set to 0 as initial start so the scheduler prioritizes this tick first
+         this.tickHandle.setInitialStart(0);
+         // Canvas end - rewrite scheduler
+@@ -399,9 +_,14 @@
+             }
  
-         public GlobalTickTickHandle(final RegionizedServer server) {
--            super(null, SchedulerThreadPool.DEADLINE_NOT_SET);
-+            super(null, io.canvasmc.canvas.tick.ScheduledTaskThreadPool.DEADLINE_NOT_SET); // Canvas - rewrite scheduler
-             this.server = server;
-         }
+             if (isNotOwnedByGlobalRegion(conn)) {
+-                // we actually require that the owning regions remove the connection for us, as it is possible
+-                // that ownership is transferred back to us
+-                continue;
++                // Canvas start - region threading
++                if (!(conn.getPacketListener() instanceof ServerGamePacketListenerImpl gamePacketListener
++                    && gamePacketListener.player.canvas$isDisplayingEndCredits)) {
++                    // we actually require that the owning regions remove the connection for us,
++                    // as it is possible that ownership is transferred back to us
++                    continue;
++                }
++                // Canvas end - region threading
+             }
  
-@@ -177,20 +_,28 @@
-             return true;
-         }
- 
-+        // Canvas start - rewrite scheduler
-+        private boolean runGlobalTask() {
-+            boolean ret = false;
-+            for (final ServerLevel world : this.server.worlds) {
-+                ret |= world.taskQueueRegionData.executeGlobalChunkTask();
-+            }
-+            return ret;
-+        }
-+
-         @Override
--        protected boolean runRegionTasks(final BooleanSupplier canContinue) {
-+        protected void runRegionTasks(final BooleanSupplier canContinue) {
-             do {
--                if (!this.runOneTask()) {
--                    return false;
-+                if (!this.runOneTask() || !this.runGlobalTask()) {
-+                    return;
-                 }
-             } while (canContinue.getAsBoolean());
--
--            return true;
-+        // Canvas end
-         }
- 
-         @Override
-         protected boolean hasIntermediateTasks() {
--            return !this.server.globalTickQueue.isEmpty();
-+            return !this.server.globalTickQueue.isEmpty() || this.server.hasAnyGlobalChunkTasks(); // Canvas - rewrite scheduler
-         }
-     }
- 
-@@ -413,6 +_,41 @@
+             if (!conn.isConnected()) {
+@@ -432,6 +_,42 @@
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final int tickCount) {
-+        // Canvas start - fix world loading/unloading
-+        if (world.isUnloading) {
++        // Canvas start - rewrite world load and unload
++        if (world.canvas$worldUnloadTicket.isPresent()) {
 +            // we are unloading, return.
 +            AtomicBoolean isSingularRegionAlive = new AtomicBoolean(false);
 +            world.regioniser.computeForAllRegions((region) -> {
-+                if (!region.getData().isClosed) {
++                if (!region.getData().canvas$isClosed) {
 +                    // region still active, possibly still saving or hasn't gotten to that yet
 +                    isSingularRegionAlive.set(true);
 +                }
 +            });
 +            if (!isSingularRegionAlive.get()) {
-+                LOGGER.info("Finalizing unload of world '" + world.getWorld().getName() + "'");
-+                // double check that *all* players are removed from this world, since they may
-+                // be added in some weird spot during shutdown of the world that we didn't catch previously
-+                for (final net.minecraft.server.level.ServerPlayer player : world.players()) {
-+                    player.getBukkitEntity().kick(net.kyori.adventure.text.Component.text("World unloading"), org.bukkit.event.player.PlayerKickEvent.Cause.WORLD_UNLOAD);
++                io.canvasmc.canvas.util.ticket.UnloadTicket ticket = world.canvas$worldUnloadTicket.getOrThrow();
++                LOGGER.info("Finalizing unload of world '{}'", world.getWorld().getName());
++                final boolean save = ticket.save();
++                if (save) {
++                    org.bukkit.Bukkit.getPluginManager().callEvent(new org.bukkit.event.world.WorldSaveEvent(world.getWorld()));
++                    world.saveLevelData(true);
 +                }
-+                // all regions saved and players are removed, we can now close this world
-+                world.moonrise$getChunkTaskScheduler().halt(false, 0L);
 +                world.chunkSource.getDataStorage().close();
-+                world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(false, true, true, false, false);
-+                io.papermc.paper.FeatureHooks.closeEntityManager(world, false); // SPIGOT-6722: close entityManager // Paper - chunk system
++                // 'save' SHOULD be false, we run this on regions, and that MUST be regionized, or we crash :)
++                world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(false, true, false, true, false);
++                io.papermc.paper.FeatureHooks.closeEntityManager(world, save);
 +                try {
 +                    world.levelStorageAccess.close();
 +                } catch (java.io.IOException e) {
@@ -114,10 +66,11 @@
 +                MinecraftServer.getServer().removeLevel(world);
 +                MinecraftServer.getServer().server.worlds.remove(world.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
 +                LOGGER.info("Completed unload of world '{}'", world.getWorld().getName());
++                ticket.callback().accept(true);
 +            }
 +            return;
 +        }
-+        // Canvas end
++        // Canvas end - rewrite world load and unload
          // needs
          // worldborder tick
          // advancing the weather cycle

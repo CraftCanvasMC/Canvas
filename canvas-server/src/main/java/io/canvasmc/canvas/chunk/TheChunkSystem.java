@@ -1,61 +1,104 @@
 package io.canvasmc.canvas.chunk;
 
 import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
+import ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue;
+import ca.spottedleaf.concurrentutil.executor.thread.PrioritisedThreadPool;
 import ca.spottedleaf.concurrentutil.util.Priority;
-import io.canvasmc.canvas.chunk.flowsched.ExecutorManager;
-import io.canvasmc.canvas.chunk.flowsched.WorkerThread;
+import ca.spottedleaf.concurrentutil.util.TimeUtil;
+import io.canvasmc.canvas.util.ThreadBuilder;
 import java.lang.reflect.Array;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import io.canvasmc.canvas.util.ThreadBuilder;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class TheChunkSystem extends ExecutorManager {
-    protected final Logger LOGGER;
-    private final String name;
+public class TheChunkSystem extends PrioritisedThreadPool {
+
+    private final Logger LOGGER;
+
     private final TheChunkSystem.COWArrayList<TheChunkSystem.ExecutorGroup> executors = new TheChunkSystem.COWArrayList<>(TheChunkSystem.ExecutorGroup.class);
+    private final TheChunkSystem.COWArrayList<TheChunkSystem.PrioritisedThread> threads = new TheChunkSystem.COWArrayList<>(TheChunkSystem.PrioritisedThread.class);
+    private final TheChunkSystem.COWArrayList<TheChunkSystem.PrioritisedThread> aliveThreads = new TheChunkSystem.COWArrayList<>(TheChunkSystem.PrioritisedThread.class);
+
+    private static final Priority HIGH_PRIORITY_NOTIFY_THRESHOLD = Priority.HIGH;
+    private static final Priority QUEUE_SHUTDOWN_PRIORITY = Priority.HIGH;
+
     private boolean shutdown;
 
     public TheChunkSystem(final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
-        super(workerThreadCount, threadInitializer);
+        super(threadInitializer);
         LOGGER = LoggerFactory.getLogger("TheChunkSystem/" + name);
-        this.name = name;
         LOGGER.info("Initialized new LS ChunkSystem '{}' with {} allocated threads", name, workerThreadCount);
+        this.adjustThreadCount(workerThreadCount);
     }
 
-    @Override
     public Thread[] getAliveThreads() {
-        return this.workerThreads;
-    }
-
-    public int getAliveThreadCount() {
-        int count = 0;
-        for (final WorkerThread thread : this.workerThreads) {
-            if (thread.active) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    @Override
-    public Thread[] getCoreThreads() {
-        final WorkerThread[] threads = this.workerThreads;
+        final TheChunkSystem.PrioritisedThread[] threads = this.aliveThreads.getArray();
 
         return Arrays.copyOf(threads, threads.length, Thread[].class);
     }
 
-    @Override
-    public void shutdown() {
+    public Thread[] getCoreThreads() {
+        final TheChunkSystem.PrioritisedThread[] threads = this.threads.getArray();
+
+        return Arrays.copyOf(threads, threads.length, Thread[].class);
+    }
+
+    /**
+     * Prevents creation of new queues, shutdowns all non-shutdown queues if specified
+     */
+    public void halt(final boolean shutdownQueues) {
         synchronized (this) {
             this.shutdown = true;
         }
 
-        // shutdown workers
-        super.shutdown();
-        this.wakeup();
+        if (shutdownQueues) {
+            for (final TheChunkSystem.ExecutorGroup group : this.executors.getArray()) {
+                for (final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor executor : group.executors.getArray()) {
+                    executor.shutdown();
+                }
+            }
+        }
+
+        for (final TheChunkSystem.PrioritisedThread thread : this.threads.getArray()) {
+            thread.halt(false);
+        }
+    }
+
+    /**
+     * Waits until all threads in this pool have shutdown, or until the specified time has passed.
+     * @param msToWait Maximum time to wait.
+     * @return {@code false} if the maximum time passed, {@code true} otherwise.
+     */
+    public boolean join(final long msToWait) {
+        try {
+            return this.join(msToWait, false);
+        } catch (final InterruptedException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    /**
+     * Waits until all threads in this pool have shutdown, or until the specified time has passed.
+     * @param msToWait Maximum time to wait.
+     * @return {@code false} if the maximum time passed, {@code true} otherwise.
+     * @throws InterruptedException If this thread is interrupted.
+     */
+    public boolean joinInterruptable(final long msToWait) throws InterruptedException {
+        return this.join(msToWait, true);
+    }
+
+    /**
+     * Shuts down this thread pool, optionally waiting for all tasks to be executed.
+     * This function will invoke {@link PrioritisedExecutor#shutdown()} on all created executors on this
+     * thread pool.
+     * @param wait Whether to wait for tasks to be executed
+     */
+    public void shutdown(final boolean wait) {
+        synchronized (this) {
+            this.shutdown = true;
+        }
 
         for (final TheChunkSystem.ExecutorGroup group : this.executors.getArray()) {
             for (final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor executor : group.executors.getArray()) {
@@ -63,17 +106,128 @@ public class TheChunkSystem extends ExecutorManager {
             }
         }
 
-        LOGGER.info("Shutdown ChunkSystem '{}' successfully", this.name);
+
+        for (final TheChunkSystem.PrioritisedThread thread : this.threads.getArray()) {
+            // none of these can be true or else NPE
+            thread.close(false, false);
+        }
+
+        if (wait) {
+            this.join(0L);
+        }
+    }
+
+    private void die(final TheChunkSystem.PrioritisedThread thread) {
+        this.aliveThreads.remove(thread);
+    }
+
+    public void adjustThreadCount(final int threads) {
+        synchronized (this) {
+            if (this.shutdown) {
+                return;
+            }
+
+            final TheChunkSystem.PrioritisedThread[] currentThreads = this.threads.getArray();
+            if (threads == currentThreads.length) {
+                // no adjustment needed
+                return;
+            }
+
+            if (threads < currentThreads.length) {
+                // we need to trim threads
+                for (int i = 0, difference = currentThreads.length - threads; i < difference; ++i) {
+                    final TheChunkSystem.PrioritisedThread remove = currentThreads[currentThreads.length - i - 1];
+
+                    remove.halt(false);
+                    this.threads.remove(remove);
+                }
+            } else {
+                // we need to add threads
+                for (int i = 0, difference = threads - currentThreads.length; i < difference; ++i) {
+                    final TheChunkSystem.PrioritisedThread thread = new TheChunkSystem.PrioritisedThread();
+
+                    this.threadModifier.accept(thread);
+                    this.aliveThreads.add(thread);
+                    this.threads.add(thread);
+
+                    thread.start();
+                }
+            }
+        }
+    }
+
+    private static int compareInsideGroup(final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor src, final Priority srcPriority,
+                                          final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor dst, final Priority dstPriority) {
+        final int priorityCompare = srcPriority.ordinal() - dstPriority.ordinal();
+        if (priorityCompare != 0) {
+            return priorityCompare;
+        }
+
+        return TimeUtil.compareTimes(src.lastRetrieved, dst.lastRetrieved);
+    }
+
+    private static int compareOutsideGroup(final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor src, final Priority srcPriority,
+                                           final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor dst, final Priority dstPriority) {
+        return TimeUtil.compareTimes(src.lastRetrieved, dst.lastRetrieved);
+    }
+
+    private TheChunkSystem.ExecutorGroup.ThreadPoolExecutor obtainQueue() {
+        final long time = System.nanoTime();
+        synchronized (this) {
+            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor ret = null;
+            Priority retPriority = null;
+
+            for (final TheChunkSystem.ExecutorGroup executorGroup : this.executors.getArray()) {
+                TheChunkSystem.ExecutorGroup.ThreadPoolExecutor highest = null;
+                Priority highestPriority = null;
+                for (final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor executor : executorGroup.executors.getArray()) {
+                    final Priority priority = executor.getTargetPriority();
+
+                    if (priority == null) {
+                        continue;
+                    }
+
+                    if (highestPriority == null || compareInsideGroup(highest, highestPriority, executor, priority) > 0) {
+                        highest = executor;
+                        highestPriority = priority;
+                    }
+                }
+
+                if (highest == null) {
+                    continue;
+                }
+
+                if (ret == null || compareOutsideGroup(ret, retPriority, highest, highestPriority) > 0) {
+                    ret = highest;
+                    retPriority = highestPriority;
+                }
+            }
+
+            if (ret != null) {
+                ret.lastRetrieved = time;
+                return ret;
+            }
+
+            return ret;
+        }
+    }
+
+    private void returnQueue(final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor executor) {
+        if (executor.isShutdown() && executor.queue.hasNoScheduledTasks()) {
+            executor.getGroup().executors.remove(executor);
+        }
     }
 
     private void notifyAllThreads() {
-        this.wakeup();
+        for (final TheChunkSystem.PrioritisedThread thread : this.threads.getArray()) {
+            thread.notifyTasks();
+        }
     }
 
     public TheChunkSystem.ExecutorGroup createExecutorGroup() {
         synchronized (this) {
             if (this.shutdown) {
-                throw new IllegalStateException("Queue is shutdown: " + this);
+                throw new IllegalStateException("Queue is shutdown: " + this.toString());
             }
 
             final TheChunkSystem.ExecutorGroup ret = new TheChunkSystem.ExecutorGroup();
@@ -84,53 +238,68 @@ public class TheChunkSystem extends ExecutorManager {
         }
     }
 
-    private static final class COWArrayList<E> {
+    private final class PrioritisedThread extends PrioritisedQueueExecutorThread {
 
-        private volatile E[] array;
+        private final AtomicBoolean alertedHighPriority = new AtomicBoolean();
 
-        public COWArrayList(final Class<E> clazz) {
-            this.array = (E[]) Array.newInstance(clazz, 0);
+        public PrioritisedThread() {
+            super(null);
         }
 
-        public E[] getArray() {
-            return this.array;
-        }
-
-        public void add(final E element) {
-            synchronized (this) {
-                final E[] array = this.array;
-
-                final E[] copy = Arrays.copyOf(array, array.length + 1);
-                copy[array.length] = element;
-
-                this.array = copy;
-            }
-        }
-
-        public boolean remove(final E element) {
-            synchronized (this) {
-                final E[] array = this.array;
-                int index = -1;
-                for (int i = 0, len = array.length; i < len; ++i) {
-                    if (array[i] == element) {
-                        index = i;
-                        break;
-                    }
+        public boolean alertHighPriorityExecutor() {
+            if (!this.notifyTasks()) {
+                if (!this.alertedHighPriority.get()) {
+                    this.alertedHighPriority.set(true);
                 }
-
-                if (index == -1) {
-                    return false;
-                }
-
-                final E[] copy = (E[]) Array.newInstance(array.getClass().getComponentType(), array.length - 1);
-
-                System.arraycopy(array, 0, copy, 0, index);
-                System.arraycopy(array, index + 1, copy, index, (array.length - 1) - index);
-
-                this.array = copy;
+                return false;
             }
 
             return true;
+        }
+
+        private boolean isAlertedHighPriority() {
+            return this.alertedHighPriority.get() && this.alertedHighPriority.getAndSet(false);
+        }
+
+        @Override
+        protected void die() {
+            TheChunkSystem.this.die(this);
+        }
+
+        @Override
+        protected boolean pollTasks() {
+            boolean ret = false;
+
+            for (;;) {
+                if (this.halted) {
+                    break;
+                }
+
+                final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor executor = TheChunkSystem.this.obtainQueue();
+                if (executor == null) {
+                    break;
+                }
+                final long deadline = System.nanoTime() + executor.queueMaxHoldTime;
+                do {
+                    try {
+                        if (this.halted || executor.halt) {
+                            break;
+                        }
+                        if (!executor.executeTask()) {
+                            // no more tasks, try next queue
+                            break;
+                        }
+                        ret = true;
+                    } catch (final Throwable throwable) {
+                        LOGGER.error("Exception thrown from thread '" + this.getName() + "' in queue '" + executor.toString() + "'", throwable);
+                    }
+                } while (!this.isAlertedHighPriority() && System.nanoTime() <= deadline);
+
+                TheChunkSystem.this.returnQueue(executor);
+            }
+
+
+            return ret;
         }
     }
 
@@ -150,13 +319,13 @@ public class TheChunkSystem extends ExecutorManager {
             return TheChunkSystem.this;
         }
 
-        public TheChunkSystem.ExecutorGroup.@NotNull ThreadPoolExecutor createExecutor() {
+        public TheChunkSystem.ExecutorGroup.ThreadPoolExecutor createExecutor(final long queueMaxHoldTime, final int flags) {
             synchronized (TheChunkSystem.this) {
                 if (TheChunkSystem.this.shutdown) {
-                    throw new IllegalStateException("Queue is shutdown: " + TheChunkSystem.this);
+                    throw new IllegalStateException("Queue is shutdown: " + TheChunkSystem.this.toString());
                 }
 
-                final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor ret = new TheChunkSystem.ExecutorGroup.ThreadPoolExecutor();
+                final TheChunkSystem.ExecutorGroup.ThreadPoolExecutor ret = new TheChunkSystem.ExecutorGroup.ThreadPoolExecutor(queueMaxHoldTime, flags);
 
                 this.executors.add(ret);
 
@@ -165,23 +334,45 @@ public class TheChunkSystem extends ExecutorManager {
         }
 
         public final class ThreadPoolExecutor implements PrioritisedExecutor {
-            // only use this field for building tasks. nothing else
-            private final ChunkSystemTaskQueue taskBuilder = new ChunkSystemTaskQueue(TheChunkSystem.this);
-            private volatile boolean halt;
 
-            private ThreadPoolExecutor() {
+            private final PrioritisedTaskQueue queue = new PrioritisedTaskQueue();
+
+            private final long queueMaxHoldTime;
+            private volatile boolean halt;
+            private long lastRetrieved = System.nanoTime();
+
+            private ThreadPoolExecutor(final long queueMaxHoldTime, final int flags) {
+                this.queueMaxHoldTime = queueMaxHoldTime;
             }
 
             private TheChunkSystem.ExecutorGroup getGroup() {
                 return TheChunkSystem.ExecutorGroup.this;
             }
 
-            private void notifyPriorityShift() {
-                TheChunkSystem.this.notifyAllThreads();
+            private boolean canNotify() {
+                return !this.halt;
+            }
+
+            private void notifyHighPriority() {
+                if (!this.canNotify()) {
+                    return;
+                }
+                for (final TheChunkSystem.PrioritisedThread thread : this.getGroup().getThreadPool().threads.getArray()) {
+                    if (thread.alertHighPriorityExecutor()) {
+                        return;
+                    }
+                }
             }
 
             private void notifyScheduled() {
-                TheChunkSystem.this.notifyAllThreads();
+                if (!this.canNotify()) {
+                    return;
+                }
+                for (final TheChunkSystem.PrioritisedThread thread : this.getGroup().getThreadPool().threads.getArray()) {
+                    if (thread.notifyTasks()) {
+                        return;
+                    }
+                }
             }
 
             /**
@@ -193,6 +384,10 @@ public class TheChunkSystem extends ExecutorManager {
                 TheChunkSystem.ExecutorGroup.this.executors.remove(this);
             }
 
+            /**
+             * Returns whether this executor is scheduled to run tasks or is running tasks, otherwise it returns whether
+             * this queue is not halted and not shutdown.
+             */
             public boolean isActive() {
                 if (this.halt) {
                     return false;
@@ -201,13 +396,17 @@ public class TheChunkSystem extends ExecutorManager {
                         return true;
                     }
 
-                    return !TheChunkSystem.this.globalWorkQueue.isEmpty();
+                    return !this.queue.hasNoScheduledTasks();
                 }
             }
 
             @Override
             public boolean shutdown() {
-                if (TheChunkSystem.this.globalWorkQueue.isEmpty()) {
+                if (!this.queue.shutdown()) {
+                    return false;
+                }
+
+                if (this.queue.hasNoScheduledTasks()) {
                     TheChunkSystem.ExecutorGroup.this.executors.remove(this);
                 }
 
@@ -216,17 +415,26 @@ public class TheChunkSystem extends ExecutorManager {
 
             @Override
             public boolean isShutdown() {
-                return TheChunkSystem.this.shutdown;
+                return this.queue.isShutdown();
+            }
+
+            Priority getTargetPriority() {
+                final Priority ret = this.queue.getHighestPriority();
+                if (!this.isShutdown()) {
+                    return ret;
+                }
+
+                return ret == null ? QUEUE_SHUTDOWN_PRIORITY : Priority.max(ret, QUEUE_SHUTDOWN_PRIORITY);
             }
 
             @Override
             public long getTotalTasksScheduled() {
-                return 0; // Canvas // TODO: implement
+                return this.queue.getTotalTasksScheduled();
             }
 
             @Override
             public long getTotalTasksExecuted() {
-                return 0; // Canvas // TODO: implement
+                return this.queue.getTotalTasksExecuted();
             }
 
             @Override
@@ -236,7 +444,7 @@ public class TheChunkSystem extends ExecutorManager {
 
             @Override
             public boolean executeTask() {
-                throw new UnsupportedOperationException("Unable to execute task from ThreadPoolExecutor as interface into FlowSched");
+                return this.queue.executeTask();
             }
 
             @Override
@@ -278,7 +486,7 @@ public class TheChunkSystem extends ExecutorManager {
 
             @Override
             public PrioritisedTask createTask(final Runnable task, final Priority priority, final long subOrder) {
-                return new TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.WrappedTask(this.taskBuilder.createTask(task, priority, subOrder));
+                return new TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.WrappedTask(this.queue.createTask(task, priority, subOrder));
             }
 
             private final class WrappedTask implements PrioritisedTask {
@@ -299,8 +507,11 @@ public class TheChunkSystem extends ExecutorManager {
                     if (this.wrapped.queue()) {
                         final Priority priority = this.getPriority();
                         if (priority != Priority.COMPLETING) {
-                            // technically we don't have a "high priority alert"
-                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyScheduled();
+                            if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
+                                TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
+                            } else {
+                                TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyScheduled();
+                            }
                         }
                         return true;
                     }
@@ -331,8 +542,9 @@ public class TheChunkSystem extends ExecutorManager {
                 @Override
                 public boolean setPriority(final Priority priority) {
                     if (this.wrapped.setPriority(priority)) {
-                        // technically we don't have a "high priority alert"
-                        TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyPriorityShift();
+                        if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
+                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
+                        }
                         return true;
                     }
 
@@ -342,8 +554,9 @@ public class TheChunkSystem extends ExecutorManager {
                 @Override
                 public boolean raisePriority(final Priority priority) {
                     if (this.wrapped.raisePriority(priority)) {
-                        // technically we don't have a "high priority alert"
-                        TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyPriorityShift();
+                        if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
+                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
+                        }
                         return true;
                     }
 
@@ -378,14 +591,65 @@ public class TheChunkSystem extends ExecutorManager {
                 @Override
                 public boolean setPriorityAndSubOrder(final Priority priority, final long subOrder) {
                     if (this.wrapped.setPriorityAndSubOrder(priority, subOrder)) {
-                        // technically we don't have a "high priority alert"
-                        TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyPriorityShift();
+                        if (priority.isHigherOrEqualPriority(HIGH_PRIORITY_NOTIFY_THRESHOLD)) {
+                            TheChunkSystem.ExecutorGroup.ThreadPoolExecutor.this.notifyHighPriority();
+                        }
                         return true;
                     }
 
                     return false;
                 }
             }
+        }
+    }
+
+    private static final class COWArrayList<E> {
+
+        private volatile E[] array;
+
+        public COWArrayList(final Class<E> clazz) {
+            this.array = (E[])Array.newInstance(clazz, 0);
+        }
+
+        public E[] getArray() {
+            return this.array;
+        }
+
+        public void add(final E element) {
+            synchronized (this) {
+                final E[] array = this.array;
+
+                final E[] copy = Arrays.copyOf(array, array.length + 1);
+                copy[array.length] = element;
+
+                this.array = copy;
+            }
+        }
+
+        public boolean remove(final E element) {
+            synchronized (this) {
+                final E[] array = this.array;
+                int index = -1;
+                for (int i = 0, len = array.length; i < len; ++i) {
+                    if (array[i] == element) {
+                        index = i;
+                        break;
+                    }
+                }
+
+                if (index == -1) {
+                    return false;
+                }
+
+                final E[] copy = (E[])Array.newInstance(array.getClass().getComponentType(), array.length - 1);
+
+                System.arraycopy(array, 0, copy, 0, index);
+                System.arraycopy(array, index + 1, copy, index, (array.length - 1) - index);
+
+                this.array = copy;
+            }
+
+            return true;
         }
     }
 }

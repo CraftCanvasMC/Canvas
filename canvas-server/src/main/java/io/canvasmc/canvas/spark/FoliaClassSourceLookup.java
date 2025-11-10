@@ -1,9 +1,8 @@
 package io.canvasmc.canvas.spark;
 
+import java.lang.reflect.Field;
 import me.lucko.spark.paper.common.sampler.source.ClassSourceLookup;
 import org.bukkit.plugin.java.JavaPlugin;
-
-import java.lang.reflect.Field;
 
 public class FoliaClassSourceLookup extends ClassSourceLookup.ByClassLoader {
     private static final Class<?> PLUGIN_CLASS_LOADER;

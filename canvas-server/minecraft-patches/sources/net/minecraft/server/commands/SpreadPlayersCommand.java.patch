@@ -1,103 +1,110 @@
 --- a/net/minecraft/server/commands/SpreadPlayersCommand.java
 +++ b/net/minecraft/server/commands/SpreadPlayersCommand.java
-@@ -32,6 +_,13 @@
+@@ -32,6 +_,45 @@
  import net.minecraft.world.scores.Team;
  
  public class SpreadPlayersCommand {
 +    // Canvas start - fix commands with region threading
-+    private static final java.util.concurrent.ThreadPoolExecutor ASYNC_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(
-+        1, 1,
-+        10L, java.util.concurrent.TimeUnit.SECONDS,
-+        new java.util.concurrent.LinkedBlockingQueue<>(8)
-+    );
-+    // Canvas end
++    private static final RegionThreadingExecutor EXECUTOR = new RegionThreadingExecutor();
++    static {
++        EXECUTOR.start();
++    }
++
++    /**
++     * We need this as an async executor, because this shouldn't be regionized
++     * as it covers potentially unloaded regions and regions other than the source
++     * region.
++     * <p>
++     * This also can't be in the global tick because it can contain extremely heavy
++     * operations, which the global tick is not made for. So it's better to be
++     * made on an asynchronous executor instead.
++     */
++    private static final class RegionThreadingExecutor extends Thread {
++        private final java.util.Queue<Runnable> taskQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
++
++        public void queue(Runnable task) {
++            this.taskQueue.add(task);
++            java.util.concurrent.locks.LockSupport.unpark(this);
++        }
++
++        @Override
++        public void run() {
++            Runnable task;
++            for (;;) {
++                while ((task = this.taskQueue.poll()) != null) {
++                    try {
++                        task.run();
++                    } catch (Throwable thrown) {
++                        net.minecraft.server.MinecraftServer.LOGGER.error("Couldn't execute task for the 'spreadplayers' command", thrown);
++                    }
++                }
++                java.util.concurrent.locks.LockSupport.park();
++            }
++        }
++    }
++    // Canvas end - fix commands with region threading
      private static final int MAX_ITERATION_COUNT = 10000;
      private static final Dynamic4CommandExceptionType ERROR_FAILED_TO_SPREAD_TEAMS = new Dynamic4CommandExceptionType(
          (teamCount, x, z, suggestedSpread) -> Component.translatableEscape("commands.spreadplayers.failed.teams", teamCount, x, z, suggestedSpread)
-@@ -102,6 +_,42 @@
-     private static int spreadPlayers(
-         CommandSourceStack source, Vec2 center, float spreadDistance, float maxRange, int maxHeight, boolean respectTeams, Collection<? extends Entity> targets
-     ) throws CommandSyntaxException {
-+        // Canvas start - fix commands with region threading
-+        if (true) {
-+            // copied from bellow
-+            ServerLevel level = source.getLevel();
-+            int minY = level.getMinY();
-+            if (maxHeight < minY) {
-+                throw ERROR_INVALID_MAX_HEIGHT.create(maxHeight, minY);
-+            } else {
-+                RandomSource randomSource = RandomSource.create();
-+                double d = center.x - maxRange;
-+                double d1 = center.y - maxRange;
-+                double d2 = center.x + maxRange;
-+                double d3 = center.y + maxRange;
+@@ -112,24 +_,178 @@
+             double d1 = center.y - maxRange;
+             double d2 = center.x + maxRange;
+             double d3 = center.y + maxRange;
+-            SpreadPlayersCommand.Position[] positions = createInitialPositions(
+-                randomSource, respectTeams ? getNumberOfTeams(targets) : targets.size(), d, d1, d2, d3
+-            );
+-            spreadPositions(center, spreadDistance, level, randomSource, d, d1, d2, d3, maxHeight, positions, respectTeams);
+-            double d4 = setPlayerPositions(targets, level, positions, maxHeight, respectTeams);
+-            source.sendSuccess(
+-                () -> Component.translatable(
+-                    "commands.spreadplayers.success." + (respectTeams ? "teams" : "entities"),
+-                    positions.length,
+-                    center.x,
+-                    center.y,
+-                    String.format(Locale.ROOT, "%.2f", d4)
+-                ),
+-                true
+-            );
+-            return positions.length;
+-        }
+-    }
++            // Canvas start - fix commands with region threading
++            EXECUTOR.queue(() -> {
++                RandomSource fasterRandom = io.canvasmc.canvas.Config.ENABLE_FASTER_RANDOM ?
++                    new io.canvasmc.canvas.util.FasterRandomSource(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed()) :
++                    new ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed());
++                // Note: createInitialPositions *is* thread-safe, and this can
++                //      actually be quite an expensive method, so we use an optimized
++                //      random source too to try and help out
 +                SpreadPlayersCommand.Position[] positions = createInitialPositions(
-+                    randomSource, respectTeams ? getNumberOfTeams(targets) : targets.size(), d, d1, d2, d3
++                    fasterRandom, targets.size(), d, d1, d2, d3
 +                );
-+                // copy from bellow end here, try and spread asynchronously
-+                sendMessage(source, level, Component.literal("Spreading " + positions.length + (positions.length == 1 ? " entity " : " entities ") + "around " + center.x + ", " + center.y + " asynchronously..."));
-+                ASYNC_EXECUTOR.submit(() -> {
-+                    try {
-+                        spreadAsync(center, spreadDistance, level, randomSource, d, d1, d2, d3, maxHeight, positions, respectTeams);
-+                    } catch (CommandSyntaxException ex) {
-+                        sendFailure(source, level, ex.getMessage());
-+                    } catch (Throwable t) {
-+                        sendFailure(source, level, "An error occurred while spreading players, check console for details");
-+                        net.minecraft.server.MinecraftServer.LOGGER.error("An error occurred while spreading players asynchronously", t);
-+                    }
-+                    teleportEntities(targets, level, positions, maxHeight, respectTeams);
-+                    sendMessage(source, level, Component.literal(
-+                        "Successfully spread " + positions.length + (positions.length == 1 ? " entity " : " entities ") + "around " + center.x + ", " + center.y + " asynchronously"
-+                    ));
-+                });
-+            }
-+            return 0;
++                try {
++                    canvas$spreadRegionThreading(center, spreadDistance, level, fasterRandom, d, d1, d2, d3, maxHeight, positions);
++                } catch (CommandSyntaxException ex) {
++                    source.sendFailure(Component.literal(ex.getMessage()));
++                } catch (Throwable t) {
++                    net.minecraft.server.MinecraftServer.LOGGER.error("An error occurred while spreading players asynchronously", t);
++                }
++                double d4 = canvas$teleportEntities(targets, level, positions, maxHeight, respectTeams);
++                source.sendSuccess(
++                    () -> Component.translatable(
++                        "commands.spreadplayers.success." + (respectTeams ? "teams" : "entities"),
++                        positions.length,
++                        center.x,
++                        center.y,
++                        String.format(Locale.ROOT, "%.2f", d4)
++                    ),
++                    true
++                );
++            });
++            return targets.size(); // original is 'positions.length'
++            // Canvas end - fix commands with region threading
 +        }
-+        // Canvas end
-         ServerLevel level = source.getLevel();
-         int minY = level.getMinY();
-         if (maxHeight < minY) {
-@@ -130,6 +_,176 @@
-             return positions.length;
-         }
-     }
++    }
 +    // Canvas start - fix commands with region threading
 +
-+    private static void sendFailure(CommandSourceStack source, ServerLevel level, String message) {
-+        // source is either a player or the server console, so we check if it's a player
-+        // first, and if it isn't then we assume it's the server and push to global
-+        if (source.isPlayer()) {
-+            net.minecraft.server.level.ServerPlayer serverPlayer = source.getPlayer();
-+            if (serverPlayer != null && !serverPlayer.hasDisconnected()) {
-+                serverPlayer.getBukkitEntity().taskScheduler.schedule((_) -> {
-+                    source.sendFailure(Component.literal(message));
-+                }, null, 0L);
-+            }
-+        } else {
-+            level.getServer().regionizedServer.addTask(() -> {
-+                source.sendFailure(Component.literal(message));
-+            });
-+        }
-+    }
-+
-+    private static void sendMessage(CommandSourceStack source, ServerLevel level, Component message) {
-+        // source is either a player or the server console, so we check if it's a player
-+        // first, and if it isn't then we assume it's the server and push to global
-+        if (source.isPlayer()) {
-+            net.minecraft.server.level.ServerPlayer serverPlayer = source.getPlayer();
-+            if (serverPlayer != null && !serverPlayer.hasDisconnected()) {
-+                serverPlayer.getBukkitEntity().taskScheduler.schedule((_) -> {
-+                    source.sendSystemMessage(message);
-+                }, null, 0L);
-+            }
-+        } else {
-+            level.getServer().regionizedServer.addTask(() -> {
-+                source.sendSystemMessage(message);
-+            });
-+        }
-+    }
-+
-+    private static void spreadAsync(
++    private static void canvas$spreadRegionThreading(
 +        Vec2 center,
 +        double spreadDistance,
 +        ServerLevel world,
@@ -107,130 +114,132 @@
 +        double maxX,
 +        double maxZ,
 +        int maxY,
-+        SpreadPlayersCommand.Position[] piles,
-+        boolean respectTeams
++        SpreadPlayersCommand.Position[] piles
 +    ) throws CommandSyntaxException {
-+        boolean bl = true;
-+        double d = Float.MAX_VALUE;
++        boolean needsAnotherPass = true;
++        double closestDistance = Float.MAX_VALUE;
 +
-+        int i;
-+        for (i = 0; i < 10000 && bl; ++i) {
-+            bl = false;
-+            d = Float.MAX_VALUE;
++        int iteration;
++        for (iteration = 0; iteration < 10000 && needsAnotherPass; ++iteration) {
++            needsAnotherPass = false;
++            closestDistance = Float.MAX_VALUE;
 +
-+            for (int j = 0; j < piles.length; ++j) {
-+                SpreadPlayersCommand.Position pile = piles[j];
-+                int k = 0;
-+                SpreadPlayersCommand.Position pile2 = new SpreadPlayersCommand.Position();
++            for (int pileIndex = 0; pileIndex < piles.length; ++pileIndex) {
++                SpreadPlayersCommand.Position pile = piles[pileIndex];
++                int overlapCount = 0;
++                SpreadPlayersCommand.Position pushVector = new SpreadPlayersCommand.Position();
 +
-+                for (int l = 0; l < piles.length; ++l) {
-+                    if (j != l) {
-+                        SpreadPlayersCommand.Position pile3 = piles[l];
-+                        double e = (pile).dist(pile3);
-+                        d = Math.min(e, d);
-+                        if (e < spreadDistance) {
-+                            ++k;
-+                            (pile2).x = ((pile2).x + ((pile3).x - (pile).x));
-+                            (pile2).z = ((pile2).z + ((pile3).z - (pile).z));
++                for (int otherIndex = 0; otherIndex < piles.length; ++otherIndex) {
++                    if (pileIndex != otherIndex) {
++                        SpreadPlayersCommand.Position otherPile = piles[otherIndex];
++                        double distance = pile.dist(otherPile);
++                        closestDistance = Math.min(distance, closestDistance);
++                        if (distance < spreadDistance) {
++                            ++overlapCount;
++                            pushVector.x = pushVector.x + (otherPile.x - pile.x);
++                            pushVector.z = pushVector.z + (otherPile.z - pile.z);
 +                        }
 +                    }
 +                }
 +
-+                if (k > 0) {
-+                    (pile2).x = ((pile2).x / k);
-+                    (pile2).z = ((pile2).z / k);
-+                    double f = (pile2).getLength();
-+                    if (f > 0.0) {
-+                        (pile2).normalize();
-+                        pile.moveAway(pile2);
++                if (overlapCount > 0) {
++                    pushVector.x = pushVector.x / overlapCount;
++                    pushVector.z = pushVector.z / overlapCount;
++                    double pushLength = pushVector.getLength();
++                    if (pushLength > 0.0) {
++                        pushVector.normalize();
++                        pile.moveAway(pushVector);
 +                    } else {
 +                        pile.randomize(random, minX, minZ, maxX, maxZ);
 +                    }
 +
-+                    bl = true;
++                    needsAnotherPass = true;
 +                }
 +
 +                if (pile.clamp(minX, minZ, maxX, maxZ)) {
-+                    bl = true;
++                    needsAnotherPass = true;
 +                }
 +            }
 +
-+            if (!bl) {
++            if (!needsAnotherPass) {
 +                java.util.List<java.util.concurrent.CompletableFuture<Void>> futures = new java.util.ArrayList<>(piles.length);
-+                java.util.concurrent.atomic.AtomicBoolean result = new java.util.concurrent.atomic.AtomicBoolean(false);
-+                for (SpreadPlayersCommand.Position pile2 : piles) {
-+                    net.minecraft.world.level.ChunkPos pos = new net.minecraft.world.level.ChunkPos(BlockPos.containing((pile2).x, 0.0, (pile2).z));
++                java.util.concurrent.atomic.AtomicBoolean invalidPositionFound = new java.util.concurrent.atomic.AtomicBoolean(false);
++                for (SpreadPlayersCommand.Position pileToCheck : piles) {
++                    net.minecraft.world.level.ChunkPos chunkPos = new net.minecraft.world.level.ChunkPos(
++                        BlockPos.containing(pileToCheck.x, 0.0, pileToCheck.z)
++                    );
 +                    final java.util.concurrent.CompletableFuture<Void> future = new java.util.concurrent.CompletableFuture<>();
-+                    world.moonrise$getChunkTaskScheduler().scheduleChunkLoad(
-+                        pos.x, pos.z, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, true, ca.spottedleaf.concurrentutil.util.Priority.HIGH,
-+                        (_) -> {
-+                            if (!pile2.isSafe(world, maxY)) {
-+                                pile2.randomize(random, minX, minZ, maxX, maxZ);
-+                                result.set(true);
++                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(
++                        world, chunkPos.x, chunkPos.z, () -> {
++                            if (!pileToCheck.isSafe(world, maxY)) {
++                                pileToCheck.randomize(random, minX, minZ, maxX, maxZ);
++                                invalidPositionFound.set(true);
 +                            }
 +                            future.complete(null);
-+                        }
++                        }, ca.spottedleaf.concurrentutil.util.Priority.BLOCKING
 +                    );
 +                    futures.add(future);
 +                }
 +                java.util.concurrent.CompletableFuture.allOf(futures.toArray(java.util.concurrent.CompletableFuture[]::new)).join();
-+                bl = result.get();
++                needsAnotherPass = invalidPositionFound.get();
 +            }
 +        }
 +
-+        if (d == Float.MAX_VALUE) {
-+            d = 0.0;
++        if (closestDistance == Float.MAX_VALUE) {
++            closestDistance = 0.0;
 +        }
 +
-+        if (i >= 10000) {
-+            if (respectTeams) {
-+                throw ERROR_FAILED_TO_SPREAD_TEAMS.create(piles.length, center.x, center.y, String.format(Locale.ROOT, "%.2f", d));
-+            } else {
-+                throw ERROR_FAILED_TO_SPREAD_ENTITIES.create(piles.length, center.x, center.y, String.format(Locale.ROOT, "%.2f", d));
-+            }
++        if (iteration >= 10000) {
++            throw ERROR_FAILED_TO_SPREAD_ENTITIES.create(
++                piles.length, center.x, center.y,
++                String.format(Locale.ROOT, "%.2f", closestDistance)
++            );
 +        }
 +    }
 +
-+    private static void teleportEntities(
++    private static double canvas$teleportEntities(
 +        Collection<? extends Entity> entities, ServerLevel world, SpreadPlayersCommand.Position[] piles, int maxY, boolean respectTeams
 +    ) {
-+        int i = 0;
-+        Map<net.minecraft.world.scores.Team, SpreadPlayersCommand.Position> map = Maps.newHashMap();
++        int pileIndex = 0;
++        double totalMinDistance = 0.0;
++        Map<net.minecraft.world.scores.Team, SpreadPlayersCommand.Position> teamAssignments = Maps.newHashMap();
 +
 +        for (Entity entity : entities) {
 +            if (!entity.isAlive()) continue;
-+            SpreadPlayersCommand.Position pile;
-+            if (respectTeams && false) { // Canvas - TODO - region threading - teams need work
-+                net.minecraft.world.scores.Team abstractTeam = entity instanceof net.minecraft.world.entity.player.Player ? entity.getTeam() : null;
-+                if (!map.containsKey(abstractTeam)) {
-+                    map.put(abstractTeam, piles[i++]);
++            SpreadPlayersCommand.Position pile = piles[pileIndex++];
++
++            BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos(
++                (int) Math.round(Math.floor(pile.x)), 0, (int) Math.round(Math.floor(pile.z))
++            );
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                world, blockPos.getX() >> 4, blockPos.getZ() >> 4, () -> {
++                    blockPos.setY(pile.getSpawnY(world, maxY));
++                    entity.getBukkitEntity().taskScheduler.schedule((entity1) -> {
++                        entity.teleportAsync(
++                            world, blockPos.getCenter(),
++                            entity.getYRot(), entity.getXRot(), entity.getDeltaMovement(),
++                            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.COMMAND,
++                            Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS | Entity.TELEPORT_FLAG_LOAD_CHUNK, null
++                        );
++                    }, null, 0L);
 +                }
++            );
 +
-+                pile = map.get(abstractTeam);
-+            } else {
-+                pile = piles[i++];
-+            }
++            double minDistanceToOther = Double.MAX_VALUE;
 +
-+            entity.getBukkitEntity().taskScheduler.schedule((_) -> {
-+                entity.teleportAsync(
-+                    world, new net.minecraft.world.phys.Vec3(Math.floor((pile).x) + 0.5, pile.getSpawnY(world, maxY), Math.floor((pile).z) + 0.5),
-+                    entity.getYRot(), entity.getXRot(), entity.getDeltaMovement(),
-+                    org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.COMMAND,
-+                    Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS | Entity.TELEPORT_FLAG_LOAD_CHUNK, null
-+                );
-+            }, null, 0L);
-+
-+            double e = Double.MAX_VALUE;
-+
-+            for (SpreadPlayersCommand.Position pile2 : piles) {
-+                if (pile != pile2) {
-+                    double f = (pile).dist(pile2);
-+                    e = Math.min(f, e);
++            for (SpreadPlayersCommand.Position otherPile : piles) {
++                if (pile != otherPile) {
++                    double distance = pile.dist(otherPile);
++                    minDistanceToOther = Math.min(distance, minDistanceToOther);
 +                }
 +            }
++
++            totalMinDistance += minDistanceToOther;
 +        }
++
++        return entities.size() < 2 ? 0.0 : totalMinDistance / entities.size();
 +    }
-+    // Canvas end
++    // Canvas end - fix commands with region threading
  
-     private static int getNumberOfTeams(Collection<? extends Entity> entities) {
-         Set<Team> set = Sets.newHashSet();
+     /**
+      * Gets the number of unique teams for the given list of entities.

@@ -1,0 +1,351 @@
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -287,6 +_,7 @@
+     public List<DefaultDrop> drops = new java.util.ArrayList<>(); // Paper - Restore vanilla drops behavior
+     public final org.bukkit.craftbukkit.attribute.CraftAttributeMap craftAttributes;
+     public boolean collides = true;
++    public boolean canvas$fromSpawner = false; // Canvas - spawner configs
+     public Set<UUID> collidableExemptions = new java.util.HashSet<>();
+     public boolean bukkitPickUpLoot;
+     public org.bukkit.craftbukkit.entity.CraftLivingEntity getBukkitLivingEntity() { return (org.bukkit.craftbukkit.entity.CraftLivingEntity) super.getBukkitEntity(); } // Paper
+@@ -401,7 +_,7 @@
+         if (this.level() instanceof ServerLevel serverLevel && onGround && this.fallDistance > 0.0) {
+             this.onChangedBlock(serverLevel, pos);
+             double d = Math.max(0, Mth.floor(this.calculateFallPower(this.fallDistance)));
+-            if (d > 0.0 && !state.isAir()) {
++            if (d > 0.0 && !(state.isAir() || (io.canvasmc.canvas.Config.INSTANCE.fixes.mc30391 && (this instanceof net.minecraft.world.entity.animal.Chicken || this instanceof net.minecraft.world.entity.monster.Blaze || this instanceof WitherBoss)))) { // Canvas - MC-30391
+                 double x = this.getX();
+                 double y1 = this.getY();
+                 double z = this.getZ();
+@@ -417,11 +_,13 @@
+                 double d1 = Math.min(0.2F + d / 15.0, 2.5);
+                 int i = (int)(150.0 * d1);
+                 // CraftBukkit start - visibility api
++                if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableFallParticles) { // Canvas - particles config
+                 if (this instanceof ServerPlayer) {
+                     serverLevel.sendParticlesSource((ServerPlayer) this, new BlockParticleOption(ParticleTypes.BLOCK, state), false, false, x, y1, z, i, 0.0, 0.0, 0.0, 0.15F);
+                 } else {
+                     serverLevel.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, state), x, y1, z, i, 0.0, 0.0, 0.0, 0.15F);
+                 }
++                } // Canvas - particles config
+                 // CraftBukkit end
+             }
+         }
+@@ -462,7 +_,7 @@
+ 
+         if (this.isAlive() && this.level() instanceof ServerLevel serverLevel1) {
+             boolean flag = this instanceof Player;
+-            if (this.isInWall()) {
++            if (shouldCheckForSuffocation() && this.isInWall()) { // Pufferfish - optimize suffocation
+                 this.hurtServer(serverLevel1, this.damageSources().inWall(), 1.0F);
+             } else if (flag && !serverLevel1.getWorldBorder().isWithinBounds(this.getBoundingBox())) {
+                 double d = serverLevel1.getWorldBorder().getDistanceToBorder(this) + serverLevel1.getWorldBorder().getDamageSafeZone();
+@@ -474,7 +_,7 @@
+                 }
+             }
+ 
+-            if (this.isEyeInFluid(FluidTags.WATER)
++            if (this.canvas$isEyeInWater() // Canvas - optimize fluidOnEyes
+                 && !serverLevel1.getBlockState(BlockPos.containing(this.getX(), this.getEyeY(), this.getZ())).is(Blocks.BUBBLE_COLUMN)) {
+                 boolean flag1 = !this.canBreatheUnderwater()
+                     && !MobEffectUtil.hasWaterBreathing(this)
+@@ -541,6 +_,19 @@
+         this.yRotO = this.getYRot();
+         this.xRotO = this.getXRot();
+     }
++    // Pufferfish start - optimize suffocation
++
++    public boolean couldPossiblyBeHurt(float amount) {
++        if ((float) this.invulnerableTime > (float) this.invulnerableDuration / 2.0F && amount <= this.lastHurt) {
++            return false;
++        }
++        return true;
++    }
++
++    public boolean shouldCheckForSuffocation() {
++        return !io.canvasmc.canvas.Config.INSTANCE.enableSuffocationOptimization || (tickCount % 10 == 0 && couldPossiblyBeHurt(1.0F));
++    }
++    // Pufferfish end
+ 
+     @Override
+     protected float getBlockSpeedFactor() {
+@@ -561,9 +_,9 @@
+     }
+ 
+     protected void tryAddFrost() {
+-        if (!this.getBlockStateOnLegacy().isAir()) {
++        if (true) { // Canvas - check frozen ticks before landing block
+             int ticksFrozen = this.getTicksFrozen();
+-            if (ticksFrozen > 0) {
++            if (ticksFrozen > 0 && !this.getBlockStateOnLegacy().isAir()) { // Canvas - check frozen ticks before landing block
+                 AttributeInstance attribute = this.getAttribute(Attributes.MOVEMENT_SPEED);
+                 if (attribute == null) {
+                     return;
+@@ -603,6 +_,7 @@
+     public boolean broadcastedDeath = false; // Folia - region threading
+     protected void tickDeath() {
+         this.deathTime++;
++        if (io.canvasmc.canvas.Config.INSTANCE.combat.removeRedDeathAnimation) this.deathTime = 20; // Canvas - remove red death animation
+         if (this.deathTime >= 20 && !this.level().isClientSide() && !this.isRemoved()) {
+             this.level().broadcastEntityEvent(this, (byte)60);
+             this.broadcastedDeath = true; // Folia - region threading - death has been broadcasted
+@@ -829,6 +_,7 @@
+         if (this.locatorBarIcon.hasData()) {
+             output.store("locator_bar_icon", Waypoint.Icon.CODEC, this.locatorBarIcon);
+         }
++        output.store("from_spawner", Codec.BOOL, this.canvas$fromSpawner); // Canvas - spawner configs
+     }
+ 
+     // Paper start - Extend dropItem API
+@@ -944,6 +_,7 @@
+         this.lastHurtByMobTimestamp = input.getIntOr("ticks_since_last_hurt_by_mob", 0) + this.tickCount;
+         this.equipment.setAll(input.read("equipment", EntityEquipment.CODEC).orElseGet(EntityEquipment::new));
+         this.locatorBarIcon = input.read("locator_bar_icon", Waypoint.Icon.CODEC).orElseGet(Waypoint.Icon::new);
++        this.canvas$fromSpawner = input.read("from_spawner", Codec.BOOL).orElse(this.canvas$fromSpawner); // Canvas - spawner configs
+     }
+ 
+     // CraftBukkit start
+@@ -1015,7 +_,7 @@
+             }
+ 
+             List<ParticleOptions> list = this.entityData.get(DATA_EFFECT_PARTICLES);
+-            if (!list.isEmpty()) {
++            if (!list.isEmpty() && !io.canvasmc.canvas.Config.INSTANCE.particles.disableEffectParticles) { // Canvas - particles config
+                 boolean flag = this.entityData.get(DATA_EFFECT_AMBIENCE_ID);
+                 int i = this.isInvisible() ? 15 : 4;
+                 int i1 = flag ? 5 : 1;
+@@ -1037,14 +_,18 @@
+     }
+ 
+     private void updateSynchronizedMobEffectParticles() {
+-        List<ParticleOptions> list = this.activeEffects
+-            .values()
+-            .stream()
+-            .filter(MobEffectInstance::isVisible)
+-            .map(MobEffectInstance::getParticleOptions)
+-            .toList();
++        // Canvas start - remove streams
++        List<ParticleOptions> list = new java.util.ArrayList<>();
++        final Collection<MobEffectInstance> effectsValues = this.activeEffects.values(); // Canvas - optimized collection
++
++        for (MobEffectInstance effect : effectsValues) { // Canvas - optimized collection
++            if (effect.isVisible()) {
++                list.add(effect.getParticleOptions());
++            }
++        }
++        // Canvas end - remove streams
+         this.entityData.set(DATA_EFFECT_PARTICLES, list);
+-        this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(this.activeEffects.values()));
++        this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(effectsValues)); // Canvas - optimized collection
+     }
+ 
+     private void updateGlowingStatus() {
+@@ -1489,7 +_,7 @@
+             }
+ 
+             boolean flag1 = true;
+-            if (this.invulnerableTime > (float) this.invulnerableDuration / 2.0F && !damageSource.is(DamageTypeTags.BYPASSES_COOLDOWN)) { // CraftBukkit - restore use of maxNoDamageTicks
++            if (this.invulnerableTime > 0.0F && !damageSource.is(DamageTypeTags.BYPASSES_COOLDOWN)) { // CraftBukkit - restore use of maxNoDamageTicks // Canvas - combat configs
+                 if (amount <= this.lastHurt) {
+                     return false;
+                 }
+@@ -1518,10 +_,10 @@
+                 }
+                 if (this instanceof ServerPlayer && event.getDamage() == 0 && originAmount == 0) return false; // Paper - revert to vanilla damage - players are not affected by damage that is 0 - skip damage if the vanilla damage is 0 and was not modified by plugins in the event.
+                 this.lastHurt = amount;
+-                this.invulnerableTime = this.invulnerableDuration; // CraftBukkit - restore use of maxNoDamageTicks
++                this.invulnerableTime = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // CraftBukkit - restore use of maxNoDamageTicks // Canvas - combat configs
+                 // this.actuallyHurt(level, damageSource, amount);
+                 // CraftBukkit end
+-                this.hurtDuration = 10;
++                this.hurtDuration = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
+                 this.hurtTime = this.hurtDuration;
+             }
+ 
+@@ -1912,6 +_,7 @@
+                     this.setHealth((float) deathEvent.getReviveHealth());
+                 }
+                 // Paper end
++                if (damageSource.is(DamageTypes.WITHER_SKULL)) this.isDyingFromWitherRose = true; // Canvas - fix Folia#388
+                     this.createWitherRose(killCredit);
+                 }
+ 
+@@ -1925,10 +_,11 @@
+         }
+     }
+ 
++    protected boolean isDyingFromWitherRose = false; // Canvas - fix Folia#388
+     protected void createWitherRose(@Nullable LivingEntity entitySource) {
+         if (this.level() instanceof ServerLevel serverLevel) {
+             boolean var6 = false;
+-            if (this.dead && entitySource instanceof WitherBoss) { // Paper
++            if (this.dead && (entitySource instanceof WitherBoss || this.isDyingFromWitherRose)) { // Paper // Canvas - fix Folia#388
+                 if (serverLevel.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) {
+                     BlockPos blockPos = this.blockPosition();
+                     BlockState blockState = Blocks.WITHER_ROSE.defaultBlockState();
+@@ -2171,6 +_,19 @@
+     public Optional<BlockPos> getLastClimbablePos() {
+         return this.lastClimbablePos;
+     }
++    // Pufferfish start
++
++    private boolean cachedOnClimable = false;
++    private BlockPos lastClimbingPosition = null;
++
++    public boolean onClimbableCached() {
++        if (!this.blockPosition().equals(this.lastClimbingPosition)) {
++            this.cachedOnClimable = this.onClimbable();
++            this.lastClimbingPosition = this.blockPosition();
++        }
++        return this.cachedOnClimable;
++    }
++    // Pufferfish end
+ 
+     public boolean onClimbable() {
+         if (this.isSpectator()) {
+@@ -2201,7 +_,7 @@
+ 
+     @Override
+     public boolean isAlive() {
+-        return !this.isRemoved() && this.getHealth() > 0.0F && !this.dead; // Paper - Check this.dead
++        return !this.dead && !this.isRemoved() && this.getHealth() > 0.0F; // Paper - Check this.dead // Canvas - cheapest check first
+     }
+ 
+     public boolean isLookingAtMe(LivingEntity entity, double tolerance, boolean scaleByDistance, boolean visual, double... yValues) {
+@@ -2277,7 +_,7 @@
+ 
+     @Override
+     public void animateHurt(float yaw) {
+-        this.hurtDuration = 10;
++        this.hurtDuration = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
+         this.hurtTime = this.hurtDuration;
+     }
+ 
+@@ -2646,8 +_,8 @@
+     @Override
+     public void handleDamageEvent(DamageSource damageSource) {
+         this.walkAnimation.setSpeed(1.5F);
+-        this.invulnerableTime = 20;
+-        this.hurtDuration = 10;
++        this.invulnerableTime = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
++        this.hurtDuration = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
+         this.hurtTime = this.hurtDuration;
+         SoundEvent hurtSound = this.getHurtSound(damageSource);
+         if (hurtSound != null) {
+@@ -2714,7 +_,7 @@
+                 this.swapHandItems();
+                 break;
+             case 60:
+-                this.makePoofParticles();
++                if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableDeathParticles) this.makePoofParticles(); // Canvas - particles config
+                 break;
+             case 65:
+                 this.breakItem(this.getItemBySlot(EquipmentSlot.BODY));
+@@ -2765,6 +_,7 @@
+     }
+ 
+     protected void updateSwingTime() {
++        if (!this.swinging && this.swingTime == 0) return; // Canvas - skip unnecessary calculations if player is not flying or swing
+         int currentSwingDuration = this.getCurrentSwingDuration();
+         if (this.swinging) {
+             this.swingTime++;
+@@ -3085,7 +_,7 @@
+                 f2 *= 0.5F;
+             }
+ 
+-            if (f2 > 0.0F) {
++            if (f2 > 0.0F && (!io.canvasmc.canvas.Config.INSTANCE.fixes.mc136249 || autoSpinAttackTicks == 0)) { // Canvas - MC-136249
+                 f += (0.54600006F - f) * f2;
+                 f1 += (this.getSpeed() - f1) * f2;
+             }
+@@ -3106,7 +_,7 @@
+         } else {
+             this.moveRelative(0.02F, travelVector);
+             this.move(MoverType.SELF, this.getDeltaMovement());
+-            if (this.getFluidHeight(FluidTags.LAVA) <= this.getFluidJumpThreshold()) {
++            if (canvas$getLavaFluidHeight() <= this.getFluidJumpThreshold()) { // Canvas - optimize fluid height
+                 this.setDeltaMovement(this.getDeltaMovement().multiply(0.5, 0.8F, 0.5));
+                 Vec3 fluidFallingAdjustedMovement = this.getFluidFallingAdjustedMovement(effectiveGravity, flag, this.getDeltaMovement());
+                 this.setDeltaMovement(fluidFallingAdjustedMovement);
+@@ -3560,9 +_,9 @@
+         if (this.jumping && this.isAffectedByFluids()) {
+             double fluidHeight;
+             if (this.isInLava()) {
+-                fluidHeight = this.getFluidHeight(FluidTags.LAVA);
++                fluidHeight = canvas$getLavaFluidHeight(); // Canvas - optimize fluid height
+             } else {
+-                fluidHeight = this.getFluidHeight(FluidTags.WATER);
++                fluidHeight = canvas$getWaterFluidHeight(); // Canvas - optimize fluid height
+             }
+ 
+             boolean flag = this.isInWater() && fluidHeight > 0.0;
+@@ -3626,7 +_,7 @@
+             this.checkAutoSpinAttack(boundingBox, this.getBoundingBox());
+         }
+ 
+-        this.pushEntities();
++        if (io.canvasmc.canvas.Config.INSTANCE.entityCollisionMode.allEntitiesCanBePushed()) this.pushEntities(); // Canvas - entity collision mode config
+         // Paper start - Add EntityMoveEvent
+         if (((ServerLevel) this.level()).getCurrentWorldData().hasEntityMoveEvent && !(this instanceof Player)) { // Folia - region threading
+             if (this.xo != this.getX() || this.yo != this.getY() || this.zo != this.getZ() || this.yRotO != this.getYRot() || this.xRotO != this.getXRot()) {
+@@ -3662,6 +_,7 @@
+     protected void updateFallFlying() {
+         this.checkFallDistanceAccumulation();
+         if (!this.level().isClientSide) {
++            if (!this.isFallFlying() && this.fallFlyTicks == 0) return; // Canvas - skip unnecessary calculations if player is not flying or swing
+             if (!this.canGlide()) {
+                 if (this.getSharedFlag(7) != false && !CraftEventFactory.callToggleGlideEvent(this, false).isCancelled()) // CraftBukkit
+                 this.setSharedFlag(7, false);
+@@ -3703,6 +_,12 @@
+     }
+ 
+     protected void pushEntities() {
++        // Canvas start - only players push config
++        io.canvasmc.canvas.entity.EntityCollisionMode collisionMode = io.canvasmc.canvas.Config.INSTANCE.entityCollisionMode;
++        if (collisionMode.noCollisions()) {
++            return;
++        }
++        // Canvas end - only players push config
+         // Paper start - don't run getEntities if we're not going to use its result
+         if (!this.isPushable()) {
+             return;
+@@ -3718,7 +_,11 @@
+             return;
+         }
+         // Paper end - don't run getEntities if we're not going to use its result
+-        List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox());
++        // Canvas start - only players push config
++        List<? extends Entity> pushableEntities = collisionMode.onlyPlayersPushable() ?
++            this.level().canvas$getIntersectingPlayers(this, this.getBoundingBox(), EntitySelector.pushableBy(this))
++            : this.level().getPushableEntities(this, this.getBoundingBox());
++        // Canvas end - only players push config
+         if (!pushableEntities.isEmpty()) {
+             if (this.level() instanceof ServerLevel serverLevel) {
+                 // Paper - don't run getEntities if we're not going to use its result; moved up
+@@ -3905,6 +_,7 @@
+ 
+     @Override
+     public boolean isCollidable(boolean ignoreClimbing) {
++        if (this.canvas$fromSpawner && io.canvasmc.canvas.Config.INSTANCE.spawner.noCollisions) return false; // Canvas - spawner configs
+         return this.isAlive() && !this.isSpectator() && (ignoreClimbing || !this.onClimbable()) && this.collides; // CraftBukkit
+         // Paper end - Climbing should not bypass cramming gamerule
+     }
+@@ -4034,6 +_,18 @@
+                 );
+             }
+ 
++            // Canvas start - item entity spread config
++            if (this.isDeadOrDying()) {
++                float halfedRandom = this.random.nextFloat() * 0.5F;
++                float piRandom = this.random.nextFloat() * (float) (Math.PI * 2);
++                double factor = io.canvasmc.canvas.Config.INSTANCE.itemEntitySpreadFactor;
++                itemEntity.setDeltaMovement(
++                    (-Mth.sin(piRandom) * halfedRandom) * factor,
++                    0.2F * factor,
++                    (Mth.cos(piRandom) * halfedRandom) * factor
++                );
++            }
++            // Canvas end - item entity spread config
+             return itemEntity;
+         }
+     }
