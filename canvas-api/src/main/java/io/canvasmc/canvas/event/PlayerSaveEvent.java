@@ -3,7 +3,6 @@ package io.canvasmc.canvas.event;
 import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.player.PlayerEvent;
-import org.jetbrains.annotations.NotNull;
 
 public class PlayerSaveEvent extends PlayerEvent {
     private static final HandlerList HANDLERS = new HandlerList();
@@ -14,7 +13,6 @@ public class PlayerSaveEvent extends PlayerEvent {
         this.isQuit = isQuit;
     }
 
-    @NotNull
     public static HandlerList getHandlerList() {
         return HANDLERS;
     }
@@ -30,7 +28,7 @@ public class PlayerSaveEvent extends PlayerEvent {
     }
 
     @Override
-    public @NotNull HandlerList getHandlers() {
+    public HandlerList getHandlers() {
         return HANDLERS;
     }
 }

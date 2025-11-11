@@ -33,6 +33,7 @@ import io.canvasmc.canvas.configuration.jankson.impl.ElementParserContext;
 import io.canvasmc.canvas.configuration.jankson.impl.MarshallerImpl;
 import io.canvasmc.canvas.configuration.jankson.impl.ObjectParserContext;
 import io.canvasmc.canvas.configuration.jankson.impl.ParserContext;
+import org.jspecify.annotations.Nullable;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -41,25 +42,25 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import javax.annotation.Nonnull;
 
 
 public class Jankson {
     private static final int BAD_CHARACTER = 0xFFFD;
     private final Deque<ParserFrame<?>> contextStack = new ArrayDeque<>();
-    private JsonObject root;
+    private @Nullable JsonObject root;
     private int line = 0;
     private int column = 0;
     private int withheldCodePoint = -1;
     @SuppressWarnings("deprecation")
     private Marshaller marshaller = MarshallerImpl.getFallback();
     private int retries = 0;
-    private SyntaxError delayedError = null;
-    private AnnotatedElement rootElement;
+    private @Nullable SyntaxError delayedError = null;
+    private @Nullable AnnotatedElement rootElement;
 
     private Jankson(Builder builder) {
     }
@@ -72,7 +73,6 @@ public class Jankson {
         return new Builder();
     }
 
-    @Nonnull
     public JsonObject load(String s) throws SyntaxError {
         ByteArrayInputStream in = new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8));
         try {
@@ -82,7 +82,6 @@ public class Jankson {
         }
     }
 
-    @Nonnull
     public JsonObject load(File f) throws IOException, SyntaxError {
         try (InputStream in = new FileInputStream(f)) {
             return load(in);
@@ -148,7 +147,6 @@ public class Jankson {
         return BAD_CHARACTER;
     }
 
-    @Nonnull
     public JsonObject load(InputStream in) throws IOException, SyntaxError {
         withheldCodePoint = -1;
         root = null;
@@ -197,7 +195,6 @@ public class Jankson {
     /**
      * Experimental: Parses the supplied String as a JsonElement, which may or may not be an object at the root level
      */
-    @Nonnull
     public JsonElement loadElement(String s) throws SyntaxError {
         ByteArrayInputStream in = new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8));
         try {
@@ -210,7 +207,6 @@ public class Jankson {
     /**
      * Experimental: Parses the supplied File as a JsonElement, which may or may not be an object at the root level
      */
-    @Nonnull
     public JsonElement loadElement(File f) throws IOException, SyntaxError {
         try (InputStream in = new FileInputStream(f)) {
             return loadElement(in);
@@ -220,7 +216,6 @@ public class Jankson {
     /**
      * Experimental: Parses the supplied InputStream as a JsonElement, which may or may not be an object at the root level
      */
-    @Nonnull
     public JsonElement loadElement(InputStream in) throws IOException, SyntaxError {
         withheldCodePoint = -1;
 
@@ -325,7 +320,7 @@ public class Jankson {
         }
 
         try {
-            boolean consumed = frame.context.consume(codePoint, this);
+            boolean consumed = Objects.requireNonNull(frame).context.consume(codePoint, this);
             if (frame.context.isComplete()) {
                 contextStack.pop();
                 frame.supply();
@@ -338,7 +333,7 @@ public class Jankson {
             }
 
         } catch (SyntaxError error) {
-            error.setStartParsing(frame.startLine, frame.startCol);
+            error.setStartParsing(Objects.requireNonNull(frame).startLine, frame.startCol);
             error.setEndParsing(line, column);
             throw error;
         }
@@ -417,7 +412,6 @@ public class Jankson {
             return this;
         }
 
-        @SuppressWarnings("deprecation")
         public <A, B> Builder registerDeserializer(Class<A> sourceClass, Class<B> targetClass, DeserializerFunction<A, B> function) {
             marshaller.registerDeserializer(sourceClass, targetClass, function);
             return this;

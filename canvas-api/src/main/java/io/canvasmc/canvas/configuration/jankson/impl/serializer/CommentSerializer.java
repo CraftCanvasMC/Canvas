@@ -25,6 +25,7 @@
 package io.canvasmc.canvas.configuration.jankson.impl.serializer;
 
 import io.canvasmc.canvas.configuration.jankson.JsonGrammar;
+import org.jspecify.annotations.Nullable;
 
 public class CommentSerializer {
     public static void print(StringBuilder builder, String comment, int indent, JsonGrammar grammar) {
@@ -33,7 +34,7 @@ public class CommentSerializer {
         print(builder, comment, indent, comments, whitespace);
     }
 
-    public static void print(StringBuilder builder, String comment, int indent, boolean comments, boolean whitespace) {
+    public static void print(StringBuilder builder, @Nullable String comment, int indent, boolean comments, boolean whitespace) {
         if (!comments) return;
         if (comment == null || comment.trim().isEmpty()) return;
         comment = comment.replaceAll("(?<!\\S)[ \\t\\r\\f]+|[ \\t\\r\\f]+(?!\\S)", ""); // Canvas - fix whitespace when updating config
@@ -50,16 +51,12 @@ public class CommentSerializer {
                     // Canvas start - close off */ on same line as last comment
                     if (i != lines.length - 1) {
                         builder.append('\n');
-                        for (int j = 0; j < indent + 1; j++) {
-                            builder.append('\t');
-                        }
+                        builder.append("\t".repeat(Math.max(0, indent + 1)));
                     }
                     // Canvas end - close off */ on same line as last comment
                 }
                 builder.append(" */\n");
-                for (int i = 0; i < indent + 1; i++) {
-                    builder.append('\t');
-                }
+                builder.append("\t".repeat(Math.max(0, indent + 1)));
             } else {
                 //Use a single-line comment
                 builder.append("// ");

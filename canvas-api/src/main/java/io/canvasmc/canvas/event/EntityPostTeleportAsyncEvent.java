@@ -6,8 +6,7 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.event.entity.EntityEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Called when an entity is finished being teleported from one location to another.
@@ -23,18 +22,16 @@ public class EntityPostTeleportAsyncEvent extends EntityEvent {
 
     private final Location from;
     private final Location to;
-    @NotNull
     private final PlayerTeleportEvent.TeleportCause cause;
 
     @ApiStatus.Internal
-    public EntityPostTeleportAsyncEvent(@NotNull Entity entity, @NotNull Location from, @Nullable Location to, @NotNull PlayerTeleportEvent.TeleportCause cause) {
+    public EntityPostTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause) {
         super(entity);
         this.from = from;
-        this.to = to;
+        this.to = (to != null) ? to : from;
         this.cause = cause;
     }
 
-    @NotNull
     public static HandlerList getHandlerList() {
         return HANDLER_LIST;
     }
@@ -44,7 +41,6 @@ public class EntityPostTeleportAsyncEvent extends EntityEvent {
      *
      * @return Location this entity moved from
      */
-    @NotNull
     public Location getFrom() {
         return this.from;
     }
@@ -54,7 +50,6 @@ public class EntityPostTeleportAsyncEvent extends EntityEvent {
      *
      * @return Location the entity moved to
      */
-    @NotNull
     public Location getTo() {
         return this.to;
     }
@@ -64,11 +59,10 @@ public class EntityPostTeleportAsyncEvent extends EntityEvent {
      *
      * @return the teleport cause
      */
-    public @NotNull PlayerTeleportEvent.TeleportCause getCause() {
+    public PlayerTeleportEvent.TeleportCause getCause() {
         return cause;
     }
 
-    @NotNull
     @Override
     public HandlerList getHandlers() {
         return HANDLER_LIST;

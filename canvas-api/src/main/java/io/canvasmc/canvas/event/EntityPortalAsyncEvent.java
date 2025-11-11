@@ -7,7 +7,6 @@ import org.bukkit.event.Cancellable;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.entity.EntityEvent;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.NotNull;
 
 /**
  * Called when an entity is about to portal from one dimension to another.
@@ -25,14 +24,13 @@ public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
     private boolean cancelled;
 
     @ApiStatus.Internal
-    public EntityPortalAsyncEvent(@NotNull Entity entity, @NotNull World from, @NotNull World to, @NotNull PortalType type) {
+    public EntityPortalAsyncEvent(Entity entity, World from, World to, PortalType type) {
         super(entity);
         this.from = from;
         this.to = to;
         this.type = type;
     }
 
-    @NotNull
     public static HandlerList getHandlerList() {
         return HANDLER_LIST;
     }
@@ -42,7 +40,6 @@ public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
      *
      * @return Location this entity moved from
      */
-    @NotNull
     public World getFrom() {
         return this.from;
     }
@@ -52,7 +49,6 @@ public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
      *
      * @return Location the entity moved to
      */
-    @NotNull
     public World getTo() {
         return this.to;
     }
@@ -62,7 +58,7 @@ public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
      *
      * @return the portal type
      */
-    public @NotNull PortalType getPortalType() {
+    public PortalType getPortalType() {
         return this.type;
     }
 
@@ -76,7 +72,6 @@ public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
         this.cancelled = cancel;
     }
 
-    @NotNull
     @Override
     public HandlerList getHandlers() {
         return HANDLER_LIST;

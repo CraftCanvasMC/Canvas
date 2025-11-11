@@ -49,7 +49,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * @deprecated For removal; please use {@link Marshaller}
@@ -151,7 +151,7 @@ public class MarshallerImpl implements Marshaller {
      */
     @SuppressWarnings("unchecked")
     @Nullable
-    public <T> T marshall(Type type, JsonElement elem) {
+    public <T> T marshall(Type type, @Nullable JsonElement elem) {
         if (elem == null) return null;
         if (elem == JsonNull.INSTANCE) return null;
 
@@ -176,6 +176,7 @@ public class MarshallerImpl implements Marshaller {
         return null;
     }
 
+    @Nullable
     public <T> T marshall(Class<T> clazz, JsonElement elem) {
         try {
             return marshall(clazz, elem, false);
@@ -184,13 +185,14 @@ public class MarshallerImpl implements Marshaller {
         }
     }
 
+    @Nullable
     public <T> T marshallCarefully(Class<T> clazz, JsonElement elem) throws DeserializationException {
         return marshall(clazz, elem, true);
     }
 
     @SuppressWarnings("unchecked")
     @Nullable
-    public <T> T marshall(Class<T> clazz, JsonElement elem, boolean failFast) throws DeserializationException {
+    public <T> T marshall(Class<T> clazz, @Nullable JsonElement elem, boolean failFast) throws DeserializationException {
         if (elem == null) return null;
         if (elem == JsonNull.INSTANCE) return null;
         if (clazz.isAssignableFrom(elem.getClass())) return (T) elem; //Already the correct type
@@ -280,6 +282,7 @@ public class MarshallerImpl implements Marshaller {
 
                 try {
                     T result = TypeMagic.createAndCast(clazz, failFast);
+                    if (result == null) return null;
                     POJODeserializer.unpackObject(result, obj, failFast);
                     return result;
                 } catch (Throwable t) {
@@ -304,7 +307,7 @@ public class MarshallerImpl implements Marshaller {
         return null;
     }
 
-    public JsonElement serialize(Object obj) {
+    public JsonElement serialize(@Nullable Object obj) {
         if (obj == null) return JsonNull.INSTANCE;
 
         //Prefer exact match
@@ -385,7 +388,7 @@ public class MarshallerImpl implements Marshaller {
                 } else {
                     result.put(name, serialize(child), Util.multi(comment.value())); // Canvas - add multi-line
                 }
-            } catch (IllegalArgumentException | IllegalAccessException e) {
+            } catch (IllegalArgumentException | IllegalAccessException ignored) {
             }
         }
 
@@ -409,7 +412,7 @@ public class MarshallerImpl implements Marshaller {
                 } else {
                     result.put(name, serialize(child), Util.multi(comment.value())); // Canvas - add multi-line
                 }
-            } catch (IllegalArgumentException | IllegalAccessException e) {
+            } catch (IllegalArgumentException | IllegalAccessException ignored) {
             }
         }
 

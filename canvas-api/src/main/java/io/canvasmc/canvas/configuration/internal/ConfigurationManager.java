@@ -13,12 +13,10 @@ public class ConfigurationManager {
     private ConfigurationManager() {
     }
 
-    public static <T> @NotNull ConfigHolder<T> register(Class<T> configClass, ConfigSerializer.Factory<T> serializerFactory) {
+    public static <T> ConfigHolder<T> register(Class<T> configClass, ConfigSerializer.Factory<T> serializerFactory) {
         Objects.requireNonNull(configClass);
         Objects.requireNonNull(serializerFactory);
-        if (holders.containsKey(configClass)) {
-            holders.remove(configClass);
-        }
+        holders.remove(configClass);
         Configuration definition = configClass.getAnnotation(Configuration.class);
         if (definition == null) {
             throw new RuntimeException(String.format("No @Configuration annotation on %s!", configClass));

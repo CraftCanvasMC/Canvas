@@ -4,10 +4,12 @@ import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;
 import jdk.incubator.vector.VectorSpecies;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
+import org.jetbrains.annotations.ApiStatus;
 
 public class SIMDChecker {
 
     @Deprecated
+    @ApiStatus.Internal
     public static boolean canEnable(ComponentLogger logger) {
         try {
             if (SIMDDetection.getJavaVersion() < 17) {

@@ -25,18 +25,19 @@
 package io.canvasmc.canvas.configuration.jankson.impl;
 
 import io.canvasmc.canvas.configuration.jankson.JsonElement;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Holds both a JsonElement and its associated comment, and any other relevant data
  */
 public class AnnotatedElement {
-    protected String comment;
+    protected @Nullable String comment;
     protected JsonElement elem;
 
-    public AnnotatedElement(@Nonnull JsonElement elem, @Nullable String comment) {
-        this.comment = comment;
+    public AnnotatedElement(JsonElement elem, @Nullable String comment) {
+        if (comment != null) {
+            this.comment = comment;
+        }
         this.elem = elem;
     }
 
@@ -45,7 +46,6 @@ public class AnnotatedElement {
         return comment;
     }
 
-    @Nonnull
     public JsonElement getElement() {
         return elem;
     }

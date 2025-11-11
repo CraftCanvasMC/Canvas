@@ -6,6 +6,7 @@ import jdk.incubator.vector.IntVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorSpecies;
 import org.bukkit.map.MapPalette;
+import org.jetbrains.annotations.ApiStatus;
 
 public class VectorMapPalette {
 
@@ -13,6 +14,7 @@ public class VectorMapPalette {
     private static final VectorSpecies<Float> F_SPEC = FloatVector.SPECIES_PREFERRED;
 
     @Deprecated
+    @ApiStatus.Internal
     public static void matchColorVectorized(int[] in, byte[] out) {
         int speciesLength = I_SPEC.length();
         int i;

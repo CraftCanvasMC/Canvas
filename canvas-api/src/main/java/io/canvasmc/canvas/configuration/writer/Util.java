@@ -11,15 +11,14 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 public class Util {
-    public static @NotNull String multi(String @NotNull [] strings) {
+    public static String multi(String [] strings) {
         return strings.length == 1 ? strings[0] : String.join("\n", strings);
     }
 
-    public static boolean isNestedWithin(Class<?> root, Class<?> candidate) {
+    public static boolean isNestedWithin(@Nullable Class<?> root, @Nullable Class<?> candidate) {
         if (root == null || candidate == null) return false;
 
         for (Class<?> inner : root.getDeclaredClasses()) {
@@ -40,7 +39,7 @@ public class Util {
      * @param path The dot-separated key path (e.g. "ah.test.inner")
      * @return The comment String, or null if not found
      */
-    public static @Nullable String getCommentByPath(@NotNull JsonObject root, @NotNull String path) {
+    public static @Nullable String getCommentByPath(JsonObject root, String path) {
         String[] parts = path.split("\\.");
         JsonObject current = root;
 
@@ -67,7 +66,7 @@ public class Util {
         computeAll(clazz, root, "", consumer);
     }
 
-    private static void computeAll(@NotNull Class<?> clazz, JsonObject root, String pathPrefix, TriConsumer<JsonElement, String, Field> consumer) {
+    private static void computeAll(Class<?> clazz, JsonObject root, String pathPrefix, TriConsumer<JsonElement, String, Field> consumer) {
         for (final Field f : clazz.getFields()) {
             if (
                 (f.getModifiers() & Modifier.PUBLIC) == 0 ||
@@ -90,7 +89,7 @@ public class Util {
         }
     }
 
-    public static @Nullable JsonElement getValueByPath(@NotNull JsonObject root, @NotNull String path) {
+    public static @Nullable JsonElement getValueByPath(JsonObject root, String path) {
         String[] parts = path.split("\\.");
         JsonObject current = root;
 
@@ -113,7 +112,7 @@ public class Util {
         return null;
     }
 
-    public static void removeByPath(@NotNull JsonObject root, @NotNull String path) {
+    public static void removeByPath(JsonObject root, String path) {
         String[] parts = path.split("\\.");
         JsonObject current = root;
 
@@ -135,7 +134,7 @@ public class Util {
 
     }
 
-    public static void putByPath(@NotNull JsonObject root, @NotNull String path, @NotNull JsonElement value, final String comment) {
+    public static void putByPath(JsonObject root, String path, JsonElement value, @Nullable final String comment) {
         String[] parts = path.split("\\.");
         JsonObject current = root;
 
@@ -159,7 +158,7 @@ public class Util {
     }
 
     // Note: i=0 == head, i=1 == body
-    public static String @NotNull [] splitHeader(@NotNull String json5) {
+    public static String [] splitHeader(String json5) {
         String[] result = new String[2];
         StringBuilder header = new StringBuilder();
         StringBuilder body = new StringBuilder();
@@ -227,7 +226,7 @@ public class Util {
      * @param json5 The JSON5 string
      * @return A new string with normalized multi-line comment indentation
      */
-    public static @NotNull String cleanMultiLineCommentIndent(String json5) {
+    public static String cleanMultiLineCommentIndent(String json5) {
         Pattern multiLinePattern = Pattern.compile("/\\*([\\s\\S]*?)\\*/");
         Matcher matcher = multiLinePattern.matcher(json5);
         StringBuffer sb = new StringBuffer();
@@ -261,7 +260,7 @@ public class Util {
         return sb.toString();
     }
 
-    public static @NotNull Diff diffWithValues(JsonObject oldObj, JsonObject newObj) {
+    public static Diff diffWithValues(JsonObject oldObj, JsonObject newObj) {
         List<String> added = Lists.newLinkedList();
         List<String> removed = Lists.newLinkedList();
         List<Change> changed = Lists.newLinkedList();
@@ -271,7 +270,7 @@ public class Util {
         return new Diff(List.copyOf(added), List.copyOf(removed), List.copyOf(changed));
     }
 
-    private static void diffRecursiveWithValues(String prefix, @NotNull JsonObject oldObj, @NotNull JsonObject newObj,
+    private static void diffRecursiveWithValues(String prefix, JsonObject oldObj, JsonObject newObj,
                                                 List<String> added, List<String> removed, List<Change> changed) {
         Set<String> oldKeys = oldObj.keySet();
         Set<String> newKeys = newObj.keySet();
@@ -289,7 +288,7 @@ public class Util {
             if (oldVal instanceof JsonObject && newVal instanceof JsonObject) {
                 diffRecursiveWithValues(fullKey + ".", (JsonObject) oldVal, (JsonObject) newVal, added, removed, changed);
             } else if (!Objects.equals(oldVal, newVal)) {
-                changed.add(new Change(fullKey, jsonToString(oldVal), jsonToString(newVal)));
+                changed.add(new Change(fullKey, jsonToString(Objects.requireNonNull(oldVal)), jsonToString(Objects.requireNonNull(newVal))));
             }
         }
 
@@ -300,14 +299,14 @@ public class Util {
         }
     }
 
-    private static String jsonToString(JsonElement element) {
+    private static String jsonToString(@Nullable JsonElement element) {
         if (element == null) return "null";
         return element.toJson();
     }
 
     public record Change(String path, String from, String to) {}
 
-    public static @NotNull Diff diff(JsonObject oldObj, JsonObject newObj) {
+    public static Diff diff(JsonObject oldObj, JsonObject newObj) {
         List<String> added = Lists.newLinkedList();
         List<String> removed = Lists.newLinkedList();
 
@@ -316,7 +315,7 @@ public class Util {
         return new Diff(List.copyOf(added), List.copyOf(removed), List.of());
     }
 
-    private static void diffRecursive(String prefix, @NotNull JsonObject oldObj, @NotNull JsonObject newObj,
+    private static void diffRecursive(String prefix, JsonObject oldObj, JsonObject newObj,
                                       List<String> added, List<String> removed) {
         Set<String> oldKeys = oldObj.keySet();
         Set<String> newKeys = newObj.keySet();
@@ -343,7 +342,7 @@ public class Util {
 
     public record Diff(List<String> added, List<String> removed, List<Change> changed) {}
 
-    public static @NotNull String wrapString(String str) {
+    public static String wrapString(@Nullable String str) {
         if (str == null || str.isEmpty()) return "";
         String[] lines = str.split("\r?\n");
         if (lines.length == 1) {

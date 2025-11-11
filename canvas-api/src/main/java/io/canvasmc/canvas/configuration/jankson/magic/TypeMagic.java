@@ -24,6 +24,7 @@
 
 package io.canvasmc.canvas.configuration.jankson.magic;
 
+import com.google.common.base.Preconditions;
 import io.canvasmc.canvas.configuration.jankson.api.DeserializationException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.GenericArrayType;
@@ -41,7 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 public class TypeMagic {
     private static final Map<Class<?>, Class<?>> concreteClasses = new HashMap<>();
@@ -91,7 +92,7 @@ public class TypeMagic {
 
                 try {
                     return Class.forName(className);
-                } catch (ClassNotFoundException ex) {
+                } catch (ClassNotFoundException ignored) {
                 }
             }
         }
@@ -121,6 +122,7 @@ public class TypeMagic {
             Class<?> componentClass = classForType(arrayType.getGenericComponentType());
             try {
                 //We can always retrieve the class under a "dots" version of the binary name, as long as componentClass wound up resolving to a valid Object type
+                Preconditions.checkState(componentClass != null, "componentClass must not be null");
                 Class<?> arrayClass = Class.forName("[L" + componentClass.getCanonicalName() + ";");
 
                 return arrayClass;
@@ -145,15 +147,20 @@ public class TypeMagic {
     @Nullable
     public static <U> U createAndCast(Type t) {
         try {
-            return (U) createAndCast(classForType(t), false);
+            Class<?> clazz = classForType(t);
+            if (clazz == null) return null;
+            return (U) createAndCast(clazz, false);
         } catch (Throwable ex) {
             ex.printStackTrace();
             return null;
         }
     }
 
+    @Nullable
     public static <U> U createAndCastCarefully(Type t) throws DeserializationException {
-        return createAndCast(classForType(t));
+        Class<?> clazz = classForType(t);
+        if (clazz == null) return null;
+        return createAndCast(clazz);
     }
 
     /**
@@ -164,7 +171,7 @@ public class TypeMagic {
      * @param t   the source type. The object will be created as this type.
      * @return a new object of type U. If any part of this process fails, this method silently returns null instead.
      */
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings("deprecation")
     @Nullable
     public static <U> U createAndCast(Class<U> t, boolean failFast) throws DeserializationException {
         if (t.isInterface()) {

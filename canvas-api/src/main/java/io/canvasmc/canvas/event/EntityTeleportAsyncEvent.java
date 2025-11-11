@@ -7,8 +7,7 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.event.entity.EntityEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Called when an entity is about to be teleported from one location to another.
@@ -23,20 +22,19 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
     private static final HandlerList HANDLER_LIST = new HandlerList();
 
     private final Location from;
-    @NotNull
+    
     private final PlayerTeleportEvent.TeleportCause cause;
     private Location to;
     private boolean cancelled;
 
     @ApiStatus.Internal
-    public EntityTeleportAsyncEvent(@NotNull Entity entity, @NotNull Location from, @Nullable Location to, @NotNull PlayerTeleportEvent.TeleportCause cause) {
+    public EntityTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause) {
         super(entity);
         this.from = from;
-        this.to = to;
+        this.to = (to != null) ? to : from;
         this.cause = cause;
     }
 
-    @NotNull
     public static HandlerList getHandlerList() {
         return HANDLER_LIST;
     }
@@ -46,7 +44,7 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      *
      * @return Location this entity moved from
      */
-    @NotNull
+    
     public Location getFrom() {
         return this.from;
     }
@@ -56,7 +54,7 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      *
      * @return Location the entity moved to
      */
-    @NotNull
+    
     public Location getTo() {
         return this.to;
     }
@@ -66,7 +64,7 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      *
      * @param to New Location this entity moved to
      */
-    public void setTo(@NotNull Location to) {
+    public void setTo(Location to) {
         this.to = to.clone();
     }
 
@@ -75,7 +73,7 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      *
      * @return the teleport cause
      */
-    public @NotNull PlayerTeleportEvent.TeleportCause getCause() {
+    public PlayerTeleportEvent.TeleportCause getCause() {
         return cause;
     }
 
@@ -89,7 +87,6 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
         this.cancelled = cancel;
     }
 
-    @NotNull
     @Override
     public HandlerList getHandlers() {
         return HANDLER_LIST;

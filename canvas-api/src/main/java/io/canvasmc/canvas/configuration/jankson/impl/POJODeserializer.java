@@ -46,8 +46,7 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Collection;
 import java.util.Map;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 public class POJODeserializer {
 
@@ -55,7 +54,7 @@ public class POJODeserializer {
     public static void unpackObject(Object target, JsonObject source) {
         try {
             unpackObject(target, source, false);
-        } catch (Throwable t) {
+        } catch (Throwable ignored) {
         }
     }
 
@@ -85,6 +84,7 @@ public class POJODeserializer {
         }
     }
 
+    @SuppressWarnings("deprecation")
     public static void unpackField(Object parent, Field f, JsonObject source, boolean failFast) throws DeserializationException {
         String fieldName = f.getName();
         SerializedName nameAnnotation = f.getAnnotation(SerializedName.class);
@@ -120,8 +120,9 @@ public class POJODeserializer {
      */
     @SuppressWarnings("unchecked")
     @Nullable
-    public static Object unpack(Type t, JsonElement elem, Marshaller marshaller) {
+    public static Object unpack(Type t, @Nullable JsonElement elem, Marshaller marshaller) {
         Class<?> rawClass = TypeMagic.classForType(t);
+        if (rawClass == null) return null;
         if (rawClass.isPrimitive())
             return null; //We can't unpack a primitive into an object of primitive type. Maybe in the future we can return a boxed type?
 
@@ -161,7 +162,7 @@ public class POJODeserializer {
     }
 
     @SuppressWarnings("unchecked")
-    public static boolean unpackFieldData(Object parent, Field field, JsonElement elem, Marshaller marshaller) throws Throwable {
+    public static boolean unpackFieldData(Object parent, Field field, @Nullable JsonElement elem, Marshaller marshaller) throws Throwable {
 
         if (elem == null) return true;
         try {
@@ -231,7 +232,7 @@ public class POJODeserializer {
                 Object k = marshaller.marshall(keyType, new JsonPrimitive(entry.getKey()));
                 Object v = marshaller.marshall(valueType, entry.getValue());
                 if (k != null && v != null) map.put(k, v);
-            } catch (Throwable t) {
+            } catch (Throwable ignored) {
             }
         }
     }
@@ -274,7 +275,7 @@ public class POJODeserializer {
      */
     @SuppressWarnings("unchecked")
     @Nullable
-    private static <A, B> InternalDeserializerFunction<B> makeDeserializer(@Nonnull Method m, @Nonnull Class<A> sourceClass, @Nonnull Class<B> targetClass) {
+    private static <A, B> InternalDeserializerFunction<B> makeDeserializer(Method m, Class<A> sourceClass, Class<B> targetClass) {
         if (!m.getReturnType().equals(targetClass)) return null;
         Parameter[] params = m.getParameters();
         if (params.length == 1) {
@@ -290,6 +291,7 @@ public class POJODeserializer {
             //return null;
         } else if (params.length == 2) {
             //if (params[0].getClass().isAssignableFrom(sourceClass)) {
+            /* todo: seemingly always equals to false
             if (params[1].getClass().equals(Marshaller.class)) {
                 return (Object o, Marshaller marshaller) -> {
                     try {
@@ -300,6 +302,7 @@ public class POJODeserializer {
                 };
             }
             //}
+             */
             return null;
         } else {
             return null;

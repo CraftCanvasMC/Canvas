@@ -33,8 +33,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Objects;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 @SuppressWarnings("deprecation")
 public class JsonArray extends JsonElement implements List<JsonElement>, Iterable<JsonElement> {
@@ -159,7 +158,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
         builder.append("[");
 
-        if (entries.size() > 0) {
+        if (!entries.isEmpty()) {
             if (grammar.printWhitespace) {
                 builder.append('\n');
             } else {
@@ -194,7 +193,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
             }
         }
 
-        if (entries.size() > 0) {
+        if (!entries.isEmpty()) {
             if (grammar.printWhitespace && depth > 0) {
                 for (int j = 0; j < effectiveDepth; j++) {
                     builder.append("\t");
@@ -202,7 +201,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
             }
         }
 
-        if (entries.size() > 0) {
+        if (!entries.isEmpty()) {
             if (!grammar.printWhitespace) builder.append(' ');
         }
 
@@ -215,19 +214,21 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
         return toJson(true, false, 0);
     }
 
-    public boolean add(@Nonnull JsonElement e, String comment) {
+    public boolean add(JsonElement e, @Nullable String comment) {
         //if (contains(e)) return false;
 
         Entry entry = new Entry();
         entry.value = e;
-        entry.comment = comment;
+        if (comment != null) {
+            entry.comment = comment;
+        }
         entries.add(entry);
         return true;
     }
 
     @Override
     public boolean equals(Object other) {
-        if (other == null || !(other instanceof JsonArray)) return false;
+        if (!(other instanceof JsonArray)) return false;
 
         List<Entry> a = this.entries;
         List<Entry> b = ((JsonArray) other).entries;
@@ -249,7 +250,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
     }
 
     @Nullable
-    public <E> E get(@Nonnull Class<E> clazz, int index) {
+    public <E> E get(Class<E> clazz, int index) {
         JsonElement elem = get(index);
         return marshaller.marshall(clazz, elem);
     }
@@ -281,7 +282,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
     }
 
     @Override
-    public boolean add(@Nonnull JsonElement e) {
+    public boolean add(JsonElement e) {
         Entry entry = new Entry();
         entry.value = e;
         entries.add(entry);
@@ -303,7 +304,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     @Override
     public boolean contains(Object o) {
-        if (o == null || !(o instanceof JsonElement)) return false;
+        if (!(o instanceof JsonElement)) return false;
 
         for (Entry entry : entries) {
             if (entry.value.equals(o)) return true;
@@ -356,7 +357,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
         return result;
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"unchecked"})
     @Override
     public <T> T[] toArray(T[] a) {
         if (a.length < entries.size()) a = (T[]) new Object[entries.size()];
@@ -392,20 +393,18 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     @Override
     public int indexOf(Object obj) {
-        if (obj == null) return -1;
         for (int i = 0; i < entries.size(); i++) {
             JsonElement val = entries.get(i).value;
-            if (val != null && val.equals(obj)) return i;
+            if (val.equals(obj)) return i;
         }
         return -1;
     }
 
     @Override
     public int lastIndexOf(Object obj) {
-        if (obj == null) return -1;
         for (int i = entries.size() - 1; i >= 0; i--) {
             JsonElement val = entries.get(i).value;
-            if (val != null && val.equals(obj)) return i;
+            if (val.equals(obj)) return i;
         }
         return -1;
     }
@@ -426,6 +425,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
     }
 
     @Override
+    @Nullable
     public JsonElement set(int index, JsonElement element) {
         Entry old = entries.set(index, new Entry(element));
         return (old == null) ? null : old.value;
@@ -499,10 +499,11 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
     }
 
     private static class Entry {
-        String comment;
+        @Nullable String comment;
         JsonElement value;
 
         public Entry() {
+            value = new JsonObject();
         }
 
         public Entry(JsonElement value) {
