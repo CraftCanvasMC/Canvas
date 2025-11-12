@@ -187,12 +187,6 @@ public class Config {
         @Comment("Whether to enable optimizations to the noise based chunk generator")
         public boolean optimizeNoiseGeneration = false;
 
-        @Comment({
-            "Once one task is completed then the next task starts immediately, to prevent blocking threads while waiting to complete all tasks",
-            "WARNING: May cause the sequence of future compose disorder"
-        })
-        public boolean useFasterStructureGenFutureSequencing = false;
-
         public Structures structures = new Structures();
 
         public static class Structures {
