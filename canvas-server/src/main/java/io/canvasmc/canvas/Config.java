@@ -2,6 +2,7 @@ package io.canvasmc.canvas;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 import ca.spottedleaf.moonrise.patches.chunk_system.util.ParallelSearchRadiusIteration;
+import gg.pufferfish.pufferfish.sentry.SentryManager;
 import io.canvasmc.canvas.chunk.FluidPostProcessingMode;
 import io.canvasmc.canvas.configuration.ConfigSerializer;
 import io.canvasmc.canvas.configuration.Configuration;
@@ -73,6 +74,7 @@ public class Config {
         GLOBAL_BROADCAST.accept("Instantiating Canvas configuration");
         long startNanos = System.nanoTime();
         INSTANCE = ConfigurationManager.register(Config.class, Config::buildGlobal).getConfig();
+        INSTANCE.sentry.init();
         GLOBAL_BROADCAST.accept("Finished Canvas config init in " + TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS) + "ms");
     }
 
@@ -722,4 +724,40 @@ public class Config {
         public int waterCreature = 0;
         public int waterAmbient = 0;
     }
+
+    @Comment("Configuration options for Sentry integration")
+    public Sentry sentry = new Sentry();
+
+    public static class Sentry {
+
+        @Comment({
+            "The Sentry DSN used to send error and log events.",
+            "Leave empty to disable Sentry integration."
+        })
+        public String dsn = "";
+
+        @Comment({
+            "The minimum log level that will be forwarded to Sentry.",
+            "Valid values:",
+            " - OFF",
+            " - FATAL",
+            " - ERROR",
+            " - WARN",
+            " - INFO",
+            " - DEBUG",
+            " - TRACE",
+            " - ALL"
+        })
+        public String logLevel = "ERROR";
+
+        @Comment("When enabled, only exceptions / thrown errors are reported to Sentry")
+        public boolean onlyLogThrown = true;
+
+        private void init() {
+            if (dsn != null && !dsn.isBlank()) {
+                SentryManager.init();
+            }
+        }
+    }
+
 }

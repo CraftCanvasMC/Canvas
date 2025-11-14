@@ -1,10 +1,10 @@
 package io.canvasmc.testplugin;
 
-import java.util.List;
-import java.util.Objects;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.event.EntityTeleportAsyncEvent;
 import io.canvasmc.canvas.event.WorldPreLoadEvent;
+import java.util.List;
+import java.util.Objects;
 import net.kyori.adventure.util.TriState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -40,6 +40,8 @@ public class TestPlugin extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         getLogger().info("Enabling test plugin for Canvas");
+        getLogger().info("Executing Sentry test...");
+        SentryTest.run();
         getServer().getPluginManager().registerEvents(this, this); // uncomment when testing events
         getServer().getCommandMap().register("rtp", new BukkitCommand("rtp") {
             @Override
