@@ -77,6 +77,35 @@ public class TestPlugin extends JavaPlugin implements Listener {
                 return true;
             }
         });
+        getServer().getCommandMap().register("createworld", new BukkitCommand("createworld") {
+            @Override
+            public boolean execute(@NotNull final CommandSender sender, @NotNull final String commandLabel, final @NotNull String @NotNull [] args) {
+                String name = args[0];
+                getServer().getGlobalRegionScheduler().run(TestPlugin.this, (task) -> {
+                    getServer().createWorld(
+                        new WorldCreator(name)
+                            .environment(World.Environment.NORMAL)
+                            .bonusChest(false)
+                            .generateStructures(false)
+                            .biomeProvider(new BiomeProvider() {
+                                @Override
+                                public @NotNull Biome getBiome(@NotNull final WorldInfo worldInfo, final int x, final int y, final int z) {
+                                    return Biome.THE_VOID;
+                                }
+
+                                @Override
+                                public @NotNull List<Biome> getBiomes(@NotNull final WorldInfo worldInfo) {
+                                    return List.of(Biome.THE_VOID);
+                                }
+                            })
+                            .hardcore(false)
+                            .keepSpawnLoaded(TriState.FALSE)
+                            .type(WorldType.FLAT)
+                    );
+                });
+                return true;
+            }
+        });
         getServer().getCommandMap().register("blockentitytest", new BukkitCommand("blockentitytest") {
             @Override
             public boolean execute(@NotNull final CommandSender sender, @NotNull final String commandLabel, final @NotNull String @NotNull [] args) {
@@ -129,46 +158,6 @@ public class TestPlugin extends JavaPlugin implements Listener {
                 return false;
             }
         });
-        getServer().getGlobalRegionScheduler().run(this, (task) -> {
-            getServer().createWorld(
-                // safe blank world to test hoppers
-                new WorldCreator("hoppers")
-                    .environment(World.Environment.NORMAL)
-                    .bonusChest(false)
-                    .generateStructures(false)
-                    .biomeProvider(new BiomeProvider() {
-                        @Override
-                        public @NotNull Biome getBiome(@NotNull final WorldInfo worldInfo, final int x, final int y, final int z) {
-                            return Biome.THE_VOID;
-                        }
-
-                        @Override
-                        public @NotNull List<Biome> getBiomes(@NotNull final WorldInfo worldInfo) {
-                            return List.of(Biome.THE_VOID);
-                        }
-                    })
-                    .hardcore(false)
-                    .keepSpawnLoaded(TriState.FALSE)
-                    .type(WorldType.FLAT)
-            );
-            getServer().createWorld(
-                new WorldCreator("world_api_test")
-                    .environment(World.Environment.NORMAL)
-                    .bonusChest(false)
-                    .hardcore(false)
-                    .type(WorldType.AMPLIFIED)
-            );
-        });
-        getServer().getGlobalRegionScheduler().runDelayed(this, (task) -> {
-            World apiTest = Bukkit.getWorld("world_api_test");
-            Bukkit.unloadWorldAsync(Objects.requireNonNull(apiTest), true, (success) -> {
-                if (success) {
-                    getLogger().info("Successfully unloaded the world load/unload api test");
-                } else {
-                    getLogger().info("Couldn't unload the world load/unload api test");
-                }
-            });
-        }, 20 * 20); // 20 seconds
         RegionDataTest.init();
     }
 

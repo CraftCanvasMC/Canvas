@@ -50,7 +50,7 @@ public class Config {
             .decoration(TextDecoration.BOLD, false);
 
         Component merged = component.append(text);
-        LOGGER.info(merged);
+        LOGGER.info(text);
         if (isServerAccessible()) {
             for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
                 player.sendSystemMessage(PaperAdventure.asVanilla(merged));
