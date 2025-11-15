@@ -309,7 +309,7 @@ public final class ScheduledTaskThreadPool {
     }
 
     private void insert(final @NotNull SchedulableTick tick, final boolean hasTasks) {
-        final long scheduleTime = tick.getScheduledStart();
+        final long scheduleTime = Math.max(tick.getScheduledStart(), System.nanoTime());
         final long timeNow = System.nanoTime();
 
         for (;;) {
