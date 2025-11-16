@@ -5,7 +5,6 @@ import io.canvasmc.canvas.configuration.jankson.JsonPrimitive;
 import io.canvasmc.canvas.configuration.validator.AnnotationValidator;
 import io.canvasmc.canvas.configuration.validator.ValidationException;
 import io.canvasmc.canvas.configuration.validator.ValidationResult;
-import org.jspecify.annotations.Nullable;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;

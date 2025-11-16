@@ -122,7 +122,7 @@ public class TypeMagic {
             Class<?> componentClass = classForType(arrayType.getGenericComponentType());
             try {
                 //We can always retrieve the class under a "dots" version of the binary name, as long as componentClass wound up resolving to a valid Object type
-                Preconditions.checkState(componentClass != null, "componentClass must not be null");
+                if (componentClass == null) return null;
                 Class<?> arrayClass = Class.forName("[L" + componentClass.getCanonicalName() + ";");
 
                 return arrayClass;

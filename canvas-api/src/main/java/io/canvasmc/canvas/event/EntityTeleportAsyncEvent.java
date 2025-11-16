@@ -22,7 +22,6 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
     private static final HandlerList HANDLER_LIST = new HandlerList();
 
     private final Location from;
-    
     private final PlayerTeleportEvent.TeleportCause cause;
     private Location to;
     private boolean cancelled;
@@ -44,7 +43,6 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      *
      * @return Location this entity moved from
      */
-    
     public Location getFrom() {
         return this.from;
     }
@@ -54,7 +52,6 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      *
      * @return Location the entity moved to
      */
-    
     public Location getTo() {
         return this.to;
     }

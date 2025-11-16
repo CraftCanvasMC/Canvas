@@ -8,8 +8,6 @@ public class SIMDDetection {
     public static boolean isEnabled = false;
     public static boolean testRun = false;
 
-    @Deprecated
-    @ApiStatus.Internal
     public static boolean canEnable(ComponentLogger logger) {
         try {
             return SIMDChecker.canEnable(logger);
@@ -18,8 +16,6 @@ public class SIMDDetection {
         }
     }
 
-    @Deprecated
-    @ApiStatus.Internal
     public static int getJavaVersion() {
         // https://stackoverflow.com/a/2591122
         String version = System.getProperty("java.version");

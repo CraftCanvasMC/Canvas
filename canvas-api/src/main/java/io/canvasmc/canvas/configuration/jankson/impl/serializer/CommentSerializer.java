@@ -28,7 +28,7 @@ import io.canvasmc.canvas.configuration.jankson.JsonGrammar;
 import org.jspecify.annotations.Nullable;
 
 public class CommentSerializer {
-    public static void print(StringBuilder builder, String comment, int indent, JsonGrammar grammar) {
+    public static void print(StringBuilder builder, @Nullable String comment, int indent, JsonGrammar grammar) {
         boolean comments = grammar.hasComments();
         boolean whitespace = grammar.shouldOutputWhitespace();
         print(builder, comment, indent, comments, whitespace);

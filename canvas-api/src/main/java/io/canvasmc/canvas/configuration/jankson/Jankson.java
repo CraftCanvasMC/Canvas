@@ -320,7 +320,7 @@ public class Jankson {
         }
 
         try {
-            boolean consumed = Objects.requireNonNull(frame).context.consume(codePoint, this);
+            boolean consumed = frame.context.consume(codePoint, this);
             if (frame.context.isComplete()) {
                 contextStack.pop();
                 frame.supply();
@@ -333,7 +333,7 @@ public class Jankson {
             }
 
         } catch (SyntaxError error) {
-            error.setStartParsing(Objects.requireNonNull(frame).startLine, frame.startCol);
+            error.setStartParsing(frame.startLine, frame.startCol);
             error.setEndParsing(line, column);
             throw error;
         }

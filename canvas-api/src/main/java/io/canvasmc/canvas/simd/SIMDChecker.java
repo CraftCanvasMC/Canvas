@@ -8,8 +8,6 @@ import org.jetbrains.annotations.ApiStatus;
 
 public class SIMDChecker {
 
-    @Deprecated
-    @ApiStatus.Internal
     public static boolean canEnable(ComponentLogger logger) {
         try {
             if (SIMDDetection.getJavaVersion() < 17) {

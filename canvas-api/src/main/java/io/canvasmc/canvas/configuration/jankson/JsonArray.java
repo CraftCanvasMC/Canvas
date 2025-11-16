@@ -65,7 +65,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public String getString(int index, String defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asString();
         }
         return defaultValue;
@@ -73,7 +73,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public boolean getBoolean(int index, boolean defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asBoolean(defaultValue);
         }
         return defaultValue;
@@ -81,7 +81,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public byte getByte(int index, byte defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asByte(defaultValue);
         }
         return defaultValue;
@@ -89,7 +89,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public char getChar(int index, char defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asChar(defaultValue);
         }
         return defaultValue;
@@ -97,7 +97,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public short getShort(int index, short defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asShort(defaultValue);
         }
         return defaultValue;
@@ -105,7 +105,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public int getInt(int index, int defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asInt(defaultValue);
         }
         return defaultValue;
@@ -113,7 +113,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public long getLong(int index, long defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asLong(defaultValue);
         }
         return defaultValue;
@@ -121,7 +121,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public float getFloat(int index, float defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asFloat(defaultValue);
         }
         return defaultValue;
@@ -129,12 +129,13 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
     public double getDouble(int index, double defaultValue) {
         JsonElement elem = get(index);
-        if (elem != null && elem instanceof JsonPrimitive) {
+        if (elem instanceof JsonPrimitive) {
             return ((JsonPrimitive) elem).asDouble(defaultValue);
         }
         return defaultValue;
     }
 
+    @Nullable
     public String getComment(int i) {
         return entries.get(i).comment;
     }
@@ -357,7 +358,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
         return result;
     }
 
-    @SuppressWarnings({"unchecked"})
+    @SuppressWarnings("unchecked")
     @Override
     public <T> T[] toArray(T[] a) {
         if (a.length < entries.size()) a = (T[]) new Object[entries.size()];
