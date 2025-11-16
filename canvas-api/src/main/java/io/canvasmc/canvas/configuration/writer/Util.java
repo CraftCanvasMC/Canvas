@@ -288,7 +288,7 @@ public class Util {
             if (oldVal instanceof JsonObject && newVal instanceof JsonObject) {
                 diffRecursiveWithValues(fullKey + ".", (JsonObject) oldVal, (JsonObject) newVal, added, removed, changed);
             } else if (!Objects.equals(oldVal, newVal)) {
-                changed.add(new Change(fullKey, jsonToString(Objects.requireNonNull(oldVal)), jsonToString(Objects.requireNonNull(newVal))));
+                changed.add(new Change(fullKey, jsonToString(oldVal), jsonToString(newVal)));
             }
         }
 
