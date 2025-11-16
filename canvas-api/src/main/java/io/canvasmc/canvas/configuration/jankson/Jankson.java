@@ -255,10 +255,12 @@ public class Jankson {
         return rootElement.getElement();
     }
 
+    @Nullable
     public <T> T fromJson(JsonObject obj, Class<T> clazz) {
         return marshaller.marshall(clazz, obj);
     }
 
+    @Nullable
     public <T> T fromJson(String json, Class<T> clazz) throws SyntaxError {
         JsonObject obj = load(json);
         return fromJson(obj, clazz);
@@ -274,6 +276,7 @@ public class Jankson {
      * @throws SyntaxError              If the json cannot be parsed
      * @throws DeserializationException If the conversion into an instance of the specified type fails
      */
+    @Nullable
     public <T> T fromJsonCarefully(String json, Class<T> clazz) throws SyntaxError, DeserializationException {
         JsonObject obj = load(json);
         return fromJsonCarefully(obj, clazz);
@@ -288,6 +291,7 @@ public class Jankson {
      * @return An object of the specified class, holding the data from json
      * @throws DeserializationException If the conversion into an instance of the specified type fails
      */
+    @Nullable
     public <T> T fromJsonCarefully(JsonObject obj, Class<T> clazz) throws DeserializationException {
         return marshaller.marshallCarefully(clazz, obj);
     }
@@ -302,8 +306,7 @@ public class Jankson {
 
     private void processCodePoint(int codePoint) throws SyntaxError {
         ParserFrame<?> frame = contextStack.peek();
-        if (frame == null)
-            throw new IllegalStateException("Parser problem! The ParserContext stack underflowed! (line " + line + ", col " + column + ")");
+        if (frame == null) throw new IllegalStateException("Parser problem! The ParserContext stack underflowed! (line " + line + ", col " + column + ")");
 
         //Do a limited amount of tail call recursion
         try {
@@ -319,6 +322,7 @@ public class Jankson {
         }
 
         try {
+            if (frame == null) throw new IllegalStateException("Parser problem! The ParserContext stack underflowed! (line " + line + ", col " + column + ")");
             boolean consumed = frame.context.consume(codePoint, this);
             if (frame.context.isComplete()) {
                 contextStack.pop();

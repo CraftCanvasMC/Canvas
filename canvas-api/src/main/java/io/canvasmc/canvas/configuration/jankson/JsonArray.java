@@ -421,10 +421,9 @@ public final class JsonArray extends JsonElement implements List<JsonElement>, I
     }
 
     @Override
-    @Nullable
     public JsonElement set(int index, JsonElement element) {
         Entry old = entries.set(index, new Entry(element));
-        return (old == null) ? null : old.value;
+        return old.value;
     }
 
     @Override
