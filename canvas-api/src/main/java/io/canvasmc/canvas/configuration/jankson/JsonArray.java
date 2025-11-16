@@ -36,9 +36,9 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 @SuppressWarnings("deprecation")
-public class JsonArray extends JsonElement implements List<JsonElement>, Iterable<JsonElement> {
+public final class JsonArray extends JsonElement implements List<JsonElement>, Iterable<JsonElement> {
     private final List<Entry> entries = new ArrayList<>();
-    protected Marshaller marshaller = MarshallerImpl.getFallback();
+    Marshaller marshaller = MarshallerImpl.getFallback();
 
     public JsonArray() {
     }
@@ -171,9 +171,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
             Entry entry = entries.get(i);
 
             if (grammar.printWhitespace) {
-                for (int j = 0; j < effectiveDepth + 1; j++) {
-                    builder.append("\t");
-                }
+                builder.append("\t".repeat(Math.max(0, effectiveDepth + 1)));
             }
 
             CommentSerializer.print(builder, entry.comment, effectiveDepth, grammar);
@@ -220,9 +218,7 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
 
         Entry entry = new Entry();
         entry.value = e;
-        if (comment != null) {
-            entry.comment = comment;
-        }
+        entry.comment = comment;
         entries.add(entry);
         return true;
     }
@@ -264,13 +260,12 @@ public class JsonArray extends JsonElement implements List<JsonElement>, Iterabl
         this.marshaller = marshaller;
     }
 
-    //IMPLEMENTATION for Cloneable
     @Override
-    public JsonArray clone() {
+    public JsonArray copy() {
         JsonArray result = new JsonArray();
         result.marshaller = marshaller;
         for (Entry entry : entries) {
-            result.add(entry.value.clone(), entry.comment);
+            result.add(entry.value.copy(), entry.comment);
         }
         return result;
     }

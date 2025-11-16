@@ -5,7 +5,6 @@ import io.canvasmc.canvas.configuration.Configuration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import org.jetbrains.annotations.NotNull;
 
 public class ConfigurationManager {
     private static final Map<Class<?>, ConfigHolder<?>> holders = new ConcurrentHashMap<>();
@@ -28,6 +27,7 @@ public class ConfigurationManager {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public static <T> ConfigHolder<T> getConfigHolder(Class<T> configClass) {
         Objects.requireNonNull(configClass);
         if (holders.containsKey(configClass)) {

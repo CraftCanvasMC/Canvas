@@ -27,8 +27,8 @@ package io.canvasmc.canvas.configuration.jankson;
 /**
  * Tagging class for Json objects, arrays, and primitives
  */
-public abstract class JsonElement implements Cloneable {
-    public abstract JsonElement clone();
+public abstract sealed class JsonElement permits JsonArray, JsonNull, JsonObject, JsonPrimitive {
+    public abstract JsonElement copy();
 
     public String toJson() {
         return toJson(false, false, 0);

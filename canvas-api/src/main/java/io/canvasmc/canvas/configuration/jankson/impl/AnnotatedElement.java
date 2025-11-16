@@ -35,9 +35,7 @@ public class AnnotatedElement {
     protected JsonElement elem;
 
     public AnnotatedElement(JsonElement elem, @Nullable String comment) {
-        if (comment != null) {
-            this.comment = comment;
-        }
+        this.comment = comment;
         this.elem = elem;
     }
 

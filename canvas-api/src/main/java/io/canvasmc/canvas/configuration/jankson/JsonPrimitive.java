@@ -26,7 +26,7 @@ package io.canvasmc.canvas.configuration.jankson;
 
 import java.util.Objects;
 
-public class JsonPrimitive extends JsonElement {
+public final class JsonPrimitive extends JsonElement {
     /**
      * Convenience instance of json "true". Don't use identity comparison (==) on these! Use equals instead.
      */
@@ -98,18 +98,23 @@ public class JsonPrimitive extends JsonElement {
     }
 
     public char asChar(char defaultValue) {
-        if (value instanceof Number) {
-            return (char) ((Number) value).intValue();
-        } else if (value instanceof Character) {
-            return (Character) value;
-        } else if (value instanceof String) {
-            if (((String) value).length() == 1) {
-                return ((String) value).charAt(0);
-            } else {
+        switch (value) {
+            case Number number -> {
+                return (char) number.intValue();
+            }
+            case Character c -> {
+                return c;
+            }
+            case String s -> {
+                if (s.length() == 1) {
+                    return s.charAt(0);
+                } else {
+                    return defaultValue;
+                }
+            }
+            default -> {
                 return defaultValue;
             }
-        } else {
-            return defaultValue;
         }
     }
 
@@ -210,9 +215,8 @@ public class JsonPrimitive extends JsonElement {
         return '\"' + escape(value.toString()) + '\"';
     }
 
-    //IMPLEMENTATION for Cloneable
     @Override
-    public JsonPrimitive clone() {
+    public JsonPrimitive copy() {
         return this;
     }
 }

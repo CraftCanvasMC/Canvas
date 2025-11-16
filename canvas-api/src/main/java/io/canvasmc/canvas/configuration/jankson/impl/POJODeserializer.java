@@ -63,7 +63,7 @@ public class POJODeserializer {
         //well, let's try anyway and see if we run into problems.
 
         //Create a copy we can redact keys from
-        JsonObject work = source.clone();
+        JsonObject work = source.copy();
 
         //Fill public and private fields declared in the target object's immediate class
         for (Field f : target.getClass().getDeclaredFields()) {
@@ -118,7 +118,6 @@ public class POJODeserializer {
     /**
      * NOT WORKING YET, HIGHLY EXPERIMENTAL
      */
-    @SuppressWarnings("unchecked")
     @Nullable
     public static Object unpack(Type t, @Nullable JsonElement elem, Marshaller marshaller) {
         Class<?> rawClass = TypeMagic.classForType(t);

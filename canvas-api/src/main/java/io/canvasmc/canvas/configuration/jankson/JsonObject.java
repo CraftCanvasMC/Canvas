@@ -37,10 +37,10 @@ import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
-public class JsonObject extends JsonElement implements Map<String, JsonElement> {
+public final class JsonObject extends JsonElement implements Map<String, JsonElement> {
     private final List<Entry> entries = new ArrayList<>();
     @SuppressWarnings("deprecation")
-    protected Marshaller marshaller = MarshallerImpl.getFallback();
+    Marshaller marshaller = MarshallerImpl.getFallback();
 
     /**
      * If there is an entry at this key, and that entry is a json object, return it. Otherwise returns null.
@@ -70,9 +70,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
             if (entry.key.equalsIgnoreCase(key)) {
                 JsonElement result = entry.value;
                 entry.value = elem;
-                if (comment != null) {
-                    entry.comment = comment;
-                }
+                entry.comment = comment;
                 return result;
             }
         }
@@ -83,9 +81,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
         if (elem instanceof JsonArray) ((JsonArray) elem).marshaller = marshaller;
         entry.key = key;
         entry.value = elem;
-        if (comment != null) {
-            entry.comment = comment;
-        }
+        entry.comment = comment;
         entries.add(entry);
         return null;
     }
@@ -101,9 +97,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
         Entry entry = new Entry();
         entry.key = key;
         entry.value = elem;
-        if (comment != null) {
-            entry.comment = comment;
-        }
+        entry.comment = comment;
         entries.add(entry);
         return elem;
     }
@@ -132,10 +126,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
         Entry entry = new Entry();
         entry.key = key;
         entry.value = marshaller.serialize(elem);
-        if (entry.value == null) entry.value = JsonNull.INSTANCE;
-        if (comment != null) {
-            entry.comment = comment;
-        }
+        entry.comment = comment;
         entries.add(entry);
         return elem;
     }
@@ -201,9 +192,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
     public void setComment(String name, @Nullable String comment) {
         for (Entry entry : entries) {
             if (entry.key.equalsIgnoreCase(name)) {
-                if (comment != null) {
-                    entry.comment = comment;
-                }
+                entry.comment = comment;
                 return;
             }
         }
@@ -236,9 +225,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
             Entry entry = entries.get(i);
 
             if (grammar.printWhitespace) {
-                for (int j = 0; j < nextDepth; j++) {
-                    builder.append("\t");
-                }
+                builder.append("\t".repeat(Math.max(0, nextDepth)));
             }
 
             CommentSerializer.print(builder, entry.comment, Math.max(effectiveDepth, 0), grammar);
@@ -326,6 +313,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
         if (key.isEmpty()) throw new IllegalArgumentException("Cannot get from empty key");
 
         JsonElement elem = get(key);
+        if (elem == null) return null;
         return marshaller.marshall(clazz, elem);
     }
 
@@ -462,7 +450,7 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
                 if (elem != null && clazz.isAssignableFrom(elem.getClass())) {
                     return (E) elem;
                 } else {
-                    E result = (E) fallback.clone();
+                    E result = (E) fallback.copy();
                     cur.put(key, result, comment);
                     return result;
                 }
@@ -473,10 +461,10 @@ public class JsonObject extends JsonElement implements Map<String, JsonElement> 
     }
 
     @Override
-    public JsonObject clone() {
+    public JsonObject copy() {
         JsonObject result = new JsonObject();
         for (Entry entry : entries) {
-            result.put(entry.key, entry.value.clone(), entry.comment);
+            result.put(entry.key, entry.value.copy(), entry.comment);
         }
         result.marshaller = marshaller;
         return result;

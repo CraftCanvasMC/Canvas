@@ -24,7 +24,7 @@
 
 package io.canvasmc.canvas.configuration.jankson;
 
-public class JsonNull extends JsonElement {
+public final class JsonNull extends JsonElement {
     public static final JsonNull INSTANCE = new JsonNull();
 
     private JsonNull() {
@@ -45,6 +45,11 @@ public class JsonNull extends JsonElement {
     }
 
     @Override
+    public JsonElement copy() {
+        return this;
+    }
+
+    @Override
     public String toJson(boolean comments, boolean newlines, int depth) {
         return "null";
     }
@@ -52,11 +57,5 @@ public class JsonNull extends JsonElement {
     @Override
     public String toJson(JsonGrammar grammar, int depth) {
         return "null";
-    }
-
-    //IMPLEMENTATION for Cloneable
-    @Override
-    public JsonNull clone() {
-        return this;
     }
 }

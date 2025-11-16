@@ -48,7 +48,6 @@ public class InternalConfigManager<T> implements ConfigHolder<T> {
 
     public boolean load() {
         try {
-
             this.config = this.serializer.read();
             return true;
         } catch (ValidationException | ConfigSerializer.SerializationException e) {
