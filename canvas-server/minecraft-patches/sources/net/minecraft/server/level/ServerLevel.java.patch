@@ -1,64 +1,6 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -366,6 +_,57 @@
-         return this.chunkLoader;
-     }
- 
-+    // Canvas start - region threading
-+    public final void canvas$loadOrRunAtChunksAsync(final BlockPos pos, final int radiusBlocks,
-+                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
-+                                                    final Runnable callback) {
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
-+            this, pos, radiusBlocks
-+        )) {
-+            // already on the running region, run callback
-+            callback.run();
-+        } else if (moonrise$areChunksLoaded(
-+            (pos.getX() - radiusBlocks) >> 4,
-+            (pos.getX() + radiusBlocks) >> 4,
-+            (pos.getZ() - radiusBlocks) >> 4,
-+            (pos.getZ() + radiusBlocks) >> 4
-+        )) {
-+            // chunks are loaded, schedule callback
-+            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-+                this, pos.getX() >> 4, pos.getZ() >> 4, callback, priority
-+            );
-+        } else {
-+            // chunks are not loaded, schedule load and callback
-+            moonrise$loadChunksAsync(
-+                pos, radiusBlocks, priority, (unused) -> callback.run()
-+            );
-+        }
-+    }
-+
-+    public final void canvas$loadOrRunAtChunksAsync(final int minChunkX, final int maxChunkX, final int minChunkZ, final int maxChunkZ,
-+                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
-+                                                    final Runnable callback) {
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
-+            this, minChunkX, minChunkZ, maxChunkX, maxChunkZ
-+        )) {
-+            // already on the running region, run callback
-+            callback.run();
-+        } else if (moonrise$areChunksLoaded(
-+            minChunkX, minChunkZ, maxChunkX, maxChunkZ
-+        )) {
-+            // chunks are loaded, schedule callback
-+            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-+                this, minChunkX, minChunkZ, callback, priority
-+            );
-+        } else {
-+            // chunks are not loaded, schedule load and callback
-+            moonrise$loadChunksAsync(
-+                minChunkX, minChunkZ, maxChunkX, maxChunkZ, priority, (unused) -> callback.run()
-+            );
-+        }
-+    }
-+
-+    // Canvas end - region threading
-     @Override
-     public final void moonrise$loadChunksAsync(final BlockPos pos, final int radiusBlocks,
-                                                final ca.spottedleaf.concurrentutil.util.Priority priority,
-@@ -615,7 +_,7 @@
+@@ -666,7 +_,7 @@
          this.sleepStatus = new SleepStatus();
          this.gameEventDispatcher = new GameEventDispatcher(this);
          this.randomSequences = Objects.requireNonNullElseGet(randomSequences, () -> this.getDataStorage().computeIfAbsent(RandomSequences.TYPE));
@@ -67,10 +9,10 @@
          // Paper start - rewrite chunk system
          this.moonrise$setEntityLookup(new ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup((ServerLevel)(Object)this, ((ServerLevel)(Object)this).new EntityCallbacks()));
          this.chunkTaskScheduler = new ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler((ServerLevel)(Object)this);
-@@ -632,6 +_,14 @@
-         // Paper end - rewrite chunk system
-         this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
-         this.updateTickData(); // Folia - region threading - make sure it is initialised before ticked
+@@ -698,6 +_,14 @@
+             }
+         }
+         // Canvas end - rewrite scheduler
 +        // Canvas start - per world distance
 +        int viewDistance = this.serverLevelData.canvas$distanceConfig.viewDistanceOrDefault();
 +        this.chunkSource.setViewDistance(viewDistance - 1);
@@ -82,7 +24,7 @@
      }
  
      // Folia start - region threading
-@@ -654,6 +_,7 @@
+@@ -720,6 +_,7 @@
      public static final int WORLD_INIT_CHECKED = 2;
      public final java.util.concurrent.atomic.AtomicInteger checkInitialised = new java.util.concurrent.atomic.AtomicInteger(WORLD_INIT_NOT_CHECKED);
      public ChunkPos randomSpawnSelection;
@@ -90,7 +32,7 @@
  
      public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
      private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
-@@ -886,71 +_,73 @@
+@@ -952,71 +_,73 @@
      // Paper start - optimise random ticking
      private final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource.INSTANCE; // Folia - region threading
  
@@ -199,7 +141,7 @@
          }
      }
  
-@@ -959,7 +_,7 @@
+@@ -1025,7 +_,7 @@
          boolean isRaining = this.isRaining();
          int minBlockX = pos.getMinBlockX();
          int minBlockZ = pos.getMinBlockZ();
@@ -208,7 +150,7 @@
              BlockPos blockPos = this.findLightningTargetAround(this.getBlockRandomPos(minBlockX, 0, minBlockZ, 15));
              if (this.isRainingAt(blockPos)) {
                  DifficultyInstance currentDifficultyAt = this.getCurrentDifficultyAt(blockPos);
-@@ -990,6 +_,16 @@
+@@ -1056,6 +_,16 @@
      public void tickPrecipitation(BlockPos blockPos) {
          BlockPos heightmapPos = this.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, blockPos);
          BlockPos blockPos1 = heightmapPos.below();
@@ -225,7 +167,7 @@
          Biome biome = this.getBiome(heightmapPos).value();
          if (biome.shouldFreeze(this, blockPos1)) {
              org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(this, blockPos1, Blocks.ICE.defaultBlockState(), 3, null); // CraftBukkit
-@@ -1013,8 +_,7 @@
+@@ -1079,8 +_,7 @@
  
              Biome.Precipitation precipitationAt = biome.getPrecipitationAt(blockPos1, this.getSeaLevel());
              if (precipitationAt != Biome.Precipitation.NONE) {
@@ -235,7 +177,7 @@
              }
          }
      }
-@@ -1628,7 +_,7 @@
+@@ -1694,7 +_,7 @@
  
      public void unload(LevelChunk chunk) {
          // Spigot start
@@ -244,7 +186,7 @@
              if (blockEntity instanceof net.minecraft.world.Container) {
                  // Paper start - this area looks like it can load chunks, change the behavior
                  // chests for example can apply physics to the world
-@@ -2303,11 +_,27 @@
+@@ -2369,11 +_,27 @@
          Optional<Holder<PoiType>> optional1 = PoiTypes.forState(newState);
          if (!Objects.equals(optional, optional1)) {
              BlockPos blockPos = pos.immutable();
@@ -274,7 +216,7 @@
                  // Paper start - Remove stale POIs
                  if (optional.isEmpty() && this.getPoiManager().exists(blockPos, ignored -> true)) {
                      this.getPoiManager().remove(blockPos);
-@@ -2441,6 +_,7 @@
+@@ -2507,6 +_,7 @@
  
          for (TickingBlockEntity tickingBlockEntity : (Iterable<? extends net.minecraft.world.level.block.entity.TickingBlockEntity>)null) { // Folia - region threading
              BlockPos pos = tickingBlockEntity.getPos();
