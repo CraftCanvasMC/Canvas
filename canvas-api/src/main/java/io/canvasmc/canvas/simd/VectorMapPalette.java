@@ -6,7 +6,6 @@ import jdk.incubator.vector.IntVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorSpecies;
 import org.bukkit.map.MapPalette;
-import org.jetbrains.annotations.ApiStatus;
 
 public class VectorMapPalette {
 

@@ -24,7 +24,6 @@
 
 package io.canvasmc.canvas.configuration.jankson.magic;
 
-import com.google.common.base.Preconditions;
 import io.canvasmc.canvas.configuration.jankson.api.DeserializationException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.GenericArrayType;
