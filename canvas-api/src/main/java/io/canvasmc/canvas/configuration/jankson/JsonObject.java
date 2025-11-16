@@ -407,6 +407,7 @@ public final class JsonObject extends JsonElement implements Map<String, JsonEle
                     return null;
                 }
             } else {
+                if (elem == null) return null;
                 return marshaller.marshall(clazz, elem);
 				
 				/*
@@ -470,8 +471,6 @@ public final class JsonObject extends JsonElement implements Map<String, JsonEle
         return result;
     }
 
-    //implements Cloneable {
-
     /**
      * Replaces a key-value mapping in this object if it exists, or adds the mapping to the end of the object if it
      * doesn't. Returns the old value mapped to this key if there was one.
@@ -520,7 +519,6 @@ public final class JsonObject extends JsonElement implements Map<String, JsonEle
 
     @Override
     public boolean containsValue(@Nullable Object val) {
-        if (val == null) return false;
         if (!(val instanceof JsonElement)) return false;
 
         for (Entry entry : entries) {
