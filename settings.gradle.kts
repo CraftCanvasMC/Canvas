@@ -45,7 +45,7 @@ for (name in listOf("canvas-api", "canvas-server")) {
 }
 
 rootDir.listFiles()
-    ?.filter { it.isDirectory && it.name.endsWith("-debug", ignoreCase = true) }
+    ?.filter { it.isDirectory && (it.name.endsWith("-debug", ignoreCase = true) || it.name.endsWith("-plugin", ignoreCase = true)) }
     ?.forEach { dir ->
         val projName = dir.name.lowercase(Locale.ENGLISH)
         include(projName)

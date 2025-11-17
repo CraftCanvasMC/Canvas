@@ -82,8 +82,8 @@ public final class ScheduledTaskThreadPool {
         return first == null ? null : first.getKey();
     }
 
-    private static ScheduledTickTask findFirstNonTaken(
-        final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
+    private static @Nullable ScheduledTickTask findFirstNonTaken(
+        final @NotNull ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
         final TickThreadRunner tickThreadRunner
     ) {
         final Iterator<ScheduledTickTask> it = map.keySet().iterator();
@@ -114,8 +114,8 @@ public final class ScheduledTaskThreadPool {
         return null;
     }
 
-    private static ScheduledTickTask findFirstNonTakenNonWatched(
-        final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
+    private static @Nullable ScheduledTickTask findFirstNonTakenNonWatched(
+        final @NotNull ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
         final TickThreadRunner tickThreadRunner
     ) {
         final Iterator<ScheduledTickTask> it = map.keySet().iterator();

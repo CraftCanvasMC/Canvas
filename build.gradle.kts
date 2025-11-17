@@ -6,6 +6,7 @@ import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 plugins {
     java
     id("io.canvasmc.weaver.patcher") version "2.3.10"
+    id("de.eldoria.plugin-yml.paper") version "0.8.0"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
@@ -87,6 +88,22 @@ subprojects {
                     password = providers.environmentVariable("PUBLISH_TOKEN").orNull
                 }
             }
+        }
+    }
+
+    if (project.name.endsWith("-debug") || project.name.endsWith("-plugin")) {
+        apply(plugin = "de.eldoria.plugin-yml.paper")
+        dependencies {
+            implementation(rootProject.projects.canvasServer)
+            implementation(rootProject.projects.canvasApi)
+        }
+        var path = project.properties["main"]
+        paper {
+            main = (path as String?)?.replace("\"", "")
+            foliaSupported = true
+            apiVersion = rootProject.properties["mcVersion"] as String?
+            version = "SNAPSHOT-DEV"
+            authors = listOf("CanvasMC")
         }
     }
 }
