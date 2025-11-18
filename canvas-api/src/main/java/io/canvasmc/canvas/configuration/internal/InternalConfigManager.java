@@ -4,7 +4,6 @@ import io.canvasmc.canvas.configuration.ConfigSerializer;
 import io.canvasmc.canvas.configuration.Configuration;
 import io.canvasmc.canvas.configuration.validator.ValidationException;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,7 +29,7 @@ public class InternalConfigManager<T> implements ConfigHolder<T> {
         return this.definition;
     }
 
-    public @NotNull Class<T> getConfigClass() {
+    public Class<T> getConfigClass() {
         return this.configClass;
     }
 
@@ -49,7 +48,6 @@ public class InternalConfigManager<T> implements ConfigHolder<T> {
 
     public boolean load() {
         try {
-
             this.config = this.serializer.read();
             return true;
         } catch (ValidationException | ConfigSerializer.SerializationException e) {

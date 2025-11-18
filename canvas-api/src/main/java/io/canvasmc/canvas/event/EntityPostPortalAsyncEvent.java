@@ -6,7 +6,6 @@ import org.bukkit.entity.Entity;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.entity.EntityEvent;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.NotNull;
 
 /**
  * Called when an entity has finished teleporting from one dimension to another via a portal.
@@ -22,14 +21,13 @@ public class EntityPostPortalAsyncEvent extends EntityEvent {
     private final PortalType type;
 
     @ApiStatus.Internal
-    public EntityPostPortalAsyncEvent(@NotNull Entity entity, @NotNull World from, @NotNull World to, @NotNull PortalType type) {
+    public EntityPostPortalAsyncEvent(Entity entity, World from, World to, PortalType type) {
         super(entity);
         this.from = from;
         this.to = to;
         this.type = type;
     }
 
-    @NotNull
     public static HandlerList getHandlerList() {
         return HANDLER_LIST;
     }
@@ -39,7 +37,6 @@ public class EntityPostPortalAsyncEvent extends EntityEvent {
      *
      * @return Location this entity moved from
      */
-    @NotNull
     public World getFrom() {
         return this.from;
     }
@@ -49,7 +46,6 @@ public class EntityPostPortalAsyncEvent extends EntityEvent {
      *
      * @return Location the entity moved to
      */
-    @NotNull
     public World getTo() {
         return this.to;
     }
@@ -59,11 +55,10 @@ public class EntityPostPortalAsyncEvent extends EntityEvent {
      *
      * @return the portal type
      */
-    public @NotNull PortalType getPortalType() {
+    public PortalType getPortalType() {
         return this.type;
     }
 
-    @NotNull
     @Override
     public HandlerList getHandlers() {
         return HANDLER_LIST;

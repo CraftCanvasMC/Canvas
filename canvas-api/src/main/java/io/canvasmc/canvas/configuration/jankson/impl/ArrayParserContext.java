@@ -27,10 +27,11 @@ package io.canvasmc.canvas.configuration.jankson.impl;
 import io.canvasmc.canvas.configuration.jankson.Jankson;
 import io.canvasmc.canvas.configuration.jankson.JsonArray;
 import io.canvasmc.canvas.configuration.jankson.api.SyntaxError;
+import org.jspecify.annotations.Nullable;
 
 public class ArrayParserContext implements ParserContext<JsonArray> {
     private final JsonArray result = new JsonArray();
-    private final String comment = null;
+    private final @Nullable String comment = null;
     private boolean foundClosingBrace = false;
 
     /**
@@ -52,14 +53,7 @@ public class ArrayParserContext implements ParserContext<JsonArray> {
         }
 
         loader.push(new ElementParserContext(), (it) -> {
-            if (it.getElement() != null) {
-                result.add(it.getElement(), it.getComment());
-            } else {
-                String existing = result.getComment(result.size() - 1);
-                if (existing == null) existing = "";
-                String combined = existing + "\n" + it.getComment();
-                result.setComment(result.size() - 1, combined);
-            }
+            result.add(it.getElement(), it.getComment());
         });
         return false;
     }

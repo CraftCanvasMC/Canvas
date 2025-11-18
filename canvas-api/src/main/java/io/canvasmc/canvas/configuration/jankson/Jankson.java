@@ -33,6 +33,7 @@ import io.canvasmc.canvas.configuration.jankson.impl.ElementParserContext;
 import io.canvasmc.canvas.configuration.jankson.impl.MarshallerImpl;
 import io.canvasmc.canvas.configuration.jankson.impl.ObjectParserContext;
 import io.canvasmc.canvas.configuration.jankson.impl.ParserContext;
+import org.jspecify.annotations.Nullable;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -45,21 +46,20 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import javax.annotation.Nonnull;
 
 
 public class Jankson {
     private static final int BAD_CHARACTER = 0xFFFD;
     private final Deque<ParserFrame<?>> contextStack = new ArrayDeque<>();
-    private JsonObject root;
+    private @Nullable JsonObject root;
     private int line = 0;
     private int column = 0;
     private int withheldCodePoint = -1;
     @SuppressWarnings("deprecation")
     private Marshaller marshaller = MarshallerImpl.getFallback();
     private int retries = 0;
-    private SyntaxError delayedError = null;
-    private AnnotatedElement rootElement;
+    private @Nullable SyntaxError delayedError = null;
+    private @Nullable AnnotatedElement rootElement;
 
     private Jankson(Builder builder) {
     }
@@ -72,7 +72,6 @@ public class Jankson {
         return new Builder();
     }
 
-    @Nonnull
     public JsonObject load(String s) throws SyntaxError {
         ByteArrayInputStream in = new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8));
         try {
@@ -82,7 +81,6 @@ public class Jankson {
         }
     }
 
-    @Nonnull
     public JsonObject load(File f) throws IOException, SyntaxError {
         try (InputStream in = new FileInputStream(f)) {
             return load(in);
@@ -148,7 +146,6 @@ public class Jankson {
         return BAD_CHARACTER;
     }
 
-    @Nonnull
     public JsonObject load(InputStream in) throws IOException, SyntaxError {
         withheldCodePoint = -1;
         root = null;
@@ -197,7 +194,6 @@ public class Jankson {
     /**
      * Experimental: Parses the supplied String as a JsonElement, which may or may not be an object at the root level
      */
-    @Nonnull
     public JsonElement loadElement(String s) throws SyntaxError {
         ByteArrayInputStream in = new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8));
         try {
@@ -210,7 +206,6 @@ public class Jankson {
     /**
      * Experimental: Parses the supplied File as a JsonElement, which may or may not be an object at the root level
      */
-    @Nonnull
     public JsonElement loadElement(File f) throws IOException, SyntaxError {
         try (InputStream in = new FileInputStream(f)) {
             return loadElement(in);
@@ -220,7 +215,6 @@ public class Jankson {
     /**
      * Experimental: Parses the supplied InputStream as a JsonElement, which may or may not be an object at the root level
      */
-    @Nonnull
     public JsonElement loadElement(InputStream in) throws IOException, SyntaxError {
         withheldCodePoint = -1;
 
@@ -261,10 +255,12 @@ public class Jankson {
         return rootElement.getElement();
     }
 
+    @Nullable
     public <T> T fromJson(JsonObject obj, Class<T> clazz) {
         return marshaller.marshall(clazz, obj);
     }
 
+    @Nullable
     public <T> T fromJson(String json, Class<T> clazz) throws SyntaxError {
         JsonObject obj = load(json);
         return fromJson(obj, clazz);
@@ -280,6 +276,7 @@ public class Jankson {
      * @throws SyntaxError              If the json cannot be parsed
      * @throws DeserializationException If the conversion into an instance of the specified type fails
      */
+    @Nullable
     public <T> T fromJsonCarefully(String json, Class<T> clazz) throws SyntaxError, DeserializationException {
         JsonObject obj = load(json);
         return fromJsonCarefully(obj, clazz);
@@ -294,6 +291,7 @@ public class Jankson {
      * @return An object of the specified class, holding the data from json
      * @throws DeserializationException If the conversion into an instance of the specified type fails
      */
+    @Nullable
     public <T> T fromJsonCarefully(JsonObject obj, Class<T> clazz) throws DeserializationException {
         return marshaller.marshallCarefully(clazz, obj);
     }
@@ -308,8 +306,7 @@ public class Jankson {
 
     private void processCodePoint(int codePoint) throws SyntaxError {
         ParserFrame<?> frame = contextStack.peek();
-        if (frame == null)
-            throw new IllegalStateException("Parser problem! The ParserContext stack underflowed! (line " + line + ", col " + column + ")");
+        if (frame == null) throw new IllegalStateException("Parser problem! The ParserContext stack underflowed! (line " + line + ", col " + column + ")");
 
         //Do a limited amount of tail call recursion
         try {
@@ -325,6 +322,7 @@ public class Jankson {
         }
 
         try {
+            if (frame == null) throw new IllegalStateException("Parser problem! The ParserContext stack underflowed! (line " + line + ", col " + column + ")");
             boolean consumed = frame.context.consume(codePoint, this);
             if (frame.context.isComplete()) {
                 contextStack.pop();
@@ -417,7 +415,6 @@ public class Jankson {
             return this;
         }
 
-        @SuppressWarnings("deprecation")
         public <A, B> Builder registerDeserializer(Class<A> sourceClass, Class<B> targetClass, DeserializerFunction<A, B> function) {
             marshaller.registerDeserializer(sourceClass, targetClass, function);
             return this;

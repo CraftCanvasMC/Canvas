@@ -25,9 +25,8 @@
 package io.canvasmc.canvas.configuration.jankson;
 
 import java.util.Objects;
-import javax.annotation.Nonnull;
 
-public class JsonPrimitive extends JsonElement {
+public final class JsonPrimitive extends JsonElement {
     /**
      * Convenience instance of json "true". Don't use identity comparison (==) on these! Use equals instead.
      */
@@ -37,10 +36,9 @@ public class JsonPrimitive extends JsonElement {
      */
     public static JsonPrimitive FALSE = new JsonPrimitive(Boolean.FALSE);
 
-    @Nonnull
     private final Object value;
 
-    public JsonPrimitive(@Nonnull Object value) {
+    public JsonPrimitive(Object value) {
         this.value = value;
     }
 
@@ -79,15 +77,13 @@ public class JsonPrimitive extends JsonElement {
         return result.toString();
     }
 
-    @Nonnull
     public String asString() {
-        if (value == null) return "null";
         return value.toString();
     }
 
     public boolean asBoolean(boolean defaultValue) {
         if (value instanceof Boolean) {
-            return ((Boolean) value).booleanValue();
+            return (Boolean) value;
         } else {
             return defaultValue;
         }
@@ -102,18 +98,23 @@ public class JsonPrimitive extends JsonElement {
     }
 
     public char asChar(char defaultValue) {
-        if (value instanceof Number) {
-            return (char) ((Number) value).intValue();
-        } else if (value instanceof Character) {
-            return ((Character) value).charValue();
-        } else if (value instanceof String) {
-            if (((String) value).length() == 1) {
-                return ((String) value).charAt(0);
-            } else {
+        switch (value) {
+            case Number number -> {
+                return (char) number.intValue();
+            }
+            case Character c -> {
+                return c;
+            }
+            case String s -> {
+                if (s.length() == 1) {
+                    return s.charAt(0);
+                } else {
+                    return defaultValue;
+                }
+            }
+            default -> {
                 return defaultValue;
             }
-        } else {
-            return defaultValue;
         }
     }
 
@@ -157,12 +158,10 @@ public class JsonPrimitive extends JsonElement {
         }
     }
 
-    @Nonnull
     public String toString() {
         return toJson();
     }
 
-    @Nonnull
     public Object getValue() {
         return value;
     }
@@ -190,30 +189,34 @@ public class JsonPrimitive extends JsonElement {
     @Override
     public String toJson(JsonGrammar grammar, int depth) {
 
-        if (value == null) return "null";
-
-        if (value instanceof Double && grammar.bareSpecialNumerics) {
-            double d = ((Double) value).doubleValue();
-            if (Double.isNaN(d)) return "NaN";
-            if (Double.isInfinite(d)) {
-                if (d < 0) {
-                    return "-Infinity";
-                } else {
-                    return "Infinity";
+        switch (value) {
+            case Double v when grammar.bareSpecialNumerics -> {
+                double d = v;
+                if (Double.isNaN(d)) return "NaN";
+                if (Double.isInfinite(d)) {
+                    if (d < 0) {
+                        return "-Infinity";
+                    } else {
+                        return "Infinity";
+                    }
                 }
+                return value.toString();
             }
-            return value.toString();
-        } else if (value instanceof Number) {
-            return value.toString();
+            case Number number -> {
+                return value.toString();
+            }
+            case Boolean b -> {
+                return value.toString();
+            }
+            default -> {
+            }
         }
-        if (value instanceof Boolean) return value.toString();
 
         return '\"' + escape(value.toString()) + '\"';
     }
 
-    //IMPLEMENTATION for Cloneable
     @Override
-    public JsonPrimitive clone() {
+    public JsonPrimitive copy() {
         return this;
     }
 }

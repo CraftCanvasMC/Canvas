@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.Nullable;
 
 public interface ConfigSerializer<T> {
     void write(T var1) throws ConfigSerializer.SerializationException;
@@ -22,7 +22,7 @@ public interface ConfigSerializer<T> {
         return Paths.get("./config/");
     }
 
-    default <V> V constructUnsafely(@NotNull Class<V> cls) {
+    default <V> V constructUnsafely(Class<V> cls) {
         try {
             Constructor<V> constructor = cls.getDeclaredConstructor();
             constructor.setAccessible(true);
@@ -32,7 +32,8 @@ public interface ConfigSerializer<T> {
         }
     }
 
-    default <V> V getUnsafely(Field field, Object obj) {
+    @Nullable
+    default <V> V getUnsafely(Field field, @Nullable Object obj) {
         if (obj == null) {
             return null;
         } else {
@@ -55,7 +56,7 @@ public interface ConfigSerializer<T> {
         return ret;
     }
 
-    default void setUnsafely(Field field, Object obj, Object newValue) {
+    default void setUnsafely(Field field, @Nullable Object obj, Object newValue) {
         if (obj != null) {
             try {
                 field.setAccessible(true);

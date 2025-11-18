@@ -27,13 +27,14 @@ package io.canvasmc.canvas.configuration.jankson.impl;
 import io.canvasmc.canvas.configuration.jankson.Jankson;
 import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import io.canvasmc.canvas.configuration.jankson.api.SyntaxError;
+import org.jspecify.annotations.Nullable;
 
 public class ObjectParserContext implements ParserContext<JsonObject> {
     private final JsonObject result = new JsonObject();
 
-    private String comment;
+    private @Nullable String comment;
     private boolean openBraceFound = false;
-    private String key;
+    private @Nullable String key;
     private boolean colonFound = false;
     private boolean closeBraceFound = false;
 
