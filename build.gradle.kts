@@ -6,7 +6,7 @@ import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 plugins {
     java
     id("io.canvasmc.weaver.patcher") version "2.3.10"
-    id("de.eldoria.plugin-yml.paper") version "0.8.0"
+    id("xyz.jpenilla.resource-factory-paper-convention") version "1.3.1" apply false
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
@@ -92,18 +92,19 @@ subprojects {
     }
 
     if (project.name.endsWith("-debug") || project.name.endsWith("-plugin")) {
-        apply(plugin = "de.eldoria.plugin-yml.paper")
+        apply(plugin = "xyz.jpenilla.resource-factory-paper-convention")
         dependencies {
-            implementation(rootProject.projects.canvasServer)
-            implementation(rootProject.projects.canvasApi)
+            compileOnly(rootProject.projects.canvasServer)
+            compileOnly(rootProject.projects.canvasApi)
         }
-        var path = project.properties["main"]
-        paper {
-            main = (path as String?)?.replace("\"", "")
-            foliaSupported = true
-            apiVersion = rootProject.properties["mcVersion"] as String?
-            version = "SNAPSHOT-DEV"
-            authors = listOf("CanvasMC")
+        project.afterEvaluate {
+            extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
+                apiVersion = providers.gradleProperty("mcVersion").get()
+                version = "SNAPSHOT-DEV"
+                main = project.findProperty("main")?.toString()
+                authors = listOf("CanvasMC")
+                foliaSupported = true
+            }
         }
     }
 }
