@@ -97,14 +97,12 @@ subprojects {
             compileOnly(rootProject.projects.canvasServer)
             compileOnly(rootProject.projects.canvasApi)
         }
-        project.afterEvaluate {
-            extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
-                apiVersion = providers.gradleProperty("mcVersion").get()
-                version = "SNAPSHOT-DEV"
-                main = project.findProperty("main")?.toString()
-                authors = listOf("CanvasMC")
-                foliaSupported = true
-            }
+        extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
+            apiVersion.set(providers.gradleProperty("mcVersion"))
+            version = "SNAPSHOT-DEV"
+            main = project.findProperty("main")?.toString()
+            authors = listOf("CanvasMC")
+            foliaSupported = true
         }
     }
 }
