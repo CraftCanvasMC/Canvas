@@ -14,12 +14,12 @@ import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
+import io.papermc.paper.adventure.PaperAdventure;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.random.RandomGeneratorFactory;
-import io.papermc.paper.adventure.PaperAdventure;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -136,11 +136,11 @@ public class Config {
         public long stealThresholdMillis = 3L;
 
         @Comment({
-            "The maximum amount of time, in milliseconds, a thread is allowed to process intermediate tasks before",
-            "yielding control.",
-            "Note: Ensures fairness by preventing any single task from keeping a scheduler thread for too long"
+            "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
+            "Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done.",
+            "Default: 0.3ms"
         })
-        public long taskTimeSliceMillis = 2L;
+        public double runTasksBufferMillis = (double) 300_000 / 1_000_000;
     }
 
     public Chunks chunks = new Chunks();

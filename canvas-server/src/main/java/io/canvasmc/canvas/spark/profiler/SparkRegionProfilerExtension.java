@@ -4,19 +4,19 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.datafixers.util.Pair;
 import io.canvasmc.canvas.tick.COWLongArrayList;
-import io.canvasmc.canvas.tick.ScheduledTaskThreadPool;
+import io.canvasmc.canvas.tick.SchedulerTickTaskThreadPool;
 import io.papermc.paper.threadedregions.RegionizedServer;
+import io.papermc.paper.util.MCUtil;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import io.papermc.paper.util.MCUtil;
 import net.minecraft.server.level.ServerLevel;
 
 public class SparkRegionProfilerExtension {
     public static final SimpleCommandExceptionType ERROR_ALREADY_PROFILING = new SimpleCommandExceptionType(net.minecraft.network.chat.Component.literal("Server already running a region profiler!"));
     public static final SimpleCommandExceptionType ERROR_NOT_ENABLED = new SimpleCommandExceptionType(net.minecraft.network.chat.Component.literal("Region Specific Profiling(RSP) is unavailable during this runtime due to the absence of the internal Spark plugin. To enable RSP, please enable the builtin Spark plugin."));
     public static final SimpleCommandExceptionType ERROR_NOT_PROFILING = new SimpleCommandExceptionType(net.minecraft.network.chat.Component.literal("Server isn't running a region profile currently!"));
-    public static final AtomicReference<ScheduledTaskThreadPool.TickThreadRunner> TRACKING_THREAD = new AtomicReference<>();
+    public static final AtomicReference<SchedulerTickTaskThreadPool.TickThreadRunner> TRACKING_THREAD = new AtomicReference<>();
     public static final AtomicReference<RegionScheduleHandlePinner> CURRENT_PINNER = new AtomicReference<>();
     public static final AtomicBoolean ENABLED = new AtomicBoolean(true);
     /**
@@ -54,10 +54,10 @@ public class SparkRegionProfilerExtension {
         RegionizedServer.getInstance().addTask(() -> {
             try {
                 CURRENT_PINNER.getAndSet(null).unpin((scheduleHandle) -> {
-                    ScheduledTaskThreadPool.TickThreadRunner thread = TRACKING_THREAD.getAndSet(null); // this is ensured constant, we are fine
+                    SchedulerTickTaskThreadPool.TickThreadRunner thread = TRACKING_THREAD.getAndSet(null); // this is ensured constant, we are fine
                     if (thread == null) throw new IllegalStateException("Tracking thread must not be null");
                     // unpin the task from the thread, clear profiling results cache
-                    thread.unpin(scheduleHandle);
+                    scheduleHandle.unpin();
                     PROFILING_RESULTS_CACHE.set(null);
                 });
             } catch (CommandSyntaxException ex) {
@@ -94,7 +94,7 @@ public class SparkRegionProfilerExtension {
                 pinner.pin((schedulingHandle, thread) -> {
                     // pin the actual region tick to the runner
                     TRACKING_THREAD.set(thread);
-                    thread.pin(schedulingHandle);
+                    schedulingHandle.pin(thread.id);
                     sendMessage.accept("Completed scheduler setup for region pin profiling");
                     CURRENT_PINNER.set(pinner);
                     // schedule async, since spark runs its operations in this pool
