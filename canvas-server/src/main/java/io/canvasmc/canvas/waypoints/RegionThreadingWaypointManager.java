@@ -13,6 +13,7 @@ import net.minecraft.server.waypoints.ServerWaypointManager;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.waypoints.WaypointTransmitter;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * A region-threading-safe implementation of the {@link ServerWaypointManager}.
@@ -61,13 +62,9 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         if (!waypoints.contains(waypoint)) waypoints.add(waypoint);
 
         for (ServerPlayer player : players) {
-            if (!TickThread.isTickThreadFor(player)) {
-                player.getBukkitEntity().taskScheduler.schedule((entity) -> {
-                    createConnection((ServerPlayer) entity, waypoint);
-                }, null, 0L);
-                continue;
-            }
-            createConnection(player, waypoint);
+            player.scheduleToOrRun(() -> {
+                createConnection(player, waypoint);
+            });
         }
     }
 
@@ -90,14 +87,9 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
                 continue;
             }
 
-            if (!TickThread.isTickThreadFor(player)) {
-                player.getBukkitEntity().taskScheduler.schedule((entity) -> {
-                    updateWaypoint(waypoint, (ServerPlayer) entity);
-                }, null, 0L);
-                continue;
-            }
-
-            updateWaypoint(waypoint, player);
+            player.scheduleToOrRun(() -> {
+                updateWaypoint(waypoint, player);
+            });
         }
     }
 
@@ -108,7 +100,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         final WaypointTransmitter.Connection conn = map.get(waypoint);
 
         if (conn != null) {
-            updateConnection(player, waypoint, conn);
+            CallbackHolder callbackHolder = updateConnection(player, waypoint, conn);
+            if (callbackHolder != null) callbackHolder.call.run();
         } else {
             createConnection(player, waypoint);
         }
@@ -117,13 +110,9 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void untrackWaypoint(WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
-            if (!TickThread.isTickThreadFor(player)) {
-                player.getBukkitEntity().taskScheduler.schedule((entity) -> {
-                    disconnectWaypoint(waypoint, (ServerPlayer) entity);
-                }, null, 0L);
-                continue;
-            }
-            disconnectWaypoint(waypoint, player);
+            player.scheduleToOrRun(() -> {
+                disconnectWaypoint(waypoint, player);
+            });
         }
 
         waypoints.remove(waypoint);
@@ -156,18 +145,30 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     // Note: this should be called on the 'player'
     public void updatePlayer(@NotNull ServerPlayer player) {
         if (isLocatorBarDisabled()) return;
-        TickThread.ensureTickThread(player, "Cannot update player off owning thread of player");
-        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
+        player.scheduleToOrRun(() -> {
+            final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
+            final CallbackHolder[] callbackHolders = new CallbackHolder[map.size()];
 
-        for (Map.Entry<WaypointTransmitter, WaypointTransmitter.Connection> entry : map.object2ObjectEntrySet()) {
-            updateConnection(player, entry.getKey(), entry.getValue());
-        }
-
-        for (WaypointTransmitter waypoint : waypoints) {
-            if (!map.containsKey(waypoint)) {
-                createConnection(player, waypoint);
+            int idx = 0;
+            for (Map.Entry<WaypointTransmitter, WaypointTransmitter.Connection> entry : map.object2ObjectEntrySet()) {
+                CallbackHolder callbackHolder = updateConnection(player, entry.getKey(), entry.getValue());
+                if (callbackHolder != null) {
+                    callbackHolders[idx] = callbackHolder;
+                    idx++;
+                }
             }
-        }
+
+            for (final CallbackHolder callbackHolder : callbackHolders) {
+                if (callbackHolder == null) break;
+                callbackHolder.call.run();
+            }
+
+            for (WaypointTransmitter waypoint : waypoints) {
+                if (!map.containsKey(waypoint)) {
+                    createConnection(player, waypoint);
+                }
+            }
+        });
     }
 
     @Override
@@ -182,13 +183,9 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void breakAllConnections() {
         for (ServerPlayer player : players) {
-            if (!TickThread.isTickThreadFor(player)) {
-                player.getBukkitEntity().taskScheduler.schedule((entity) -> {
-                    breakConnection((ServerPlayer) entity);
-                }, null, 0L);
-                continue;
-            }
-            breakConnection(player);
+            player.scheduleToOrRun(() -> {
+                breakConnection(player);
+            });
         }
     }
 
@@ -205,13 +202,9 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void remakeConnections(WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
-            if (!TickThread.isTickThreadFor(player)) {
-                player.getBukkitEntity().taskScheduler.schedule((entity) -> {
-                    createConnection((ServerPlayer) entity, waypoint);
-                }, null, 0L);
-                continue;
-            }
-            createConnection(player, waypoint);
+            player.scheduleToOrRun(() -> {
+                createConnection(player, waypoint);
+            });
         }
     }
 
@@ -237,8 +230,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     // Note: this should be scheduled on 'player'
-    private void updateConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection connection) {
-        if (player == waypoint) return;
+    private @Nullable RegionThreadingWaypointManager.CallbackHolder updateConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection connection) {
+        if (player == waypoint) return null;
         TickThread.ensureTickThread(player, "Cannot update waypoint connection off owning thread of player");
 
         final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
@@ -246,17 +239,27 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         if (!connection.isBroken()) {
             connection.update();
         } else {
-            waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(newConn -> {
+            CallbackHolder ref = new CallbackHolder();
+            waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(newConn -> ref.call = () -> {
                 newConn.connect();
                 map.put(waypoint, newConn);
-            }, () -> {
+            }, () -> ref.call = () -> {
                 connection.disconnect();
                 map.remove(waypoint);
             });
+            return ref;
         }
+        return null;
     }
 
     public ServerLevel getWorld() {
         return world;
+    }
+
+    private static class CallbackHolder {
+        /**
+         * In usage of this, if the class != null, then this field should be non-null
+         */
+        Runnable call;
     }
 }

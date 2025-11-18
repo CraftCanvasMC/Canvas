@@ -1265,10 +1265,33 @@ index 81cdbcf00efca209b0567ea10d54d1a3add681d7..1b4d1a7a3c6afdfeb067565907e6a662
              @Override
              public void merge(final Scheduler from, final Scheduler into, final long fromTickOffset) {
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 752d273a0f34d3d426337df2360b2565a6c6b6a9..2235e8d3ef714af24f031a0f6e87e85ccdbca9a4 100644
+index 752d273a0f34d3d426337df2360b2565a6c6b6a9..4261995c054708caa5f5978b8510b562084ff1f0 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -1588,6 +1588,20 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -719,21 +719,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             // Back to the createLevels method without crazy modifications
+             primaryLevelData.setModdedInfo(this.getServerModName(), this.getModdedStatus().shouldReportAsModified());
+             this.addLevel(serverLevel); // Paper - Put world into worldlist before initing the world; move up
+-            // Folia start - region threading
+-            // the spawn should be within ~1024 blocks, so we force add ticket levels to ensure the first thread
+-            // to init spawn will not run into any ownership issues
+-            // move init to start of tickServer
+-            int loadRegionRadius = 1024 >> 4;
+-            serverLevel.randomSpawnSelection = new ChunkPos(serverLevel.getChunkSource().randomState().sampler().findSpawnPosition());
+-            for (int currX = -loadRegionRadius; currX <= loadRegionRadius; ++currX) {
+-                for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
+-                    ChunkPos pos = new ChunkPos(currX + serverLevel.randomSpawnSelection.x, currZ + serverLevel.randomSpawnSelection.z);
+-                    serverLevel.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
+-                            net.minecraft.server.level.TicketType.UNKNOWN, pos, ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, null
+-                    );
+-                }
+-            }
+-            // Folia end - region threading
++            // Canvas - rewrite scheduler
+ 
+             // Paper - Put world into worldlist before initing the world; move up
+             this.getPlayerList().addWorldborderListener(serverLevel);
+@@ -1588,6 +1574,20 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          region.world.getCurrentWorldData().updateTickData();
          if (region.world.checkInitialised.get() != ServerLevel.WORLD_INIT_CHECKED) {
              synchronized (region.world.checkInitialised) {
@@ -1289,7 +1312,7 @@ index 752d273a0f34d3d426337df2360b2565a6c6b6a9..2235e8d3ef714af24f031a0f6e87e85c
                  if (region.world.checkInitialised.compareAndSet(ServerLevel.WORLD_INIT_NOT_CHECKED, ServerLevel.WORLD_INIT_CHECKING)) {
                      LOGGER.info("Initialising world '" + region.world.getWorld().getName() + "' before it can be ticked...");
                      this.initWorld(region.world, region.world.serverLevelData, worldData, region.world.serverLevelData.worldGenOptions()); // Folia - delayed until first tick of world
-@@ -1601,12 +1615,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1601,12 +1601,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          };
          // Folia end - region threading
  
@@ -1304,7 +1327,7 @@ index 752d273a0f34d3d426337df2360b2565a6c6b6a9..2235e8d3ef714af24f031a0f6e87e85c
              // now run all the entity schedulers
              for (io.papermc.paper.threadedregions.EntityScheduler scheduler : region.world.getCurrentWorldData().entitySchedulerTickList.getAllSchedulers()) {
                  net.minecraft.world.entity.Entity handle = scheduler.entity.getHandleRaw();
-@@ -1655,7 +1670,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1655,7 +1656,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          long remaining = scheduledEnd - endTime; // Folia - region ticking
          new com.destroystokyo.paper.event.server.ServerTickEndEvent((int)io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick(), ((double)(endTime - startTime) / 1000000D), remaining).callEvent(); // Folia - region ticking
          // Paper end - Server Tick Events
@@ -1329,6 +1352,90 @@ index fd1dcc340c574ee62cc052a789cf1f3cce09f695..69d9b83da0f4f92d76ac310f90f9453e
          this.remainingSprintTicks = 0L;
          this.setFrozen(this.previousIsFrozen);
          this.server.onTickRateChanged();
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index c27938b888121031653e4dad152bed133071e3bd..175773b5ef07ca07f898137ee02d33ee4c21857c 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -258,6 +258,57 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         return true;
+     }
+ 
++    // Canvas start - region threading
++    public final void canvas$loadOrRunAtChunksAsync(final BlockPos pos, final int radiusBlocks,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, pos, radiusBlocks
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            (pos.getX() - radiusBlocks) >> 4,
++            (pos.getX() + radiusBlocks) >> 4,
++            (pos.getZ() - radiusBlocks) >> 4,
++            (pos.getZ() + radiusBlocks) >> 4
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                this, pos.getX() >> 4, pos.getZ() >> 4, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            moonrise$loadChunksAsync(
++                pos, radiusBlocks, priority, (unused) -> callback.run()
++            );
++        }
++    }
++
++    public final void canvas$loadOrRunAtChunksAsync(final int minChunkX, final int maxChunkX, final int minChunkZ, final int maxChunkZ,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                this, minChunkX, minChunkZ, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            moonrise$loadChunksAsync(
++                minChunkX, minChunkZ, maxChunkX, maxChunkZ, priority, (unused) -> callback.run()
++            );
++        }
++    }
++
++    // Canvas end - region threading
+     public final void loadChunksForMoveAsync(AABB axisalignedbb, ca.spottedleaf.concurrentutil.util.Priority priority,
+                                              java.util.function.Consumer<List<net.minecraft.world.level.chunk.ChunkAccess>> onLoad) {
+         // Paper - rewrite chunk system
+@@ -632,6 +683,21 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         // Paper end - rewrite chunk system
+         this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
+         this.updateTickData(); // Folia - region threading - make sure it is initialised before ticked
++        // Canvas start - rewrite scheduler
++        // the spawn should be within ~1024 blocks, so we force add ticket levels to ensure the first thread
++        // to init spawn will not run into any ownership issues
++        // move init to start of tickServer
++        int loadRegionRadius = 1024 >> 4;
++        this.randomSpawnSelection = new ChunkPos(this.getChunkSource().randomState().sampler().findSpawnPosition());
++        for (int currX = -loadRegionRadius; currX <= loadRegionRadius; ++currX) {
++            for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
++                ChunkPos pos = new ChunkPos(currX + this.randomSpawnSelection.x, currZ + this.randomSpawnSelection.z);
++                this.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
++                    net.minecraft.server.level.TicketType.UNKNOWN, pos, ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, null
++                );
++            }
++        }
++        // Canvas end - rewrite scheduler
+     }
+ 
+     // Folia start - region threading
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
 index 917069c6710ba7a9455603f821d80c8165c80904..7b27d1eb7b35d4ba0794103f8532ec969d10415d 100644
 --- a/net/minecraft/server/level/ServerPlayer.java

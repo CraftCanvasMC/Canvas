@@ -1,4 +1,4 @@
-import java.util.Locale
+import java.util.*
 
 pluginManagement {
     repositories {
@@ -38,8 +38,16 @@ if (!file(".git").exists()) {
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 rootProject.name = "canvas"
-for (name in listOf("canvas-api", "canvas-server", "canvas-test-plugin")) {
+for (name in listOf("canvas-api", "canvas-server")) {
     val projName = name.lowercase(Locale.ENGLISH)
     include(projName)
     findProject(":$projName")!!.projectDir = file(name)
 }
+
+rootDir.listFiles()
+    ?.filter { it.isDirectory && (it.name.endsWith("-debug", ignoreCase = true) || it.name.endsWith("-plugin", ignoreCase = true)) }
+    ?.forEach { dir ->
+        val projName = dir.name.lowercase(Locale.ENGLISH)
+        include(projName)
+        findProject(":$projName")!!.projectDir = dir
+    }
