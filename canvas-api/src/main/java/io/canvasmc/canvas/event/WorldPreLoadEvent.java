@@ -3,29 +3,26 @@ package io.canvasmc.canvas.event;
 import org.bukkit.World;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.world.WorldEvent;
-import org.jetbrains.annotations.NotNull;
 
 public class WorldPreLoadEvent extends WorldEvent {
     private static final HandlerList HANDLERS = new HandlerList();
-    private final @NotNull Stage stage;
+    private final Stage stage;
 
-    public WorldPreLoadEvent(@NotNull World world, @NotNull Stage stage) {
+    public WorldPreLoadEvent(World world, Stage stage) {
         super(world);
         this.stage = stage;
     }
 
-    @NotNull
     public static HandlerList getHandlerList() {
         return HANDLERS;
     }
 
-    @NotNull
     public Stage getStage() {
         return stage;
     }
 
     @Override
-    public @NotNull HandlerList getHandlers() {
+    public HandlerList getHandlers() {
         return HANDLERS;
     }
 

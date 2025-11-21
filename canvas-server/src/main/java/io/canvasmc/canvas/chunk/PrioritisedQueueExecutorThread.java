@@ -8,6 +8,11 @@ import java.util.concurrent.locks.LockSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * This is a slightly modified version of the SpottedLeaf ConcurrentUtil {@link ca.spottedleaf.concurrentutil.executor.thread.PrioritisedQueueExecutorThread}
+ * @author dueris - Modifier
+ * @author spottedleaf - Original author
+ */
 public class PrioritisedQueueExecutorThread extends Thread implements PrioritisedExecutor {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PrioritisedQueueExecutorThread.class);

@@ -27,13 +27,15 @@ package io.canvasmc.canvas.configuration.jankson.impl;
 import io.canvasmc.canvas.configuration.jankson.Jankson;
 import io.canvasmc.canvas.configuration.jankson.JsonElement;
 import io.canvasmc.canvas.configuration.jankson.JsonNull;
+import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import io.canvasmc.canvas.configuration.jankson.JsonPrimitive;
 import io.canvasmc.canvas.configuration.jankson.api.SyntaxError;
+import org.jspecify.annotations.Nullable;
 import java.util.Locale;
 
 public class ElementParserContext implements ParserContext<AnnotatedElement> {
-    String comment = null;
-    AnnotatedElement result = null;
+    @Nullable String comment = null;
+    @Nullable AnnotatedElement result = null;
     boolean childActive = false;
 
     @Override
@@ -65,7 +67,7 @@ public class ElementParserContext implements ParserContext<AnnotatedElement> {
                 loader.throwDelayed(new SyntaxError("Found '" + ((char) codePoint) + "' while parsing an element - this shouldn't happen!"));
                 return false;
             case ']':
-                result = new AnnotatedElement(null, comment);
+                result = new AnnotatedElement(new JsonObject(), comment);
 			/*
 			if (this.result==null) {
 				System.out.println("Comment parser didn't release its context in time?");
@@ -141,7 +143,7 @@ public class ElementParserContext implements ParserContext<AnnotatedElement> {
     }
 
     @Override
-    public AnnotatedElement getResult() throws SyntaxError {
+    public @Nullable AnnotatedElement getResult() throws SyntaxError {
         return result;
     }
 

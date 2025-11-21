@@ -49,7 +49,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import javax.annotation.Nullable;
+import org.jspecify.annotations.Nullable;
 
 /**
  * @deprecated For removal; please use {@link Marshaller}
@@ -57,11 +57,11 @@ import javax.annotation.Nullable;
 @Deprecated
 public class MarshallerImpl implements Marshaller {
     private static final MarshallerImpl INSTANCE = new MarshallerImpl();
-    private final Map<Class<?>, Function<Object, ?>> primitiveMarshallers = new HashMap<>();
+    private final Map<Class<?>, Function<Object, ? extends @Nullable Object>> primitiveMarshallers = new HashMap<>();
     private final Map<Class<?>, BiFunction<Object, Marshaller, JsonElement>> serializers = new HashMap<>();
     private final Map<Class<?>, DeserializerFunctionPool<?>> deserializers = new HashMap<>();
-    private final Map<Class<?>, Supplier<?>> typeFactories = new HashMap<>();
-    Map<Class<?>, Function<JsonObject, ?>> typeAdapters = new HashMap<>();
+    private final Map<Class<?>, Supplier<? extends @Nullable Object>> typeFactories = new HashMap<>();
+    Map<Class<?>, Function<JsonObject, ? extends @Nullable Object>> typeAdapters = new HashMap<>();
 
     public MarshallerImpl() {
         register(Void.class, (it) -> null);
@@ -89,50 +89,50 @@ public class MarshallerImpl implements Marshaller {
 
 
         registerSerializer(Void.class, (it) -> JsonNull.INSTANCE);
-        registerSerializer(Character.class, (it) -> new JsonPrimitive("" + it));
-        registerSerializer(String.class, JsonPrimitive::new);
-        registerSerializer(Byte.class, (it) -> new JsonPrimitive(Long.valueOf(it)));
-        registerSerializer(Short.class, (it) -> new JsonPrimitive(Long.valueOf(it)));
-        registerSerializer(Integer.class, (it) -> new JsonPrimitive(Long.valueOf(it)));
-        registerSerializer(Long.class, JsonPrimitive::new);
-        registerSerializer(Float.class, (it) -> new JsonPrimitive(Double.valueOf(it)));
-        registerSerializer(Double.class, JsonPrimitive::new);
-        registerSerializer(Boolean.class, JsonPrimitive::new);
+        registerSerializer(Character.class, (it) -> it != null ? new JsonPrimitive("" + it) : JsonNull.INSTANCE);
+        registerSerializer(String.class, (it) -> it != null ? new JsonPrimitive(it) : JsonNull.INSTANCE);
+        registerSerializer(Byte.class, (it) -> it != null ? new JsonPrimitive(Long.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Short.class, (it) -> it != null ? new JsonPrimitive(Long.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Integer.class, (it) -> it != null ? new JsonPrimitive(Long.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Long.class, (it) -> it != null ? new JsonPrimitive(it) : JsonNull.INSTANCE);
+        registerSerializer(Float.class, (it) -> it != null ? new JsonPrimitive(Double.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Double.class, (it) -> it != null ? new JsonPrimitive(it) : JsonNull.INSTANCE);
+        registerSerializer(Boolean.class, (it) -> it != null ? new JsonPrimitive(it) : JsonNull.INSTANCE);
 
         registerSerializer(Void.TYPE, (it) -> JsonNull.INSTANCE);
-        registerSerializer(Character.TYPE, (it) -> new JsonPrimitive("" + it));
-        registerSerializer(Byte.TYPE, (it) -> new JsonPrimitive(Long.valueOf(it)));
-        registerSerializer(Short.TYPE, (it) -> new JsonPrimitive(Long.valueOf(it)));
-        registerSerializer(Integer.TYPE, (it) -> new JsonPrimitive(Long.valueOf(it)));
-        registerSerializer(Long.TYPE, JsonPrimitive::new);
-        registerSerializer(Float.TYPE, (it) -> new JsonPrimitive(Double.valueOf(it)));
-        registerSerializer(Double.TYPE, JsonPrimitive::new);
-        registerSerializer(Boolean.TYPE, JsonPrimitive::new);
+        registerSerializer(Character.TYPE, (it) -> it != null ? new JsonPrimitive("" + it) : JsonNull.INSTANCE);
+        registerSerializer(Byte.TYPE, (it) -> it != null ? new JsonPrimitive(Long.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Short.TYPE, (it) -> it != null ? new JsonPrimitive(Long.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Integer.TYPE, (it) -> it != null ? new JsonPrimitive(Long.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Long.TYPE, (it) -> it != null ? new JsonPrimitive(it) : JsonNull.INSTANCE);
+        registerSerializer(Float.TYPE, (it) -> it != null ? new JsonPrimitive(Double.valueOf(it)) : JsonNull.INSTANCE);
+        registerSerializer(Double.TYPE, (it) -> it != null ? new JsonPrimitive(it) : JsonNull.INSTANCE);
+        registerSerializer(Boolean.TYPE, (it) -> it != null ? new JsonPrimitive(it) : JsonNull.INSTANCE);
     }
 
     public static Marshaller getFallback() {
         return INSTANCE;
     }
 
-    public <T> void register(Class<T> clazz, Function<Object, T> marshaller) {
+    public <T> void register(Class<T> clazz, Function<Object, @Nullable T> marshaller) {
         primitiveMarshallers.put(clazz, marshaller);
     }
 
-    public <T> void registerTypeAdapter(Class<T> clazz, Function<JsonObject, T> adapter) {
+    public <T> void registerTypeAdapter(Class<T> clazz, Function<JsonObject, @Nullable T> adapter) {
         typeAdapters.put(clazz, adapter);
     }
 
     @SuppressWarnings("unchecked")
-    public <T> void registerSerializer(Class<T> clazz, Function<T, JsonElement> serializer) {
+    public <T> void registerSerializer(Class<T> clazz, Function<@Nullable T, JsonElement> serializer) {
         serializers.put(clazz, (it, marshaller) -> serializer.apply((T) it));
     }
 
     @SuppressWarnings("unchecked")
-    public <T> void registerSerializer(Class<T> clazz, BiFunction<T, Marshaller, JsonElement> serializer) {
+    public <T> void registerSerializer(Class<T> clazz, BiFunction<@Nullable T, Marshaller, JsonElement> serializer) {
         serializers.put(clazz, (BiFunction<Object, Marshaller, JsonElement>) serializer);
     }
 
-    public <T> void registerTypeFactory(Class<T> clazz, Supplier<T> supplier) {
+    public <T> void registerTypeFactory(Class<T> clazz, Supplier<@Nullable T> supplier) {
         typeFactories.put(clazz, supplier);
     }
 
@@ -151,7 +151,7 @@ public class MarshallerImpl implements Marshaller {
      */
     @SuppressWarnings("unchecked")
     @Nullable
-    public <T> T marshall(Type type, JsonElement elem) {
+    public <T> T marshall(Type type, @Nullable JsonElement elem) {
         if (elem == null) return null;
         if (elem == JsonNull.INSTANCE) return null;
 
@@ -167,6 +167,7 @@ public class MarshallerImpl implements Marshaller {
             try {
                 Class<T> clazz = (Class<T>) TypeMagic.classForType(type);
 
+                if (clazz == null) return null;
                 return marshall(clazz, elem);
             } catch (ClassCastException t) {
                 return null;
@@ -176,6 +177,7 @@ public class MarshallerImpl implements Marshaller {
         return null;
     }
 
+    @Nullable
     public <T> T marshall(Class<T> clazz, JsonElement elem) {
         try {
             return marshall(clazz, elem, false);
@@ -184,13 +186,14 @@ public class MarshallerImpl implements Marshaller {
         }
     }
 
+    @Nullable
     public <T> T marshallCarefully(Class<T> clazz, JsonElement elem) throws DeserializationException {
         return marshall(clazz, elem, true);
     }
 
     @SuppressWarnings("unchecked")
     @Nullable
-    public <T> T marshall(Class<T> clazz, JsonElement elem, boolean failFast) throws DeserializationException {
+    public <T> T marshall(Class<T> clazz, @Nullable JsonElement elem, boolean failFast) throws DeserializationException {
         if (elem == null) return null;
         if (elem == JsonNull.INSTANCE) return null;
         if (clazz.isAssignableFrom(elem.getClass())) return (T) elem; //Already the correct type
@@ -229,82 +232,100 @@ public class MarshallerImpl implements Marshaller {
 
         if (clazz.equals(String.class)) {
             //Almost everything has a String representation
-            if (elem instanceof JsonObject) return (T) elem.toJson(false, false);
-            if (elem instanceof JsonArray) return (T) elem.toJson(false, false);
-            if (elem instanceof JsonPrimitive) {
-                ((JsonPrimitive) elem).getValue();
-                return (T) ((JsonPrimitive) elem).asString();
+            switch (elem) {
+                case JsonObject jsonObject -> {
+                    return (T) elem.toJson(false, false);
+                }
+                case JsonArray jsonElements -> {
+                    return (T) elem.toJson(false, false);
+                }
+                case JsonPrimitive jsonPrimitive -> {
+                    jsonPrimitive.getValue();
+                    return (T) jsonPrimitive.asString();
+                }
+                case JsonNull jsonNull -> {
+                    return (T) "null";
+                }
+                default -> {
+                }
             }
-            if (elem instanceof JsonNull) return (T) "null";
 
             if (failFast)
                 throw new DeserializationException("Encountered unexpected JsonElement type while deserializing to string: " + elem.getClass().getCanonicalName());
             return null;
         }
 
-        if (elem instanceof JsonPrimitive) {
-            Function<Object, ?> func = primitiveMarshallers.get(clazz);
-            if (func != null) {
-                return (T) func.apply(((JsonPrimitive) elem).getValue());
-            } else {
-                if (failFast)
-                    throw new DeserializationException("Don't know how to unpack value '" + elem + "' into target type '" + clazz.getCanonicalName() + "'");
-                return null;
-            }
-        } else if (elem instanceof final JsonObject obj) {
-
-
-            if (clazz.isPrimitive())
-                throw new DeserializationException("Can't marshall json object into primitive type " + clazz.getCanonicalName());
-            if (JsonPrimitive.class.isAssignableFrom(clazz)) {
-                if (failFast) throw new DeserializationException("Can't marshall json object into a json primitive");
-                return null;
-            }
-
-            obj.setMarshaller(this);
-
-            if (typeAdapters.containsKey(clazz)) {
-                return (T) typeAdapters.get(clazz).apply(obj);
-            }
-
-            if (typeFactories.containsKey(clazz)) {
-                T result = (T) typeFactories.get(clazz).get();
-                try {
-                    POJODeserializer.unpackObject(result, obj, failFast);
-                    return result;
-                } catch (Throwable t) {
-                    if (failFast) throw t;
-                    return null;
-                }
-            } else {
-
-                try {
-                    T result = TypeMagic.createAndCast(clazz, failFast);
-                    POJODeserializer.unpackObject(result, obj, failFast);
-                    return result;
-                } catch (Throwable t) {
-                    if (failFast) throw t;
+        switch (elem) {
+            case JsonPrimitive jsonPrimitive -> {
+                Function<Object, ? extends @Nullable Object> func = primitiveMarshallers.get(clazz);
+                if (func != null) {
+                    return (T) func.apply(jsonPrimitive.getValue());
+                } else {
+                    if (failFast)
+                        throw new DeserializationException("Don't know how to unpack value '" + elem + "' into target type '" + clazz.getCanonicalName() + "'");
                     return null;
                 }
             }
+            case final JsonObject obj -> {
 
-        } else if (elem instanceof final JsonArray array) {
-            if (clazz.isPrimitive()) return null;
-            if (clazz.isArray()) {
-                Class<?> componentType = clazz.getComponentType();
 
-                T result = (T) Array.newInstance(componentType, array.size());
-                for (int i = 0; i < array.size(); i++) {
-                    Array.set(result, i, marshall(componentType, array.get(i)));
+                if (clazz.isPrimitive())
+                    throw new DeserializationException("Can't marshall json object into primitive type " + clazz.getCanonicalName());
+                if (JsonPrimitive.class.isAssignableFrom(clazz)) {
+                    if (failFast)
+                        throw new DeserializationException("Can't marshall json object into a json primitive");
+                    return null;
                 }
-                return result;
+
+                obj.setMarshaller(this);
+
+                if (typeAdapters.containsKey(clazz)) {
+                    return (T) typeAdapters.get(clazz).apply(obj);
+                }
+
+                if (typeFactories.containsKey(clazz)) {
+                    T result = (T) typeFactories.get(clazz).get();
+                    try {
+                        if (result == null) return null;
+                        POJODeserializer.unpackObject(result, obj, failFast);
+                        return result;
+                    } catch (Throwable t) {
+                        if (failFast) throw t;
+                        return null;
+                    }
+                } else {
+
+                    try {
+                        T result = TypeMagic.createAndCast(clazz, failFast);
+                        if (result == null) return null;
+                        POJODeserializer.unpackObject(result, obj, failFast);
+                        return result;
+                    } catch (Throwable t) {
+                        if (failFast) throw t;
+                        return null;
+                    }
+                }
+            }
+            case final JsonArray array -> {
+                if (clazz.isPrimitive()) return null;
+                if (clazz.isArray()) {
+                    Class<?> componentType = clazz.getComponentType();
+
+                    T result = (T) Array.newInstance(componentType, array.size());
+                    for (int i = 0; i < array.size(); i++) {
+                        Array.set(result, i, marshall(componentType, array.get(i)));
+                    }
+                    return result;
+                }
+            }
+            default -> {
             }
         }
 
         return null;
     }
 
-    public JsonElement serialize(Object obj) {
+    public JsonElement serialize(@Nullable Object obj) {
         if (obj == null) return JsonNull.INSTANCE;
 
         //Prefer exact match
@@ -385,7 +406,7 @@ public class MarshallerImpl implements Marshaller {
                 } else {
                     result.put(name, serialize(child), Util.multi(comment.value())); // Canvas - add multi-line
                 }
-            } catch (IllegalArgumentException | IllegalAccessException e) {
+            } catch (IllegalArgumentException | IllegalAccessException ignored) {
             }
         }
 
@@ -409,7 +430,7 @@ public class MarshallerImpl implements Marshaller {
                 } else {
                     result.put(name, serialize(child), Util.multi(comment.value())); // Canvas - add multi-line
                 }
-            } catch (IllegalArgumentException | IllegalAccessException e) {
+            } catch (IllegalArgumentException | IllegalAccessException ignored) {
             }
         }
 

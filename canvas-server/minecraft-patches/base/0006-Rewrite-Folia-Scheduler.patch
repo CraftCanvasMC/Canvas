@@ -5,7 +5,7 @@ Subject: [PATCH] Rewrite Folia Scheduler
 
 
 diff --git a/io/papermc/paper/threadedregions/RegionizedData.java b/io/papermc/paper/threadedregions/RegionizedData.java
-index a1043c426d031755b57b77a9b2eec685e9861b13..b6788ce5f03eecf0b54cf433c7822cd5edfaaae3 100644
+index a1043c426d031755b57b77a9b2eec685e9861b13..79738ff795ffac1d24c6d5b172230826b214fcf4 100644
 --- a/io/papermc/paper/threadedregions/RegionizedData.java
 +++ b/io/papermc/paper/threadedregions/RegionizedData.java
 @@ -42,7 +42,7 @@ import java.util.function.Supplier;
@@ -31,7 +31,7 @@ index a1043c426d031755b57b77a9b2eec685e9861b13..b6788ce5f03eecf0b54cf433c7822cd5
  
      private final ServerLevel world;
 -    private final Supplier<T> initialValueSupplier;
-+    private final java.util.function.Function<io.papermc.paper.threadedregions.TickRegions.TickRegionData ,T> initialValueSupplier; // Canvas - rewrite scheduler
++    private final java.util.function.Function<io.papermc.paper.threadedregions.TickRegions.TickRegionData, T> initialValueSupplier; // Canvas - rewrite scheduler
      private final RegioniserCallback<T> callback;
  
      /**
@@ -40,7 +40,7 @@ index a1043c426d031755b57b77a9b2eec685e9861b13..b6788ce5f03eecf0b54cf433c7822cd5
       * @param callback Region callback to manage this regionised data.
       */
 -    public RegionizedData(final ServerLevel world, final Supplier<T> supplier, final RegioniserCallback<T> callback) {
-+    public RegionizedData(final ServerLevel world, final java.util.function.Function<io.papermc.paper.threadedregions.TickRegions.TickRegionData,T> supplier, final RegioniserCallback<T> callback) { // Canvas - rewrite scheduler
++    public RegionizedData(final ServerLevel world, final java.util.function.Function<io.papermc.paper.threadedregions.TickRegions.TickRegionData, T> supplier, final RegioniserCallback<T> callback) { // Canvas - rewrite scheduler
          this.world = world;
          this.initialValueSupplier = Validate.notNull(supplier, "Supplier may not be null.");
          this.callback = Validate.notNull(callback, "Regioniser callback may not be null.");
@@ -62,15 +62,8 @@ index a1043c426d031755b57b77a9b2eec685e9861b13..b6788ce5f03eecf0b54cf433c7822cd5
              TickRegionScheduler.getCurrentRegion();
  
          if (region == null) {
-@@ -232,4 +232,4 @@ public final class RegionizedData<T> {
-             final Long2ReferenceOpenHashMap<T> regionToData, final ReferenceOpenHashSet<T> dataSet
-         );
-     }
--}
-\ No newline at end of file
-+}
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea96686cd0e 100644
+index 07038e34a21a52afe785b901046af66e7b4e40ec..6291cc1c4986a6d80f1367b55692a4387f39a41d 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -30,8 +30,18 @@ import java.util.function.BooleanSupplier;
@@ -93,7 +86,7 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea9
  
      public final RegionizedTaskQueue taskQueue = new RegionizedTaskQueue();
  
-@@ -56,6 +66,7 @@ public final class RegionizedServer {
+@@ -56,16 +66,20 @@ public final class RegionizedServer {
  
      public void addWorld(final ServerLevel world) {
          this.worlds.add(world);
@@ -101,26 +94,23 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea9
      }
  
      public void init() {
-@@ -63,9 +74,16 @@ public final class RegionizedServer {
+         // call init event _before_ scheduling anything
          new RegionizedServerInitEvent().callEvent();
  
-         // now we can schedule
+-        // now we can schedule
 -        this.tickHandle.setInitialStart(System.nanoTime() + TickRegionScheduler.TIME_BETWEEN_TICKS);
 +        // Canvas start - rewrite scheduler
-+        // Folia has a race condition in the old scheduler(which is more likely with the new scheduler)
-+        // that essentially crashes the server on the first tick of a freshly generated world.
-+        // This fixes it, because the race condition is caused by the global tick not being run first
-+        // which is required to process ticket updates so we don't fail any thread ownership checks
-+        // set to 0 as initial start so the scheduler prioritizes this tick first
-+        this.tickHandle.setInitialStart(0);
-+        // Canvas end - rewrite scheduler
++        // start scheduler
++        TickRegions.start();
++        // set init start, we need this tick right now please and thank you
++        this.tickHandle.setInitialStart(System.nanoTime());
          TickRegions.getScheduler().scheduleRegion(this.tickHandle);
 -        TickRegions.getScheduler().init();
-+        TickRegions.start(); // Canvas - rewrite scheduler
++        // Canvas end - rewrite scheduler
      }
  
      public void invalidateStatus() {
-@@ -73,12 +91,12 @@ public final class RegionizedServer {
+@@ -73,7 +87,7 @@ public final class RegionizedServer {
      }
  
      public void addTaskWithoutNotify(final Runnable run) {
@@ -129,13 +119,7 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea9
      }
  
      public void addTask(final Runnable run) {
-         this.addTaskWithoutNotify(run);
--        TickRegions.getScheduler().setHasTasks(this.tickHandle);
-+        // TickRegions.getScheduler().setHasTasks(this.tickHandle); // Canvas - rewrite scheduler
-     }
- 
-     public void blockOn(final Runnable run) {
-@@ -131,7 +149,7 @@ public final class RegionizedServer {
+@@ -131,7 +145,7 @@ public final class RegionizedServer {
          private final AtomicBoolean ticking = new AtomicBoolean();
  
          public GlobalTickTickHandle(final RegionizedServer server) {
@@ -144,43 +128,65 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea9
              this.server = server;
          }
  
-@@ -162,6 +180,10 @@ public final class RegionizedServer {
+@@ -162,7 +176,11 @@ public final class RegionizedServer {
          }
  
          private void drainTasks() {
+-            while (this.runOneTask());
 +            // Canvas start - rewrite scheduler
 +            if (!this.server.globalTickQueue.isEmpty() && this.server.globalTickQueue.peek() == null)
 +                throw new IllegalStateException("Global tick task queue not empty but returning null values!");
++            while (this.runOneTask()); // TODO - maybe we add global chunk tasks here? is it really needed though?
 +            // Canvas end - rewrite scheduler
-             while (this.runOneTask());
          }
  
-@@ -177,20 +199,15 @@ public final class RegionizedServer {
+         private boolean runOneTask() {
+@@ -171,26 +189,37 @@ public final class RegionizedServer {
+                 return false;
+             }
+ 
+-            // TODO try catch?
+             run.run();
+ 
              return true;
          }
  
-+        // TODO - global tick draining is *not* safe!
          @Override
 -        protected boolean runRegionTasks(final BooleanSupplier canContinue) {
--            do {
++        // Canvas start - rewrite scheduler
++        protected void runRegionTasks(final BooleanSupplier canContinue) {
+             do {
 -                if (!this.runOneTask()) {
 -                    return false;
 -                }
--            } while (canContinue.getAsBoolean());
--
++                if (!this.runOneTask() || !this.runGlobalTask()) return;
+             } while (canContinue.getAsBoolean());
++        }
+ 
 -            return true;
-+        protected void runRegionTasks(final BooleanSupplier canContinue) { // Canvas - rewrite scheduler
-+            // Canvas - rewrite scheduler
++        private boolean runGlobalTask() {
++            boolean ret = false;
++            for (final ServerLevel world : this.server.worlds) {
++                ret |= world.taskQueueRegionData.executeGlobalChunkTask();
++            }
++            return ret;
          }
  
          @Override
          protected boolean hasIntermediateTasks() {
 -            return !this.server.globalTickQueue.isEmpty();
-+            return false; // Canvas - rewrite scheduler
++            if (!this.server.globalTickQueue.isEmpty()) return true;
++            else {
++                for (final ServerLevel world : this.server.worlds) {
++                    if (world.taskQueueRegionData.hasAnyGlobalTasks()) return true;
++                }
++            }
++            return false;
++        // Canvas end - rewrite scheduler
          }
      }
  
-@@ -302,6 +319,13 @@ public final class RegionizedServer {
+@@ -302,6 +331,13 @@ public final class RegionizedServer {
          // expire invalid click command callbacks
          io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.ADVENTURE_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
          io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
@@ -194,7 +200,7 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea9
  
          // scheduler
          ((FoliaGlobalRegionScheduler)Bukkit.getGlobalRegionScheduler()).tick();
-@@ -316,6 +340,7 @@ public final class RegionizedServer {
+@@ -316,6 +352,7 @@ public final class RegionizedServer {
  
          // tick player ping sample
          this.tickPlayerSample();
@@ -202,7 +208,7 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea9
  
          // tick worlds
          for (final ServerLevel world : this.worlds) {
-@@ -327,6 +352,13 @@ public final class RegionizedServer {
+@@ -327,6 +364,13 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
@@ -217,10 +223,34 @@ index 07038e34a21a52afe785b901046af66e7b4e40ec..f401d6e77d4f969b8ba071043ee49ea9
  
      private void tickPlayerSample() {
 diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
-index 25a0b1d56652e4455a188d0f413581638d5ef538..59dca5af1a3089068d5deafa04015d4ff2280dd0 100644
+index 25a0b1d56652e4455a188d0f413581638d5ef538..d3be0fd26c1a0b1c158d1a61d4c82914189f2d53 100644
 --- a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
 +++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
-@@ -225,12 +225,14 @@ public final class RegionizedTaskQueue {
+@@ -80,7 +80,7 @@ public final class RegionizedTaskQueue {
+             this.world = world;
+         }
+ 
+-        private boolean executeGlobalChunkTask() {
++        public boolean executeGlobalChunkTask() { // Canvas - rewrite scheduler - private -> public
+             final Runnable run = this.globalChunkTask.poll();
+             if (run != null) {
+                 run.run();
+@@ -95,7 +95,14 @@ public final class RegionizedTaskQueue {
+ 
+         public void pushGlobalChunkTask(final Runnable run) {
+             this.globalChunkTask.add(run);
++            TickRegions.getScheduler().setHasTasks(RegionizedServer.getGlobalTickData()); // Canvas - rewrite scheduler
+         }
++        // Canvas start - rewrite scheduler
++
++        public boolean hasAnyGlobalTasks() {
++            return !this.globalChunkTask.isEmpty();
++        }
++        // Canvas end - rewrite scheduler
+ 
+         private PrioritisedQueue getQueue(final boolean synchronise, final int chunkX, final int chunkZ, final boolean isChunkTask) {
+             final ThreadedRegionizer<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> regioniser = this.world.regioniser;
+@@ -225,12 +232,14 @@ public final class RegionizedTaskQueue {
      }
  
      public static final class RegionTaskQueueData {
@@ -238,7 +268,7 @@ index 25a0b1d56652e4455a188d0f413581638d5ef538..59dca5af1a3089068d5deafa04015d4f
          }
  
          void mergeInto(final RegionTaskQueueData into) {
-@@ -290,6 +292,15 @@ public final class RegionizedTaskQueue {
+@@ -290,6 +299,15 @@ public final class RegionizedTaskQueue {
                  this.queues[i] = new ArrayDeque<>();
              }
          }
@@ -254,7 +284,7 @@ index 25a0b1d56652e4455a188d0f413581638d5ef538..59dca5af1a3089068d5deafa04015d4f
          private boolean isDestroyed;
  
          public int getScheduledTasks() {
-@@ -618,6 +629,7 @@ public final class RegionizedTaskQueue {
+@@ -618,6 +636,7 @@ public final class RegionizedTaskQueue {
                          continue;
                      }
  
@@ -263,7 +293,7 @@ index 25a0b1d56652e4455a188d0f413581638d5ef538..59dca5af1a3089068d5deafa04015d4f
                      return true;
                  }
 diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
-index 01ea2e7133a41f1a75169c7e3edbd528b268412b..f46aadfa17e4ef6e2df22e173189e584d5340b05 100644
+index 01ea2e7133a41f1a75169c7e3edbd528b268412b..8df4234adc769da8a4a8ede9de8057e4cb915cf1 100644
 --- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
 +++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
 @@ -66,7 +66,7 @@ import java.util.function.Predicate;
@@ -343,24 +373,6 @@ index 01ea2e7133a41f1a75169c7e3edbd528b268412b..f46aadfa17e4ef6e2df22e173189e584
              }
              TickRegions.RegionStats.updateCurrentRegion();
          }
-@@ -768,4 +774,4 @@ public final class RegionizedWorldData {
-     public int getChunkCount() {
-         return this.chunks.size();
-     }
--}
-\ No newline at end of file
-+}
-diff --git a/io/papermc/paper/threadedregions/ThreadedRegionizer.java b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
-index d7357c4e77852db1f80b68a56de616acd9dcee2c..75b76549721544a559c35758bee76b38de9c144b 100644
---- a/io/papermc/paper/threadedregions/ThreadedRegionizer.java
-+++ b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
-@@ -1402,4 +1402,4 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
-          */
-         public void preSplit(final ThreadedRegion<R, S> from, final List<ThreadedRegion<R, S>> into);
-     }
--}
-\ No newline at end of file
-+}
 diff --git a/io/papermc/paper/threadedregions/TickData.java b/io/papermc/paper/threadedregions/TickData.java
 index d4d80a69488f57704f1b3dc74cb379de36e80ec0..d322f19f72ac3b1d8b46d33c06ca3a11def64875 100644
 --- a/io/papermc/paper/threadedregions/TickData.java
@@ -397,7 +409,7 @@ index d4d80a69488f57704f1b3dc74cb379de36e80ec0..d322f19f72ac3b1d8b46d33c06ca3a11
                      }
  
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index 50c9549007c3cc1168f69014a605b7b0d709bb86..47e15fa1f8f6ba722366d463e3fcc3e05f9949f2 100644
+index 50c9549007c3cc1168f69014a605b7b0d709bb86..77070f5460f69e2a61ba5b15a00ab81c95cda208 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 @@ -41,10 +41,10 @@ public final class TickRegionScheduler {
@@ -627,7 +639,7 @@ index 50c9549007c3cc1168f69014a605b7b0d709bb86..47e15fa1f8f6ba722366d463e3fcc3e0
  
          /**
 -         * Subclasses should call this instead of {@link ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.SchedulableTick#setScheduledStart(long)}
-+         * Subclasses should call this instead of {@link #setScheduledStart(long)} // Canvas - rewrite scheduler
++         * Subclasses should call this instead of {@link #setScheduledStart(long)}
           * so that the tick schedule and scheduled start remain synchronised
           */
          protected final void updateScheduledStart(final long to) {
@@ -1253,9 +1265,53 @@ index 81cdbcf00efca209b0567ea10d54d1a3add681d7..1b4d1a7a3c6afdfeb067565907e6a662
              @Override
              public void merge(final Scheduler from, final Scheduler into, final long fromTickOffset) {
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 752d273a0f34d3d426337df2360b2565a6c6b6a9..3bafc39df13c763d83f3b7ad87e753e6c3e5b50a 100644
+index 752d273a0f34d3d426337df2360b2565a6c6b6a9..4261995c054708caa5f5978b8510b562084ff1f0 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
+@@ -719,21 +719,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             // Back to the createLevels method without crazy modifications
+             primaryLevelData.setModdedInfo(this.getServerModName(), this.getModdedStatus().shouldReportAsModified());
+             this.addLevel(serverLevel); // Paper - Put world into worldlist before initing the world; move up
+-            // Folia start - region threading
+-            // the spawn should be within ~1024 blocks, so we force add ticket levels to ensure the first thread
+-            // to init spawn will not run into any ownership issues
+-            // move init to start of tickServer
+-            int loadRegionRadius = 1024 >> 4;
+-            serverLevel.randomSpawnSelection = new ChunkPos(serverLevel.getChunkSource().randomState().sampler().findSpawnPosition());
+-            for (int currX = -loadRegionRadius; currX <= loadRegionRadius; ++currX) {
+-                for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
+-                    ChunkPos pos = new ChunkPos(currX + serverLevel.randomSpawnSelection.x, currZ + serverLevel.randomSpawnSelection.z);
+-                    serverLevel.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
+-                            net.minecraft.server.level.TicketType.UNKNOWN, pos, ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, null
+-                    );
+-                }
+-            }
+-            // Folia end - region threading
++            // Canvas - rewrite scheduler
+ 
+             // Paper - Put world into worldlist before initing the world; move up
+             this.getPlayerList().addWorldborderListener(serverLevel);
+@@ -1588,6 +1574,20 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         region.world.getCurrentWorldData().updateTickData();
+         if (region.world.checkInitialised.get() != ServerLevel.WORLD_INIT_CHECKED) {
+             synchronized (region.world.checkInitialised) {
++                // Canvas start - rewrite scheduler
++                final int centerChunkX = region.world.randomSpawnSelection.x;
++                final int centerChunkZ = region.world.randomSpawnSelection.z;
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++                    region.world, centerChunkX, centerChunkZ, 1024 >> 4
++                )) {
++                    // basically if the full region isn't loaded yet, or this isn't
++                    // the owning region of the randomly selected chunk, we need to
++                    // delay this a tad. this also fixes ownership crash issues relating
++                    // to the global tick. might increase startup times a tad, but
++                    // shouldn't be drastic
++                    return;
++                }
++                // Canvas end - rewrite scheduler
+                 if (region.world.checkInitialised.compareAndSet(ServerLevel.WORLD_INIT_NOT_CHECKED, ServerLevel.WORLD_INIT_CHECKING)) {
+                     LOGGER.info("Initialising world '" + region.world.getWorld().getName() + "' before it can be ticked...");
+                     this.initWorld(region.world, region.world.serverLevelData, worldData, region.world.serverLevelData.worldGenOptions()); // Folia - delayed until first tick of world
 @@ -1601,12 +1601,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          };
          // Folia end - region threading
@@ -1296,6 +1352,90 @@ index fd1dcc340c574ee62cc052a789cf1f3cce09f695..69d9b83da0f4f92d76ac310f90f9453e
          this.remainingSprintTicks = 0L;
          this.setFrozen(this.previousIsFrozen);
          this.server.onTickRateChanged();
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index c27938b888121031653e4dad152bed133071e3bd..175773b5ef07ca07f898137ee02d33ee4c21857c 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -258,6 +258,57 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         return true;
+     }
+ 
++    // Canvas start - region threading
++    public final void canvas$loadOrRunAtChunksAsync(final BlockPos pos, final int radiusBlocks,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, pos, radiusBlocks
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            (pos.getX() - radiusBlocks) >> 4,
++            (pos.getX() + radiusBlocks) >> 4,
++            (pos.getZ() - radiusBlocks) >> 4,
++            (pos.getZ() + radiusBlocks) >> 4
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                this, pos.getX() >> 4, pos.getZ() >> 4, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            moonrise$loadChunksAsync(
++                pos, radiusBlocks, priority, (unused) -> callback.run()
++            );
++        }
++    }
++
++    public final void canvas$loadOrRunAtChunksAsync(final int minChunkX, final int maxChunkX, final int minChunkZ, final int maxChunkZ,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                this, minChunkX, minChunkZ, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            moonrise$loadChunksAsync(
++                minChunkX, minChunkZ, maxChunkX, maxChunkZ, priority, (unused) -> callback.run()
++            );
++        }
++    }
++
++    // Canvas end - region threading
+     public final void loadChunksForMoveAsync(AABB axisalignedbb, ca.spottedleaf.concurrentutil.util.Priority priority,
+                                              java.util.function.Consumer<List<net.minecraft.world.level.chunk.ChunkAccess>> onLoad) {
+         // Paper - rewrite chunk system
+@@ -632,6 +683,21 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         // Paper end - rewrite chunk system
+         this.getCraftServer().addWorld(this.getWorld()); // CraftBukkit
+         this.updateTickData(); // Folia - region threading - make sure it is initialised before ticked
++        // Canvas start - rewrite scheduler
++        // the spawn should be within ~1024 blocks, so we force add ticket levels to ensure the first thread
++        // to init spawn will not run into any ownership issues
++        // move init to start of tickServer
++        int loadRegionRadius = 1024 >> 4;
++        this.randomSpawnSelection = new ChunkPos(this.getChunkSource().randomState().sampler().findSpawnPosition());
++        for (int currX = -loadRegionRadius; currX <= loadRegionRadius; ++currX) {
++            for (int currZ = -loadRegionRadius; currZ <= loadRegionRadius; ++currZ) {
++                ChunkPos pos = new ChunkPos(currX + this.randomSpawnSelection.x, currZ + this.randomSpawnSelection.z);
++                this.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
++                    net.minecraft.server.level.TicketType.UNKNOWN, pos, ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.MAX_TICKET_LEVEL, null
++                );
++            }
++        }
++        // Canvas end - rewrite scheduler
+     }
+ 
+     // Folia start - region threading
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
 index 917069c6710ba7a9455603f821d80c8165c80904..7b27d1eb7b35d4ba0794103f8532ec969d10415d 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
@@ -1370,7 +1510,7 @@ index 3702c46c2ab07df3defd5fe2f231bb0e7a0b90bd..84c078b38349eb33ab803034d06b9604
      public static TicketType register(String name, long timeout, boolean persist, TicketType.TicketUse use) {
          return Registry.register(BuiltInRegistries.TICKET_TYPE, name, new TicketType(timeout, persist, use));
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index a30f0a760efd4f72c2e94316387bfd57b0c73db8..9242c9f6ef0d968e179dce47ab2c19f21edc2011 100644
+index 8512f1180002d031496659a85a517ee30ea5d3e5..1b67e32fee761bafd4014fe966bb7c66360e9204 100644
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
 @@ -1172,7 +1172,7 @@ public abstract class PlayerList {

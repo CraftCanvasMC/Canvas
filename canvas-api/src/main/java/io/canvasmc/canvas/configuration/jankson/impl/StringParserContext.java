@@ -48,38 +48,38 @@ public class StringParserContext implements ParserContext<JsonPrimitive> {
         if (escape) {
             escape = false;
             switch (codePoint) {
-
-
-                case 'b':
+                case 'b' -> {
                     builder.append('\b');
-                    return true;
-                case 'f':
+                }
+                case 'f' -> {
                     builder.append('\f');
-                    return true;
-                case 'n':  // regular \n
+                }
+                case 'n' -> {
                     builder.append('\n');
-                    return true;
-                case '\n': // JSON5 multiline string
-                    return true;
-                case 'r':
+                }
+                case '\n' -> // JSON5 multiline string
+                {
+                }
+                case 'r' -> {
                     builder.append('\r');
-                    return true;
-                case 't':
+                }
+                case 't' -> {
                     builder.append('\t');
-                    return true;
-                case '"':
+                }
+                case '"' -> {
                     builder.append('"');
-                    return true;
-                case '\'':
+                }
+                case '\'' -> {
                     builder.append('\'');
-                    return true;
-                case '\\':
+                }
+                case '\\' -> {
                     builder.append('\\');
-                    return true;
-                default:
+                }
+                default -> {
                     builder.append((char) codePoint);
-                    return true;
-            }
+                }
+            }// JSON5 multiline string
+            return true;
         } else {
             if (codePoint == quote) {
                 complete = true;

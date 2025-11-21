@@ -1,13 +1,13 @@
 package io.canvasmc.canvas.simd;
 
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
+import org.jetbrains.annotations.ApiStatus;
 
 public class SIMDDetection {
 
     public static boolean isEnabled = false;
     public static boolean testRun = false;
 
-    @Deprecated
     public static boolean canEnable(ComponentLogger logger) {
         try {
             return SIMDChecker.canEnable(logger);
@@ -16,7 +16,6 @@ public class SIMDDetection {
         }
     }
 
-    @Deprecated
     public static int getJavaVersion() {
         // https://stackoverflow.com/a/2591122
         String version = System.getProperty("java.version");

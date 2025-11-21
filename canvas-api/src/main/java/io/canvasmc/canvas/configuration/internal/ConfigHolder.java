@@ -2,11 +2,10 @@ package io.canvasmc.canvas.configuration.internal;
 
 import java.util.function.Supplier;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.NotNull;
 
 @ApiStatus.NonExtendable
 public interface ConfigHolder<T> extends Supplier<T> {
-    @NotNull Class<T> getConfigClass();
+    Class<T> getConfigClass();
 
     void save();
 

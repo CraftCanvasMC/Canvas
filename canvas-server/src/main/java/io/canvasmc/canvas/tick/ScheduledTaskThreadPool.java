@@ -82,8 +82,8 @@ public final class ScheduledTaskThreadPool {
         return first == null ? null : first.getKey();
     }
 
-    private static ScheduledTickTask findFirstNonTaken(
-        final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
+    private static @Nullable ScheduledTickTask findFirstNonTaken(
+        final @NotNull ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
         final TickThreadRunner tickThreadRunner
     ) {
         final Iterator<ScheduledTickTask> it = map.keySet().iterator();
@@ -114,8 +114,8 @@ public final class ScheduledTaskThreadPool {
         return null;
     }
 
-    private static ScheduledTickTask findFirstNonTakenNonWatched(
-        final ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
+    private static @Nullable ScheduledTickTask findFirstNonTakenNonWatched(
+        final @NotNull ConcurrentSkipListMap<ScheduledTickTask, ScheduledTickTask> map,
         final TickThreadRunner tickThreadRunner
     ) {
         final Iterator<ScheduledTickTask> it = map.keySet().iterator();
@@ -309,7 +309,7 @@ public final class ScheduledTaskThreadPool {
     }
 
     private void insert(final @NotNull SchedulableTick tick, final boolean hasTasks) {
-        final long scheduleTime = tick.getScheduledStart();
+        final long scheduleTime = Math.max(tick.getScheduledStart(), System.nanoTime());
         final long timeNow = System.nanoTime();
 
         for (;;) {
@@ -478,7 +478,7 @@ public final class ScheduledTaskThreadPool {
         private volatile long pinnedTo = -1L; // methods are public so we can pin to threads outside of this, since this needs to be an exposed API
         private static final VarHandle PINNED_HANDLE = ConcurrentUtil.getVarHandle(SchedulableTick.class, "pinnedTo", long.class);
 
-        private volatile ScheduledTickTask task;
+        public volatile ScheduledTickTask task;
 
         private int getStateVolatile() {
             return (int) STATE_HANDLE.getVolatile(this);
@@ -1284,7 +1284,7 @@ public final class ScheduledTaskThreadPool {
         }
     }
 
-    private static final class ScheduledTickTask {
+    public static final class ScheduledTickTask {
         private static final Comparator<ScheduledTickTask> TICK_COMPARATOR = (final ScheduledTickTask t1, final ScheduledTickTask t2) -> {
             final int timeCmp = TimeUtil.compareTimes(t1.tickStart, t2.tickStart);
             if (timeCmp != 0L) {

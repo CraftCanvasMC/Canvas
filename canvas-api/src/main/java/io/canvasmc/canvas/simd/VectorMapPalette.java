@@ -12,7 +12,6 @@ public class VectorMapPalette {
     private static final VectorSpecies<Integer> I_SPEC = IntVector.SPECIES_PREFERRED;
     private static final VectorSpecies<Float> F_SPEC = FloatVector.SPECIES_PREFERRED;
 
-    @Deprecated
     public static void matchColorVectorized(int[] in, byte[] out) {
         int speciesLength = I_SPEC.length();
         int i;

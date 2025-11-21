@@ -31,6 +31,7 @@ import io.canvasmc.canvas.configuration.jankson.JsonObject;
 import io.canvasmc.canvas.configuration.jankson.JsonPrimitive;
 import io.canvasmc.canvas.configuration.jankson.api.DeserializationException;
 import io.canvasmc.canvas.configuration.jankson.api.Marshaller;
+import java.io.Serial;
 import java.util.HashMap;
 
 /**
@@ -56,23 +57,29 @@ public class DeserializerFunctionPool<B> {
         InternalDeserializerFunction<B> selected = null;
 
         //This whole block is pretty ugly but there's a very particular selection order
-        if (elem instanceof JsonPrimitive) {
-            //1. Unwrapped primitive class
-            Object obj = ((JsonPrimitive) elem).getValue();
-            selected = values.get(obj.getClass());
-            if (selected != null) return selected.deserialize(obj, marshaller);
+        switch (elem) {
+            case JsonPrimitive jsonPrimitive -> {
+                //1. Unwrapped primitive class
+                Object obj = jsonPrimitive.getValue();
+                selected = values.get(obj.getClass());
+                if (selected != null) return selected.deserialize(obj, marshaller);
 
-            //2. JsonPrimitive
-            selected = values.get(JsonPrimitive.class);
-            if (selected != null) return selected.deserialize(elem, marshaller);
-        } else if (elem instanceof JsonObject) {
-            //2. JsonObject
-            selected = values.get(JsonObject.class);
-            if (selected != null) return selected.deserialize(elem, marshaller);
-        } else if (elem instanceof JsonArray) {
-            //2. JsonArray
-            selected = values.get(JsonArray.class);
-            if (selected != null) return selected.deserialize(elem, marshaller);
+                //2. JsonPrimitive
+                selected = values.get(JsonPrimitive.class);
+                if (selected != null) return selected.deserialize(elem, marshaller);
+            }
+            case JsonObject jsonObject -> {
+                //2. JsonObject
+                selected = values.get(JsonObject.class);
+                if (selected != null) return selected.deserialize(elem, marshaller);
+            }
+            case JsonArray jsonElements -> {
+                //2. JsonArray
+                selected = values.get(JsonArray.class);
+                if (selected != null) return selected.deserialize(elem, marshaller);
+            }
+            default -> {
+            }
         }
 
         //3. JsonElement
@@ -84,6 +91,7 @@ public class DeserializerFunctionPool<B> {
     }
 
     public static class FunctionMatchFailedException extends Exception {
+        @Serial
         private static final long serialVersionUID = -7909332778483440658L;
 
         public FunctionMatchFailedException(String message) {

@@ -7,11 +7,12 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import net.kyori.adventure.key.Key;
+import org.jspecify.annotations.Nullable;
 
 public class NamespacedKeyValidator implements AnnotationValidator<NamespacedKeyValidator.NamespacedKey> {
     @Override
-    public ValidationResult read(final NamespacedKey annotation, final JsonElement element) {
-        if (element == null || !(element instanceof JsonPrimitive primitive)) {
+    public ValidationResult read(final NamespacedKey annotation, @Nullable final JsonElement element) {
+        if (!(element instanceof JsonPrimitive primitive)) {
             return ValidationResult.FAIL; // quick escape
         }
         String string = primitive.asString();

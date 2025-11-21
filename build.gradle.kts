@@ -6,6 +6,7 @@ import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 plugins {
     java
     id("io.canvasmc.weaver.patcher") version "2.3.10"
+    id("xyz.jpenilla.resource-factory-paper-convention") version "1.3.1" apply false
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
@@ -87,6 +88,21 @@ subprojects {
                     password = providers.environmentVariable("PUBLISH_TOKEN").orNull
                 }
             }
+        }
+    }
+
+    if (project.name.endsWith("-debug") || project.name.endsWith("-plugin")) {
+        apply(plugin = "xyz.jpenilla.resource-factory-paper-convention")
+        dependencies {
+            compileOnly(rootProject.projects.canvasServer)
+            compileOnly(rootProject.projects.canvasApi)
+        }
+        extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
+            apiVersion.set(providers.gradleProperty("mcVersion"))
+            version = "SNAPSHOT-DEV"
+            main = project.findProperty("main")?.toString()
+            authors = listOf("CanvasMC")
+            foliaSupported = true
         }
     }
 }

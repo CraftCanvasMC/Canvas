@@ -2,7 +2,6 @@ package io.canvasmc.canvas.region;
 
 import java.util.function.Consumer;
 import org.bukkit.World;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -15,7 +14,6 @@ public interface WorldRegionizer {
      *
      * @return The world this regionizer manages.
      */
-    @NonNull
     World getWorld();
 
     /**
