@@ -138,9 +138,9 @@ public class Config {
         @Comment({
             "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
             "Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done.",
-            "Default: 0.3ms"
+            "Default: 0.1ms"
         })
-        public double runTasksBufferMillis = (double) 300_000 / 1_000_000;
+        public double runTasksBufferMillis = (double) 100_000 / 1_000_000;
     }
 
     public Chunks chunks = new Chunks();

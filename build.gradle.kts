@@ -100,7 +100,7 @@ subprojects {
         extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
             apiVersion.set(providers.gradleProperty("mcVersion"))
             version = "SNAPSHOT-DEV"
-            main = project.findProperty("main")?.toString()
+            main = project.findProperty("main")?.toString()?.replace("\"", "")
             authors = listOf("CanvasMC")
             foliaSupported = true
         }

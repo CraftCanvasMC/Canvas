@@ -714,7 +714,9 @@ public class SchedulerTickTaskThreadPool {
                             // we are parking, which is fine, however, we
                             // CAN do mid-tick tasks here instead, which makes us
                             // much more productive
-                            if (startStateTask.tryMarkTakingTasks() || startStateTask.hasTasks()) {
+                            if ((diff > RUN_TASKS_BUFFER_NANOS) && // if we are less than the buffer, then don't try run mid-tick-tasks
+                                (startStateTask.tryMarkTakingTasks() || startStateTask.hasTasks())
+                            ) {
                                 // try and take the tick task like it's a normal tick
                                 if (!this.takeTask(startState, startStateTask)) {
                                     // just park like normal, couldn't take task
