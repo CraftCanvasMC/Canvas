@@ -57,7 +57,7 @@ public class SparkRegionProfilerExtension {
                     SchedulerTickTaskThreadPool.TickThreadRunner thread = TRACKING_THREAD.getAndSet(null); // this is ensured constant, we are fine
                     if (thread == null) throw new IllegalStateException("Tracking thread must not be null");
                     // unpin the task from the thread, clear profiling results cache
-                    scheduleHandle.unpin();
+                    scheduleHandle.unpin(thread.scheduler);
                     PROFILING_RESULTS_CACHE.set(null);
                 });
             } catch (CommandSyntaxException ex) {
@@ -94,7 +94,7 @@ public class SparkRegionProfilerExtension {
                 pinner.pin((schedulingHandle, thread) -> {
                     // pin the actual region tick to the runner
                     TRACKING_THREAD.set(thread);
-                    schedulingHandle.pin(thread.id);
+                    schedulingHandle.pin(thread.id, thread.scheduler);
                     sendMessage.accept("Completed scheduler setup for region pin profiling");
                     CURRENT_PINNER.set(pinner);
                     // schedule async, since spark runs its operations in this pool

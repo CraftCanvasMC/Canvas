@@ -315,9 +315,7 @@ public class SchedulerTickTaskThreadPool {
                 throw new IllegalStateException("Task " + task + " is already scheduled or cancelled");
             }
 
-            if (task.schedulerOwnedBy != this) {
-                throw new IllegalStateException("Task was created by a different scheduler");
-            }
+            task.setSchedulerOwnedBy(this);
 
             this.insertFresh(task);
         }
@@ -380,14 +378,34 @@ public class SchedulerTickTaskThreadPool {
         public final long id = ID_GENERATOR.getAndIncrement();
         private final AtomicInteger scheduled = new AtomicInteger();
         public boolean markedAsHasTasks = false;
-        private final SchedulerTickTaskThreadPool schedulerOwnedBy;
+        private SchedulerTickTaskThreadPool schedulerOwnedBy;
         private long scheduledStart = DEADLINE_NOT_SET;
         private TickThreadRunner ownedBy;
         private int pinnedThreadId = PINNED_NOT_SET;
         private LinkedSortedSet.Link<SchedulableTick> awaitingLink;
 
-        public SchedulableTick(final SchedulerTickTaskThreadPool schedulerOwnedBy) {
+        public SchedulableTick() {
+            this(null);
+        }
+
+        public SchedulableTick(final SchedulerTickTaskThreadPool scheduler) {
+            if (scheduler != null) {
+                // if the scheduler doesn't equal null, we can just set it early
+                setSchedulerOwnedBy(scheduler);
+            }
+        }
+
+        public void setSchedulerOwnedBy(final SchedulerTickTaskThreadPool schedulerOwnedBy) {
+            if (this.schedulerOwnedBy != null && this.schedulerOwnedBy != schedulerOwnedBy) {
+                // if we are setting it to the same thing again, nobody really cares
+                // if we are trying to change it, throw
+                throw new UnsupportedOperationException("Cannot change scheduler, already set");
+            }
             this.schedulerOwnedBy = schedulerOwnedBy;
+        }
+
+        public SchedulerTickTaskThreadPool getOwningScheduler() {
+            return schedulerOwnedBy;
         }
 
         @Override
@@ -404,7 +422,7 @@ public class SchedulerTickTaskThreadPool {
             return (int) PINNED_THREAD_ID_HANDLE.getVolatile(this);
         }
 
-        public final void setPinnedThreadId(final int threadId) {
+        public final void setPinnedThreadId(final int threadId, final SchedulerTickTaskThreadPool scheduler) {
             final int prev = (int) PINNED_THREAD_ID_HANDLE.getAndSet(this, threadId);
 
             // only update pin counts if actually changing
@@ -412,7 +430,7 @@ public class SchedulerTickTaskThreadPool {
                 return;
             }
 
-            final SchedulerTickTaskThreadPool scheduler = this.schedulerOwnedBy;
+            this.setSchedulerOwnedBy(scheduler); // try set scheduler if we haven't already
 
             // need to handle the case where task is currently scheduled
             // and pinning changes - this requires scheduler intervention
@@ -464,23 +482,23 @@ public class SchedulerTickTaskThreadPool {
          * </p>
          * @param threadId the ID of the thread to pin the task to. If the value is -1, the task will be unpinned.
          */
-        public final void pin(final int threadId) {
+        public final void pin(final int threadId, final SchedulerTickTaskThreadPool scheduler) {
             if (threadId > this.schedulerOwnedBy.threadCount()) {
                 // don't pin, this isn't a valid thread
                 return;
             } else if (threadId == PINNED_NOT_SET) {
                 // we are unpinning
-                unpin();
+                unpin(scheduler);
                 return;
             } else if (threadId < PINNED_NOT_SET) {
                 // invalid thread, don't pin or unpin
                 return;
             }
-            this.setPinnedThreadId(threadId);
+            this.setPinnedThreadId(threadId, scheduler);
         }
 
-        public final void unpin() {
-            this.setPinnedThreadId(PINNED_NOT_SET);
+        public final void unpin(final SchedulerTickTaskThreadPool scheduler) {
+            this.setPinnedThreadId(PINNED_NOT_SET, scheduler);
         }
 
         public TickThreadRunner getOwnedBy() {
