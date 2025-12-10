@@ -91,9 +91,6 @@ public class Config {
                 GLOBAL_BROADCAST.accept("Running post validation consumer");
                 VirtualThreadUtils.init();
 
-                // Canvas - Apply server branding
-                BrandingManager.init(context.configuration());
-
                 if (isServerAccessible()) {
                     for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
                         // update all info with player, covers 1.8 combat config
@@ -726,14 +723,9 @@ public class Config {
         public int waterAmbient = 0;
     }
 
-    @Comment("Configuration options for server branding and naming")
-    public ServerBrand serverBrand = new ServerBrand();
+    @Comment("The server mod name displayed in server listings and client info")
+    public String serverModName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
 
-    public static class ServerBrand {
-        @Comment("The server mod name displayed in server listings and client info")
-        public String serverModName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
-
-        @Comment("The server console window title")
-        public String serverGUIName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName() + " Console";
-    }
+    @Comment("The server console window title")
+    public String serverGUIName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName() + " Console";
 }
