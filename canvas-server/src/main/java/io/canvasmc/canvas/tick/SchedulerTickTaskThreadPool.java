@@ -340,6 +340,16 @@ public class SchedulerTickTaskThreadPool {
         LockSupport.unpark(runner.getRunnerThread()); */
     }
 
+    public TickThreadRunner getCurrentTickThreadRunner() {
+        Thread curr = Thread.currentThread();
+        for (final TickThreadRunner runner : this.runners) {
+            if (runner.thread == curr) {
+                return runner;
+            }
+        }
+        throw new IllegalStateException("Couldn't locate current tick thread runner");
+    }
+
     /**
      * Represents a tickable task that can be scheduled into a {@link SchedulerTickTaskThreadPool}.
      * <p>

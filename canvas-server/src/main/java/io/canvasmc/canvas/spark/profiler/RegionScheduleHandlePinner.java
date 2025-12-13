@@ -132,10 +132,10 @@ public interface RegionScheduleHandlePinner {
                         throw new IllegalStateException("Region must be present at the profiling coordinates");
                     }
                     final TickRegionScheduler.RegionScheduleHandle schedulingHandle = region.getData().getRegionSchedulingHandle();
-                    final SchedulerTickTaskThreadPool.TickThreadRunner thread = schedulingHandle.getOwnedBy();
+                    final SchedulerTickTaskThreadPool.TickThreadRunner thread = TickRegions.getScheduler().scheduler.getCurrentTickThreadRunner();
 
                     if (thread == null) {
-                        throw new IllegalStateException("Region scheduling handle returned null task or runner");
+                        throw new IllegalStateException("Couldn't locate current thread runner");
                     }
 
                     finalizer.accept(schedulingHandle, thread);
