@@ -725,7 +725,4 @@ public class Config {
 
     @Comment("The server mod name displayed in server listings and client info")
     public String serverModName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
-
-    @Comment("The server console window title")
-    public String serverGUIName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName() + " Console";
 }
