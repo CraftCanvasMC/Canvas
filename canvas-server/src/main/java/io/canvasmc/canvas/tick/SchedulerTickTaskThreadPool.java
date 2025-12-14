@@ -4,21 +4,18 @@ import ca.spottedleaf.concurrentutil.set.LinkedSortedSet;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
 import io.canvasmc.canvas.Config;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import java.lang.invoke.VarHandle;
-import java.lang.reflect.Array;
 import java.util.BitSet;
 import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
-import org.jetbrains.annotations.NotNull;
+import java.util.function.Predicate;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Original class from ConcurrentUtil {@link ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool}
@@ -152,7 +149,7 @@ public class SchedulerTickTaskThreadPool {
         return this.threads.clone();
     }
 
-    private void insertFresh(final @NotNull SchedulableTick task) {
+    private void insertFresh(final @NonNull SchedulableTick task) {
         final TickThreadRunner[] runners = this.runners;
 
         if (task.isPinned()) {
@@ -261,36 +258,38 @@ public class SchedulerTickTaskThreadPool {
 
         SchedulableTick ret = null;
         if (!this.queued.isEmpty()) {
-            // snapshot the elements, essentially the same as making
-            // a reusable and quick iterator with this partition queue
-            SchedulableTick[] elements = this.queued.elements(runner.id);
             final boolean runnerIsPinned = runner.isPinnedTo();
+            final SchedulableTick[] foundTask = new SchedulableTick[1];
 
-            for (final SchedulableTick task : elements) {
+            this.queued.forEachVisible(runner.id, task -> {
                 final boolean taskIsPinned = task.isPinned();
 
                 // tasks pinned to the runner
                 if (taskIsPinned && task.getPinnedThreadId() == runner.id) {
                     this.queued.remove(task);
-                    ret = task;
-                    break;
+                    foundTask[0] = task;
+                    return false; // stop iterating
                 }
 
                 // work stealing is prioritized, since if we are stealing, it means
                 // the task that is being stolen has missed its deadline...
                 if (!runnerIsPinned && !taskIsPinned && task.isGloballyVisible()) {
                     this.queued.remove(task);
-                    ret = task;
-                    break;
+                    foundTask[0] = task;
+                    return false; // stop iterating
                 }
 
                 // fallback to local work
                 if (!runnerIsPinned && !taskIsPinned) {
                     this.queued.remove(task);
-                    ret = task;
-                    break;
+                    foundTask[0] = task;
+                    return false; // stop iterating
                 }
-            }
+
+                return true; // continue iterating
+            });
+
+            ret = foundTask[0];
         }
 
         if (ret == null) {
@@ -330,7 +329,7 @@ public class SchedulerTickTaskThreadPool {
      * @param task The specified task
      * @see SchedulableTick
      */
-    public void notifyTasks(final @NotNull SchedulableTick task) {
+    public void notifyTasks(final @NonNull SchedulableTick task) {
         task.setMarkedAsHasTasks(true);
         // if ownedBy is non-null, then the thread is already awake
         /* final TickThreadRunner runner = task.ownedBy;
@@ -393,6 +392,7 @@ public class SchedulerTickTaskThreadPool {
         private TickThreadRunner ownedBy;
         private int pinnedThreadId = PINNED_NOT_SET;
         private LinkedSortedSet.Link<SchedulableTick> awaitingLink;
+        private @Nullable Integer assocPartition = null;
 
         public SchedulableTick() {
             this(null);
@@ -422,6 +422,16 @@ public class SchedulerTickTaskThreadPool {
         public boolean isGloballyVisible() {
             // diff + thresh <= 0L
             return (this.getScheduledStart() - System.nanoTime()) + STEAL_THRESH_NANOS <= 0L;
+        }
+
+        @Override
+        public void setPartitionKey(final int partitionKey) {
+            this.assocPartition = partitionKey;
+        }
+
+        @Override
+        public @Nullable Integer getPartitionKey() {
+            return this.assocPartition;
         }
 
         public final boolean isPinned() {
@@ -808,14 +818,10 @@ public class SchedulerTickTaskThreadPool {
     private static class PartitionedPriorityQueue<E extends PartitionedPriorityQueue.Partitionable> {
 
         private final PriorityQueue<E> queue;
-        private final Map<E, Integer> associations;
-        private final List<E> tempBuffer;
         private final Class<? extends E> elementClass;
 
         public PartitionedPriorityQueue(Comparator<? super E> comparator, Class<? extends E> elementClass) {
             this.queue = new PriorityQueue<>(comparator);
-            this.associations = new Object2ObjectOpenHashMap<>();
-            this.tempBuffer = new ObjectArrayList<>(16);
             this.elementClass = elementClass;
         }
 
@@ -826,10 +832,6 @@ public class SchedulerTickTaskThreadPool {
          * </p>
          */
         public void add(E e) {
-            if (associations.containsKey(e) || queue.contains(e)) {
-                throw new IllegalArgumentException("Duplicate element: " + e);
-            }
-
             queue.add(e);
         }
 
@@ -843,48 +845,8 @@ public class SchedulerTickTaskThreadPool {
          * remove it globally first, then call this.
          */
         public void add(E e, int partitionKey) {
-            Integer existing = associations.get(e);
-            if (existing != null || queue.contains(e)) {
-                throw new IllegalArgumentException("Duplicate element: " + e);
-            }
-
-            associations.put(e, partitionKey);
+            e.setPartitionKey(partitionKey);
             queue.add(e);
-        }
-
-
-        public E poll(int partitionKey) {
-            E head = queue.peek();
-            if (head != null) {
-                Integer assoc = associations.get(head);
-                if (assoc == null || assoc == partitionKey || head.isGloballyVisible()) {
-                    queue.poll();
-                    associations.remove(head);
-                    return head;
-                }
-            }
-
-            tempBuffer.clear();
-            E result = null;
-
-            while (!queue.isEmpty()) {
-                E element = queue.poll();
-                Integer assoc = associations.get(element);
-
-                if (assoc == null || assoc == partitionKey || element.isGloballyVisible()) {
-                    result = element;
-                    associations.remove(element);
-                    break;
-                } else {
-                    tempBuffer.add(element);
-                }
-            }
-
-            if (!tempBuffer.isEmpty()) {
-                queue.addAll(tempBuffer);
-            }
-
-            return result;
         }
 
         public boolean isEmpty() {
@@ -892,28 +854,28 @@ public class SchedulerTickTaskThreadPool {
         }
 
         public boolean remove(E element) {
-            boolean removed = queue.remove(element);
-            if (removed) {
-                associations.remove(element);
-            }
-            return removed;
+            return queue.remove(element);
         }
 
-        public E[] elements(final int partitionKey) {
-            final ObjectArrayList<E> snapshot = new ObjectArrayList<>(queue.size());
-
-            // this is safe, held under scheduling lock
+        /**
+         * Iterates over all elements visible to the specified partition key.
+         * Elements are visited in priority order (heap order, not fully sorted).
+         * <p>
+         * The consumer should return true to continue iteration, or false to stop early.
+         * </p>
+         *
+         * @param partitionKey the partition key to filter by
+         * @param consumer the consumer that processes each visible element
+         */
+        public void forEachVisible(final int partitionKey, final Predicate<E> consumer) {
             for (E element : queue) {
-                Integer assoc = associations.get(element);
+                final Integer assoc = element.getPartitionKey();
                 if (assoc == null || assoc == partitionKey || element.isGloballyVisible()) {
-                    snapshot.add(element);
+                    if (!consumer.test(element)) {
+                        return; // early exit
+                    }
                 }
             }
-
-            @SuppressWarnings("unchecked")
-            E[] result = (E[]) Array.newInstance(this.elementClass, snapshot.size());
-            snapshot.toArray(result);
-            return result;
         }
 
         public interface Partitionable {
@@ -924,6 +886,20 @@ public class SchedulerTickTaskThreadPool {
              * @return true if this element should be globally visible
              */
             boolean isGloballyVisible();
+
+            /**
+             * Gets the partition key associated with this element.
+             *
+             * @return the partition key, or null if globally visible
+             */
+            @Nullable Integer getPartitionKey();
+
+            /**
+             * Sets the partition key for this element.
+             *
+             * @param partitionKey the partition key to associate with this element
+             */
+            void setPartitionKey(int partitionKey);
         }
     }
 }
