@@ -722,4 +722,7 @@ public class Config {
         public int waterCreature = 0;
         public int waterAmbient = 0;
     }
+
+    @Comment("The server mod name displayed in server listings and client info")
+    public String serverModName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
 }
