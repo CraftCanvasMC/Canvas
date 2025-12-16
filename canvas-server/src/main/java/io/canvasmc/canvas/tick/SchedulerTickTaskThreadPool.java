@@ -41,7 +41,7 @@ public class SchedulerTickTaskThreadPool {
         return Long.compare(t1.id, t2.id);
     };
     private final LinkedSortedSet<SchedulableTick> awaiting = new LinkedSortedSet<>(TICK_COMPARATOR_BY_TIME);
-    private final PartitionedPriorityQueue<SchedulableTick> queued = new PartitionedPriorityQueue<>(TICK_COMPARATOR_BY_TIME, SchedulableTick.class);
+    private final PartitionedPriorityQueue<SchedulableTick> queued = new PartitionedPriorityQueue<>(TICK_COMPARATOR_BY_TIME);
     private final Object scheduleLock = new Object();
     private final ThreadFactory threadFactory;
     private final int threadCount;
@@ -818,11 +818,9 @@ public class SchedulerTickTaskThreadPool {
     private static class PartitionedPriorityQueue<E extends PartitionedPriorityQueue.Partitionable> {
 
         private final PriorityQueue<E> queue;
-        private final Class<? extends E> elementClass;
 
-        public PartitionedPriorityQueue(Comparator<? super E> comparator, Class<? extends E> elementClass) {
+        public PartitionedPriorityQueue(Comparator<? super E> comparator) {
             this.queue = new PriorityQueue<>(comparator);
-            this.elementClass = elementClass;
         }
 
         /**
