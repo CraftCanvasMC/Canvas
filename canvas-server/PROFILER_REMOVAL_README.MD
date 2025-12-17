@@ -1,4 +1,4 @@
-The script used to create the profiler removal patch is as such:
+The script used to create the Folia profiler removal patch is as such:
 
 ```bash
 #!/usr/bin/env bash
