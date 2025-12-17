@@ -1,59 +1,35 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <jedimastertoothless@hotmail.com>
-Date: Wed, 13 Aug 2025 00:34:37 -0700
+Date: Wed, 17 Dec 2025 10:43:04 -0800
 Subject: [PATCH] Remove Dead Old Watchdog Code
 
-Was originally intended to remove synchronized locks on hot entity code, since we did not need those whatsoever
 
 diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
-index 1626b932a5e46ee77465ef08c2f4430c2e2753c1..8b4a9da3f3e070035500423da98d2f7a99ea8814 100644
+index c26e81b07f1ea6d0820147da35cc8555fd83f75c..864b268531f512d80bbbaf3c23c806197b1492d1 100644
 --- a/net/minecraft/network/Connection.java
 +++ b/net/minecraft/network/Connection.java
-@@ -658,13 +658,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -632,13 +632,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
          if (this.packetListener instanceof TickablePacketListener tickablePacketListener) {
              // Paper start - Buffer joins to world
              if (true) { // Folia - region threading
 -            // Paper start - detailed watchdog information
--            net.minecraft.network.protocol.PacketUtils.packetProcessing.push(this.packetListener);
+-            net.minecraft.network.PacketProcessor.packetProcessing.push(this.packetListener);
 -            try {
              tickablePacketListener.tick();
 -            } finally {
--                net.minecraft.network.protocol.PacketUtils.packetProcessing.pop();
+-                net.minecraft.network.PacketProcessor.packetProcessing.pop();
 -            } // Paper end - detailed watchdog information
              } // Paper end - Buffer joins to world
          }
  
-diff --git a/net/minecraft/network/protocol/PacketUtils.java b/net/minecraft/network/protocol/PacketUtils.java
-index 4a7de2ed6eabe919f0c33de49ed7fab75abac1b4..9ff0f3e37107ed21f66caefd7c64a5216a5b4698 100644
---- a/net/minecraft/network/protocol/PacketUtils.java
-+++ b/net/minecraft/network/protocol/PacketUtils.java
-@@ -21,8 +21,6 @@ public class PacketUtils {
-     public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T processor, BlockableEventLoop<?> executor) throws RunningOnDifferentThreadException {
-         if (!executor.isSameThread()) {
-             Runnable run = () -> { // Folia - region threading
--                packetProcessing.push(processor); // Paper - detailed watchdog information
--                try { // Paper - detailed watchdog information
-                 if (processor instanceof net.minecraft.server.network.ServerCommonPacketListenerImpl serverCommonPacketListener && serverCommonPacketListener.processedDisconnect) return; // Paper - Don't handle sync packets for kicked players
-                 if (processor.shouldHandleMessage(packet)) {
-                     try {
-@@ -37,12 +35,6 @@ public class PacketUtils {
-                 } else {
-                     LOGGER.debug("Ignoring packet due to disconnection: {}", packet);
-                 }
--                // Paper start - detailed watchdog information
--                } finally {
--                    totalMainThreadPacketsProcessed.getAndIncrement();
--                    packetProcessing.pop();
--                }
--                // Paper end - detailed watchdog information
-             // Folia start - region threading
-             };
-             // ignore retired state, if removed then we don't want the packet to be handled
-@@ -81,22 +73,4 @@ public class PacketUtils {
- 
-         packetListener.fillCrashReport(crashReport);
+diff --git a/net/minecraft/network/PacketProcessor.java b/net/minecraft/network/PacketProcessor.java
+index 406849772f764eb5f5f986ea5e3e0213f83b3255..b6fb6b3358d35e713cd0610449549802de4eb627 100644
+--- a/net/minecraft/network/PacketProcessor.java
++++ b/net/minecraft/network/PacketProcessor.java
+@@ -78,28 +78,8 @@ public class PacketProcessor implements AutoCloseable {
+         this.closed = true;
      }
--
+ 
 -    // Paper start - detailed watchdog information
 -    public static final java.util.concurrent.ConcurrentLinkedDeque<PacketListener> packetProcessing = new java.util.concurrent.ConcurrentLinkedDeque<>();
 -    static final java.util.concurrent.atomic.AtomicLong totalMainThreadPacketsProcessed = new java.util.concurrent.atomic.AtomicLong();
@@ -71,12 +47,32 @@ index 4a7de2ed6eabe919f0c33de49ed7fab75abac1b4..9ff0f3e37107ed21f66caefd7c64a521
 -        return listeners;
 -    }
 -    // Paper end - detailed watchdog information
+-
+     record ListenerAndPacket<T extends PacketListener>(T listener, Packet<T> packet) {
+         public void handle() {
+-            packetProcessing.push(this.listener); // Paper - detailed watchdog information
+-            try { // Paper - detailed watchdog information
+             if (this.listener instanceof net.minecraft.server.network.ServerCommonPacketListenerImpl serverCommonPacketListener && (serverCommonPacketListener.processedDisconnect || serverCommonPacketListener.handledDisconnect)) return; // Paper - Don't handle sync packets for kicked players // Folia - correctly handle cases where the configuration listener disconnects, ensure that no login packets get processed
+             if (this.listener.shouldHandleMessage(this.packet)) {
+                 try {
+@@ -114,12 +94,6 @@ public class PacketProcessor implements AutoCloseable {
+             } else {
+                 PacketProcessor.LOGGER.debug("Ignoring packet due to disconnection: {}", this.packet);
+             }
+-            // Paper start - detailed watchdog information
+-            } finally {
+-                totalMainThreadPacketsProcessed.getAndIncrement();
+-                packetProcessing.pop();
+-            }
+-            // Paper end - detailed watchdog information
+         }
+     }
  }
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 238fed45bc1910f149a8050f71b4eba30f00075d..09e4a5331478df4e422e8c2f2fe2933196bb1f79 100644
+index bd5cfe6c5cd60abb0fce4db752d51a154777cf48..a00ca1b6348233f0fcaeb4a239229a75636d479d 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -1091,28 +1091,9 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -1111,28 +1111,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          return this.onGround;
      }
  
@@ -105,8 +101,8 @@ index 238fed45bc1910f149a8050f71b4eba30f00075d..09e4a5331478df4e422e8c2f2fe29331
 +        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot move an entity off-main"); // Folia - region threading
          if (this.noPhysics) {
              this.setPos(this.getX() + movement.x, this.getY() + movement.y, this.getZ() + movement.z);
-         } else {
-@@ -1226,13 +1207,6 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+             this.horizontalCollision = false;
+@@ -1253,13 +1234,6 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                  this.setDeltaMovement(this.getDeltaMovement().multiply(blockSpeedFactor, 1.0, blockSpeedFactor));
              }
          }
@@ -120,17 +116,17 @@ index 238fed45bc1910f149a8050f71b4eba30f00075d..09e4a5331478df4e422e8c2f2fe29331
      }
  
      private void applyMovementEmissionAndPlaySound(Entity.MovementEmission movementEmission, Vec3 movement, BlockPos pos, BlockState state) {
-@@ -5684,9 +5658,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
-     }
+@@ -5738,9 +5712,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
  
      public void setDeltaMovement(Vec3 deltaMovement) {
--        synchronized (this.posLock) { // Paper - detailed watchdog information
-         this.deltaMovement = deltaMovement;
--        } // Paper - detailed watchdog information
+         if (deltaMovement.isFinite()) {
+-            synchronized (this.posLock) { // Paper - detailed watchdog information
+             this.deltaMovement = deltaMovement;
+-            } // Paper - detailed watchdog information
+         }
      }
  
-     public void addDeltaMovement(Vec3 addend) {
-@@ -5785,9 +5757,7 @@ public abstract class Entity implements SyncedDataHolder, Nameable, EntityAccess
+@@ -5842,9 +5814,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          // Paper end - Block invalid positions and bounding box
          boolean posChanged = this.position.x != x || this.position.y != y || this.position.z != z;
          if (posChanged) { // Folia - region threading
