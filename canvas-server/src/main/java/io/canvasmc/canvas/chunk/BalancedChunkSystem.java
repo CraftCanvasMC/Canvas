@@ -14,6 +14,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * This is based off {@link BalancedPrioritisedThreadPool} from ConcurrentUtil by SpottedLeaf.
+ * This code has been modified from its original form to remove max parallelism and rework the
+ * constructor and such for CanvasMC.
+ *
+ * @author dueris modifier
+ * @author spottedleaf original author
+ */
 public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
     public static final long DEFAULT_GROUP_TIME_SLICE = (long)(15.0e6); // 15ms
