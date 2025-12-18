@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <jedimastertoothless@hotmail.com>
+Date: Wed, 17 Dec 2025 17:57:32 -0800
+Subject: [PATCH] Rewrite Moonrise Executor
+
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java b/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java
+index 9a1fbd88e56f8dd01368a0a5e74cfa8c54965d7f..068b3452f56bb89bee317b9311bc550183624b2d 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java
+@@ -12,27 +12,11 @@ public final class MoonriseCommon {
+ 
+     private static final Logger LOGGER = LogUtils.getClassLogger();
+ 
+-    public static final long WORKER_QUEUE_HOLD_TIME = (long)(20.0e6); // 20ms
+-    public static final BalancedPrioritisedThreadPool WORKER_POOL = new BalancedPrioritisedThreadPool(
+-        WORKER_QUEUE_HOLD_TIME,
+-            new Consumer<>() {
+-                private final AtomicInteger idGenerator = new AtomicInteger();
+-
+-                @Override
+-                public void accept(Thread thread) {
+-                    thread.setDaemon(true);
+-                    thread.setName(PlatformHooks.get().getBrand() + " Common Worker #" + this.idGenerator.getAndIncrement());
+-                    thread.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+-                        @Override
+-                        public void uncaughtException(final Thread thread, final Throwable throwable) {
+-                            LOGGER.error("Uncaught exception in thread " + thread.getName(), throwable);
+-                        }
+-                    });
+-                }
+-            }
+-    );
+-    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup CLIENT_GROUP = MoonriseCommon.WORKER_POOL.createOrderedStreamGroup();
+-    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup SERVER_GROUP = MoonriseCommon.WORKER_POOL.createOrderedStreamGroup();
++    // Canvas start - rewrite moonrise executor
++    public static final long WORKER_QUEUE_HOLD_TIME = (long)(10.0e6); // 20ms -> 10ms
++    public static io.canvasmc.canvas.chunk.BalancedChunkSystem WORKER_POOL;
++    public static io.canvasmc.canvas.chunk.BalancedChunkSystem.OrderedStreamGroup SERVER_GROUP;
++    // Canvas end - rewrite moonrise executor
+ 
+     public static void adjustWorkerThreads(final int configWorkerThreads, final int configIoThreads) {
+         int defaultWorkerThreads = Runtime.getRuntime().availableProcessors() / 2;
+@@ -51,10 +35,31 @@ public final class MoonriseCommon {
+ 
+         final int ioThreads = Math.max(1, configIoThreads);
+ 
+-        WORKER_POOL.adjustThreadCount(workerThreads);
++        // Canvas start - rewrite moonrise executor
++        if (WORKER_POOL != null) {
++            // we just need to adjust the thread count, cannot recreate instances
++            WORKER_POOL.adjustThreadCount(workerThreads);
++        } else {
++            // setup chunk system
++            LOGGER.info("Setting up ls_wg chunk system");
++            WORKER_POOL = new io.canvasmc.canvas.chunk.BalancedChunkSystem(
++                WORKER_QUEUE_HOLD_TIME, workerThreads,
++                new io.canvasmc.canvas.util.ThreadBuilder() {
++                    @Override
++                    public void accept(final Thread thread) {
++                        thread.setPriority(io.canvasmc.canvas.Config.INSTANCE.chunks.threadPoolPriority);
++                        thread.setDaemon(true);
++                        thread.setUncaughtExceptionHandler((thread1, throwable) -> LOGGER.error("Uncaught exception in thread {}", thread1.getName(), throwable));
++                        thread.setName("ls_wg worker #" + getAndIncrementId());
++                    }
++                }, "ls_wg"
++            );
++            SERVER_GROUP = WORKER_POOL.createChunkOrderedStreamGroup();
++        }
+         IO_POOL.adjustThreadCount(ioThreads);
+ 
+-        LOGGER.info(PlatformHooks.get().getBrand() + " is using " + workerThreads + " worker threads, " + ioThreads + " I/O threads");
++        LOGGER.info("Running LS ChunkSystem with {} worker threads and {} io threads", workerThreads, ioThreads);
++        // Canvas end - rewrite moonrise executor
+     }
+ 
+     public static final long IO_QUEUE_HOLD_TIME = (long)(25.0e6); // 25ms
+@@ -76,7 +81,7 @@ public final class MoonriseCommon {
+                 }
+             }
+     );
+-    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup CLIENT_IO_GROUP = IO_POOL.createOrderedStreamGroup();
++    // Canvas - remove client-only code
+     public static final BalancedPrioritisedThreadPool.OrderedStreamGroup SERVER_IO_GROUP = IO_POOL.createOrderedStreamGroup();
+ 
+     public static void haltExecutors() {
