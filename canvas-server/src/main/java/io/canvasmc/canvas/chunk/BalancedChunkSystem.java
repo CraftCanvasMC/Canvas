@@ -3,6 +3,7 @@ package io.canvasmc.canvas.chunk;
 import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
 import ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue;
 import ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool;
+import ca.spottedleaf.concurrentutil.executor.thread.PrioritisedQueueExecutorThread;
 import ca.spottedleaf.concurrentutil.list.COWArrayList;
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
