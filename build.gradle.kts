@@ -79,6 +79,12 @@ subprojects {
             events(TestLogEvent.STANDARD_OUT)
         }
     }
+    tasks.withType<RebuildGitPatches>().configureEach {
+        filterPatches = false
+    }
+    tasks.withType<RebuildBaseGitPatches>().configureEach {
+        filterPatches = false
+    }
     extensions.configure<PublishingExtension> {
         repositories {
             maven("https://maven.canvasmc.io/snapshots") {
@@ -95,10 +101,9 @@ subprojects {
         apply(plugin = "xyz.jpenilla.resource-factory-paper-convention")
         dependencies {
             compileOnly(rootProject.projects.canvasServer)
-            compileOnly(rootProject.projects.canvasApi)
         }
         extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
-            apiVersion.set(providers.gradleProperty("mcVersion"))
+            apiVersion.set(providers.gradleProperty("apiVersion"))
             version = "SNAPSHOT-DEV"
             main = project.findProperty("main")?.toString()?.replace("\"", "")
             authors = listOf("CanvasMC")
@@ -110,13 +115,4 @@ subprojects {
 // patching scripts
 tasks.register("fixupMinecraftFilePatches") {
     dependsOn(":canvas-server:fixupMinecraftSourcePatches")
-}
-
-allprojects {
-    tasks.withType<RebuildGitPatches>().configureEach {
-        filterPatches = false
-    }
-    tasks.withType<RebuildBaseGitPatches>().configureEach {
-        filterPatches = false
-    }
 }
