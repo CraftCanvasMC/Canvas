@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.AtomicReference;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.NotNull;
 

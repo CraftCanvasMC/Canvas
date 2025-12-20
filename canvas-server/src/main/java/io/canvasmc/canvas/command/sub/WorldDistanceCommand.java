@@ -15,6 +15,7 @@ import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.Permissions;
 import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.Nullable;
 
@@ -44,7 +45,7 @@ public class WorldDistanceCommand implements Command {
 
     @Override
     public LiteralArgumentBuilder<CommandSourceStack> construct(final @NotNull LiteralArgumentBuilder<CommandSourceStack> base) {
-        return base.requires(stack -> stack.hasPermission(3, "canvas.command.worlddistance"))
+        return base.requires(stack -> stack.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command.worlddistance"))
             .then(argument("type", StringArgumentType.word())
                 .suggests((context, builder) -> {
                     builder.suggest("view");

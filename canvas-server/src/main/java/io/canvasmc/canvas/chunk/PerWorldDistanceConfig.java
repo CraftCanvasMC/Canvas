@@ -25,11 +25,11 @@ public record PerWorldDistanceConfig(AtomicInteger viewDistance, AtomicInteger s
     public static PerWorldDistanceConfig DEFAULT = new PerWorldDistanceConfig(DEFAULT_DISTANCE, DEFAULT_DISTANCE);
 
     public int viewDistanceOrDefault() {
-        return this.viewDistance.get() <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().viewDistance : this.viewDistance.get();
+        return this.viewDistance.get() <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().viewDistance.get() : this.viewDistance.get();
     }
 
     public int simulationDistanceOrDefault() {
-        return this.simulationDistance.get() <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().simulationDistance : this.simulationDistance.get();
+        return this.simulationDistance.get() <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().simulationDistance.get() : this.simulationDistance.get();
     }
 
     public boolean isViewDistanceOverridden() {

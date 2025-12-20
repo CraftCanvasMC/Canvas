@@ -10,7 +10,7 @@ import java.util.Set;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.waypoints.ServerWaypointManager;
-import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.waypoints.WaypointTransmitter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -53,7 +53,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     public boolean isLocatorBarDisabled() {
-        return !world.getGameRules().getBoolean(GameRules.RULE_LOCATOR_BAR);
+        return !world.getGameRules().get(GameRules.LOCATOR_BAR);
     }
 
     @Override

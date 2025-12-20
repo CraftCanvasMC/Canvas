@@ -1,12 +1,12 @@
 package io.canvasmc.canvas;
 
+import ca.spottedleaf.moonrise.common.time.TickData;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.canvasmc.canvas.util.Gradient;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
-import io.papermc.paper.threadedregions.TickData;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
 import java.util.function.Consumer;

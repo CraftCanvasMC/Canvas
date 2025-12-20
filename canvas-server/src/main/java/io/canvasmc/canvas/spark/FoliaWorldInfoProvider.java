@@ -176,11 +176,11 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
     @SuppressWarnings({"removal", "UnstableApiUsage"})
     @Override
     public Collection<DataPackInfo> pollDataPacks() {
-        return this.server.getDataPackManager().getDataPacks().stream()
+        return this.server.getDatapackManager().getEnabledPacks().stream()
             .map(pack -> new DataPackInfo(
-                pack.getTitle(),
-                pack.getDescription(),
-                pack.getSource().name().toLowerCase(Locale.ROOT).replace("_", "")
+                pack.getTitle().examinableName(),
+                pack.getDescription().examinableName(),
+                pack.getSource().toString().toLowerCase(Locale.ROOT).replace("_", "")
             ))
             .collect(Collectors.toList());
     }
