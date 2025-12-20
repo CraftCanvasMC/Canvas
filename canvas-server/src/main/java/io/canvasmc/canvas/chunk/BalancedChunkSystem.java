@@ -8,6 +8,9 @@ import ca.spottedleaf.concurrentutil.list.COWArrayList;
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
 import io.canvasmc.canvas.util.ThreadBuilder;
+import org.jetbrains.annotations.Contract;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
@@ -50,13 +53,13 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    public Thread[] getAliveThreads() {
+    public Thread @NonNull [] getAliveThreads() {
         final WorkerThread[] threads = this.aliveThreads.getArray();
 
         return Arrays.copyOf(threads, threads.length, Thread[].class);
     }
 
-    public Thread[] getCoreThreads() {
+    public Thread @NonNull [] getCoreThreads() {
         final WorkerThread[] threads = this.threads.getArray();
 
         return Arrays.copyOf(threads, threads.length, Thread[].class);
@@ -209,11 +212,11 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    public BalancedChunkSystem.OrderedStreamGroup createChunkOrderedStreamGroup() {
+    public BalancedChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup() {
         return this.createChunkOrderedStreamGroup(new AtomicLong());
     }
 
-    public BalancedChunkSystem.OrderedStreamGroup createChunkOrderedStreamGroup(final AtomicLong subOrderGenerate) {
+    public BalancedChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup(final AtomicLong subOrderGenerate) {
         synchronized (this) {
             if (this.shutdown) {
                 throw new IllegalStateException("Queue is shutdown");
@@ -227,11 +230,11 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    private static int compareGroup(final BalancedChunkSystem.OrderedStreamGroup g1, final BalancedChunkSystem.OrderedStreamGroup g2) {
+    private static int compareGroup(final BalancedChunkSystem.@NonNull OrderedStreamGroup g1, final BalancedChunkSystem.@NonNull OrderedStreamGroup g2) {
         return TimeUtil.compareTimes(g1.lastRetrieved, g2.lastRetrieved);
     }
 
-    private List<BalancedChunkSystem.OrderedStreamGroup> findEligibleGroups() {
+    private @NonNull List<BalancedChunkSystem.OrderedStreamGroup> findEligibleGroups() {
         final List<BalancedChunkSystem.OrderedStreamGroup> nonEmpty = new ArrayList<>();
 
         for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
@@ -243,7 +246,17 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         return nonEmpty;
     }
 
-    private BalancedChunkSystem.OrderedStreamGroup obtainGroup0(final List<BalancedChunkSystem.OrderedStreamGroup> groups, final long time) {
+    private BalancedChunkSystem.@Nullable OrderedStreamGroup findFirstNonEmpty() {
+        for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
+            if (group.hasAnyTasks()) {
+                return group;
+            }
+        }
+
+        return null;
+    }
+
+    private BalancedChunkSystem.OrderedStreamGroup obtainGroup0(final @NonNull List<BalancedChunkSystem.OrderedStreamGroup> groups, final long time) {
         BalancedChunkSystem.OrderedStreamGroup ret = null;
 
         for (final BalancedChunkSystem.OrderedStreamGroup group : groups) {
@@ -329,7 +342,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             return highestTask;
         }
 
-        public Queue createExecutor() {
+        public @NonNull Queue createExecutor() {
             synchronized (BalancedChunkSystem.this) {
                 if (BalancedChunkSystem.this.shutdown) {
                     throw new IllegalStateException("Queue is shutdown");
@@ -402,18 +415,21 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                 return this.wrapped.isShutdown();
             }
 
+            @Contract("_ -> new")
             @Override
-            public PrioritisedTask createTask(final Runnable task) {
+            public @NonNull PrioritisedTask createTask(final Runnable task) {
                 return this.createTask(task, Priority.NORMAL);
             }
 
+            @Contract("_, _ -> new")
             @Override
-            public PrioritisedTask createTask(final Runnable task, final Priority priority) {
+            public @NonNull PrioritisedTask createTask(final Runnable task, final Priority priority) {
                 return this.createTask(task, priority, this.generateNextSubOrder(), 0L);
             }
 
+            @Contract("_, _, _, _ -> new")
             @Override
-            public PrioritisedTask createTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
+            public @NonNull PrioritisedTask createTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
                 return new Task(this.wrapped.createTask(() -> {
                     Queue.this.executors.getAndIncrement();
                     try {
@@ -425,21 +441,21 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             }
 
             @Override
-            public PrioritisedTask queueTask(final Runnable task) {
+            public @NonNull PrioritisedTask queueTask(final Runnable task) {
                 final PrioritisedTask ret = this.createTask(task);
                 ret.queue();
                 return ret;
             }
 
             @Override
-            public PrioritisedTask queueTask(final Runnable task, final Priority priority) {
+            public @NonNull PrioritisedTask queueTask(final Runnable task, final Priority priority) {
                 final PrioritisedTask ret = this.createTask(task, priority);
                 ret.queue();
                 return ret;
             }
 
             @Override
-            public PrioritisedTask queueTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
+            public @NonNull PrioritisedTask queueTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
                 final PrioritisedTask ret = this.createTask(task, priority, subOrder, stream);
                 ret.queue();
                 return ret;
