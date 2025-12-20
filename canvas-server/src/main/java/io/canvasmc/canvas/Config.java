@@ -244,6 +244,7 @@ public class Config {
         public NetworkIoModel networkIoModel = NetworkIoModel.EPOLL;
     }
 
+    // TODO - test performance enhancements - is this worth keeping?
     @Comment("Configurations for enabling virtual threads for different thread pool executors")
     public VirtualThreads virtualThreads = new VirtualThreads();
 
