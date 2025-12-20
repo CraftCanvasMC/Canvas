@@ -1,15 +1,15 @@
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -666,7 +_,7 @@
+@@ -698,7 +_,7 @@
          this.sleepStatus = new SleepStatus();
          this.gameEventDispatcher = new GameEventDispatcher(this);
          this.randomSequences = Objects.requireNonNullElseGet(randomSequences, () -> this.getDataStorage().computeIfAbsent(RandomSequences.TYPE));
 -        this.waypointManager = new ServerWaypointManager();
 +        this.waypointManager = new io.canvasmc.canvas.waypoints.RegionThreadingWaypointManager(this); // Canvas - region threading
+         this.environmentAttributes = EnvironmentAttributeSystem.builder().addDefaultLayers(this).build();
+         //this.updateSkyBrightness(); // Folia - region threading - delay until first tick
          // Paper start - rewrite chunk system
-         this.moonrise$setEntityLookup(new ca.spottedleaf.moonrise.patches.chunk_system.level.entity.server.ServerEntityLookup((ServerLevel)(Object)this, ((ServerLevel)(Object)this).new EntityCallbacks()));
-         this.chunkTaskScheduler = new ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler((ServerLevel)(Object)this);
-@@ -698,6 +_,14 @@
+@@ -732,6 +_,13 @@
              }
          }
          // Canvas end - rewrite scheduler
@@ -20,19 +20,18 @@
 +        int simulationDistance = this.serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault();
 +        this.chunkSource.setSimulationDistance(simulationDistance - 1);
 +        // Canvas end - per world distance
-+        new io.canvasmc.canvas.event.WorldPreLoadEvent(getWorld(), io.canvasmc.canvas.event.WorldPreLoadEvent.Stage.CONSTRUCTED).callEvent(); // Canvas - world pre load event
      }
  
      // Folia start - region threading
-@@ -720,6 +_,7 @@
-     public static final int WORLD_INIT_CHECKED = 2;
-     public final java.util.concurrent.atomic.AtomicInteger checkInitialised = new java.util.concurrent.atomic.AtomicInteger(WORLD_INIT_NOT_CHECKED);
-     public ChunkPos randomSpawnSelection;
-+    public final io.canvasmc.canvas.util.ticket.TicketHolder<io.canvasmc.canvas.util.ticket.UnloadTicket> canvas$worldUnloadTicket = new io.canvasmc.canvas.util.ticket.TicketHolder<>(); // Canvas - rewrite world load and unload
+@@ -750,6 +_,7 @@
+     }
+     public final io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData taskQueueRegionData = new io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData(this);
  
++    public final io.canvasmc.canvas.util.ticket.TicketHolder<io.canvasmc.canvas.util.ticket.UnloadTicket> canvas$worldUnloadTicket = new io.canvasmc.canvas.util.ticket.TicketHolder<>(); // Canvas - rewrite world load and unload
      public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
      private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
-@@ -952,71 +_,73 @@
+ 
+@@ -1003,71 +_,73 @@
      // Paper start - optimise random ticking
      private final io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource simpleRandom = io.papermc.paper.threadedregions.util.SimpleThreadLocalRandomSource.INSTANCE; // Folia - region threading
  
@@ -141,7 +140,7 @@
          }
      }
  
-@@ -1025,7 +_,7 @@
+@@ -1076,7 +_,7 @@
          boolean isRaining = this.isRaining();
          int minBlockX = pos.getMinBlockX();
          int minBlockZ = pos.getMinBlockZ();
@@ -150,12 +149,12 @@
              BlockPos blockPos = this.findLightningTargetAround(this.getBlockRandomPos(minBlockX, 0, minBlockZ, 15));
              if (this.isRainingAt(blockPos)) {
                  DifficultyInstance currentDifficultyAt = this.getCurrentDifficultyAt(blockPos);
-@@ -1056,6 +_,16 @@
-     public void tickPrecipitation(BlockPos blockPos) {
-         BlockPos heightmapPos = this.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, blockPos);
-         BlockPos blockPos1 = heightmapPos.below();
+@@ -1107,6 +_,16 @@
+     public void tickPrecipitation(BlockPos pos) {
+         BlockPos heightmapPos = this.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, pos);
+         BlockPos blockPos = heightmapPos.below();
 +        // Canvas start - optimize precipitation
-+        BlockState heighestBlockState = this.getBlockState(blockPos1);
++        BlockState heighestBlockState = this.getBlockState(blockPos);
 +        if (
 +            !(
 +                (heighestBlockState.tagFlag & io.canvasmc.canvas.chunk.block.BlockTags.WATER) != 0 && heighestBlockState.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock
@@ -165,19 +164,19 @@
 +        }
 +        // Canvas end - optimize precipitation
          Biome biome = this.getBiome(heightmapPos).value();
-         if (biome.shouldFreeze(this, blockPos1)) {
-             org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(this, blockPos1, Blocks.ICE.defaultBlockState(), 3, null); // CraftBukkit
-@@ -1079,8 +_,7 @@
+         if (biome.shouldFreeze(this, blockPos)) {
+             org.bukkit.craftbukkit.event.CraftEventFactory.handleBlockFormEvent(this, blockPos, Blocks.ICE.defaultBlockState(), 3, null); // CraftBukkit
+@@ -1130,8 +_,7 @@
  
-             Biome.Precipitation precipitationAt = biome.getPrecipitationAt(blockPos1, this.getSeaLevel());
+             Biome.Precipitation precipitationAt = biome.getPrecipitationAt(blockPos, this.getSeaLevel());
              if (precipitationAt != Biome.Precipitation.NONE) {
--                BlockState blockState2 = this.getBlockState(blockPos1);
--                blockState2.getBlock().handlePrecipitation(blockState2, this, blockPos1, precipitationAt);
-+                heighestBlockState.getBlock().handlePrecipitation(heighestBlockState, this, blockPos1, precipitationAt);
+-                BlockState blockState2 = this.getBlockState(blockPos);
+-                blockState2.getBlock().handlePrecipitation(blockState2, this, blockPos, precipitationAt);
++                heighestBlockState.getBlock().handlePrecipitation(heighestBlockState, this, blockPos, precipitationAt); // Canvas - optimize precipitation
              }
          }
      }
-@@ -1694,7 +_,7 @@
+@@ -1759,7 +_,7 @@
  
      public void unload(LevelChunk chunk) {
          // Spigot start
@@ -186,7 +185,7 @@
              if (blockEntity instanceof net.minecraft.world.Container) {
                  // Paper start - this area looks like it can load chunks, change the behavior
                  // chests for example can apply physics to the world
-@@ -2369,11 +_,27 @@
+@@ -2445,11 +_,27 @@
          Optional<Holder<PoiType>> optional1 = PoiTypes.forState(newState);
          if (!Objects.equals(optional, optional1)) {
              BlockPos blockPos = pos.immutable();
@@ -208,7 +207,7 @@
 +                    task -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(this, blockPos.getX() >> 4, blockPos.getZ() >> 4, task);
 +            optional.ifPresent(holder -> scheduler.accept(() -> {
                  this.getPoiManager().remove(blockPos);
-                 DebugPackets.sendPoiRemovedPacket(this, blockPos);
+                 this.debugSynchronizers.dropPoi(blockPos);
              }));
 -            optional1.ifPresent(holder -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(this, blockPos.getX() >> 4, blockPos.getZ() >> 4, () -> { // Folia - region threading
 +            optional1.ifPresent(holder -> scheduler.accept(() -> {
@@ -216,7 +215,7 @@
                  // Paper start - Remove stale POIs
                  if (optional.isEmpty() && this.getPoiManager().exists(blockPos, ignored -> true)) {
                      this.getPoiManager().remove(blockPos);
-@@ -2507,6 +_,7 @@
+@@ -2584,6 +_,7 @@
  
          for (TickingBlockEntity tickingBlockEntity : (Iterable<? extends net.minecraft.world.level.block.entity.TickingBlockEntity>)null) { // Folia - region threading
              BlockPos pos = tickingBlockEntity.getPos();

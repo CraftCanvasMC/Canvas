@@ -24,12 +24,12 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
-import net.minecraft.Util;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Util;
 import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
 import org.jetbrains.annotations.NotNull;
@@ -256,9 +256,6 @@ public class Config {
 
         @Comment("Enables virtual thread usage for the text filter executor")
         public boolean tabCompleteExecutor = false;
-
-        @Comment("Enables virtual thread usage for the profile lookup executor")
-        public boolean profileLookupExecutor = false;
     }
 
     @Comment("Check if a cactus can survive before growing. Heavily optimizes cacti farms")
@@ -321,16 +318,11 @@ public class Config {
         public boolean mc223153 = false;
 
         @Comment({
-            "Fixes MC-119417 - https://bugs.mojang.com/browse/MC/issues/MC-119417",
-            "A spectator can occupy a bed if they enter it and then are switched to spectator mode"
-        })
-        public boolean mc119417 = false; // TODO - fixed by Mojang, remove.
-
-        @Comment({
             "Fixes MC-200418 - https://bugs.mojang.com/browse/MC/issues/MC-200418",
             "Cured baby zombie villagers stay as jockey variant"
         })
-        public boolean mc200418 = false; // TODO - fixed by Mojang, remove.
+        // track this, was reopened in 1.21.11-pre2
+        public boolean mc200418 = false;
 
         @Comment({
             "Fixes MC-200418 - https://bugs.mojang.com/browse/MC/issues/MC-94054",
@@ -381,14 +373,6 @@ public class Config {
         public boolean mc132878 = false;
 
         @Comment({
-            "Fixes MC-129909 - https://bugs.mojang.com/browse/MC/issues/MC-129909",
-            "Players in spectator mode continue to consume foods and liquids shortly after switching game modes",
-            "This also fixes MC-81773 - https://bugs.mojang.com/browse/MC/issues/MC-81773",
-            "Bows and tridents drawn in survival/creative/adventure mode can be released in spectator mode"
-        })
-        public boolean mc129909 = false;
-
-        @Comment({
             "Fixes MC-121706 - https://bugs.mojang.com/browse/MC/issues/MC-121706",
             "Skeletons and illusioners aren't looking up / down at their target while strafing"
         })
@@ -407,22 +391,10 @@ public class Config {
         public boolean mc100991 = false;
 
         @Comment({
-            "Fixes MC-69216 - https://bugs.mojang.com/browse/MC/issues/MC-69216",
-            "Switching to spectator mode while fishing keeps rod cast"
-        })
-        public boolean mc69216 = false; // TODO - fixed by Mojang, remove.
-
-        @Comment({
             "Fixes MC-30391 - https://bugs.mojang.com/browse/MC/issues/MC-30391",
             "Chickens, blazes and the wither emit particles when landing from a height, despite falling slowly"
         })
         public boolean mc30391 = false;
-
-        @Comment({
-            "Fixes MC-2025 - https://bugs.mojang.com/browse/MC/issues/MC-2025",
-            "Mobs going out of fenced areas/suffocate in blocks when loading chunks"
-        })
-        public boolean mc2025 = false; // TODO - fixed by Mojang, remove.
 
         @Comment({
             "Fixes MC-183990 - https://bugs.mojang.com/browse/MC/issues/MC-183990",
@@ -477,8 +449,8 @@ public class Config {
     @NamespacedKeyValidator.NamespacedKey
     public String defaultRespawnDimensionKey = "minecraft:overworld";
 
-    public ResourceKey<Level> fetchRespawnDimensionKey() {
-        return ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(this.defaultRespawnDimensionKey));
+    public ResourceKey<@NotNull Level> fetchRespawnDimensionKey() {
+        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(this.defaultRespawnDimensionKey));
     }
 
     public Containers containers = new Containers();

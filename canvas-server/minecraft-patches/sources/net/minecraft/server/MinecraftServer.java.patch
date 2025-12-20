@@ -1,7 +1,7 @@
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
-@@ -286,7 +_,7 @@
-     public static final long SERVER_INIT = System.nanoTime(); // Paper - Lag compensation
+@@ -365,7 +_,7 @@
+     // Paper end - improve tick loop
  
      // Folia start - regionised ticking
 -    public final io.papermc.paper.threadedregions.RegionizedServer regionizedServer = new io.papermc.paper.threadedregions.RegionizedServer();
@@ -9,7 +9,7 @@
  
      @Override
      public <V> CompletableFuture<V> submit(java.util.function.Supplier<V> task) {
-@@ -336,7 +_,7 @@
+@@ -415,7 +_,7 @@
          thread.setUncaughtExceptionHandler((thread1, exception) -> LOGGER.error("Uncaught exception in server thread", exception));
          thread.setPriority(Thread.NORM_PRIORITY+2); // Paper - Perf: Boost priority
          if (Runtime.getRuntime().availableProcessors() > 4) {
@@ -18,15 +18,15 @@
          }
  
          S minecraftServer = (S)threadFunction.apply(thread);
-@@ -720,6 +_,7 @@
-             primaryLevelData.setModdedInfo(this.getServerModName(), this.getModdedStatus().shouldReportAsModified());
-             this.addLevel(serverLevel); // Paper - Put world into worldlist before initing the world; move up
-             // Canvas - rewrite scheduler
-+            LOGGER.info("Using world distance config of {} for world '{}'", serverLevel.serverLevelData.canvas$distanceConfig, serverLevel); // Canvas - per world distance
- 
-             // Paper - Put world into worldlist before initing the world; move up
-             this.getPlayerList().addWorldborderListener(serverLevel);
-@@ -1228,11 +_,7 @@
+@@ -736,6 +_,7 @@
+             );
+         }
+         this.addLevel(serverLevel);
++        LOGGER.info("Using world distance config of {} for world '{}'", serverLevel.serverLevelData.canvas$distanceConfig, serverLevel); // Canvas - per world distance
+         this.initWorld(serverLevel, serverLevelData, worldOptions);
+     }
+     public void initWorld(ServerLevel serverLevel, net.minecraft.world.level.storage.PrimaryLevelData serverLevelData, WorldOptions worldOptions) {
+@@ -1312,11 +_,7 @@
                  io.papermc.paper.threadedregions.RegionizedServer.getInstance().init(); // Folia - region threading - only after loading worlds
                  final long actualDoneTimeMs = System.currentTimeMillis() - org.bukkit.craftbukkit.Main.BOOT_TIME.toEpochMilli(); // Paper - Improve startup message
                  LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1000.00D)); // Paper - Improve startup message
@@ -39,7 +39,7 @@
              }
              // Folia end - region threading
              // Spigot start
-@@ -1343,7 +_,7 @@
+@@ -1410,7 +_,7 @@
              }
  
              this.onServerCrash(crashReport);
@@ -48,15 +48,7 @@
              try {
                  this.stopped = true;
                  this.stopServer();
-@@ -1602,6 +_,7 @@
-                     LOGGER.info("Initialising world '" + region.world.getWorld().getName() + "' before it can be ticked...");
-                     this.initWorld(region.world, region.world.serverLevelData, worldData, region.world.serverLevelData.worldGenOptions()); // Folia - delayed until first tick of world
-                     region.world.checkInitialised.set(ServerLevel.WORLD_INIT_CHECKED);
-+                    new io.canvasmc.canvas.event.WorldPreLoadEvent(region.world.getWorld(), io.canvasmc.canvas.event.WorldPreLoadEvent.Stage.INIT_WORLD).callEvent(); // Canvas - world pre load event
-                     LOGGER.info("Initialised world '" + region.world.getWorld().getName() + "'");
-                 } // else: must be checked
-             }
-@@ -1628,9 +_,74 @@
+@@ -1685,9 +_,74 @@
                  scheduler.executeTick();
              }
          }
@@ -131,7 +123,7 @@
          this.tickChildren(hasTimeLeft, region); // Folia - region threading
          if (false && nanos - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - region threading
              this.lastServerStatus = nanos;
-@@ -1639,6 +_,27 @@
+@@ -1696,6 +_,27 @@
  
          //this.ticksUntilAutosave--; // Folia - region threading
          // Paper start - Incremental chunk and player saving
@@ -159,18 +151,18 @@
          int playerSaveInterval = io.papermc.paper.configuration.GlobalConfiguration.get().playerAutoSave.rate;
          if (playerSaveInterval < 0) {
              playerSaveInterval = autosavePeriod;
-@@ -1657,6 +_,7 @@
+@@ -1714,6 +_,7 @@
          } finally {
              this.isSaving = false;
          }
 +        } // Canvas - optimize autosave
          // Paper end - Incremental chunk and player saving
  
-         //this.runAllTasks(); // Paper - move runAllTasks() into full server tick (previously for timings) // Folia - region threading
-@@ -1741,6 +_,19 @@
+         //this.server.spark.executeMainThreadTasks(); // Paper - spark // Folia - region threading
+@@ -1812,6 +_,19 @@
+         //io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.ADVENTURE_CLICK_MANAGER.handleQueue(this.tickCount); // Paper // Folia - region threading - moved to global tick
          //io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue(this.tickCount); // Paper // Folia - region threading - moved to global tick
          //this.getFunctions().tick(); // Folia - region threading - TODO Purge functions
- 
 +        // Canvas start - async save-all command
 +        region.canvas$saveAllTicket.consumeIfPresent(ticket -> {
 +            try {
@@ -184,13 +176,13 @@
 +            }
 +        });
 +        // Canvas end - async save-all command
+         this.updateEffectiveRespawnData();
+ 
          // CraftBukkit start
-         // Run tasks that are waiting on processing
-         if (false) while (!this.processQueue.isEmpty()) { // Folia - region threading
-@@ -1852,11 +_,16 @@
+@@ -1931,11 +_,16 @@
+      * Gets the ServerLevel by the given dimension.
       */
-     @Nullable
-     public ServerLevel getLevel(ResourceKey<Level> dimension) {
+     public @Nullable ServerLevel getLevel(ResourceKey<Level> dimension) {
 -        return this.levels.get(dimension);
 +        // Canvas start - region threading
 +        ServerLevel serverLevel = this.levels.get(dimension);
@@ -205,7 +197,7 @@
          Map<ResourceKey<Level>, ServerLevel> oldLevels = this.levels;
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.put(level.dimension(), level);
-@@ -1864,6 +_,7 @@
+@@ -1943,6 +_,7 @@
      }
  
      public void removeLevel(ServerLevel level) {
@@ -213,7 +205,7 @@
          Map<ResourceKey<Level>, ServerLevel> oldLevels = this.levels;
          Map<ResourceKey<Level>, ServerLevel> newLevels = Maps.newLinkedHashMap(oldLevels);
          newLevels.remove(level.dimension());
-@@ -1904,7 +_,8 @@
+@@ -1974,7 +_,7 @@
  
      @DontObfuscate
      public String getServerModName() {
@@ -222,20 +214,7 @@
      }
  
      public SystemReport fillSystemReport(SystemReport systemReport) {
-@@ -2052,6 +_,12 @@
- 
-     public abstract boolean isEpollEnabled();
- 
-+    // Canvas start - bump netty
-+    public abstract boolean isIoUringEnabled();
-+
-+    public abstract boolean isKqueueEnabled();
-+
-+    // Canvas end - bump netty
-     public boolean isPvpAllowed() {
-         return this.pvp;
-     }
-@@ -2222,6 +_,13 @@
+@@ -2280,6 +_,13 @@
          return 256;
      }
  

@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/entity/ai/Brain.java
 +++ b/net/minecraft/world/entity/ai/Brain.java
-@@ -45,16 +_,24 @@
+@@ -47,16 +_,24 @@
      static final Logger LOGGER = LogUtils.getLogger();
      private final Supplier<Codec<Brain<E>>> codec;
      private static final int SCHEDULE_UPDATE_DELAY = 20;
@@ -16,7 +16,7 @@
 +    public static final io.canvasmc.canvas.util.map.BehaviorControlArraySet[] EMPTY_BEHAVIOR_ARRAY = {};
 +    private Map<Activity, Set<BehaviorControl<? super E>>>[] availableBehaviorsByPriorityArray = EMPTY_MAP_ARRAY;
 +    private io.canvasmc.canvas.util.map.BehaviorControlArraySet<? super E>[] activeBehaviors = EMPTY_BEHAVIOR_ARRAY;
-     private Schedule schedule = Schedule.EMPTY;
+     private @Nullable EnvironmentAttribute<Activity> schedule;
 -    private final Map<Activity, Set<Pair<MemoryModuleType<?>, MemoryStatus>>> activityRequirements = Maps.newHashMap();
 -    private final Map<Activity, Set<MemoryModuleType<?>>> activityMemoriesToEraseWhenStopped = Maps.newHashMap();
 -    private Set<Activity> coreActivities = Sets.newHashSet();
@@ -32,53 +32,7 @@
  
      public static <E extends LivingEntity> Brain.Provider<E> provider(
          Collection<? extends MemoryModuleType<?>> memoryTypes, Collection<? extends SensorType<? extends Sensor<? super E>>> sensorTypes
-@@ -70,13 +_,22 @@
-             (new MapCodec<Brain<E>>() {
-                     @Override
-                     public <T> Stream<T> keys(DynamicOps<T> ops) {
--                        return memoryTypes.stream()
--                            .flatMap(
--                                memoryModuleType -> memoryModuleType.getCodec()
--                                    .map(codec -> BuiltInRegistries.MEMORY_MODULE_TYPE.getKey((MemoryModuleType<?>)memoryModuleType))
--                                    .stream()
--                            )
--                            .map(resourceLocation -> ops.createString(resourceLocation.toString()));
-+                        // Canvas start - remove streams
-+                        List<T> results = new java.util.ArrayList<>();
-+
-+                        for (MemoryModuleType<?> memoryModuleType : memoryTypes) {
-+                            final Optional<?> codec = memoryModuleType.getCodec();
-+
-+                            if (codec.isPresent()) {
-+                                final net.minecraft.resources.ResourceLocation resourceLocation = BuiltInRegistries.MEMORY_MODULE_TYPE.getKey(memoryModuleType);
-+                                final T opsResult = ops.createString(resourceLocation.toString());
-+
-+                                results.add(opsResult);
-+                            }
-+                        }
-+
-+                        return results.stream();
-+                        // Canvas end - remove streams
-                     }
- 
-                     @Override
-@@ -111,7 +_,14 @@
- 
-                     @Override
-                     public <T> RecordBuilder<T> encode(Brain<E> input, DynamicOps<T> ops, RecordBuilder<T> prefix) {
--                        input.memories().forEach(memoryValue -> memoryValue.serialize(ops, prefix));
-+                        // Canvas start - remove streams
-+                        for (Entry<MemoryModuleType<?>, Optional<? extends ExpirableValue<?>>> memory : input.memories.entrySet()) {
-+                            final Brain.MemoryValue<?> result = Brain.MemoryValue.createUnchecked(memory.getKey(), memory.getValue());
-+
-+                            result.serialize(ops, prefix);
-+                        }
-+
-+                        // Canvas end - remove streams
-                         return prefix;
-                     }
-                 })
-@@ -146,6 +_,7 @@
+@@ -148,6 +_,7 @@
          for (Brain.MemoryValue<?> memoryValue : memoryValues) {
              memoryValue.setMemoryInternal(this);
          }
@@ -86,7 +40,7 @@
      }
  
      public <T> DataResult<T> serializeStart(DynamicOps<T> ops) {
-@@ -162,6 +_,8 @@
+@@ -164,6 +_,8 @@
  
      public void clearMemories() {
          this.memories.keySet().forEach(memoryModuleType -> this.memories.put((MemoryModuleType<?>)memoryModuleType, Optional.empty()));
@@ -95,7 +49,7 @@
      }
  
      public <U> void eraseMemory(MemoryModuleType<U> type) {
-@@ -185,10 +_,21 @@
+@@ -187,10 +_,21 @@
              if (memory.isPresent() && this.isEmptyCollection(memory.get().getValue())) {
                  this.eraseMemory(memoryType);
              } else {
@@ -118,7 +72,7 @@
  
      public <U> Optional<U> getMemory(MemoryModuleType<U> type) {
          Optional<? extends ExpirableValue<?>> optional = this.memories.get(type);
-@@ -346,7 +_,7 @@
+@@ -343,7 +_,7 @@
      }
  
      public void addActivity(Activity activity, ImmutableList<? extends Pair<Integer, ? extends BehaviorControl<? super E>>> tasks) {
@@ -127,7 +81,7 @@
      }
  
      public void addActivityWithConditions(
-@@ -379,15 +_,18 @@
+@@ -376,15 +_,18 @@
  
          for (Pair<Integer, ? extends BehaviorControl<? super E>> pair : tasks) {
              this.availableBehaviorsByPriority
@@ -148,7 +102,7 @@
      }
  
      public boolean isActive(Activity activity) {
-@@ -404,6 +_,7 @@
+@@ -401,6 +_,7 @@
              }
          }
  
@@ -156,7 +110,7 @@
          return brain;
      }
  
-@@ -421,16 +_,33 @@
+@@ -418,16 +_,33 @@
      }
  
      private void forgetOutdatedMemories() {
@@ -195,7 +149,7 @@
      }
  
      public void stopAll(ServerLevel level, E owner) {
-@@ -443,35 +_,96 @@
+@@ -440,35 +_,96 @@
          }
          // Folia end - region threading
          long gameTime = owner.level().getGameTime();
@@ -232,13 +186,6 @@
 -                Activity activity = entry.getKey();
 -                if (this.activeActivities.contains(activity)) {
 -                    for (BehaviorControl<? super E> behaviorControl : entry.getValue()) {
--                        if (behaviorControl.getStatus() == Behavior.Status.STOPPED) {
--                            behaviorControl.tryStart(level, entity, gameTime);
--                        }
--                    }
--                }
--            }
--        }
 +        // Leaf start - optimize brain
 +        if (this.availableBehaviorsByPriorityArray.length != this.availableBehaviorsByPriority.size()) {
 +            this.availableBehaviorsByPriorityArray = this.availableBehaviorsByPriority.values().toArray(EMPTY_MAP_ARRAY);
@@ -276,14 +223,11 @@
 +            }
 +        }
 +        // Leaf end - optimize brain
-     }
- 
-     private void tickEachRunningBehavior(ServerLevel level, E entity) {
-         long gameTime = level.getGameTime();
- 
--        for (BehaviorControl<? super E> behaviorControl : this.getRunningBehaviors()) {
--            behaviorControl.tickOrStop(level, entity, gameTime);
--        }
++    }
++
++    private void tickEachRunningBehavior(ServerLevel level, E entity) {
++        long gameTime = level.getGameTime();
++
 +        // Leaf start - optimize brain
 +        if (this.availableBehaviorsByPriorityArray.length != this.availableBehaviorsByPriority.size()) {
 +            this.availableBehaviorsByPriorityArray = this.availableBehaviorsByPriority.values().toArray(new Map[0]);
@@ -300,13 +244,22 @@
 +                    BehaviorControl<? super E> behaviorControl = behaviorControlsRaw[i];
 +                    if (behaviorControl.getStatus() == Behavior.Status.RUNNING) {
 +                        behaviorControl.tickOrStop(level, entity, gameTime);
-+                        if (behaviorControl.getStatus() == Behavior.Status.STOPPED) {
+                         if (behaviorControl.getStatus() == Behavior.Status.STOPPED) {
+-                            behaviorControl.tryStart(level, entity, gameTime);
 +                            behaviorControls.dec();
-+                        }
-+                    }
-+                }
-+            }
-+        }
+                         }
+                     }
+                 }
+             }
+         }
+-    }
+-
+-    private void tickEachRunningBehavior(ServerLevel level, E entity) {
+-        long gameTime = level.getGameTime();
+-
+-        for (BehaviorControl<? super E> behaviorControl : this.getRunningBehaviors()) {
+-            behaviorControl.tickOrStop(level, entity, gameTime);
+-        }
 +        // Leaf end - optimize brain
      }
  
