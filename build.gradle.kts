@@ -101,6 +101,7 @@ subprojects {
         apply(plugin = "xyz.jpenilla.resource-factory-paper-convention")
         dependencies {
             compileOnly(rootProject.projects.canvasServer)
+            compileOnly(rootProject.projects.canvasApi)
         }
         extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
             apiVersion.set(providers.gradleProperty("apiVersion"))
