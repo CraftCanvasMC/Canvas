@@ -4,6 +4,7 @@ pluginManagement {
     repositories {
         mavenLocal()
         gradlePluginPortal()
+        maven("https://maven.canvasmc.io/snapshots") // TODO: remove me when switching to stable weaver
         maven {
             name = "canvasmc"
             url = uri("https://maven.canvasmc.io/releases")
