@@ -67,15 +67,18 @@ You can use Canvas’s API in your own Minecraft plugins. Here’s an example of
 
 ```kotlin
 repositories {
-  maven {
-    name = "Canvas"
-    url = uri("https://maven.canvasmc.io/snapshots")
-  }
-  mavenCentral()
-  maven("https://repo.papermc.io/repository/maven-public/")
+    maven {
+        name = "Canvas"
+        url = uri("https://maven.canvasmc.io/snapshots")
+    }
 }
+
 dependencies {
-  implementation("io.canvasmc.canvas:canvas-api:1.21.8-R0.1-SNAPSHOT")
+    compileOnly("io.canvasmc.canvas:canvas-api:1.21.8-R0.1-SNAPSHOT")
+}
+
+java {
+    toolchain.languageVersion.set(JavaLanguageVersion.of(21))
 }
 ```
 
@@ -85,7 +88,7 @@ Replace the version number with the appropriate version you want to target.
 
 ## REST API
 
-Canvas provides a REST interface to fetch build and version metadata. Documentation is available via [The docs page](https://docs.canvasmc.io/developers/rest-api)
+Canvas provides a REST interface to fetch build and version metadata. Documentation is available via [The docs page](https://docs.canvasmc.io/guides/developers/rest-api/)
 
 ---
 
@@ -108,7 +111,7 @@ We welcome many forms of contributions:
 * Community help & support
 * Donations to help support the developers
 
-See the [Contributing Guide](https://docs.canvasmc.io/developers/contributing) for more detail.
+See the [Canvas Contributing Guide](https://docs.canvasmc.io/guides/developers/contributing/canvas/) for more detail.
 
 ---
 
