@@ -677,9 +677,6 @@ public class Config {
     })
     public double waypointUpdateScale = 4000.0D;
 
-    @Comment("Whether to use an alternative autosave implementation for region-threading")
-    public boolean optimizedAutoSave = false;
-
     @Comment({
         "Natural mob spawning increments for attempts to spawn mobs.",
         "This can create \"pauses\" between trying to spawn mobs per-chunk"
