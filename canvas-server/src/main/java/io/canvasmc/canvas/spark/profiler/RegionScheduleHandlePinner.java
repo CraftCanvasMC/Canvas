@@ -1,11 +1,13 @@
 package io.canvasmc.canvas.spark.profiler;
 
+import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.util.Priority;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
+import io.canvasmc.canvas.configuration.TriConsumer;
 import io.canvasmc.canvas.tick.COWLongArrayList;
-import io.canvasmc.canvas.tick.SchedulerTickTaskThreadPool;
+import io.canvasmc.canvas.tick.CRSThreadPool;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
@@ -21,6 +23,7 @@ import net.minecraft.server.level.Ticket;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.border.WorldBorder;
 import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,12 +46,12 @@ public interface RegionScheduleHandlePinner {
      * @param finalizer the consumer that finishes the Spark profiler setup
      * @throws CommandSyntaxException if an error occurs in setup and should be sent as an error to the sender
      */
-    void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, SchedulerTickTaskThreadPool.TickThreadRunner> finalizer) throws CommandSyntaxException;
+    void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, CRSThreadPool.TickThreadRunner> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException;
 
     /**
      * Wraps up pinning for the current {@link RegionScheduleHandlePinner}. This should do the following:
      * <br>
-     * - Call the finalizer {@link Consumer} when you <i>retrieve</i> the {@link io.canvasmc.canvas.tick.SchedulerTickTaskThreadPool.SchedulableTick},
+     * - Call the finalizer {@link Consumer} when you <i>retrieve</i> the {@link ca.spottedleaf.concurrentutil.scheduler.SchedulableTick},
      * and then <i>after</i> cleanup the pin.
      * <br>
      * - Call the finalizer <i>on the profiling schedule handle</i>
@@ -58,7 +61,7 @@ public interface RegionScheduleHandlePinner {
      * @param finalizer the consumer that finishes the Spark profiler completion
      * @throws CommandSyntaxException if an error occurs in completion and should be sent as an error to the sender
      */
-    void unpin(Consumer<SchedulerTickTaskThreadPool.SchedulableTick> finalizer) throws CommandSyntaxException;
+    void unpin(Consumer<SchedulableTick> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException;
 
     /**
      * Fetches the logger for this region pinner, used for debugging purposes
@@ -79,7 +82,7 @@ public interface RegionScheduleHandlePinner {
         public static final AtomicReference<ServerLevel> PROFILING_LEVEL = new AtomicReference<>();
 
         @Override
-        public void pin(final BiConsumer<TickRegionScheduler.RegionScheduleHandle, SchedulerTickTaskThreadPool.TickThreadRunner> finalizer) throws CommandSyntaxException {
+        public void pin(final BiConsumer<TickRegionScheduler.RegionScheduleHandle, CRSThreadPool.TickThreadRunner> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException {
             // note: this is the BLOCK pos, not to be confused with the CHUNK pos
             int minX = Math.min(fromPos.x(), toPos.x());
             int minZ = Math.min(fromPos.z(), toPos.z());
@@ -132,11 +135,7 @@ public interface RegionScheduleHandlePinner {
                         throw new IllegalStateException("Region must be present at the profiling coordinates");
                     }
                     final TickRegionScheduler.RegionScheduleHandle schedulingHandle = region.getData().getRegionSchedulingHandle();
-                    final SchedulerTickTaskThreadPool.TickThreadRunner thread = TickRegions.getScheduler().scheduler.getCurrentTickThreadRunner();
-
-                    if (thread == null) {
-                        throw new IllegalStateException("Couldn't locate current thread runner");
-                    }
+                    final CRSThreadPool.TickThreadRunner thread = crsThreadPool.getCurrentTickThreadRunner();
 
                     finalizer.accept(schedulingHandle, thread);
                 }
@@ -144,7 +143,7 @@ public interface RegionScheduleHandlePinner {
         }
 
         @Override
-        public void unpin(Consumer<SchedulerTickTaskThreadPool.SchedulableTick> finalizer) {
+        public void unpin(Consumer<SchedulableTick> finalizer, CRSThreadPool crsThreadPool) {
             final long[] curr = PROFILING_CHUNKS.getArray();
             final ServerLevel level = PROFILING_LEVEL.getAndSet(null);
             if (level == null)
@@ -164,7 +163,7 @@ public interface RegionScheduleHandlePinner {
                     ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = TickRegionScheduler.getCurrentRegion();
                     if (region == null)
                         throw new IllegalStateException("Region must be present at the profiling coordinates");
-                    SchedulerTickTaskThreadPool.SchedulableTick backendTask = region.getData().getRegionSchedulingHandle();
+                    TickRegionScheduler.RegionScheduleHandle backendTask = region.getData().getRegionSchedulingHandle();
                     finalizer.accept(backendTask);
                     // cleanup pinning, we need to do the following:
                     // - remove tickets (Note: we don't *need* to process ticket updates here, they will be done later)
@@ -192,9 +191,9 @@ public interface RegionScheduleHandlePinner {
      */
     class GlobalTickPinner implements RegionScheduleHandlePinner {
         @Override
-        public void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, SchedulerTickTaskThreadPool.TickThreadRunner> finalizer) throws CommandSyntaxException {
+        public void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, CRSThreadPool.TickThreadRunner> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException {
             TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
-            final SchedulerTickTaskThreadPool.TickThreadRunner thread = schedulingHandle.getOwnedBy();
+            final CRSThreadPool.TickThreadRunner thread = ((CRSThreadPool.ScheduledState) schedulingHandle.state).getOwnedBy();
 
             if (thread == null) {
                 throw new IllegalStateException("Region scheduling handle returned null task or runner");
@@ -204,7 +203,7 @@ public interface RegionScheduleHandlePinner {
         }
 
         @Override
-        public void unpin(@NotNull Consumer<SchedulerTickTaskThreadPool.SchedulableTick> finalizer) {
+        public void unpin(@NotNull Consumer<SchedulableTick> finalizer, CRSThreadPool crsThreadPool) {
             TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
             finalizer.accept(schedulingHandle);
         }

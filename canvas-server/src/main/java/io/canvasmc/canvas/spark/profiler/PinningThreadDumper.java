@@ -1,6 +1,6 @@
 package io.canvasmc.canvas.spark.profiler;
 
-import io.canvasmc.canvas.tick.SchedulerTickTaskThreadPool;
+import io.canvasmc.canvas.tick.CRSThreadPool;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.util.HashMap;
@@ -24,12 +24,12 @@ public class PinningThreadDumper implements ThreadDumper {
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
-        SchedulerTickTaskThreadPool.TickThreadRunner threadRunner =
+        CRSThreadPool.TickThreadRunner threadRunner =
             SparkRegionProfilerExtension.TRACKING_THREAD.get();
 
         if (threadRunner != null) {
             // we are profiling, use the thread we are tracking
-            return threadRunner.thread.getName().equalsIgnoreCase(threadName);
+            return threadRunner.backingThread.getName().equalsIgnoreCase(threadName);
         }
 
         // get from cache or compute+cache
