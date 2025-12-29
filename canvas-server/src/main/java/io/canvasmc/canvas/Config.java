@@ -53,7 +53,9 @@ public class Config {
         LOGGER.info(text);
         if (isServerAccessible()) {
             for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
-                player.sendSystemMessage(PaperAdventure.asVanilla(merged));
+                if (player.getBukkitEntity().isOp()) {
+                    player.sendSystemMessage(PaperAdventure.asVanilla(merged));
+                }
             }
         }
     };
