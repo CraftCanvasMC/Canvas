@@ -573,9 +573,6 @@ public class Config {
         @Comment("Configures the damage modifier per critical hit")
         public float criticalHitMultiplier = 1.5F;
 
-        @Comment("Enables legacy blast protection")
-        public boolean legacyBlastProtection = false;
-
         @Comment("Removes the red death animation seen on entities when killed.")
         public boolean removeRedDeathAnimation = false;
     }
