@@ -147,6 +147,13 @@ public class Config {
 
     public Chunks chunks = new Chunks();
 
+    @Comment({
+        "When enabled, feature placement (ores/structures/etc.) uses a 1024-bit secure seed.",
+        "Terrain and biome generation still use the normal 64-bit world seed.",
+        "Requires restart."
+    })
+    public boolean secureSeed = false;
+
     public static class Chunks {
         @Comment("Use euclidean distance squared for chunk task ordering. Makes the world load in what appears a circle rather than a diamond")
         public boolean useEuclideanDistanceSquared = true;
