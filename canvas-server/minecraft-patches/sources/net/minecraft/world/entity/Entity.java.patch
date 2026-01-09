@@ -240,7 +240,7 @@
          if (level instanceof ServerLevel serverLevel) {
              for (int i = 0; i < 2; i++) {
                  serverLevel.sendParticles(
-@@ -4425,9 +_,33 @@
+@@ -4425,9 +_,20 @@
          );
      }
  
@@ -260,20 +260,7 @@
 +        );
 +    }
 +
-+    private boolean canvas$checkNearbyRegions(int destX, int destZ) {
-+        // based off https://github.com/LuminolMC/Luminol/blob/ver/1.21.8/luminol-server/minecraft-patches/features/0062-Fix-off-tickregion-sync-teleport.patch
-+        // modified to work better with Canvas' systems
-+        int sizeBx = Math.min(6, (int) (this.bb.maxX - this.bb.minX) + ((ServerLevel) this.level).serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault());
-+        int sizeBz = Math.min(6, (int) (this.bb.maxZ - this.bb.minZ) + ((ServerLevel) this.level).serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault());
-+
-+        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level,
-+            (destX >> 4) - sizeBx,
-+            (destZ >> 4) - sizeBz,
-+            (destX >> 4) + sizeBx,
-+            (destZ >> 4) + sizeBz);
-+    }
-+
-+    private final boolean canvas$checkCanTeleportAsync(ServerLevel destination, Vec3 pos, long teleportFlags) {
++    private boolean canvas$checkCanTeleportAsync(ServerLevel destination, Vec3 pos, long teleportFlags) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
  
          if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
@@ -290,7 +277,7 @@
          if ((teleportFlags & TELEPORT_FLAG_UNMOUNT) == 0L) {
              for (Entity entity : this.getIndirectPassengers()) {
                  if (!entity.canTeleportAsync()) {
-@@ -4450,21 +_,68 @@
+@@ -4450,16 +_,64 @@
          }
  
          if ((teleportFlags & TELEPORT_FLAG_TELEPORT_PASSENGERS) != 0L) {
@@ -343,15 +330,14 @@
 +                // event was cancelled
                  return false;
              }
--        }
--
--        // TODO any events that can modify go HERE
 +            org.bukkit.Location resultLocation = teleportAsyncEvent.getTo();
 +            pos = new Vec3(teleportAsyncEvent.getTo().x(), teleportAsyncEvent.getTo().y(), teleportAsyncEvent.getTo().z());
 +            destination = resultLocation.getWorld() == null ? destination : ((org.bukkit.craftbukkit.CraftWorld) resultLocation.getWorld()).getHandle();
 +            yaw = resultLocation.getYaw();
 +            pitch = resultLocation.getPitch();
-+        }
+         }
+ 
+-        // TODO any events that can modify go HERE
 +        if (shouldCallEvents && !canvas$checkCanTeleportAsync(destination, pos, teleportFlags)) {
 +            // plugin did something funky, kill
 +            throw new TeleportValidationException();
@@ -360,38 +346,31 @@
 +    // Canvas end - region threading
  
          // check for same region
-         if (destination == this.level()) {
--            Vec3 currPos = this.position();
-             if (
-+                this.canvas$checkNearbyRegions((int) pos.x, (int) pos.z) && // Canvas - region threading
-                 destination.regioniser.getRegionAtUnsynchronised(
-                     ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(currPos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(currPos)
-                 ) == destination.regioniser.getRegionAtUnsynchronised(
-@@ -4483,7 +_,9 @@
-                 }
- 
-                 for (EntityTreeNode entity : passengerTree.getFullTree()) {
-+                    if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().untrackWaypoint(player); // Canvas - region threading
-                     entity.root.teleportSyncSameRegion(pos, yaw, pitch, velocity);
-+                    if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().trackWaypoint(player);
-                 }
- 
-                 if (hasPassengers) {
-@@ -4501,13 +_,22 @@
-                 if (teleportComplete != null) {
-                     teleportComplete.accept(this);
-                 }
-+                // Canvas start - region threading
-+                if (io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
-+                    org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
-+                    org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
-+                    new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
-+                        this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
-+                    ).callEvent();
-+                }
-+                // Canvas end - region threading
-                 return true;
+         if (destination == this.level()
+@@ -4477,7 +_,9 @@
              }
+ 
+             for (EntityTreeNode entity : passengerTree.getFullTree()) {
++                if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().untrackWaypoint(player); // Canvas - region threading
+                 entity.root.teleportSyncSameRegion(pos, yaw, pitch, velocity);
++                if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().trackWaypoint(player); // Canvas - region threading
+             }
+ 
+             if (hasPassengers) {
+@@ -4495,12 +_,21 @@
+             if (teleportComplete != null) {
+                 teleportComplete.accept(this);
+             }
++            // Canvas start - region threading
++            if (io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
++                org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
++                org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
++                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
++                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
++                ).callEvent();
++            }
++            // Canvas end - region threading
+             return true;
          }
  
          EntityTreeNode passengerTree = this.detachPassengers();
@@ -401,7 +380,7 @@
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
-@@ -4517,7 +_,22 @@
+@@ -4510,7 +_,22 @@
              node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, velocity);
          }
  
@@ -425,7 +404,7 @@
  
          return true;
      }
-@@ -4539,7 +_,7 @@
+@@ -4532,7 +_,7 @@
      public boolean endPortalLogicAsync(BlockPos portalPos) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
  
@@ -434,7 +413,7 @@
          if (destination == null) {
              // wat
              return false;
-@@ -4551,7 +_,7 @@
+@@ -4544,7 +_,7 @@
      public boolean netherPortalLogicAsync(BlockPos portalPos) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
  
@@ -443,7 +422,7 @@
          if (destination == null) {
              // wat
              return false;
-@@ -4772,6 +_,7 @@
+@@ -4765,6 +_,7 @@
                  }
              }
          }
@@ -451,7 +430,7 @@
  
          return true;
      }
-@@ -4783,9 +_,36 @@
+@@ -4776,9 +_,36 @@
      protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
                                      PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
@@ -489,7 +468,7 @@
  
          Vec3 initialPosition = this.position();
          ChunkPos initialPositionChunk = new ChunkPos(
-@@ -4796,7 +_,8 @@
+@@ -4789,7 +_,8 @@
          // first, remove entity/passengers from world
          EntityTreeNode passengerTree = this.detachPassengers();
          List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
@@ -499,7 +478,7 @@
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
-@@ -4808,6 +_,11 @@
+@@ -4801,6 +_,11 @@
              node.root = node.root.transformForAsyncTeleport(destination, null, null, null, null);
              // set portal cooldown
              node.root.setPortalCooldown();
@@ -511,7 +490,7 @@
          }
  
          // ensure the region is always ticking in case of a shutdown
-@@ -4843,7 +_,7 @@
+@@ -4836,7 +_,7 @@
  
              // place
              passengerTree.root.placeInAsync(
@@ -520,7 +499,7 @@
                  passengerTree,
                  (Entity teleported) -> {
                      if (info.postTeleportTransition() != null) {
-@@ -4853,6 +_,17 @@
+@@ -4846,6 +_,17 @@
                      if (teleportComplete != null) {
                          teleportComplete.accept(teleported);
                      }
@@ -538,7 +517,7 @@
                  }
              );
          });
-@@ -5102,7 +_,7 @@
+@@ -5095,7 +_,7 @@
  
      public boolean canTeleport(Level fromLevel, Level toLevel) {
          if (!this.isAlive() || !this.valid) return false; // Paper - Fix item duplication and teleport issues
@@ -547,7 +526,7 @@
              for (Entity entity : this.getPassengers()) {
                  if (entity instanceof ServerPlayer serverPlayer && !serverPlayer.seenCredits) {
                      return false;
-@@ -5651,9 +_,7 @@
+@@ -5644,9 +_,7 @@
  
      // Paper start - optimise collisions
      public boolean updateFluidHeightAndDoFluidPushing(final TagKey<Fluid> fluid, final double flowScale) {
@@ -558,7 +537,7 @@
  
          final AABB boundingBox = this.getBoundingBox().deflate(1.0E-3);
  
-@@ -5685,6 +_,7 @@
+@@ -5678,6 +_,7 @@
  
          final net.minecraft.world.level.chunk.ChunkSource chunkSource = world.getChunkSource();
  
@@ -566,7 +545,7 @@
          final int chunkLenX = maxChunkX - minChunkX + 1;
          // chunk index = (x - minX) + (maxX-minX+1)*(z - minZ)
          //             = x + (maxX-minX+1)*z - (minX + (maxX-minX+1)*minZ)
-@@ -5695,14 +_,28 @@
+@@ -5688,14 +_,28 @@
          // init chunks
          for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
              for (int currChunkX = minChunkX; currChunkX <= maxChunkX; ++currChunkX) {
@@ -597,7 +576,7 @@
                          .states.get((currX & 15) | ((currZ & 15) << 4) | ((currY & 15) << 8)).getFluidState();
  
                      if (fluidState.isEmpty() || !fluidState.is(fluid)) {
-@@ -5744,7 +_,7 @@
+@@ -5737,7 +_,7 @@
              }
          }
  
@@ -606,7 +585,7 @@
  
          if (pushVector == Vec3.ZERO) {
              return inFluid;
-@@ -5780,7 +_,7 @@
+@@ -5773,7 +_,7 @@
      }
  
      public double getFluidHeight(TagKey<Fluid> fluidTag) {
