@@ -20,7 +20,7 @@ import me.lucko.spark.paper.proto.SparkSamplerProtos;
 public class PinningThreadDumper implements ThreadDumper {
     private final ThreadFinder threadFinder = new ThreadFinder();
     private final Map<Long, Boolean> cache = new HashMap<>();
-    private final Pattern regionThreadNamePattern = Pattern.compile("Region Scheduler Thread #\\d+", Pattern.CASE_INSENSITIVE);
+    private final Pattern regionThreadNamePattern = Pattern.compile("Folia Region Scheduler Thread #\\d+", Pattern.CASE_INSENSITIVE);
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
