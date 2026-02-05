@@ -38,7 +38,7 @@ public interface SleepingBlockEntity {
             sleepingTicker = tickWrapper.ticker;
         }
         Level world = ((BlockEntity) this).getLevel();
-        tickWrapper.rebind(new SleepUntilTimeBlockEntityTickInvoker((BlockEntity) this, world.getGameTime() + 1, sleepingTicker));
+        tickWrapper.rebind(new SleepUntilTimeBlockEntityTickInvoker((BlockEntity) this, world.getRedstoneGameTime() + 1, sleepingTicker));
         this.lithium$setSleepingTicker(null);
     }
 
@@ -49,7 +49,7 @@ public interface SleepingBlockEntity {
             sleepingTicker = tickWrapper.ticker;
         }
         Level world = ((BlockEntity) this).getLevel();
-        tickWrapper.rebind(new SleepUntilTimeBlockEntityTickInvoker((BlockEntity) this, world.getGameTime() + ticks, sleepingTicker));
+        tickWrapper.rebind(new SleepUntilTimeBlockEntityTickInvoker((BlockEntity) this, world.getRedstoneGameTime() + ticks, sleepingTicker));
         this.lithium$setSleepingTicker(null);
     }
 
