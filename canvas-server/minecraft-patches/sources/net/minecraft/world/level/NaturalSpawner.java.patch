@@ -1,201 +1,311 @@
 --- a/net/minecraft/world/level/NaturalSpawner.java
 +++ b/net/minecraft/world/level/NaturalSpawner.java
-@@ -152,8 +_,59 @@
-         return list;
+@@ -68,50 +_,93 @@
+         int spawnableChunkCount, Iterable<Entity> entities, NaturalSpawner.ChunkGetter chunkGetter, LocalMobCapCalculator calculator
+     ) {
+         // Paper start - Optional per player mob spawns
+-        return createState(spawnableChunkCount, entities, chunkGetter, calculator, false);
+-    }
+-
++        return createState(spawnableChunkCount, calculator, false, io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData()); // Canvas - optimize natural spawning
++    }
++
++    // Canvas start - optimize natural spawning
++    private static int[] calculateLimits(io.papermc.paper.threadedregions.RegionizedWorldData worldData, int spawnableChunkCount) {
++        int[] retVal = new int[SPAWNING_CATEGORIES.length];
++        ServerLevel world = worldData.world;
++        for (MobCategory category : MobCategory.values()) {
++            if (category == MobCategory.MISC) continue;
++            // normally we would check if the category is valid for spawn limits, however the SPAWNING_CATEGORIES
++            // array filters this for us already, so we don't need to do an extra call
++            int rawLimit = world.getWorld().getSpawnLimit(org.bukkit.craftbukkit.util.CraftSpawnCategory.toBukkit(category));
++            // we need to apply the same ratio calculation as canSpawnForCategoryGlobal
++            retVal[category.ordinal()] = rawLimit * spawnableChunkCount / NaturalSpawner.MAGIC_NUMBER;
++        }
++        return retVal;
++    }
++
++    // Canvas end - optimize natural spawning
+     public static NaturalSpawner.SpawnState createState(
+-        int spawnableChunkCount, Iterable<Entity> entities, NaturalSpawner.ChunkGetter chunkGetter, LocalMobCapCalculator calculator, final boolean countMobs
++        int spawnableChunkCount, LocalMobCapCalculator calculator, final boolean countMobs, io.papermc.paper.threadedregions.RegionizedWorldData worldData // Canvas - optimize natural spawning
+     ) {
+         // Paper end - Optional per player mob spawns
+         PotentialCalculator potentialCalculator = new PotentialCalculator();
++        int[] limits = calculateLimits(worldData, spawnableChunkCount); // Canvas - optimize natural spawning
+         Object2IntOpenHashMap<MobCategory> map = new Object2IntOpenHashMap<>();
+ 
+-        for (Entity entity : entities) {
++        // Canvas start - optimize natural spawning
++        final boolean perPlayerMobSpawning = worldData.world.paperConfig().entities.spawning.perPlayerMobSpawns;
++        // optimized iteration path, go by chunks
++        for (LevelChunk chunk : worldData.getChunks().getRawDataUnchecked()) {
++            if (chunk == null) continue; // unlikely, but check to be sure
++        for (Entity entity : chunk.moonrise$getChunkHolder().getEntityChunk().getEntityArr()) {
++            if (entity == null) continue; // very likely, must check
++            MobCategory category = entity.getType().getCategory();
++            // if we skip because we hit the limit, it won't change the outcome, since if it skips because
++            // of the limit hit, the category will be filtered anyway later
++            if (category == MobCategory.MISC) continue;
++            final boolean shouldSkipBecauseOfLimit = limits[category.ordinal()] <= map.getInt(category);
++            if (!perPlayerMobSpawning && shouldSkipBecauseOfLimit) continue;
+             if (!(entity instanceof Mob mob && (mob.isPersistenceRequired() || mob.requiresCustomPersistence()))) {
+-                MobCategory category = entity.getType().getCategory();
+-                if (category != MobCategory.MISC) {
+-                    // Paper start - Only count natural spawns
+-                    if (!entity.level().paperConfig().entities.spawning.countAllMobsForSpawning &&
+-                        !(entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL ||
+-                            entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CHUNK_GEN)) {
+-                        continue;
++                // Paper start - Only count natural spawns
++                if (!entity.level().paperConfig().entities.spawning.countAllMobsForSpawning &&
++                    !(entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL ||
++                        entity.spawnReason == org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.CHUNK_GEN)) {
++                    continue;
++                }
++                // Paper end - Only count natural spawns
++                BlockPos blockPos = entity.blockPosition();
++
++                // getting the rough biome is expensive, if we are skipping because of
++                // the limit, why tf are we gonna do this, since there is no impact by skipping this anyway
++
++                // the only real reason we don't skip the full thing with per-player mob spawns is because
++                // per-player mob spawns require 'updatePlayerMobTypeMap' to be called for accurate spawning
++
++                // as a result, if we are doing per-player spawning, we try and skip as much as possible to
++                // reduce expensive CPU time without costing vanilla mob spawning functionality
++
++                // Note: this should be safe, this only effects the rate of spawning, and specifically for a
++                // few mobs for a few nether biomes, so farms shouldn't be impacted
++                if (!perPlayerMobSpawning || !shouldSkipBecauseOfLimit) {
++                    // only do this lookup if we aren't using per-player spawns(since we skip above), and
++                    // if we are doing per-player mob spawning and not over the limit yet
++                    MobSpawnSettings.MobSpawnCost mobSpawnCost = getRoughBiome(blockPos, chunk).getMobSettings().getMobSpawnCost(entity.getType());
++                    if (mobSpawnCost != null) {
++                        potentialCalculator.addCharge(blockPos, mobSpawnCost.charge());
+                     }
+-                    // Paper end - Only count natural spawns
+-                    BlockPos blockPos = entity.blockPosition();
+-                    chunkGetter.query(ChunkPos.asLong(blockPos), chunk -> {
+-                        MobSpawnSettings.MobSpawnCost mobSpawnCost = getRoughBiome(blockPos, chunk).getMobSettings().getMobSpawnCost(entity.getType());
+-                        if (mobSpawnCost != null) {
+-                            potentialCalculator.addCharge(entity.blockPosition(), mobSpawnCost.charge());
+-                        }
+-
+-                        if (calculator != null && entity instanceof Mob) { // Paper - Optional per player mob spawns
+-                            calculator.addMob(chunk.getPos(), category);
+-                        }
+-
+-                        map.addTo(category, 1);
+-                        // Paper start - Optional per player mob spawns
+-                        if (countMobs) {
+-                            chunk.level.getChunkSource().chunkMap.updatePlayerMobTypeMap(entity);
+-                        }
+-                        // Paper end - Optional per player mob spawns
+-                    });
+-                }
++                }
++
++                // only runs if we are not doing per-player
++                if (calculator != null && entity instanceof Mob) {
++                    calculator.addMob(chunk.getPos(), category);
++                }
++
++                map.addTo(category, 1);
++                // Paper start - Optional per player mob spawns
++                if (countMobs) {
++                    chunk.level.getChunkSource().chunkMap.updatePlayerMobTypeMap(entity);
++                }
++                // Paper end - Optional per player mob spawns
++            }
++        // Canvas end - optimize natural spawning
+             }
+         }
+ 
+-        return new NaturalSpawner.SpawnState(spawnableChunkCount, map, potentialCalculator, calculator);
++        return new NaturalSpawner.SpawnState(spawnableChunkCount, map, potentialCalculator, calculator, worldData, limits); // Canvas - optimize natural spawning
      }
  
--    public static void spawnForChunk(ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnState spawnState, List<MobCategory> categories) {
-+    // Canvas start - optimize natural spawning
-+    public static void spawnForChunk(ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnState spawnState, List<MobCategory> categories, io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData) {
-+        /*
-+            The core optimizations in this class consist of the following:
-+                - Reduce the amount of times we try and access regionized world data, this is slow when used in hot-code
-+                - Reduce the amount of times we call getPlayers, we only really need to call once
-+                - Use optimized random source for getting the random pos between through thread-unsafe randoms in regionized data
-+                - Use optimized random source for generalized usage of randoms
-+                - Reduce chunk lookups
-+                - Intervals configuration
-+                - Reuse objects
-+         */
+     static Biome getRoughBiome(BlockPos pos, ChunkAccess chunk) {
+@@ -153,6 +_,11 @@
+     }
+ 
+     public static void spawnForChunk(ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnState spawnState, List<MobCategory> categories) {
++        // Canvas start - optimize natural spawning
 +        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
-+            regionizedWorldData.getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
-+        final LevelChunk.SpawningIntervals counters = chunk.canvas$localNatSpawnIntervals;
-+        final io.canvasmc.canvas.Config.SpawningIntervals config = io.canvasmc.canvas.Config.INSTANCE.naturalMobSpawnIncrements;
-         for (MobCategory mobCategory : categories) {
-+            boolean skip = false;
-+            switch (mobCategory) {
-+                case MONSTER -> {
-+                    if (++counters.monster < config.monster) skip = true;
-+                    else counters.monster = 0;
-+                }
-+                case CREATURE -> {
-+                    if (++counters.creature < config.creature) skip = true;
-+                    else counters.creature = 0;
-+                }
-+                case AMBIENT -> {
-+                    if (++counters.ambient < config.ambient) skip = true;
-+                    else counters.ambient = 0;
-+                }
-+                case AXOLOTLS -> {
-+                    if (++counters.axolotls < config.axolotls) skip = true;
-+                    else counters.axolotls = 0;
-+                }
-+                case UNDERGROUND_WATER_CREATURE -> {
-+                    if (++counters.undergroundWaterCreature < config.undergroundWaterCreature) skip = true;
-+                    else counters.undergroundWaterCreature = 0;
-+                }
-+                case WATER_CREATURE -> {
-+                    if (++counters.waterCreature < config.waterCreature) skip = true;
-+                    else counters.waterCreature = 0;
-+                }
-+                case WATER_AMBIENT -> {
-+                    if (++counters.waterAmbient < config.waterAmbient) skip = true;
-+                    else counters.waterAmbient = 0;
-+                }
-+                default -> {
-+                }
-+            }
-+            if (skip) continue;
-+            Player nearest = null;
++            level.moonrise$getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
++        net.minecraft.server.level.ServerPlayer closestPlayer = null;
 +        // Canvas end - optimize natural spawning
+         for (MobCategory mobCategory : categories) {
              // Paper start - Optional per player mob spawns
              final boolean canSpawn;
-             int maxSpawns = Integer.MAX_VALUE;
-@@ -165,16 +_,37 @@
-                     limit = level.getWorld().getSpawnLimit(spawnCategory);
-                 }
+@@ -167,12 +_,17 @@
  
--                // Apply per-player limit
-+                // Canvas start - optimize natural spawning
+                 // Apply per-player limit
                  int minDiff = Integer.MAX_VALUE;
 -                final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange =
 -                    level.moonrise$getNearbyPlayers().getPlayers(chunk.getPos(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE);
-+                double nearestDistSq = Double.MAX_VALUE;
-+
++                // Canvas - move up
                  if (inRange != null) {
                      final net.minecraft.server.level.ServerPlayer[] backingSet = inRange.getRawDataUnchecked();
-+                    final int chunkX = chunk.getPos().x;
-+                    final int chunkZ = chunk.getPos().z;
-+                    final double centerX = (chunkX << 4) + 8.0;
-+                    final double centerZ = (chunkZ << 4) + 8.0;
-+
                      for (int k = 0, len = inRange.size(); k < len; k++) {
 -                        minDiff = Math.min(limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory), minDiff);
-+                        final net.minecraft.server.level.ServerPlayer player = backingSet[k];
-+
-+                        // dist^2 to chunk
-+                        final double dx = player.getX() - centerX;
-+                        final double dz = player.getZ() - centerZ;
-+                        final double distSq = dx * dx + dz * dz;
-+
-+                        if (distSq < nearestDistSq) {
-+                            nearestDistSq = distSq;
-+                            nearest = player;
-+                        }
-+
-+                        final int diff = limit - level.getChunkSource().chunkMap.getMobCountNear(player, mobCategory);
++                        // Canvas start - optimize natural spawning
++                        int diff = limit - level.getChunkSource().chunkMap.getMobCountNear(backingSet[k], mobCategory);
 +                        if (diff < minDiff) {
 +                            minDiff = diff;
++                            closestPlayer = backingSet[k];
 +                        }
++                        // Canvas end - optimize natural spawning
                      }
                  }
-+                // Canvas end - optimize natural spawning
  
-                 maxSpawns = (minDiff == Integer.MAX_VALUE) ? 0 : minDiff;
-                 canSpawn = maxSpawns > 0;
-@@ -183,7 +_,7 @@
+@@ -182,8 +_,10 @@
+                 canSpawn = spawnState.canSpawnForCategoryLocal(mobCategory, chunk.getPos());
              }
              if (canSpawn) {
-                 spawnCategoryForChunk(mobCategory, level, chunk, spawnState::canSpawn, spawnState::afterSpawn,
+-                spawnCategoryForChunk(mobCategory, level, chunk, spawnState::canSpawn, spawnState::afterSpawn,
 -                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null);
-+                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null, regionizedWorldData, nearest, inRange); // Canvas - optimize natural spawning
++                // Canvas start - optimize natural spawning
++                spawnCategoryForChunk(mobCategory, spawnState, chunk, spawnState::canSpawn, spawnState::afterSpawn,
++                    maxSpawns, level.paperConfig().entities.spawning.perPlayerMobSpawns ? level.getChunkSource().chunkMap::updatePlayerMobTypeMap : null, closestPlayer);
++                // Canvas end - optimize natural spawning
                  // Paper end - Optional per player mob spawns
              }
          }
-@@ -203,15 +_,16 @@
-         MobCategory category, ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback
-     ) {
-         // Paper start - Optional per player mob spawns
--        spawnCategoryForChunk(category, level, chunk, filter, callback, Integer.MAX_VALUE, null);
-+        spawnCategoryForChunk(category, level, chunk, filter, callback, Integer.MAX_VALUE, null, level.getCurrentWorldData(), null, null); // Canvas - optimize natural spawning - don't pass this, we don't use this method anyway...
+@@ -199,21 +_,28 @@
      }
-     public static void spawnCategoryForChunk(
-         MobCategory category, ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final Consumer<Entity> trackEntity
-+        , io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData, Player nearest, ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange // Canvas - optimize natural spawning
-     ) {
-         // Paper end - Optional per player mob spawns
+     // Paper end - Add mobcaps commands
+ 
+-    public static void spawnCategoryForChunk(
+-        MobCategory category, ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback
+-    ) {
+-        // Paper start - Optional per player mob spawns
+-        spawnCategoryForChunk(category, level, chunk, filter, callback, Integer.MAX_VALUE, null);
+-    }
+-    public static void spawnCategoryForChunk(
+-        MobCategory category, ServerLevel level, LevelChunk chunk, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final Consumer<Entity> trackEntity
+-    ) {
+-        // Paper end - Optional per player mob spawns
 -        BlockPos randomPosWithin = getRandomPosWithin(level, chunk);
-+        BlockPos randomPosWithin = getRandomPosWithin(level, chunk, regionizedWorldData); // Canvas - optimize natural spawning
-         if (randomPosWithin.getY() >= level.getMinY() + 1) {
+-        if (randomPosWithin.getY() >= level.getMinY() + 1) {
 -            spawnCategoryForPosition(category, level, chunk, randomPosWithin, filter, callback, maxSpawns, trackEntity); // Paper - Optional per player mob spawns
-+            spawnCategoryForPosition(category, level, chunk, randomPosWithin, filter, callback, maxSpawns, trackEntity, regionizedWorldData, nearest, inRange); // Paper - Optional per player mob spawns
++    // Canvas start - optimize natural spawning
++    public static void spawnCategoryForChunk(
++        MobCategory category, NaturalSpawner.SpawnState spawnState, LevelChunk chunk, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final Consumer<Entity> trackEntity, net.minecraft.server.level.ServerPlayer closestPlayer
++    ) {
++        final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = spawnState.regionizedWorldData;
++        final ServerLevel world = regionizedWorldData.world;
++
++        final ChunkPos pos = chunk.getPos();
++        final RandomSource random = regionizedWorldData.simpleUnsafeLocalRandom;
++
++        // using the min bounds and then adding an RNG with bound of 16 means it won't escape this chunk
++        int i = pos.getMinBlockX() + random.nextInt(16);
++        int i1 = pos.getMinBlockZ() + random.nextInt(16);
++        int i2 = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, i, i1) + 1;
++        int i3 = Mth.randomBetweenInclusive(random, world.getMinY(), i2);
++
++        BlockPos randomPosWithin = new BlockPos(i, i3, i1);
++        if (randomPosWithin.getY() >= world.getMinY() + 1) {
++            spawnCategoryForPosition(category, spawnState, chunk, randomPosWithin, filter, callback, maxSpawns, trackEntity, closestPlayer); // Paper - Optional per player mob spawns
          }
      }
++    // Canvas end - optimize natural spawning
  
-@@ -228,19 +_,29 @@
+     @VisibleForDebug
+     public static void spawnCategoryForPosition(MobCategory category, ServerLevel level, BlockPos pos) {
+@@ -228,53 +_,89 @@
          NaturalSpawner.SpawnPredicate filter,
          NaturalSpawner.AfterSpawnCallback callback
      ) {
 -        spawnCategoryForPosition(category, level, chunk, pos, filter, callback, Integer.MAX_VALUE, null);
-+        spawnCategoryForPosition(category, level, (LevelChunk) chunk, pos, filter, callback, Integer.MAX_VALUE, null, level.getCurrentWorldData(), null, null); // Canvas - optimize natural spawning
-     }
+-    }
++        throw new UnsupportedOperationException(); // Canvas - optimize natural spawning
++    }
++    // Canvas start - optimize natural spawning
++
++    private static int clamp(int val, int min, int max) {
++        return Math.max(min, Math.min(val, max));
++    }
++
      public static void spawnCategoryForPosition(
 -        MobCategory category, ServerLevel level, ChunkAccess chunk, BlockPos pos, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final @Nullable Consumer<Entity> trackEntity
-+        MobCategory category, ServerLevel level, LevelChunk chunk, BlockPos pos, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final @Nullable Consumer<Entity> trackEntity, io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData, Player nearest, ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> inRange // Canvas - optimize natural spawning
++        MobCategory category, NaturalSpawner.SpawnState state, LevelChunk chunk, BlockPos pos, NaturalSpawner.SpawnPredicate filter, NaturalSpawner.AfterSpawnCallback callback, final int maxSpawns, final @Nullable Consumer<Entity> trackEntity, net.minecraft.server.level.ServerPlayer closestPlayer
      ) {
          // Paper end - Optional per player mob spawns
++        final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = state.regionizedWorldData;
++        final ServerLevel level = regionizedWorldData.world;
++        final RandomSource fastRandom = regionizedWorldData.simpleUnsafeLocalRandom;
++        final net.minecraft.world.level.border.WorldBorder border = level.getWorldBorder();
++
++        final int minX = chunk.getPos().getMinBlockX();
++        final int minZ = chunk.getPos().getMinBlockZ();
++        final int maxX = chunk.getPos().getMaxBlockX();
++        final int maxZ = chunk.getPos().getMaxBlockZ();
++
          StructureManager structureManager = level.structureManager();
          ChunkGenerator generator = level.getChunkSource().getGenerator();
          int y = pos.getY();
 -        BlockState blockState = level.getBlockStateIfLoadedAndInBounds(pos); // Paper - don't load chunks for mob spawn
 -        if (blockState != null && !blockState.isRedstoneConductor(chunk, pos)) { // Paper - don't load chunks for mob spawn
-+        // Canvas start - optimize natural spawning
++        // the pos is literally in bounds of this chunk, don't fetch the chunk again
 +        BlockState blockState = chunk.getBlockStateFinal(pos.getX(), pos.getY(), pos.getZ());
-+        // The block pos is ALWAYS WITHIN THE CHUNK PROVIDED. WHY ARE WE DOING THIS????????
-+        // BlockState blockState = level.getBlockStateIfLoadedAndInBounds(pos); // Paper - don't load chunks for mob spawn
-+        if (!blockState.isRedstoneConductor(chunk, pos)) { // Paper - don't load chunks for mob spawn
-+        // Canvas end - optimize natural spawning
++        if (!blockState.isRedstoneConductor(chunk, pos)) {
++    // Canvas end - optimize natural spawning
              BlockPos.MutableBlockPos mutableBlockPos = new BlockPos.MutableBlockPos();
              int i = 0;
-+            // Canvas start - optimize natural spawning
-+            final int minX = chunk.getPos().getMinBlockX();
-+            final int maxX = chunk.getPos().getMaxBlockX();
-+            final int minZ = chunk.getPos().getMinBlockZ();
-+            final int maxZ = chunk.getPos().getMaxBlockZ();
-+            // Canvas end - optimize natural spawning
  
-             for (int i1 = 0; i1 < 3; i1++) {
-                 int x = pos.getX();
-@@ -248,36 +_,40 @@
+-            for (int i1 = 0; i1 < 3; i1++) {
+-                int x = pos.getX();
+-                int z = pos.getZ();
++            for (int groupI = 0; groupI < 3; groupI++) { // Canvas - rename
++                int centerX = pos.getX(); // Canvas - rename
++                int centerZ = pos.getZ(); // Canvas - rename
                  int i2 = 6;
                  MobSpawnSettings.SpawnerData spawnerData = null;
                  SpawnGroupData spawnGroupData = null;
 -                int ceil = Mth.ceil(level.random.nextFloat() * 4.0F);
-+                int ceil = Mth.ceil(regionizedWorldData.simpleUnsafeLocalRandom.nextFloat() * 4.0F); // Canvas - optimize natural spawning
++                int ceil = Mth.ceil(fastRandom.nextFloat() * 4.0F); // Canvas - use faster random
                  int i3 = 0;
  
-                 for (int i4 = 0; i4 < ceil; i4++) {
+-                for (int i4 = 0; i4 < ceil; i4++) {
 -                    x += level.random.nextInt(6) - level.random.nextInt(6);
 -                    z += level.random.nextInt(6) - level.random.nextInt(6);
-+                    // Canvas start - optimize natural spawning
-+                    x += regionizedWorldData.simpleUnsafeLocalRandom.nextInt(6) - regionizedWorldData.simpleUnsafeLocalRandom.nextInt(6);
-+                    z += regionizedWorldData.simpleUnsafeLocalRandom.nextInt(6) - regionizedWorldData.simpleUnsafeLocalRandom.nextInt(6);
-+                    if (x < minX || x > maxX) x = Mth.clamp(x, minX, maxX);
-+                    if (z < minZ || z > maxZ) z = Mth.clamp(z, minZ, maxZ);
-+                    // Canvas end - optimize natural spawning
++                // Canvas start - optimize natural spawning
++                for (int mobI = 0; mobI < ceil; mobI++) {
++                    // this cuts random calls in half, which is def a micro-opt, but
++                    // reduces possible random calls from 48 -> 24, while almost preserving
++                    // the vanilla spread logic. the vanilla logic uses triangular
++                    // distribution, and this one uses uniform distribution, meaning
++                    // mob clusters will spawn slightly more spread out, rather than clustered
++                    // more towards the center. barely noticeable, but worth mentioning
++                    long randomPair = fastRandom.nextLong();
++                    int x = centerX + (int)((randomPair & 0xFFFF) * 11L >> 16) - 5;
++                    int z = centerZ + (int)(((randomPair >>> 32) & 0xFFFF) * 11L >> 16) - 5;
++
++                    // clamp to the chunk bounds, so we can reduce chunk lookup calls since
++                    // all blocks will be within this chunk
++                    x = clamp(x, minX, maxX);
++                    z = clamp(z, minZ, maxZ);
                      mutableBlockPos.set(x, y, z);
++
                      double d = x + 0.5;
                      double d1 = z + 0.5;
 -                    Player nearestPlayer = level.getNearestPlayer(d, y, d1, -1.0, false);
-+                    Player nearestPlayer = nearest == null ? level.getNearestPlayer(d, y, d1, -1.0, false) : nearest; // Canvas - optimize natural spawning
++                    // we run through an inRange set already, so why not try and use those results to help us out?
++                    // the biggest difference we would face here is like... 16 blocks max?
++                    Player nearestPlayer = closestPlayer == null ? level.getNearestPlayer(d, y, d1, -1.0, false) : closestPlayer;
                      if (nearestPlayer != null) {
                          double d2 = nearestPlayer.distanceToSqr(d, y, d1);
 -                        if (level.isLoadedAndInBounds(mutableBlockPos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, mutableBlockPos, d2)) { // Paper - don't load chunks for mob spawn
-+                        if (level.getWorldBorder().isWithinBounds(pos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, mutableBlockPos, d2)) { // Paper - don't load chunks for mob spawn
++                        if (border.isWithinBounds(mutableBlockPos) && isRightDistanceToPlayerAndSpawnPoint(level, chunk, mutableBlockPos, d2)) { // Paper - don't load chunks for mob spawn
                              if (spawnerData == null) {
                                  Optional<MobSpawnSettings.SpawnerData> randomSpawnMobAt = getRandomSpawnMobAt(
 -                                    level, structureManager, generator, category, level.random, mutableBlockPos
-+                                    level, structureManager, generator, category, regionizedWorldData.simpleUnsafeLocalRandom, mutableBlockPos, chunk // Canvas - optimize natural spawning
++                                    // passing chunk here is ok, since the pos is clamped to the chunk
++                                    chunk, structureManager, generator, category, fastRandom, mutableBlockPos
++                // Canvas end - optimize natural spawning
                                  );
                                  if (randomSpawnMobAt.isEmpty()) {
                                      break;
@@ -203,125 +313,122 @@
  
                                  spawnerData = randomSpawnMobAt.get();
 -                                ceil = spawnerData.minCount() + level.random.nextInt(1 + spawnerData.maxCount() - spawnerData.minCount());
-+                                ceil = spawnerData.minCount() + regionizedWorldData.simpleUnsafeLocalRandom.nextInt(1 + spawnerData.maxCount() - spawnerData.minCount()); // Canvas - optimize natural spawning
++                                ceil = spawnerData.minCount() + fastRandom.nextInt(1 + spawnerData.maxCount() - spawnerData.minCount()); // Canvas - optimize natural spawning
                              }
  
                              // Paper start - PreCreatureSpawnEvent
 -                            PreSpawnStatus doSpawning = isValidSpawnPostitionForType(level, category, structureManager, generator, spawnerData, mutableBlockPos, d2);
-+                            PreSpawnStatus doSpawning = isValidSpawnPostitionForType(level, category, structureManager, generator, spawnerData, mutableBlockPos, d2, chunk); // Canvas - optimize natural spawning
++                            PreSpawnStatus doSpawning = isValidSpawnPostitionForType(level, category, structureManager, generator, spawnerData, mutableBlockPos, chunk, fastRandom, d2); // Canvas - pass chunk and random
                              // Paper start - per player mob count backoff
                              if (doSpawning == PreSpawnStatus.ABORT || doSpawning == PreSpawnStatus.CANCELLED) {
--                                level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(mutableBlockPos.getX() >> 4, mutableBlockPos.getZ() >> 4, category);
-+                                level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(category, inRange == null ? level.moonrise$getNearbyPlayers().getPlayersByChunk(mutableBlockPos.getX() >> 4, mutableBlockPos.getZ() >> 4, ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.TICK_VIEW_DISTANCE) : inRange); // Canvas - optimize natural spawning
-                             }
-                             // Paper end - per player mob count backoff
-                             if (doSpawning == PreSpawnStatus.ABORT) {
+                                 level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(mutableBlockPos.getX() >> 4, mutableBlockPos.getZ() >> 4, category);
 @@ -291,7 +_,7 @@
                                      return;
                                  }
  
 -                                mobForSpawn.snapTo(d, y, d1, level.random.nextFloat() * 360.0F, 0.0F);
-+                                mobForSpawn.snapTo(d, y, d1, regionizedWorldData.simpleUnsafeLocalRandom.nextFloat() * 360.0F, 0.0F); // Canvas - optimize natural spawning
++                                mobForSpawn.snapTo(d, y, d1, fastRandom.nextFloat() * 360.0F, 0.0F); // Canvas - optimize natural spawning
                                  if (isValidPositionForMob(level, mobForSpawn, d2)) {
                                      spawnGroupData = mobForSpawn.finalizeSpawn(
                                          level, level.getCurrentDifficultyAt(mobForSpawn.blockPosition()), EntitySpawnReason.NATURAL, spawnGroupData
-@@ -335,8 +_,7 @@
+@@ -335,8 +_,12 @@
                  && respawnData.pos().closerToCenterThan(new Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5), 24.0)) {
                  return false;
              } else {
 -                ChunkPos chunkPos = new ChunkPos(pos);
 -                return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
-+                return true; // Canvas - optimize natural spawning - we make it so it's isolated to the currently ticking chunk, so Objects.equals will just return true always
++                // Canvas start - optimize natural spawning
++                // 'pos' is a mutable block pos clamped to the passed ChunkAccess, so this check is stupid
++                // ChunkPos chunkPos = new ChunkPos(pos);
++                // return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
++                return true;
++                // Canvas end - optimize natural spawning
              }
          }
      }
-@@ -357,9 +_,11 @@
+@@ -356,6 +_,8 @@
+         ChunkGenerator generator,
          MobSpawnSettings.SpawnerData data,
          BlockPos.MutableBlockPos pos,
++        LevelChunk chunk, // Canvas - pass chunk
++        RandomSource random, // Canvas - pass random
          double distance
-+        , LevelChunk chunk // Canvas - optimize natural spawning
      ) {
          EntityType<?> entityType = data.type();
-         // Paper start - PreCreatureSpawnEvent
-+        if (com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent.getHandlerList().getRegisteredListeners().length != 0) { // Canvas - optimize natural spawning
-         com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent event = new com.destroystokyo.paper.event.entity.PreCreatureSpawnEvent(
-                 org.bukkit.craftbukkit.util.CraftLocation.toBukkit(pos, level),
-                 org.bukkit.craftbukkit.entity.CraftEntityType.minecraftToBukkit(entityType), org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.NATURAL
-@@ -370,6 +_,7 @@
-             }
-             return PreSpawnStatus.CANCELLED;
-         }
-+        } // Canvas - optimize natural spawning
-         final boolean success = entityType.getCategory() != MobCategory.MISC
-         // Paper end - PreCreatureSpawnEvent
-             && (
-@@ -377,7 +_,7 @@
+@@ -377,9 +_,9 @@
                      || !(distance > entityType.getCategory().getDespawnDistance() * entityType.getCategory().getDespawnDistance())
              )
              && entityType.canSummon()
 -            && canSpawnMobAt(level, structureManager, generator, category, data, pos)
-+            && canSpawnMobAt(level, structureManager, generator, category, data, pos, chunk) // Canvas - optimize natural spawning
++            && canSpawnMobAt(chunk, structureManager, generator, category, data, pos) // Canvas - pass chunk
              && SpawnPlacements.isSpawnPositionOk(entityType, level, pos)
-             && SpawnPlacements.checkSpawnRules(entityType, level, EntitySpawnReason.NATURAL, pos, level.random)
+-            && SpawnPlacements.checkSpawnRules(entityType, level, EntitySpawnReason.NATURAL, pos, level.random)
++            && SpawnPlacements.checkSpawnRules(entityType, level, EntitySpawnReason.NATURAL, pos, random) // Canvas - pass faster random
              && level.noCollision(entityType.getSpawnAABB(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5));
+         return success ? PreSpawnStatus.SUCCESS : PreSpawnStatus.FAIL; // Paper - PreCreatureSpawnEvent
+     }
 @@ -409,30 +_,30 @@
      }
  
      private static Optional<MobSpawnSettings.SpawnerData> getRandomSpawnMobAt(
 -        ServerLevel level, StructureManager structureManager, ChunkGenerator generator, MobCategory category, RandomSource random, BlockPos pos
-+        ServerLevel level, StructureManager structureManager, ChunkGenerator generator, MobCategory category, RandomSource random, BlockPos pos, LevelChunk chunk // Canvas - optimize natural spawning
++        LevelChunk chunk, StructureManager structureManager, ChunkGenerator generator, MobCategory category, RandomSource random, BlockPos pos // Canvas - pass chunk
      ) {
 -        Holder<Biome> biome = level.getBiome(pos);
-+        Holder<Biome> biome = chunk.getNoiseBiome(pos.getX(), pos.getY(), pos.getZ()); // Canvas - optimize natural spawning
++        Holder<Biome> biome = chunk.level.getBiome(pos); // Canvas - pass chunk
          return category == MobCategory.WATER_AMBIENT && biome.is(BiomeTags.REDUCED_WATER_AMBIENT_SPAWNS) && random.nextFloat() < 0.98F
              ? Optional.empty()
 -            : mobsAt(level, structureManager, generator, category, pos, biome).getRandom(random);
-+            : mobsAt(level, structureManager, generator, category, pos, biome, chunk).getRandom(random);
++            : mobsAt(chunk, structureManager, generator, category, pos, biome).getRandom(random); // Canvas - pass chunk
      }
  
      private static boolean canSpawnMobAt(
 -        ServerLevel level, StructureManager structureManager, ChunkGenerator generator, MobCategory category, MobSpawnSettings.SpawnerData data, BlockPos pos
-+        ServerLevel level, StructureManager structureManager, ChunkGenerator generator, MobCategory category, MobSpawnSettings.SpawnerData data, BlockPos pos, LevelChunk chunk // Canvas - optimize natural spawning
++        LevelChunk chunk, StructureManager structureManager, ChunkGenerator generator, MobCategory category, MobSpawnSettings.SpawnerData data, BlockPos pos // Canvas - pass chunk
      ) {
 -        return mobsAt(level, structureManager, generator, category, pos, null).contains(data);
-+        return mobsAt(level, structureManager, generator, category, pos, null, chunk).contains(data); // Canvas - optimize natural spawning
++        return mobsAt(chunk, structureManager, generator, category, pos, null).contains(data); // Canvas - pass chunk
      }
  
      private static WeightedList<MobSpawnSettings.SpawnerData> mobsAt(
 -        ServerLevel level, StructureManager structureManager, ChunkGenerator generator, MobCategory category, BlockPos pos, @Nullable Holder<Biome> biome
-+        ServerLevel level, StructureManager structureManager, ChunkGenerator generator, MobCategory category, BlockPos pos, @Nullable Holder<Biome> biome, LevelChunk chunk // Canvas - optimize natural spawning
++        LevelChunk chunk, StructureManager structureManager, ChunkGenerator generator, MobCategory category, BlockPos pos, @Nullable Holder<Biome> biome // Canvas - pass chunk
      ) {
 -        return isInNetherFortressBounds(pos, level, category, structureManager)
-+        return isInNetherFortressBounds(pos, level, category, structureManager, chunk) // Canvas - optimize natural spawning
++        return isInNetherFortressBounds(pos, chunk, category, structureManager) // Canvas - pass chunk
              ? NetherFortressStructure.FORTRESS_ENEMIES
 -            : generator.getMobsAt(biome != null ? biome : level.getBiome(pos), structureManager, category, pos);
-+            : generator.getMobsAt(biome != null ? biome : chunk.getNoiseBiome(pos.getX(), pos.getY(), pos.getZ()), structureManager, category, pos, chunk.getAllReferences()); // Canvas - optimize natural spawning
++            : generator.getMobsAt(biome != null ? biome : chunk.level.getBiome(pos), structureManager, category, pos, chunk.getAllReferences()); // Canvas - reduce chunk lookup
      }
  
 -    public static boolean isInNetherFortressBounds(BlockPos pos, ServerLevel level, MobCategory category, StructureManager structureManager) {
 -        if (category == MobCategory.MONSTER && level.getBlockState(pos.below()).is(Blocks.NETHER_BRICKS)) {
-+    public static boolean isInNetherFortressBounds(BlockPos pos, ServerLevel level, MobCategory category, StructureManager structureManager, LevelChunk chunk) { // Canvas - optimize natural spawning
-+        if (category == MobCategory.MONSTER && chunk.getBlockState(pos.below()).is(Blocks.NETHER_BRICKS)) { // Canvas - optimize natural spawning
++    public static boolean isInNetherFortressBounds(BlockPos pos, LevelChunk chunk, MobCategory category, StructureManager structureManager) { // Canvas - pass chunk
++        if (category == MobCategory.MONSTER && chunk.getBlockState(pos.below()).is(Blocks.NETHER_BRICKS)) { // Canvas - reduce chunk lookup
              Structure structure = structureManager.registryAccess().lookupOrThrow(Registries.STRUCTURE).getValue(BuiltinStructures.FORTRESS);
              return structure != null && structureManager.getStructureAt(pos, structure).isValid();
          } else {
-@@ -440,12 +_,15 @@
+@@ -575,18 +_,22 @@
+         private @Nullable BlockPos lastCheckedPos;
+         private @Nullable EntityType<?> lastCheckedType;
+         private double lastCharge;
++        public final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData; // Canvas - optimize natural spawning
++        public final int[] limits; // Canvas - optimize natural spawning
+ 
+         SpawnState(
+             int spawnableChunkCount,
+             Object2IntOpenHashMap<MobCategory> mobCategoryCounts,
+             PotentialCalculator spawnPotential,
+-            LocalMobCapCalculator localMobCapCalculator
++            LocalMobCapCalculator localMobCapCalculator, io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData, int[] limits // Canvas - optimize natural spawning
+         ) {
+             this.spawnableChunkCount = spawnableChunkCount;
+             this.mobCategoryCounts = mobCategoryCounts;
+             this.spawnPotential = spawnPotential;
+             this.localMobCapCalculator = localMobCapCalculator;
+             this.unmodifiableMobCategoryCounts = Object2IntMaps.unmodifiable(mobCategoryCounts);
++            this.regionizedWorldData = regionizedWorldData; // Canvas - optimize natural spawning
++            this.limits = limits; // Canvas - optimize natural spawning
          }
-     }
  
--    private static BlockPos getRandomPosWithin(Level level, LevelChunk chunk) {
-+    private static BlockPos getRandomPosWithin(Level level, LevelChunk chunk, io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData) { // Canvas - optimize natural spawning
-         ChunkPos pos = chunk.getPos();
--        int i = pos.getMinBlockX() + level.random.nextInt(16);
--        int i1 = pos.getMinBlockZ() + level.random.nextInt(16);
-+        // Canvas start - optimize natural spawning
-+        // Note: this is *not* threadsafe and should NEVER be called off the owning thread of the regionized world data
-+        int i = pos.getMinBlockX() + regionizedWorldData.simpleUnsafeLocalRandom.nextInt(16);
-+        int i1 = pos.getMinBlockZ() + regionizedWorldData.simpleUnsafeLocalRandom.nextInt(16);
-         int i2 = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, i, i1) + 1;
--        int i3 = Mth.randomBetweenInclusive(level.random, level.getMinY(), i2);
-+        int i3 = regionizedWorldData.simpleUnsafeLocalRandom.nextInt(i2 - level.getMinY() + 1) + level.getMinY();
-+        // Canvas end - optimize natural spawning
-         return new BlockPos(i, i3, i1);
-     }
- 
+         private boolean canSpawn(EntityType<?> entityType, BlockPos pos, ChunkAccess chunk) {
