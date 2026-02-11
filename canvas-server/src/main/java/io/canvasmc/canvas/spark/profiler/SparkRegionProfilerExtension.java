@@ -63,7 +63,7 @@ public class SparkRegionProfilerExtension {
             try {
                 CURRENT_PINNER.getAndSet(null).unpin((scheduleHandle) -> {
                     TRACKING_THREAD.set(null); // clear tracking thread
-                    ((CRSThreadPool.ScheduledState) scheduleHandle.state).unpin(crsScheduler);
+                    ((CRSThreadPool.ScheduledState) scheduleHandle.state).unlink();
                     PROFILING_RESULTS_CACHE.set(null);
                 }, crsScheduler);
             } catch (CommandSyntaxException ex) {
@@ -104,7 +104,7 @@ public class SparkRegionProfilerExtension {
                 pinner.pin((schedulingHandle, thread) -> {
                     // pin the actual region tick to the runner
                     TRACKING_THREAD.set(thread);
-                    ((CRSThreadPool.ScheduledState) schedulingHandle.state).pin(thread.id, crsScheduler);
+                    ((CRSThreadPool.ScheduledState) schedulingHandle.state).link(thread);
                     sendMessage.accept("Completed scheduler setup for region pin profiling");
                     CURRENT_PINNER.set(pinner);
                     // schedule async, since spark runs its operations in this pool

@@ -2,7 +2,6 @@ package io.canvasmc.canvas.tick;
 
 import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
-import ca.spottedleaf.concurrentutil.set.LinkedSortedSet;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
 import io.canvasmc.canvas.Config;
@@ -12,23 +11,23 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
-import java.util.function.Predicate;
 import org.jspecify.annotations.NonNull;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Scheduler thread pool implementation based off EDF scheduler in ConcurrentUtil
- * that supports intermediate task execution and task pinning
+ * that supports intermediate task execution and task linking
  */
 public final class CRSThreadPool extends Scheduler {
 
-    public static final long RUN_TASKS_BUFFER_NANOS = (long) (Config.INSTANCE.scheduler.runTasksBufferMillis * 1_000_000L);
-    public static final long STEAL_THRESH_NANOS = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
+    // TODO - these as local vars?
+    public static final long RUN_TASKS_BUFFER_NANOS = (long) (((double) 100_000 / 1_000_000) * 1_000_000L);
+    public static final long STEAL_THRESH_NANOS = 3L * 1_000_000L;
+    // public static final long RUN_TASKS_BUFFER_NANOS = (long) (Config.INSTANCE.scheduler.runTasksBufferMillis * 1_000_000L);
+    // public static final long STEAL_THRESH_NANOS = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
     private static final Comparator<ScheduledState> TICK_COMPARATOR_BY_TIME = (final ScheduledState s1, final ScheduledState s2) -> {
         final SchedulableTick t1 = s1.tick;
         final SchedulableTick t2 = s2.tick;
@@ -40,13 +39,12 @@ public final class CRSThreadPool extends Scheduler {
 
         return Long.signum(t1.id - t2.id);
     };
-    private final LinkedSortedSet<ScheduledState> awaiting = new LinkedSortedSet<>(TICK_COMPARATOR_BY_TIME);
-    private final PartitionedPriorityQueue<ScheduledState> queued = new PartitionedPriorityQueue<>(TICK_COMPARATOR_BY_TIME);
+    private final StealingQueue stealingQueue = new StealingQueue();
     private final Object scheduleLock = new Object();
     private final int threadCount;
-    private TickThreadRunner[] runners;
-    private Thread[] threads;
-    private BitSet idleThreads;
+    private final TickThreadRunner[] runners;
+    private final Thread[] threads;
+    private final BitSet idleThreads;
     private volatile boolean halted;
     private volatile boolean supportsPinning = true;
 
@@ -181,41 +179,16 @@ public final class CRSThreadPool extends Scheduler {
     private void insertFresh(final @NonNull ScheduledState task) {
         final TickThreadRunner[] runners = this.runners;
 
-        if (task.isPinned()) {
-            final int pinnedId = task.getPinnedThreadId();
-            if (pinnedId >= 0 && pinnedId < runners.length) {
-                final TickThreadRunner pinnedRunner = runners[pinnedId];
-
-                if (this.idleThreads.get(pinnedId)) {
-                    this.idleThreads.clear(pinnedId);
-                    task.awaitingLink = this.awaiting.addLast(task);
-                    pinnedRunner.acceptTask(task);
-                    return;
-                }
-
-                final TickThreadRunner.TickThreadRunnerState pinnedState = pinnedRunner.state;
-                if (pinnedState.state == TickThreadRunner.STATE_AWAITING_TICK) {
-                    final ScheduledState currentTask = pinnedState.stateTarget;
-
-                    if (TICK_COMPARATOR_BY_TIME.compare(task, currentTask) < 0) {
-                        this.awaiting.remove(currentTask.awaitingLink);
-                        currentTask.awaitingLink = null;
-                        task.awaitingLink = this.awaiting.addLast(task);
-                        // add with proper partition
-                        if (currentTask.isPinned()) {
-                            this.queued.add(currentTask, currentTask.getPinnedThreadId());
-                        } else {
-                            this.queued.add(currentTask, pinnedId);
-                        }
-                        pinnedRunner.replaceTask(task);
-                        return;
-                    }
-                }
-
-                // add to pinned thread partition
-                this.queued.add(task, pinnedId);
-                return;
+        if (task.linked != null) {
+            if (idleThreads.get(task.linked.id)) {
+                // is idle
+                idleThreads.clear(task.linked.id);
+                task.linked.acceptTask(task);
+            } else {
+                // not idle, just queue
+                task.linked.directQueue.add(task);
             }
+            return;
         }
 
         final int firstIdleThread = this.idleThreads.nextSetBit(0);
@@ -224,107 +197,38 @@ public final class CRSThreadPool extends Scheduler {
             // push to idle thread
             this.idleThreads.clear(firstIdleThread);
             final TickThreadRunner runner = runners[firstIdleThread];
-            task.awaitingLink = this.awaiting.addLast(task);
             runner.acceptTask(task);
             return;
         }
 
-        // try to replace the last awaiting task
-        final ScheduledState last = this.awaiting.last();
-
-        if (last != null && TICK_COMPARATOR_BY_TIME.compare(task, last) < 0) {
-            // need to replace the last task
-            this.awaiting.pollLast();
-            last.awaitingLink = null;
-            task.awaitingLink = this.awaiting.addLast(task);
-
-            final TickThreadRunner runner = last.ownedBy;
-
-            // add to proper partition
-            if (last.isPinned()) {
-                this.queued.add(last, last.getPinnedThreadId());
-            } else {
-                this.queued.add(last, runner.id);
-            }
-
-            runner.replaceTask(task);
-
-            return;
-        }
-
-        // add to queue, will be picked up later
-        this.queued.add(task);
-    }
-
-    private void takeTask(final TickThreadRunner runner, final @NonNull ScheduledState tick) {
-        if (!this.awaiting.remove(tick.awaitingLink)) {
-            throw new IllegalStateException("Task is not in awaiting");
-        }
-        tick.awaitingLink = null;
+        // add to global queue, will be picked up later
+        this.stealingQueue.addGlobal(task);
     }
 
     private ScheduledState returnTask(final TickThreadRunner runner, final ScheduledState reschedule) {
         if (reschedule != null) {
-            this.queued.remove(reschedule);
-            if (reschedule.isPinned()) {
-                final int pinnedThreadId = reschedule.getPinnedThreadId();
-                this.queued.add(reschedule, pinnedThreadId);
-
-                // if task is now pinned to a *different* thread than the one that just ran it,
-                // we need to wake up the new pinned thread if it's idle
-                if (pinnedThreadId != runner.id && this.idleThreads.get(pinnedThreadId)) {
-                    this.idleThreads.clear(pinnedThreadId);
-                    final TickThreadRunner targetRunner = this.runners[pinnedThreadId];
-
-                    // send task to idle runner
-                    reschedule.awaitingLink = this.awaiting.addLast(reschedule);
-                    targetRunner.acceptTask(reschedule);
+            // reschedule shouldn't be in any queue
+            if (reschedule.linked != null) {
+                if (reschedule.linked == runner) {
+                    // reschedule linked to the live runner
+                    runner.directQueue.add(reschedule);
+                } else {
+                    // linked to a diff runner, if idle, wake and take
+                    if (idleThreads.get(reschedule.linked.id)) {
+                        // push to idle thread
+                        idleThreads.clear(reschedule.linked.id);
+                        reschedule.linked.acceptTask(reschedule);
+                    } else
+                        // not idle, just queue it, will be picked up next tick
+                        reschedule.linked.directQueue.add(reschedule);
                 }
-            } else {
-                this.queued.add(reschedule, runner.id);
-            }
+            } else this.stealingQueue.add(reschedule, runner);
         }
 
-        ScheduledState ret = null;
-        if (!this.queued.isEmpty()) {
-            final boolean runnerIsPinned = runner.isPinnedTo();
-            final ScheduledState[] foundTask = new ScheduledState[1];
-
-            this.queued.forEachVisible(runner.id, task -> {
-                final boolean taskIsPinned = task.isPinned();
-
-                // tasks pinned to the runner
-                if (taskIsPinned && task.getPinnedThreadId() == runner.id) {
-                    this.queued.remove(task);
-                    foundTask[0] = task;
-                    return false; // stop iterating
-                }
-
-                // work stealing is prioritized, since if we are stealing, it means
-                // the task that is being stolen has missed its deadline...
-                if (!runnerIsPinned && !taskIsPinned && task.isGloballyVisible()) {
-                    this.queued.remove(task);
-                    foundTask[0] = task;
-                    return false; // stop iterating
-                }
-
-                // fallback to local work
-                if (!runnerIsPinned && !taskIsPinned) {
-                    this.queued.remove(task);
-                    foundTask[0] = task;
-                    return false; // stop iterating
-                }
-
-                return true; // continue iterating
-            });
-
-            ret = foundTask[0];
-        }
+        ScheduledState ret = this.stealingQueue.poll(runner);
 
         if (ret == null) {
             this.idleThreads.set(runner.id);
-        } else {
-            ret.awaitingLink = this.awaiting.addLast(ret);
         }
 
         return ret;
@@ -368,27 +272,17 @@ public final class CRSThreadPool extends Scheduler {
         return this.supportsPinning;
     }
 
-    public static final class ScheduledState implements PartitionedPriorityQueue.Partitionable {
-        /**
-         * Represents a constant indicating that the pinned state has not been set.
-         * This value is used as a default or uninitialized state for tasks, and is
-         * used for tasks that should be unpinned.
-         */
-        public static final int PINNED_NOT_SET = -1;
-        private static final VarHandle PINNED_THREAD_ID_HANDLE =
-            ConcurrentUtil.getVarHandle(ScheduledState.class, "pinnedThreadId", int.class);
+    public static final class ScheduledState {
         private static final int SCHEDULE_STATE_NOT_SCHEDULED = 0;
         private static final int SCHEDULE_STATE_SCHEDULED = 1;
         private static final int SCHEDULE_STATE_CANCELLED = 2;
         private final SchedulableTick tick;
         private final AtomicInteger scheduled = new AtomicInteger();
         public CRSThreadPool schedulerOwnedBy;
-        private TickThreadRunner ownedBy;
-        private int pinnedThreadId = PINNED_NOT_SET;
-        private @Nullable Integer assocPartition = null;
-        private boolean hasTasks;
+        private volatile boolean hasTasks;
 
-        private LinkedSortedSet.Link<ScheduledState> awaitingLink;
+        private TickThreadRunner ownedBy;
+        public TickThreadRunner linked;
 
         private ScheduledState(final SchedulableTick tick) {
             this.tick = tick;
@@ -402,7 +296,7 @@ public final class CRSThreadPool extends Scheduler {
             return this.scheduled.compareAndSet(SCHEDULE_STATE_SCHEDULED, SCHEDULE_STATE_CANCELLED);
         }
 
-        private boolean isScheduled() {
+        boolean isScheduled() {
             return this.scheduled.get() == SCHEDULE_STATE_SCHEDULED;
         }
 
@@ -420,101 +314,26 @@ public final class CRSThreadPool extends Scheduler {
             return ownedBy;
         }
 
-        @Override
-        public boolean isGloballyVisible() {
+        public boolean canSteal(long nanos) {
             // diff + thresh <= 0L
-            return (this.tick.getScheduledStart() - System.nanoTime()) + STEAL_THRESH_NANOS <= 0L;
+            return (this.tick.getScheduledStart() - nanos) + STEAL_THRESH_NANOS <= 0L;
         }
 
-        @Override
-        public @Nullable Integer getPartitionKey() {
-            return this.assocPartition;
-        }
-
-        @Override
-        public void setPartitionKey(final int partitionKey) {
-            this.assocPartition = partitionKey;
-        }
-
-        public boolean isPinned() {
-            return (int) PINNED_THREAD_ID_HANDLE.getVolatile(this) >= 0;
-        }
-
-        public int getPinnedThreadId() {
-            return (int) PINNED_THREAD_ID_HANDLE.getVolatile(this);
-        }
-
-        public void setPinnedThreadId(final int threadId, final CRSThreadPool scheduler) {
-            final int prev = (int) PINNED_THREAD_ID_HANDLE.getAndSet(this, threadId);
-
-            // only update pin counts if actually changing
-            if (prev == threadId) {
-                return;
-            }
-
-            // try set scheduler if we haven't already
-            if (this.schedulerOwnedBy == null) this.schedulerOwnedBy = scheduler;
-
-            // need to handle the case where task is currently scheduled
-            // and pinning changes - this requires scheduler intervention
-            synchronized (scheduler.scheduleLock) {
-                for (final TickThreadRunner runner : scheduler.runners) {
-                    if (threadId < 0) {
-                        // we are removing the pinning status
-                        if (runner.id == prev && prev >= 0) {
-                            runner.deincPin();
-                            break;
-                        }
-                    } else {
-                        // we are adding the pinning status
-                        if (runner.id == threadId) {
-                            // add new association
-                            runner.incPin();
-                        } else if (runner.id == prev && prev >= 0) {
-                            // remove old association
-                            runner.deincPin();
-                        }
-                    }
-                }
-
-                if (this.isScheduled() && this.ownedBy == null && this.awaitingLink == null) {
-                    if (scheduler.queued.remove(this)) {
-                        if (threadId >= 0) {
-                            scheduler.queued.add(this, threadId);
-                        } else {
-                            scheduler.queued.add(this);
-                        }
-                    }
-                }
+        public void link(final TickThreadRunner threadRunner) {
+            if (threadRunner == null) throw new IllegalStateException("Use unlink");
+            synchronized (threadRunner.scheduler.scheduleLock) {
+                if (linked != null) throw new IllegalStateException("Already linked");
+                linked = threadRunner;
+                TickThreadRunner.LINKED_HANDLE.getAndAdd(linked, 1);
             }
         }
 
-        /**
-         * Pins the task to a specific thread for execution or unpins it depending on the provided thread ID.
-         * If the thread ID is invalid or not within the valid range of threads in the scheduler, no action is taken.
-         * <p>
-         * Use {@link #PINNED_NOT_SET} for unpinning a task
-         * </p>
-         *
-         * @param threadId the ID of the thread to pin the task to. If the value is -1, the task will be unpinned.
-         */
-        public void pin(final int threadId, final CRSThreadPool scheduler) {
-            if (threadId > scheduler.threadCount) {
-                // don't pin, this isn't a valid thread
-                return;
-            } else if (threadId == PINNED_NOT_SET) {
-                // we are unpinning
-                unpin(scheduler);
-                return;
-            } else if (threadId < PINNED_NOT_SET) {
-                // invalid thread, don't pin or unpin
-                return;
+        public void unlink() {
+            synchronized (schedulerOwnedBy.scheduleLock) {
+                if (linked == null) throw new IllegalStateException("Not linked");
+                TickThreadRunner.LINKED_HANDLE.getAndAdd(linked, -1);
+                linked = null;
             }
-            this.setPinnedThreadId(threadId, scheduler);
-        }
-
-        public void unpin(final CRSThreadPool scheduler) {
-            this.setPinnedThreadId(PINNED_NOT_SET, scheduler);
         }
     }
 
@@ -544,30 +363,19 @@ public final class CRSThreadPool extends Scheduler {
          */
         private static final int STATE_EXECUTING_TICK = 2;
         private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "state", TickThreadRunnerState.class);
-        private static final VarHandle LINKED_TO_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "linkedTo", ScheduledState.class);
-        private static final VarHandle IS_PINNED_TO_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "pinnedTasks", int.class);
+        private static final VarHandle LINKED_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "linked", int.class);
         public final int id;
         public final CRSThreadPool scheduler;
         public volatile Thread backingThread;
         private volatile TickThreadRunnerState state = new TickThreadRunnerState(null, STATE_IDLE);
-        private volatile ScheduledState linkedTo = null;
-        private int pinnedTasks = 0;
+
+        private final ObjectPriorityQueue<ScheduledState> localQueue = new ObjectPriorityQueue<>(65, TICK_COMPARATOR_BY_TIME);
+        private final ObjectPriorityQueue<ScheduledState> directQueue = new ObjectPriorityQueue<>(2, TICK_COMPARATOR_BY_TIME);
+        private volatile int linked = 0;
 
         public TickThreadRunner(final int id, final CRSThreadPool scheduler) {
             this.id = id;
             this.scheduler = scheduler;
-        }
-
-        private void incPin() {
-            IS_PINNED_TO_HANDLE.getAndAdd(this, 1);
-        }
-
-        private void deincPin() {
-            IS_PINNED_TO_HANDLE.getAndAdd(this, -1);
-        }
-
-        public boolean isPinnedTo() {
-            return this.pinnedTasks > 0;
         }
 
         private void setStatePlain(final TickThreadRunnerState state) {
@@ -580,14 +388,6 @@ public final class CRSThreadPool extends Scheduler {
 
         private void setStateVolatile(final TickThreadRunnerState state) {
             STATE_HANDLE.setVolatile(this, state);
-        }
-
-        private void link(ScheduledState to) {
-            LINKED_TO_HANDLE.setVolatile(this, to);
-        }
-
-        private void unlink() {
-            LINKED_TO_HANDLE.setVolatile(this, null);
         }
 
         private Thread getRunnerThread() {
@@ -607,39 +407,12 @@ public final class CRSThreadPool extends Scheduler {
             LockSupport.unpark(this.getRunnerThread());
         }
 
-        private void replaceTask(final ScheduledState task) {
-            final TickThreadRunnerState state = this.state;
-            if (state.state != STATE_AWAITING_TICK) {
-                throw new IllegalStateException("Cannot replace task in state " + state);
-            }
-            if (task.ownedBy != null) {
-                throw new IllegalStateException("Already owned by another runner");
-            }
-            task.ownedBy = this;
-
-            state.stateTarget.ownedBy = null;
-
-            this.setStateVolatile(new TickThreadRunnerState(task, STATE_AWAITING_TICK));
-            LockSupport.unpark(this.getRunnerThread());
-        }
-
-        private void forceIdle() {
-            final TickThreadRunnerState state = this.state;
-            if (state.state != STATE_AWAITING_TICK) {
-                throw new IllegalStateException("Cannot replace task in state " + state);
-            }
-            state.stateTarget.ownedBy = null;
-            this.setStateOpaque(new TickThreadRunnerState(null, STATE_IDLE));
-            // no need to unpark
-        }
-
         private boolean takeTask(final TickThreadRunnerState state, final ScheduledState task) {
             synchronized (this.scheduler.scheduleLock) {
                 if (this.state != state) {
                     return false;
                 }
                 this.setStatePlain(new TickThreadRunnerState(task, STATE_EXECUTING_TICK));
-                this.scheduler.takeTask(this, task);
                 return true;
             }
         }
@@ -754,101 +527,81 @@ public final class CRSThreadPool extends Scheduler {
             }
         }
 
-        private static record TickThreadRunnerState(ScheduledState stateTarget, int state) {
+        @Override
+        public String toString() {
+            return "CRSThread-" + id;
+        }
+
+        private record TickThreadRunnerState(ScheduledState stateTarget, int state) {
         }
     }
 
-    /**
-     * A priority queue that associates elements with partition keys (integers) and allows selective operations
-     * based on those partitions. This class provides management of elements within specific partitions,
-     * while still retaining the behavior of a priority queue.
-     *
-     * @param <E> The type of elements stored in the queue, which must implement the {@link PartitionedPriorityQueue.Partitionable} interface.
-     * @author dueris
-     */
-    private static class PartitionedPriorityQueue<E extends PartitionedPriorityQueue.Partitionable> {
+    private class StealingQueue {
 
-        private final PriorityQueue<E> queue;
+        private final ObjectPriorityQueue<ScheduledState> globalQueue;
 
-        public PartitionedPriorityQueue(Comparator<? super E> comparator) {
-            this.queue = new PriorityQueue<>(comparator);
+        public StealingQueue() {
+            this.globalQueue = new ObjectPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME);
         }
 
-        /**
-         * Adds the specified element to this queue
-         * <p>
-         * <b>Note:</b> This task will be visible globally
-         * </p>
-         */
-        public void add(E e) {
-            queue.add(e);
+        public void addGlobal(@NonNull ScheduledState task) {
+            if (task.linked != null) {
+                task.linked.directQueue.add(task);
+                return;
+            }
+            globalQueue.add(task);
         }
 
-        /**
-         * Adds the specified element to this queue
-         * <p>
-         * <b>Note:</b> This task will be visible specifically to the partition key, unless {@link Partitionable#isGloballyVisible()} is true.
-         * </p>
-         * <br>
-         * If there is potential for this to be owned by a different partition key,
-         * remove it globally first, then call this.
-         */
-        public void add(E e, int partitionKey) {
-            e.setPartitionKey(partitionKey);
-            queue.add(e);
+        public void add(final @NonNull ScheduledState state, final @NonNull TickThreadRunner threadRunner) {
+            if (state.linked != null && threadRunner != state.linked) {
+                // state is linked, and is trying to be added to the wrong queue
+                throw new IllegalStateException("Linked to different thread");
+            } else if (state.linked != null) {
+                threadRunner.directQueue.add(state);
+            } else threadRunner.localQueue.add(state);
         }
 
-        public boolean isEmpty() {
-            return queue.isEmpty();
-        }
-
-        public boolean remove(E element) {
-            return queue.remove(element);
-        }
-
-        /**
-         * Iterates over all elements visible to the specified partition key.
-         * Elements are visited in priority order (heap order, not fully sorted).
-         * <p>
-         * The consumer should return true to continue iteration, or false to stop early.
-         * </p>
-         *
-         * @param partitionKey the partition key to filter by
-         * @param consumer     the consumer that processes each visible element
-         */
-        public void forEachVisible(final int partitionKey, final Predicate<E> consumer) {
-            for (E element : queue) {
-                final Integer assoc = element.getPartitionKey();
-                if (assoc == null || assoc == partitionKey || element.isGloballyVisible()) {
-                    if (!consumer.test(element)) {
-                        return; // early exit
-                    }
+        // note: try pull from global first, if global head is sooner, return, else, if local
+        //       is overdue, return, else, try steal if more overdue than local head
+        public ScheduledState poll(final @NonNull TickThreadRunner runner) {
+            if (runner.linked > 0) {
+                return runner.directQueue.poll();
+            }
+            // check global first, this is all under lock
+            final ScheduledState localHead = runner.localQueue.peek();
+            if (globalQueue.size > 0) {
+                ScheduledState globalHead = globalQueue.peek();
+                if (localHead == null || TICK_COMPARATOR_BY_TIME.compare(globalHead, localHead) < 0) {
+                    // global is better, take that
+                    return globalQueue.poll();
                 }
             }
-        }
 
-        public interface Partitionable {
-            /**
-             * Called every time the element is being searched to determine if it should
-             * be visible to all partitions regardless of its association.
-             *
-             * @return true if this element should be globally visible
-             */
-            boolean isGloballyVisible();
+            final TickThreadRunner[] runners = CRSThreadPool.this.runners;
+            final long nanos = System.nanoTime();
 
-            /**
-             * Gets the partition key associated with this element.
-             *
-             * @return the partition key, or null if globally visible
-             */
-            @Nullable Integer getPartitionKey();
+            if (localHead != null) {
+                long localTime = localHead.tick.scheduledStart;
 
-            /**
-             * Sets the partition key for this element.
-             *
-             * @param partitionKey the partition key to associate with this element
-             */
-            void setPartitionKey(int partitionKey);
+                // if local is overdue by more than steal threshold, just take it
+                if ((nanos - localTime) > STEAL_THRESH_NANOS) {
+                    return runner.localQueue.poll();
+                }
+            }
+
+            // try steal next
+            for (int i = 0; i < threadCount; i++) {
+                if (i == runner.id) continue;
+
+                ScheduledState otherHead = runners[i].localQueue.peek();
+                if (otherHead != null && otherHead.canSteal(nanos) && (localHead == null || TICK_COMPARATOR_BY_TIME.compare(otherHead, localHead) < 0)) {
+                    // is stealable, just fucking grab it, it's overdue more than local head
+                    return runners[i].localQueue.poll();
+                }
+            }
+
+            // try and get local head, this is best
+            return runner.localQueue.poll();
         }
     }
 }
