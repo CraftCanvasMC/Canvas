@@ -23,11 +23,6 @@ import org.jspecify.annotations.NonNull;
  */
 public final class CRSThreadPool extends Scheduler {
 
-    // TODO - these as local vars?
-    public static final long RUN_TASKS_BUFFER_NANOS = (long) (((double) 100_000 / 1_000_000) * 1_000_000L);
-    public static final long STEAL_THRESH_NANOS = 3L * 1_000_000L;
-    // public static final long RUN_TASKS_BUFFER_NANOS = (long) (Config.INSTANCE.scheduler.runTasksBufferMillis * 1_000_000L);
-    // public static final long STEAL_THRESH_NANOS = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
     private static final Comparator<ScheduledState> TICK_COMPARATOR_BY_TIME = (final ScheduledState s1, final ScheduledState s2) -> {
         final SchedulableTick t1 = s1.tick;
         final SchedulableTick t2 = s2.tick;
@@ -45,8 +40,12 @@ public final class CRSThreadPool extends Scheduler {
     private final TickThreadRunner[] runners;
     private final Thread[] threads;
     private final BitSet idleThreads;
+
     private volatile boolean halted;
     private volatile boolean supportsPinning = true;
+
+    public final long runTaskBuff;
+    public final long stealThresh;
 
     /**
      * Creates, but does not start, a scheduler thread pool with the specified number of threads
@@ -56,7 +55,7 @@ public final class CRSThreadPool extends Scheduler {
      * @param threadFactory Specified thread factory
      * @see #start()
      */
-    public CRSThreadPool(final int threads, final ThreadFactory threadFactory) {
+    public CRSThreadPool(final int threads, final ThreadFactory threadFactory, long runTaskBuff, long stealThresh) {
         final BitSet idleThreads = new BitSet(threads);
         for (int i = 0; i < threads; ++i) {
             idleThreads.set(i);
@@ -73,6 +72,9 @@ public final class CRSThreadPool extends Scheduler {
         this.threads = t;
         this.runners = runners;
         this.threadCount = threads;
+
+        this.runTaskBuff = runTaskBuff;
+        this.stealThresh = stealThresh;
     }
 
     /**
@@ -316,7 +318,7 @@ public final class CRSThreadPool extends Scheduler {
 
         public boolean canSteal(long nanos) {
             // diff + thresh <= 0L
-            return (this.tick.getScheduledStart() - nanos) + STEAL_THRESH_NANOS <= 0L;
+            return (this.tick.getScheduledStart() - nanos) + schedulerOwnedBy.stealThresh <= 0L;
         }
 
         public void link(final TickThreadRunner threadRunner) {
@@ -474,7 +476,7 @@ public final class CRSThreadPool extends Scheduler {
                             // we are parking, which is fine, however, we
                             // CAN do mid-tick tasks here instead, which makes us
                             // much more productive
-                            if ((diff > RUN_TASKS_BUFFER_NANOS) && // if we are less than the buffer, then don't try run mid-tick-tasks
+                            if ((diff > scheduler.runTaskBuff) && // if we are less than the buffer, then don't try run mid-tick-tasks
                                 (startStateTask.compareHasTasks() || startStateTask.tick.hasTasks())) {
                                 // try and take the tick task like it's a normal tick
                                 if (!this.takeTask(startState, startStateTask)) {
@@ -483,7 +485,7 @@ public final class CRSThreadPool extends Scheduler {
                                     continue; // done parking, or we got woken up, so we continue so it loops back to check the diff
                                 }
                                 // task is taken, wonderful
-                                final long bufferedDeadline = deadline - RUN_TASKS_BUFFER_NANOS;
+                                final long bufferedDeadline = deadline - scheduler.runTaskBuff;
                                 final boolean taskRes = startStateTask.tick.runTasks(
                                     () -> !this.scheduler.halted && (bufferedDeadline - System.nanoTime()) <= 0L
                                 );
@@ -584,7 +586,7 @@ public final class CRSThreadPool extends Scheduler {
                 long localTime = localHead.tick.scheduledStart;
 
                 // if local is overdue by more than steal threshold, just take it
-                if ((nanos - localTime) > STEAL_THRESH_NANOS) {
+                if ((nanos - localTime) > stealThresh) {
                     return runner.localQueue.poll();
                 }
             }
