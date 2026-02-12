@@ -676,22 +676,6 @@ public class Config {
     })
     public double waypointUpdateScale = 4000.0D;
 
-    @Comment({
-        "Natural mob spawning increments for attempts to spawn mobs.",
-        "This can create \"pauses\" between trying to spawn mobs per-chunk"
-    })
-    public SpawningIntervals naturalMobSpawnIncrements = new SpawningIntervals();
-
-    public static class SpawningIntervals {
-        public int monster = 0;
-        public int creature = 0;
-        public int ambient = 0;
-        public int axolotls = 0;
-        public int undergroundWaterCreature = 0;
-        public int waterCreature = 0;
-        public int waterAmbient = 0;
-    }
-
     @Comment("The server mod name displayed in server listings and client info")
     public String serverModName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
 }
