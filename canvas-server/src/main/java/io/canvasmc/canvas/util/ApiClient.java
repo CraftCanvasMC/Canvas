@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -117,6 +119,23 @@ public final class ApiClient {
         return parseSingleBuild(json);
     }
 
+    /**
+     * Returns the build across <b>all Minecraft versions</b> related to the provided build number.
+     *
+     * @param buildNum the build number
+     * @return the build associated with the provided build number
+     * @throws IOException          if the API request fails
+     * @throws InterruptedException if the HTTP request is interrupted
+     */
+    public @Nullable Build getBuild(int buildNum) throws IOException, InterruptedException {
+        String json = sendRequest(BASE_URL + "/builds?experimental=true");
+        List<Build> builds = parseBuildsArray(json);
+        builds.sort(Comparator.comparingInt(Build::buildNumber));
+        return builds.stream()
+            .filter((build) -> build.buildNumber == buildNum)
+            .findFirst().orElse(null);
+    }
+
     private String sendRequest(String url) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
@@ -151,7 +170,7 @@ public final class ApiClient {
     }
 
     private @NonNull Build parseSingleBuild(String json) {
-        int buildNumber = extractInt(json, "buildNumber");
+        int buildNumber = extractIntElse(json, "buildNumber", -1);
         String url = extractString(json, "url");
         String downloadUrl = extractString(json, "downloadUrl");
         String mcVersion = extractString(json, "minecraftVersion");
@@ -159,7 +178,7 @@ public final class ApiClient {
         boolean experimental = extractBoolean(json, "isExperimental");
 
         List<Commit> commits = parseCommits(json);
-        return new Build(buildNumber, url, downloadUrl, mcVersion, timestamp, experimental, commits.toArray(new Commit[0]));
+        return new Build(buildNumber, url, downloadUrl, mcVersion, timestamp, buildNumber == -1 ? Channel.LOCAL : experimental ? Channel.BETA : Channel.STABLE, commits.toArray(new Commit[0]));
     }
 
     private @NonNull List<Commit> parseCommits(@NonNull String json) {
@@ -222,6 +241,11 @@ public final class ApiClient {
         return value == null ? 0 : Integer.parseInt(value);
     }
 
+    private int extractIntElse(String json, String key, int fallback) {
+        String value = extractNumber(json, key);
+        return value == null ? fallback : Integer.parseInt(value);
+    }
+
     private long extractLong(String json, String key) {
         String value = extractNumber(json, key);
         return value == null ? 0L : Long.parseLong(value);
@@ -261,7 +285,7 @@ public final class ApiClient {
      * @param downloadUrl      the download URL
      * @param minecraftVersion the Minecraft version for this build
      * @param timestamp        the timestamp of the associated build
-     * @param isExperimental   if the build is marked as experimental
+     * @param channel          the channel of this build
      * @param commits          an array of commits in this build, can be empty
      */
     public record Build(
@@ -270,7 +294,7 @@ public final class ApiClient {
         String downloadUrl,
         String minecraftVersion,
         long timestamp,
-        boolean isExperimental,
+        Channel channel,
         Commit[] commits
     ) {
         public boolean hasChanges() {
@@ -285,5 +309,25 @@ public final class ApiClient {
      * @param hash    the commit hash
      */
     public record Commit(String message, String hash) {
+    }
+
+    /**
+     * The release channel of this build
+     */
+    public enum Channel {
+        STABLE(NamedTextColor.GREEN),
+        BETA(NamedTextColor.YELLOW),
+        LOCAL(NamedTextColor.RED),
+        UNKNOWN(NamedTextColor.RED);
+
+        private final TextColor color;
+
+        Channel(TextColor color) {
+            this.color = color;
+        }
+
+        public @Nullable TextColor color() {
+            return color;
+        }
     }
 }

@@ -18,8 +18,8 @@ import static net.kyori.adventure.text.Component.text;
  */
 public class CanvasVersionFetcher implements VersionFetcher {
     public static final ApiClient CLIENT = new ApiClient();
+    public static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
 
-    private static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
     private static final ComponentLogger LOGGER = ComponentLogger.logger(BUILD_INFO.brandName() + "VersionProvider");
 
     private static final int DISTANCE_ERROR = -1;
