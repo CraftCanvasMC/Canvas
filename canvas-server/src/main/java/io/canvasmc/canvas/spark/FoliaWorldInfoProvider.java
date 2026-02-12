@@ -83,12 +83,13 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         }
         int players = this.server.getOnlinePlayers().size();
         int entities = 0;
+        // TODO - implement?
+        // we don't provide tile entity data because it's not thread-safe
         int tileEntities = 0;
         int chunks = 0;
 
         for (World world : this.server.getWorlds()) {
             entities += world.getEntityCount();
-            tileEntities += world.getTileEntityCount();
             chunks += world.getChunkCount();
         }
 
