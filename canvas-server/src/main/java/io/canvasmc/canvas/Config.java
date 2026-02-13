@@ -268,9 +268,6 @@ public class Config {
 
         @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
         public boolean asyncProtocolSwitch = false;
-
-        @Comment("The networking IO model for netty")
-        public NetworkIoModel networkIoModel = NetworkIoModel.EPOLL;
     }
 
     // TODO - test performance enhancements - is this worth keeping?
