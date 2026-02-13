@@ -13,13 +13,18 @@ import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
+import io.canvasmc.canvas.util.ApiClient;
+import io.canvasmc.canvas.util.CanvasVersionFetcher;
 import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
+import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.random.RandomGeneratorFactory;
+import io.papermc.paper.threadedregions.RegionizedServer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -41,6 +46,7 @@ public class Config {
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
     // Note: this field should never be used during POST, use 'context.configuration()' instead
     public static Config INSTANCE;
+    public static ApiClient.Channel ACTIVE_BUILD_CHANNEL = ApiClient.Channel.UNKNOWN;
     public static final Consumer<String> GLOBAL_BROADCAST = (msg) -> {
         Component component = RegionizedTpsBar.gradient("[CanvasMC] ",
             s -> s.decorate(TextDecoration.BOLD),
@@ -69,6 +75,27 @@ public class Config {
         // preload parallel search radius iteration early
         //noinspection ResultOfMethodCallIgnored
         ParallelSearchRadiusIteration.getSearchIteration(MoonriseConstants.MAX_VIEW_DISTANCE);
+        CompletableFuture.supplyAsync(() -> {
+            ApiClient.Channel channel = ApiClient.Channel.UNKNOWN;
+            ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
+            int build = buildInfo.buildNumber().orElse(-1);
+            if (build == -1) {
+                channel = ApiClient.Channel.LOCAL;
+            } else {
+                try {
+                    channel = CanvasVersionFetcher.CLIENT.getBuild(build).channel();
+                } catch (Throwable ignored) {
+                }
+            }
+            return channel;
+        }).thenAccept(channel -> RegionizedServer.getInstance().addTask(() -> {
+            ACTIVE_BUILD_CHANNEL = channel;
+            switch (channel) {
+                case UNKNOWN -> GLOBAL_BROADCAST.accept("Running unknown build channel, proceed with caution");
+                case BETA -> GLOBAL_BROADCAST.accept("Running a beta build, there may be bugs, proceed with caution!");
+                case LOCAL -> GLOBAL_BROADCAST.accept("You are running a development version of Canvas, which may not be production-ready, be very careful!");
+            }
+        }));
     }
 
     public static void reload() {

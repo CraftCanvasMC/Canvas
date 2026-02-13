@@ -318,7 +318,7 @@ public final class ApiClient {
         STABLE(NamedTextColor.GREEN),
         BETA(NamedTextColor.YELLOW),
         LOCAL(NamedTextColor.RED),
-        UNKNOWN(NamedTextColor.RED);
+        UNKNOWN(NamedTextColor.GOLD);
 
         private final TextColor color;
 
