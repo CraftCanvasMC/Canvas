@@ -702,4 +702,7 @@ public class Config {
 
     @Comment("The server mod name displayed in server listings and client info")
     public String serverModName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
+
+    @Comment("Restores vanilla ender pearl behavior to match Paper, which is disabled in Folia.")
+    public boolean restoreVanillaEnderPearlBehavior = false;
 }
