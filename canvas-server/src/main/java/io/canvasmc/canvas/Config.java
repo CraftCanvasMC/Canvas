@@ -601,12 +601,6 @@ public class Config {
         public boolean removeRedDeathAnimation = false;
     }
 
-    @Comment({
-        "Use direct random implementation instead of delegating to Java's RandomGenerator.",
-        "This may improve performance but potentially changes RNG behavior."
-    })
-    public boolean useDirectRandomImpl = false;
-
     public Spawner spawner = new Spawner();
 
     public static class Spawner {
