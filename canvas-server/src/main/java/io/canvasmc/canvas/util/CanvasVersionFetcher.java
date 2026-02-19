@@ -3,10 +3,17 @@ package io.canvasmc.canvas.util;
 import com.destroystokyo.paper.util.VersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
+
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.util.OptionalInt;
 
 import static net.kyori.adventure.text.Component.text;
 
@@ -27,10 +34,19 @@ public class CanvasVersionFetcher implements VersionFetcher {
     private static final int IS_LOCAL = -3;
 
     private static final @NotNull TextColor RED = TextColor.color(0xFF5300);
-    private static final @NotNull TextColor WARN = TextColor.color(0xFFFF00);
+    private static final @NotNull TextColor WARN = TextColor.color(0xFFCD00);
     private static final @NotNull TextColor GREEN = TextColor.color(0x4DE54D);
 
-    private static final @NotNull String DOWNLOAD_PAGE = "https://canvasmc.io/downloads";
+    private static final @NotNull URL DOWNLOAD_URL;
+
+    static {
+        try {
+            DOWNLOAD_URL = URI.create("https://canvasmc.io/downloads/").toURL();
+        } catch (MalformedURLException e) {
+            throw new RuntimeException("Couldn't create download url", e);
+        }
+    }
+
     private static final @NotNull Component NEW_LINE = text("\n");
 
     public CanvasVersionFetcher() {
@@ -47,10 +63,11 @@ public class CanvasVersionFetcher implements VersionFetcher {
     }
 
     private int fetchStatus() {
-        if (BUILD_INFO.buildNumber().isEmpty()) {
+        final OptionalInt buildNumber = BUILD_INFO.buildNumber();
+        if (buildNumber.isEmpty() || buildNumber.getAsInt() == -1) {
             return IS_LOCAL;
         }
-        final int localNum = BUILD_INFO.buildNumber().getAsInt();
+        final int localNum = buildNumber.getAsInt();
         try {
             ApiClient.Build build = CLIENT.getLatestBuildForVersion(BUILD_INFO.minecraftVersionId(), true);
             if (build == null) {
@@ -74,7 +91,9 @@ public class CanvasVersionFetcher implements VersionFetcher {
                 if (i > 0) {
                     yield Component.text("You are " + i + " builds behind", WARN)
                         .append(NEW_LINE)
-                        .append(Component.text("You can download the latest version from " + DOWNLOAD_PAGE));
+                        .append(Component.text("You can download the latest version from the ").append(
+                            Component.text("downloads page").clickEvent(ClickEvent.openUrl(DOWNLOAD_URL)).decorate(TextDecoration.UNDERLINED)
+                        ));
                 }
                 yield text("Unknown response code '" + i + "'", RED);
             }
