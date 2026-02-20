@@ -396,10 +396,9 @@ public final class CRSThreadPool extends Scheduler {
             return ownedBy;
         }
 
-        // TODO - pass current time nanos
-        public boolean canSteal() {
+        public boolean canSteal(long nanos) {
             // diff + thresh <= 0L
-            return (this.tick.getScheduledStart() - System.nanoTime()) + schedulerOwnedBy.stealThresh <= 0L;
+            return (this.tick.getScheduledStart() - nanos) + schedulerOwnedBy.stealThresh <= 0L;
         }
 
         // TODO - store as tick thread ref
@@ -765,9 +764,10 @@ public final class CRSThreadPool extends Scheduler {
         }
 
         public @Nullable ScheduledState pollFor(final int partitionKey, final boolean runnerIsPinned) {
+            long initialPollTimeNanos = System.nanoTime();
             for (ScheduledState element : queue) {
                 final Integer assoc = element.getPartitionKey();
-                final boolean canSteal = element.canSteal();
+                final boolean canSteal = element.canSteal(initialPollTimeNanos);
                 if (assoc == null || assoc == partitionKey || canSteal) {
                     final boolean taskIsPinned = element.isPinned();
 
