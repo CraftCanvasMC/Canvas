@@ -293,37 +293,8 @@ public final class CRSThreadPool extends Scheduler {
         ScheduledState ret = null;
         if (!this.queued.isEmpty()) {
             final boolean runnerIsPinned = runner.isPinnedTo();
-            final ScheduledState[] foundTask = new ScheduledState[1];
 
-            this.queued.forEachVisible(runner.id, task -> {
-                final boolean taskIsPinned = task.isPinned();
-
-                // tasks pinned to the runner
-                if (taskIsPinned && task.getPinnedThreadId() == runner.id) {
-                    this.queued.remove(task);
-                    foundTask[0] = task;
-                    return false; // stop iterating
-                }
-
-                // work stealing is prioritized, since if we are stealing, it means
-                // the task that is being stolen has missed its deadline...
-                if (!runnerIsPinned && !taskIsPinned && task.canSteal()) {
-                    this.queued.remove(task);
-                    foundTask[0] = task;
-                    return false; // stop iterating
-                }
-
-                // fallback to local work
-                if (!runnerIsPinned && !taskIsPinned) {
-                    this.queued.remove(task);
-                    foundTask[0] = task;
-                    return false; // stop iterating
-                }
-
-                return true; // continue iterating
-            });
-
-            ret = foundTask[0];
+            ret = this.queued.pollFor(runner.id, runnerIsPinned);;
         }
 
         if (ret == null) {
@@ -767,13 +738,6 @@ public final class CRSThreadPool extends Scheduler {
         }
     }
 
-    /**
-     * A priority queue that associates elements with partition keys (integers) and allows selective operations
-     * based on those partitions. This class provides management of elements within specific partitions,
-     * while still retaining the behavior of a priority queue.
-     *
-     * @author dueris
-     */
     @NullMarked
     private final class StealingQueue {
 
@@ -783,25 +747,10 @@ public final class CRSThreadPool extends Scheduler {
             this.queue = new PriorityQueue<>(150, comparator);
         }
 
-        /**
-         * Adds the specified element to this queue
-         * <p>
-         * <b>Note:</b> This task will be visible globally
-         * </p>
-         */
         public void add(ScheduledState state) {
             queue.add(state);
         }
 
-        /**
-         * Adds the specified element to this queue
-         * <p>
-         * <b>Note:</b> This task will be visible specifically to the partition key, unless {@link ScheduledState#canSteal()} is true.
-         * </p>
-         * <br>
-         * If there is potential for this to be owned by a different partition key,
-         * remove it globally first, then call this.
-         */
         public void add(ScheduledState state, int partitionKey) {
             state.setPartitionKey(partitionKey);
             queue.add(state);
@@ -815,25 +764,35 @@ public final class CRSThreadPool extends Scheduler {
             return queue.remove(state);
         }
 
-        /**
-         * Iterates over all elements visible to the specified partition key.
-         * Elements are visited in priority order (heap order, not fully sorted).
-         * <p>
-         * The consumer should return true to continue iteration, or false to stop early.
-         * </p>
-         *
-         * @param partitionKey the partition key to filter by
-         * @param consumer     the consumer that processes each visible element
-         */
-        public void forEachVisible(final int partitionKey, final Predicate<ScheduledState> consumer) {
+        public @Nullable ScheduledState pollFor(final int partitionKey, final boolean runnerIsPinned) {
             for (ScheduledState element : queue) {
                 final Integer assoc = element.getPartitionKey();
-                if (assoc == null || assoc == partitionKey || element.canSteal()) {
-                    if (!consumer.test(element)) {
-                        return; // early exit
+                final boolean canSteal = element.canSteal();
+                if (assoc == null || assoc == partitionKey || canSteal) {
+                    final boolean taskIsPinned = element.isPinned();
+
+                    // tasks pinned to the runner
+                    if (taskIsPinned && element.getPinnedThreadId() == partitionKey) {
+                        remove(element);
+                        return element; // stop iterating
+                    }
+
+                    // work stealing is prioritized, since if we are stealing, it means
+                    // the task that is being stolen has missed its deadline...
+                    if (!runnerIsPinned && !taskIsPinned && canSteal) {
+                        remove(element);
+                        return element; // stop iterating
+                    }
+
+                    // fallback to local work
+                    if (!runnerIsPinned && !taskIsPinned) {
+                        remove(element);
+                        return element; // stop iterating
                     }
                 }
             }
+            // no matches
+            return null;
         }
     }
 }
