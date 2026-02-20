@@ -599,6 +599,9 @@ public class Config {
 
         @Comment("Removes the red death animation seen on entities when killed.")
         public boolean removeRedDeathAnimation = false;
+
+        @Comment("Restores the blast protection logic from before 1.21")
+        public boolean useOldBlastProtection = false;
     }
 
     public Spawner spawner = new Spawner();
