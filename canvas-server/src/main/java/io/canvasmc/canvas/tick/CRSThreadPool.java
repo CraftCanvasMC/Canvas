@@ -40,7 +40,7 @@ public final class CRSThreadPool extends Scheduler {
         return Long.signum(t1.id - t2.id);
     };
     private final LinkedSortedSet<ScheduledState> awaiting = new LinkedSortedSet<>(TICK_COMPARATOR_BY_TIME);
-    private final PartitionedPriorityQueue<ScheduledState> queued = new PartitionedPriorityQueue<>(TICK_COMPARATOR_BY_TIME);
+    private final StealingQueue queued = new StealingQueue(TICK_COMPARATOR_BY_TIME);
     private final Object scheduleLock = new Object();
     private final int threadCount;
     private TickThreadRunner[] runners;
@@ -307,7 +307,7 @@ public final class CRSThreadPool extends Scheduler {
 
                 // work stealing is prioritized, since if we are stealing, it means
                 // the task that is being stolen has missed its deadline...
-                if (!runnerIsPinned && !taskIsPinned && task.isGloballyVisible()) {
+                if (!runnerIsPinned && !taskIsPinned && task.canSteal()) {
                     this.queued.remove(task);
                     foundTask[0] = task;
                     return false; // stop iterating
@@ -373,7 +373,7 @@ public final class CRSThreadPool extends Scheduler {
         return this.supportsPinning;
     }
 
-    public static final class ScheduledState implements PartitionedPriorityQueue.Partitionable {
+    public static final class ScheduledState {
         /**
          * Represents a constant indicating that the pinned state has not been set.
          * This value is used as a default or uninitialized state for tasks, and is
@@ -425,18 +425,17 @@ public final class CRSThreadPool extends Scheduler {
             return ownedBy;
         }
 
-        @Override
-        public boolean isGloballyVisible() {
+        // TODO - pass current time nanos
+        public boolean canSteal() {
             // diff + thresh <= 0L
             return (this.tick.getScheduledStart() - System.nanoTime()) + schedulerOwnedBy.stealThresh <= 0L;
         }
 
-        @Override
+        // TODO - store as tick thread ref
         public @Nullable Integer getPartitionKey() {
             return this.assocPartition;
         }
 
-        @Override
         public void setPartitionKey(final int partitionKey) {
             this.assocPartition = partitionKey;
         }
@@ -773,15 +772,14 @@ public final class CRSThreadPool extends Scheduler {
      * based on those partitions. This class provides management of elements within specific partitions,
      * while still retaining the behavior of a priority queue.
      *
-     * @param <E> The type of elements stored in the queue, which must implement the {@link PartitionedPriorityQueue.Partitionable} interface.
      * @author dueris
      */
     @NullMarked
-    private static class PartitionedPriorityQueue<E extends PartitionedPriorityQueue.Partitionable> {
+    private final class StealingQueue {
 
-        private final PriorityQueue<E> queue;
+        private final PriorityQueue<ScheduledState> queue;
 
-        public PartitionedPriorityQueue(Comparator<? super E> comparator) {
+        public StealingQueue(Comparator<ScheduledState> comparator) {
             this.queue = new PriorityQueue<>(150, comparator);
         }
 
@@ -791,30 +789,30 @@ public final class CRSThreadPool extends Scheduler {
          * <b>Note:</b> This task will be visible globally
          * </p>
          */
-        public void add(E e) {
-            queue.add(e);
+        public void add(ScheduledState state) {
+            queue.add(state);
         }
 
         /**
          * Adds the specified element to this queue
          * <p>
-         * <b>Note:</b> This task will be visible specifically to the partition key, unless {@link Partitionable#isGloballyVisible()} is true.
+         * <b>Note:</b> This task will be visible specifically to the partition key, unless {@link ScheduledState#canSteal()} is true.
          * </p>
          * <br>
          * If there is potential for this to be owned by a different partition key,
          * remove it globally first, then call this.
          */
-        public void add(E e, int partitionKey) {
-            e.setPartitionKey(partitionKey);
-            queue.add(e);
+        public void add(ScheduledState state, int partitionKey) {
+            state.setPartitionKey(partitionKey);
+            queue.add(state);
         }
 
         public boolean isEmpty() {
             return queue.isEmpty();
         }
 
-        public boolean remove(E element) {
-            return queue.remove(element);
+        public boolean remove(ScheduledState state) {
+            return queue.remove(state);
         }
 
         /**
@@ -827,39 +825,15 @@ public final class CRSThreadPool extends Scheduler {
          * @param partitionKey the partition key to filter by
          * @param consumer     the consumer that processes each visible element
          */
-        public void forEachVisible(final int partitionKey, final Predicate<E> consumer) {
-            for (E element : queue) {
+        public void forEachVisible(final int partitionKey, final Predicate<ScheduledState> consumer) {
+            for (ScheduledState element : queue) {
                 final Integer assoc = element.getPartitionKey();
-                if (assoc == null || assoc == partitionKey || element.isGloballyVisible()) {
+                if (assoc == null || assoc == partitionKey || element.canSteal()) {
                     if (!consumer.test(element)) {
                         return; // early exit
                     }
                 }
             }
-        }
-
-        public interface Partitionable {
-            /**
-             * Called every time the element is being searched to determine if it should
-             * be visible to all partitions regardless of its association.
-             *
-             * @return true if this element should be globally visible
-             */
-            boolean isGloballyVisible();
-
-            /**
-             * Gets the partition key associated with this element.
-             *
-             * @return the partition key, or null if globally visible
-             */
-            @Nullable Integer getPartitionKey();
-
-            /**
-             * Sets the partition key for this element.
-             *
-             * @param partitionKey the partition key to associate with this element
-             */
-            void setPartitionKey(int partitionKey);
         }
     }
 }
