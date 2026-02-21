@@ -740,23 +740,23 @@ public final class CRSThreadPool extends Scheduler {
     @NullMarked
     private final class StealingQueue {
 
-        private final PriorityQueue<ScheduledState> queue;
+        private final TickPriorityQueue<ScheduledState> queue;
 
         public StealingQueue(Comparator<ScheduledState> comparator) {
-            this.queue = new PriorityQueue<>(150, comparator);
+            this.queue = new TickPriorityQueue<>(150, comparator, ScheduledState.class);
         }
 
         public void add(ScheduledState state) {
-            queue.add(state);
+            queue.offer(state);
         }
 
         public void add(ScheduledState state, int partitionKey) {
             state.setPartitionKey(partitionKey);
-            queue.add(state);
+            queue.offer(state);
         }
 
         public boolean isEmpty() {
-            return queue.isEmpty();
+            return queue.size == 0;
         }
 
         public boolean remove(ScheduledState state) {
@@ -765,7 +765,8 @@ public final class CRSThreadPool extends Scheduler {
 
         public @Nullable ScheduledState pollFor(final int partitionKey, final boolean runnerIsPinned) {
             long initialPollTimeNanos = System.nanoTime();
-            for (ScheduledState element : queue) {
+            for (int i = 0; i < queue.size; i++) {
+                ScheduledState element = queue.arr[i];
                 final Integer assoc = element.getPartitionKey();
                 final boolean canSteal = element.canSteal(initialPollTimeNanos);
                 if (assoc == null || assoc == partitionKey || canSteal) {

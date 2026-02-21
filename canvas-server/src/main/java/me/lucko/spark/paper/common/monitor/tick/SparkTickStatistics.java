@@ -10,7 +10,7 @@ import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
 import com.google.common.base.Suppliers;
 import com.mojang.datafixers.util.Pair;
 import io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension;
-import io.canvasmc.canvas.tick.COWLongArrayList;
+import io.canvasmc.canvas.util.COWLongArrayList;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegions;
 import me.lucko.spark.api.statistic.StatisticWindow;

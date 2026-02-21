@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.tick;
+package io.canvasmc.canvas.util;
 
 import java.lang.reflect.Array;
 import java.util.Arrays;

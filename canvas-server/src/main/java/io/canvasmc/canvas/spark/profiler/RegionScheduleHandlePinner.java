@@ -5,8 +5,7 @@ import ca.spottedleaf.concurrentutil.util.Priority;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
-import io.canvasmc.canvas.configuration.TriConsumer;
-import io.canvasmc.canvas.tick.COWLongArrayList;
+import io.canvasmc.canvas.util.COWLongArrayList;
 import io.canvasmc.canvas.tick.CRSThreadPool;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
@@ -23,7 +22,6 @@ import net.minecraft.server.level.Ticket;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.border.WorldBorder;
 import org.jetbrains.annotations.NotNull;
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

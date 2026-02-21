@@ -4,7 +4,7 @@ import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
 import com.mojang.datafixers.util.Pair;
 import io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension;
-import io.canvasmc.canvas.tick.COWLongArrayList;
+import io.canvasmc.canvas.util.COWLongArrayList;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import java.util.ArrayList;

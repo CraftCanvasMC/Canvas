@@ -3,7 +3,7 @@ package io.canvasmc.canvas.spark.profiler;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.datafixers.util.Pair;
-import io.canvasmc.canvas.tick.COWLongArrayList;
+import io.canvasmc.canvas.util.COWLongArrayList;
 import io.canvasmc.canvas.tick.CRSThreadPool;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
