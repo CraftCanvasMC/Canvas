@@ -170,6 +170,13 @@ public class Config {
             "Default: 0.1ms"
         })
         public double runTasksBufferMillis = (double) 100_000 / 1_000_000;
+
+        @Comment({
+            "Amount of time between the end and next start of a region tick where the server will log a",
+            "warning that the scheduler is overloaded. Can help catch if you need to allocate more threads",
+            "or help identify deadline missing issues"
+        })
+        public long overloadedLogMillis = 5_000L;
     }
 
     public Chunks chunks = new Chunks();
