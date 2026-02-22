@@ -538,6 +538,15 @@ public class Config {
             "Only works with projectiles thrown by players."
         })
         public List<String> loadChunks = new ArrayList<>();
+
+        @Comment({
+            "Restores vanilla redirect behavior for arrow hits on redirectable projectiles",
+            "(like wind charges and fireballs) across region threads.",
+            "For machines using this mechanic, it is recommended to set",
+            "\"max-arrow-despawn-invulnerability: disabled\" in paper-world-defaults.yml",
+            "To prevent the arrows from despawning."
+        })
+        public boolean crossRegionRedirectableProjectileDeflection = false;
     }
 
     @Comment({
