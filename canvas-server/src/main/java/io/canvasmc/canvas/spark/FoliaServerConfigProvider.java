@@ -77,19 +77,19 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
         HIDDEN_PATHS = hiddenPaths.build();
     }
 
-    public FoliaServerConfigProvider() {
-        super(FILES, HIDDEN_PATHS);
-    }
-
     private static @NotNull @Unmodifiable List<String> getTimingsHiddenConfigs() {
         return Collections.emptyList();
     }
 
+    public FoliaServerConfigProvider() {
+        super(FILES, HIDDEN_PATHS);
+    }
+
     private static class YamlConfigParser implements ConfigParser {
-        public static final YamlConfigParser INSTANCE = new YamlConfigParser();
         protected static final Gson GSON = new GsonBuilder()
             .registerTypeAdapter(MemorySection.class, (JsonSerializer<MemorySection>) (obj, type, ctx) -> ctx.serialize(obj.getValues(false)))
             .create();
+        public static final YamlConfigParser INSTANCE = new YamlConfigParser();
 
         @Override
         public JsonElement load(String file, ExcludedConfigFilter filter) throws IOException {
@@ -109,11 +109,11 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
     }
 
     private static class Json5YamlParser implements ConfigParser {
+        private static final Json5YamlParser INSTANCE = new Json5YamlParser();
         protected static final Gson GSON = new GsonBuilder()
             .registerTypeAdapter(MemorySection.class, (JsonSerializer<MemorySection>) (obj, type, ctx) ->
                 ctx.serialize(obj.getValues(false)))
             .create();
-        private static final Json5YamlParser INSTANCE = new Json5YamlParser();
 
         @Override
         public JsonElement load(String file, ExcludedConfigFilter filter) throws IOException {

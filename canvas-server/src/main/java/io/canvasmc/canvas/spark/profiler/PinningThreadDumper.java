@@ -12,8 +12,8 @@ import me.lucko.spark.paper.common.util.ThreadFinder;
 import me.lucko.spark.paper.proto.SparkSamplerProtos;
 
 /**
- * A {@link ThreadDumper} implementation that works similar to the {@link ThreadDumper.Regex} dumper,
- * however it will return the tracking thread <i>only</i> if a region profiler is currently running.
+ * A {@link ThreadDumper} implementation that works similar to the {@link ThreadDumper.Regex} dumper, however it will
+ * return the tracking thread <i>only</i> if a region profiler is currently running.
  *
  * @author dueris
  */

@@ -2,58 +2,51 @@
  * <h1>Region Profiler V2</h1>
  *
  * <p>
- * In the Folia region threading environment, there are multiple issues with utilizing
- * this environment. One of the core issues is that profiling regions independently is
- * nearly impossible unless you have a single region loaded on a server. For production
- * environments, this is oftentimes not possible.
+ * In the Folia region threading environment, there are multiple issues with utilizing this environment. One of the core
+ * issues is that profiling regions independently is nearly impossible unless you have a single region loaded on a
+ * server. For production environments, this is oftentimes not possible.
  * </p>
  *
  * <p>
- * To combat this, SpottedLeaf, the creator of V1 of the region profiler, implemented a
- * more generalized profiler to determine points of lag. The issue with this is that it
- * had no detailing whatsoever, causing issues when trying to make genuine performance
- * optimizations for the dedicated server, or for server owners and developers to find
- * sources of lag.
+ * To combat this, SpottedLeaf, the creator of V1 of the region profiler, implemented a more generalized profiler to
+ * determine points of lag. The issue with this is that it had no detailing whatsoever, causing issues when trying to
+ * make genuine performance optimizations for the dedicated server, or for server owners and developers to find sources
+ * of lag.
  * </p>
  *
  * <p>
- * Spark is the builtin profiler for Paper, upstream of Folia, and gives a perfect amount
- * of data to help diagnose issues and performance problems. However, the way Spark works
- * prevents us from being able to track regions independently. Spark has the capability of
- * tracking specific <i><b>threads</b></i>, not <i><b>regions</b></i>, as regions are tasked
- * based on a scheduled task thread pool.
+ * Spark is the builtin profiler for Paper, upstream of Folia, and gives a perfect amount of data to help diagnose
+ * issues and performance problems. However, the way Spark works prevents us from being able to track regions
+ * independently. Spark has the capability of tracking specific <i><b>threads</b></i>, not <i><b>regions</b></i>, as
+ * regions are tasked based on a scheduled task thread pool.
  * </p>
  *
  * <p>
- * To combat this, we created a <i><b>task pinning</b></i> system that allows runners to
- * become marked as dedicated processors for a selected area of chunks to be profiled.
+ * To combat this, we created a <i><b>task pinning</b></i> system that allows runners to become marked as dedicated
+ * processors for a selected area of chunks to be profiled.
  * </p>
  *
  * <h2>Threading Details</h2>
  *
  * <p>
- * As stated in the brief explanation prior, Spark can track specific <i><b>threads</b></i>,
- * not <i><b>regions</b></i>, and so we need a way to ensure that the region is on a specific
- * thread at all times. An API was introduced to allow <i><b>pinning</b></i> the area
- * of chunks to a dedicated tick runner.
+ * As stated in the brief explanation prior, Spark can track specific <i><b>threads</b></i>, not <i><b>regions</b></i>,
+ * and so we need a way to ensure that the region is on a specific thread at all times. An API was introduced to allow
+ * <i><b>pinning</b></i> the area of chunks to a dedicated tick runner.
  * </p>
  *
  * <p>
- * This does include some performance penalties, as since the area needs isolation, it cannot
- * be utilized in scaling the server, so other tasks cannot use the thread for task processing
- * while a region is pinned to it. For the spark report to be accurate, we need to make the
- * area completely isolated. The new API allows us to mark tasks as pinned to the thread id
- * of a tick runner, which marks the thread as only able to process tasks pinned to it. The
- * API internally allows us to pin any amount of tasks to any amount of threads, however we
- * limit the server’s usage to only a single area at a time, as Spark can only run one
- * profiler at once.
+ * This does include some performance penalties, as since the area needs isolation, it cannot be utilized in scaling the
+ * server, so other tasks cannot use the thread for task processing while a region is pinned to it. For the spark report
+ * to be accurate, we need to make the area completely isolated. The new API allows us to mark tasks as pinned to the
+ * thread id of a tick runner, which marks the thread as only able to process tasks pinned to it. The API internally
+ * allows us to pin any amount of tasks to any amount of threads, however we limit the server’s usage to only a single
+ * area at a time, as Spark can only run one profiler at once.
  * </p>
  *
  * <p>
- * When the relationship between the thread runner and the tick task is formed or destroyed,
- * the scheduler will view this as a filter to ensure that the tick task is only ticked on
- * the thread runner, even if it exceeds the steal threshold. This is ensured by applying
- * a few behavioral changes in the forms of filters:
+ * When the relationship between the thread runner and the tick task is formed or destroyed, the scheduler will view
+ * this as a filter to ensure that the tick task is only ticked on the thread runner, even if it exceeds the steal
+ * threshold. This is ensured by applying a few behavioral changes in the forms of filters:
  * <ul>
  *     <li>If a pinned task is on a different thread than the one it's being pinned to, it will
  *         not be picked up by anything until it has exceeded its steal threshold, where the

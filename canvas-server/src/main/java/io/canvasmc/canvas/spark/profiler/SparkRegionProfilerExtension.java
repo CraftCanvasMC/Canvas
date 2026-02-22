@@ -6,12 +6,14 @@ import com.mojang.datafixers.util.Pair;
 import io.canvasmc.canvas.util.COWLongArrayList;
 import io.canvasmc.canvas.tick.CRSThreadPool;
 import io.papermc.paper.threadedregions.RegionizedServer;
+import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
 import io.papermc.paper.util.MCUtil;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import net.minecraft.server.level.ServerLevel;
 
+// TODO - wow this needs cleanup
 public class SparkRegionProfilerExtension {
     public static final SimpleCommandExceptionType ERROR_ALREADY_PROFILING =
         new SimpleCommandExceptionType(net.minecraft.network.chat.Component.literal("Server already running a region profiler!"));
@@ -29,6 +31,7 @@ public class SparkRegionProfilerExtension {
      * Its more of a temporary storage than anything
      */
     public static final AtomicReference<Pair<ServerLevel, COWLongArrayList>> PROFILING_RESULTS_CACHE = new AtomicReference<>();
+    public static final AtomicReference<TickRegionScheduler.RegionScheduleHandle> SCHEDULE_HANDLE_CACHE = new AtomicReference<>();
 
     /**
      * Ends pinning of the currently profiling region
@@ -65,6 +68,7 @@ public class SparkRegionProfilerExtension {
                     TRACKING_THREAD.set(null); // clear tracking thread
                     ((CRSThreadPool.ScheduledState) scheduleHandle.state).unpin(crsScheduler);
                     PROFILING_RESULTS_CACHE.set(null);
+                    SCHEDULE_HANDLE_CACHE.set(null);
                 }, crsScheduler);
             } catch (CommandSyntaxException ex) {
                 sendFailure.accept(ex.getRawMessage().getString());
@@ -107,6 +111,7 @@ public class SparkRegionProfilerExtension {
                     ((CRSThreadPool.ScheduledState) schedulingHandle.state).pin(thread.id, crsScheduler);
                     sendMessage.accept("Completed scheduler setup for region pin profiling");
                     CURRENT_PINNER.set(pinner);
+                    SCHEDULE_HANDLE_CACHE.set(schedulingHandle);
                     // schedule async, since spark runs its operations in this pool
                     MCUtil.scheduleAsyncTask(pinCallback);
                 }, crsScheduler);

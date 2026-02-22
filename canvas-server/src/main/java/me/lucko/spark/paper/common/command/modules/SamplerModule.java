@@ -70,6 +70,7 @@ import static net.kyori.adventure.text.format.NamedTextColor.GRAY;
 import static net.kyori.adventure.text.format.NamedTextColor.RED;
 import static net.kyori.adventure.text.format.NamedTextColor.WHITE;
 
+// TODO - update this whenever this class updates in spark, since there are no source files... RAHHHH
 public class SamplerModule implements CommandModule {
 
     @Override

@@ -30,7 +30,8 @@ public class FoliaClassSourceLookup extends ClassSourceLookup.ByClassLoader {
         if (PLUGIN_CLASS_LOADER.isInstance(loader)) {
             JavaPlugin plugin = (JavaPlugin) PLUGIN_FIELD.get(loader);
             return plugin.getName();
-        } else if (PAPER_PLUGIN_CLASS_LOADER.isInstance(loader)) {
+        }
+        else if (PAPER_PLUGIN_CLASS_LOADER.isInstance(loader)) {
             JavaPlugin plugin = (JavaPlugin) PAPER_PLUGIN_FIELD.get(loader);
             return plugin.getName();
         }

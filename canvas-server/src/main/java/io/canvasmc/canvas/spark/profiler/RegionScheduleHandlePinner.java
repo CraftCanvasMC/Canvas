@@ -5,8 +5,8 @@ import ca.spottedleaf.concurrentutil.util.Priority;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
-import io.canvasmc.canvas.util.COWLongArrayList;
 import io.canvasmc.canvas.tick.CRSThreadPool;
+import io.canvasmc.canvas.util.COWLongArrayList;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
@@ -41,39 +41,49 @@ public interface RegionScheduleHandlePinner {
      * <br></br>
      * <b>Note:</b> This will *always* be called on the global tick
      *
-     * @param finalizer the consumer that finishes the Spark profiler setup
-     * @throws CommandSyntaxException if an error occurs in setup and should be sent as an error to the sender
+     * @param finalizer
+     *     the consumer that finishes the Spark profiler setup
+     *
+     * @throws CommandSyntaxException
+     *     if an error occurs in setup and should be sent as an error to the sender
      */
     void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, CRSThreadPool.TickThreadRunner> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException;
 
     /**
      * Wraps up pinning for the current {@link RegionScheduleHandlePinner}. This should do the following:
      * <br>
-     * - Call the finalizer {@link Consumer} when you <i>retrieve</i> the {@link ca.spottedleaf.concurrentutil.scheduler.SchedulableTick},
-     * and then <i>after</i> cleanup the pin.
+     * - Call the finalizer {@link Consumer} when you <i>retrieve</i> the
+     * {@link ca.spottedleaf.concurrentutil.scheduler.SchedulableTick}, and then <i>after</i> cleanup the pin.
      * <br>
      * - Call the finalizer <i>on the profiling schedule handle</i>
      * <br></br>
      * <b>Note:</b> This will *always* be called on the global tick
      *
-     * @param finalizer the consumer that finishes the Spark profiler completion
-     * @throws CommandSyntaxException if an error occurs in completion and should be sent as an error to the sender
+     * @param finalizer
+     *     the consumer that finishes the Spark profiler completion
+     *
+     * @throws CommandSyntaxException
+     *     if an error occurs in completion and should be sent as an error to the sender
      */
     void unpin(Consumer<SchedulableTick> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException;
 
     /**
      * Fetches the logger for this region pinner, used for debugging purposes
+     *
      * @return the logger
      */
     Logger getLogger();
 
     /**
-     * Pinning implementation for a specific region area, allowing for a 'from' and a 'to' position to select
-     * more than one chunk to be profiled, with a maximum of 512 chunks (Note: the limit may be removed in the future)
+     * Pinning implementation for a specific region area, allowing for a 'from' and a 'to' position to select more than
+     * one chunk to be profiled, with a maximum of 512 chunks (Note: the limit may be removed in the future)
      *
-     * @param fromPos the 'from' coordinates
-     * @param toPos   the 'to' coordinates
-     * @param world   the world we are operating on
+     * @param fromPos
+     *     the 'from' coordinates
+     * @param toPos
+     *     the 'to' coordinates
+     * @param world
+     *     the world we are operating on
      */
     record RegionPinner(ColumnPos fromPos, ColumnPos toPos, ServerLevel world) implements RegionScheduleHandlePinner {
         public static final COWLongArrayList PROFILING_CHUNKS = new COWLongArrayList();
@@ -184,8 +194,8 @@ public interface RegionScheduleHandlePinner {
     /**
      * Pinning implementation for tracking the global tick, instead of a specified area of chunks
      * <br></br>
-     * Note: unfortunately this *does* block on the global tick. There isn't any way of avoiding
-     * this unless we find a way to make it still accurate while also having this complete async
+     * Note: unfortunately this *does* block on the global tick. There isn't any way of avoiding this unless we find a
+     * way to make it still accurate while also having this complete async
      */
     class GlobalTickPinner implements RegionScheduleHandlePinner {
         @Override

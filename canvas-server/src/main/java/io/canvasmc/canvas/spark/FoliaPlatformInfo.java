@@ -2,6 +2,8 @@ package io.canvasmc.canvas.spark;
 
 import me.lucko.spark.paper.common.platform.PlatformInfo;
 import org.bukkit.Server;
+import org.jetbrains.annotations.Contract;
+import org.jspecify.annotations.NonNull;
 
 public record FoliaPlatformInfo(Server server) implements PlatformInfo {
 
@@ -10,23 +12,24 @@ public record FoliaPlatformInfo(Server server) implements PlatformInfo {
         return Type.SERVER;
     }
 
+    @Contract(pure = true)
     @Override
-    public String getName() {
+    public @NonNull String getName() {
         return "Folia";
     }
 
     @Override
-    public String getBrand() {
+    public @NonNull String getBrand() {
         return this.server.getName();
     }
 
     @Override
-    public String getVersion() {
+    public @NonNull String getVersion() {
         return this.server.getVersion();
     }
 
     @Override
-    public String getMinecraftVersion() {
+    public @NonNull String getMinecraftVersion() {
         return this.server.getMinecraftVersion();
     }
 }

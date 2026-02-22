@@ -19,7 +19,6 @@ import me.lucko.spark.paper.api.PaperSparkModule;
 import me.lucko.spark.paper.common.SparkPlatform;
 import me.lucko.spark.paper.common.SparkPlugin;
 import me.lucko.spark.paper.common.monitor.ping.PlayerPingProvider;
-import me.lucko.spark.paper.common.monitor.tick.SparkTickStatistics;
 import me.lucko.spark.paper.common.monitor.tick.TickStatistics;
 import me.lucko.spark.paper.common.platform.PlatformInfo;
 import me.lucko.spark.paper.common.platform.serverconfig.ServerConfigProvider;
@@ -75,7 +74,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     @Override
     public TickStatistics createTickStatistics() {
-        return new SparkTickStatistics();
+        return new FoliaTickStatistics();
     }
 
     public List<String> tabComplete(CommandSender sender, String[] args) {

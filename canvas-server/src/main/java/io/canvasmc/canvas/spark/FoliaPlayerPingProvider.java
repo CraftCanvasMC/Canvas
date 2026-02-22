@@ -5,11 +5,13 @@ import java.util.Map;
 import me.lucko.spark.paper.common.monitor.ping.PlayerPingProvider;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jspecify.annotations.NonNull;
 
 public record FoliaPlayerPingProvider(Server server) implements PlayerPingProvider {
 
     @Override
-    public Map<String, Integer> poll() {
+    public @NonNull @Unmodifiable Map<String, Integer> poll() {
         ImmutableMap.Builder<String, Integer> builder = ImmutableMap.builder();
         for (Player player : this.server.getOnlinePlayers()) {
             builder.put(player.getName(), player.getPing());
