@@ -1,29 +1,33 @@
 package io.canvasmc.canvas.entity;
 
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.phys.Vec3;
+
 public final class EntityMoveOutOfRegionException extends RuntimeException {
-    private final net.minecraft.world.entity.Entity entity;
-    private final net.minecraft.world.entity.MoverType moverType;
-    private final net.minecraft.world.phys.Vec3 movement;
+    private final Entity entity;
+    private final MoverType moverType;
+    private final Vec3 movement;
 
     public EntityMoveOutOfRegionException(
-        net.minecraft.world.entity.Entity entity,
-        net.minecraft.world.entity.MoverType moverType,
-        net.minecraft.world.phys.Vec3 movement
+        Entity entity,
+        MoverType moverType,
+        Vec3 movement
     ) {
         this.entity = entity;
         this.moverType = moverType;
         this.movement = movement;
     }
 
-    public net.minecraft.world.entity.Entity entity() {
+    public Entity entity() {
         return this.entity;
     }
 
-    public net.minecraft.world.entity.MoverType moverType() {
+    public MoverType moverType() {
         return this.moverType;
     }
 
-    public net.minecraft.world.phys.Vec3 movement() {
+    public Vec3 movement() {
         return this.movement;
     }
 
