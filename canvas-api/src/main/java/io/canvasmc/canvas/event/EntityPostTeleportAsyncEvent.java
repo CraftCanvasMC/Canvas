@@ -11,8 +11,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Called when an entity is finished being teleported from one location to another.
  * <br>
- * This may be as a result of natural causes (Enderman, Shulker), pathfinding
- * (Wolf), or commands (/teleport).
+ * This may be as a result of natural causes (Enderman, Shulker), pathfinding (Wolf), or commands (/teleport).
  * <br>
  * This <b>*can*</b> be a player!
  */
