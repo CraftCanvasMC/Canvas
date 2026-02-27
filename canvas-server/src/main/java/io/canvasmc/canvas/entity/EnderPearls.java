@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -70,14 +71,17 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         return new EnderPearls(new ConcurrentHashMap<>());
     }
 
-    public void save() {
+    public @NonNull CompletableFuture<Void> save() {
+        CompletableFuture<Void> future = new CompletableFuture<>();
         Util.ioPool().execute(() -> CODEC.encodeStart(NbtOps.INSTANCE, this).resultOrPartial(Config.LOGGER::error).ifPresent(tag -> {
             try {
+                future.complete(null);
                 NbtIo.writeCompressed((CompoundTag) tag, SAVE_PATH);
             } catch (IOException e) {
                 throw new RuntimeException("Couldn't save pearls", e);
             }
         }));
+        return future;
     }
 
     public void spawnPearls(final @NonNull ServerPlayer player) {
