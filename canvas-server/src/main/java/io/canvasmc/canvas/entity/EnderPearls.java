@@ -162,6 +162,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 world.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
                     world.addFreshEntityWithPassengers(entity);
                     ServerPlayer.placeEnderPearlTicket(world, entity.chunkPosition());
+                    Config.LOGGER.debug("Spawned saved pearl in world ({})", world.dimension().identifier());
                 });
             }
             else {
