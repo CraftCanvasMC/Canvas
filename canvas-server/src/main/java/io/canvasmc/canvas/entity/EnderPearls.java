@@ -58,7 +58,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
     }
 
     public static EnderPearls read() {
-        if (Files.exists(SAVE_PATH)) {
+        if (Config.INSTANCE.restoreVanillaEnderPearlBehavior && Files.exists(SAVE_PATH)) {
             try {
                 CompoundTag tag = Objects.requireNonNull(NbtIo.readCompressed(SAVE_PATH, NbtAccounter.unlimitedHeap()), "NBT cannot be null")
                     .asCompound().orElseThrow(UnknownError::new);
