@@ -96,7 +96,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
 
     public void addPearl(final UUID uuid, final @NonNull ThrownEnderpearl thrownEnderpearl) {
         if (thrownEnderpearl.isRemoved()) {
-            Config.LOGGER.warn("Trying to add removed ender pearl, skipping");
+            Config.LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason(), new Throwable());
             return;
         }
         List<Pearl> pearls = pearls().computeIfAbsent(uuid, (ignored) -> new CopyOnWriteArrayList<>());
