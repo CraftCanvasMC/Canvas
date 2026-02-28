@@ -25,6 +25,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -73,14 +74,16 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
 
     public @NonNull CompletableFuture<Void> save() {
         CompletableFuture<Void> future = new CompletableFuture<>();
-        Util.ioPool().execute(() -> CODEC.encodeStart(NbtOps.INSTANCE, this).resultOrPartial(Config.LOGGER::error).ifPresent(tag -> {
+        Util.ioPool().execute(() -> {
             try {
-                future.complete(null);
+                Tag tag = CODEC.encodeStart(NbtOps.INSTANCE, this).getOrThrow();
                 NbtIo.writeCompressed((CompoundTag) tag, SAVE_PATH);
-            } catch (IOException e) {
-                throw new RuntimeException("Couldn't save pearls", e);
+                future.complete(null);
+            } catch (Throwable thrown) {
+                future.complete(null);
+                throw new RuntimeException("Couldn't save pearls", thrown);
             }
-        }));
+        });
         return future;
     }
 
