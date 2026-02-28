@@ -2,6 +2,7 @@ package io.canvasmc.canvas.entity;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.util.Codecs;
@@ -19,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
@@ -41,10 +43,8 @@ import org.jspecify.annotations.NonNull;
 public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
     private static final AtomicLong LAST_AUTOSAVE = new AtomicLong(System.nanoTime());
     public static final Path SAVE_PATH = Paths.get("pearls.dat");
-    public static final Codec<Pearl> PEARL_CODEC = RecordCodecBuilder.create(
-        instance -> instance.group(
-            CompoundTag.CODEC.fieldOf("Serialized").forGetter(Pearl::serialized)
-        ).apply(instance, Pearl::new)
+    public static final Codec<Pearl> PEARL_CODEC = CompoundTag.CODEC.comapFlatMap(
+        (Function<CompoundTag, DataResult<Pearl>>) compoundTag -> DataResult.success(new Pearl(compoundTag)), pearl -> pearl.serialized
     );
     public static final Codec<EnderPearls> CODEC = RecordCodecBuilder.create(
         instance -> instance.group(
