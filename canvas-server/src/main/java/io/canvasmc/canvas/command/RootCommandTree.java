@@ -107,6 +107,9 @@ public class RootCommandTree {
 
                 for (Command subCommand : subCommands) {
                     String name = subCommand.getName();
+                    if (!bukkitSender.hasPermission("canvas.command." + name)) {
+                        continue;
+                    }
 
                     Component hoverText = Component.text()
                         .append(Component.text("Click to view further details", INFORMATION))
