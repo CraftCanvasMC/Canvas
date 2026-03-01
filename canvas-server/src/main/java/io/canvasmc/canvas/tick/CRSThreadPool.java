@@ -281,6 +281,9 @@ public final class CRSThreadPool extends Scheduler {
                     this.idleThreads.clear(pinnedThreadId);
                     final TickThreadRunner targetRunner = this.runners[pinnedThreadId];
 
+                    // remove before handing off
+                    this.queued.remove(reschedule);
+
                     // send task to idle runner
                     reschedule.awaitingLink = this.awaiting.addLast(reschedule);
                     targetRunner.acceptTask(reschedule);
