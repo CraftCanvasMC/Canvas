@@ -6,6 +6,10 @@
 
 **CanvasMC** is a high-performance fork of the Folia Minecraft server software. It addresses gameplay inconsistencies and bugs, while introducing performance optimizations and enhancements to the dedicated server.
 
+
+
+
+
 ---
 [![bStats Graph Data](https://bstats.org/signatures/server-implementation/Canvas.svg)](https://bstats.org/plugin/server-implementation/Canvas)
 ---
