@@ -37,7 +37,7 @@ public final class CRSThreadPool extends Scheduler {
             return timeCompare;
         }
 
-        return Long.signum(t1.id - t2.id);
+        return Long.compare(t1.id, t2.id);
     };
     private final LinkedSortedSet<ScheduledState> awaiting = new LinkedSortedSet<>(TICK_COMPARATOR_BY_TIME);
     private final StealingQueue queued = new StealingQueue(TICK_COMPARATOR_BY_TIME);
@@ -273,7 +273,6 @@ public final class CRSThreadPool extends Scheduler {
             this.queued.remove(reschedule);
             if (reschedule.isPinned()) {
                 final int pinnedThreadId = reschedule.getPinnedThreadId();
-                this.queued.add(reschedule, pinnedThreadId);
 
                 // if task is now pinned to a *different* thread than the one that just ran it,
                 // we need to wake up the new pinned thread if it's idle
@@ -281,13 +280,10 @@ public final class CRSThreadPool extends Scheduler {
                     this.idleThreads.clear(pinnedThreadId);
                     final TickThreadRunner targetRunner = this.runners[pinnedThreadId];
 
-                    // remove before handing off
-                    this.queued.remove(reschedule);
-
                     // send task to idle runner
                     reschedule.awaitingLink = this.awaiting.addLast(reschedule);
                     targetRunner.acceptTask(reschedule);
-                }
+                } else this.queued.add(reschedule, pinnedThreadId);
             } else {
                 this.queued.add(reschedule, runner.id);
             }
@@ -297,7 +293,7 @@ public final class CRSThreadPool extends Scheduler {
         if (!this.queued.isEmpty()) {
             final boolean runnerIsPinned = runner.isPinnedTo();
 
-            ret = this.queued.pollFor(runner.id, runnerIsPinned);;
+            ret = this.queued.pollFor(runner.id, runnerIsPinned);
         }
 
         if (ret == null) {
