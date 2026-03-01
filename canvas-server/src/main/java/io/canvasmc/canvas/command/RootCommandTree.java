@@ -2,6 +2,7 @@ package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import io.canvasmc.canvas.command.sub.ItemModifyCommand;
 import io.canvasmc.canvas.command.sub.ReloadCommand;
 import io.canvasmc.canvas.command.sub.SetMaxPlayersCommand;
 import io.canvasmc.canvas.command.sub.TpsBarCommand;
@@ -15,6 +16,7 @@ import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import org.bukkit.command.CommandSender;
 import org.jetbrains.annotations.NotNull;
@@ -30,17 +32,10 @@ public class RootCommandTree {
     private static final TextColor ACCENT = TextColor.color(173, 216, 255);
     private static final TextColor MUTED = TextColor.color(80, 120, 170);
 
-    public static final RootCommandTree INSTANCE;
-
-    static {
-        INSTANCE = new RootCommandTree();
-        INSTANCE.register(SetMaxPlayersCommand.class);
-        INSTANCE.register(TpsBarCommand.class);
-        INSTANCE.register(WorldDistanceCommand.class);
-        INSTANCE.register(ReloadCommand.class);
-    }
+    public static final RootCommandTree INSTANCE = new RootCommandTree();
 
     private final List<Command> subCommands = new LinkedList<>();
+    public CommandBuildContext buildContext;
 
     @NotNull
     private Component buildDetailComponent(@NotNull Command subCommand) {
@@ -75,7 +70,15 @@ public class RootCommandTree {
         return builder.build();
     }
 
-    public void build(CommandDispatcher<CommandSourceStack> dispatcher) {
+    public void build(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
+        this.buildContext = buildContext;
+
+        INSTANCE.register(SetMaxPlayersCommand.class);
+        INSTANCE.register(TpsBarCommand.class);
+        INSTANCE.register(WorldDistanceCommand.class);
+        INSTANCE.register(ReloadCommand.class);
+        INSTANCE.register(ItemModifyCommand.class);
+
         LiteralArgumentBuilder<CommandSourceStack> root = literal("canvas")
             .requires(source -> source.getSender().isOp() || source.getSender().hasPermission("canvas.command"));
 

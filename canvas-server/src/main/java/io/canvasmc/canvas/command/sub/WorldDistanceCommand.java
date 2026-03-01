@@ -22,8 +22,7 @@ import org.jspecify.annotations.Nullable;
 import static net.minecraft.commands.Commands.argument;
 
 /**
- * Command for viewing or setting the view/simulation distance of a specific world.
- * Usage examples:
+ * Command for viewing or setting the view/simulation distance of a specific world. Usage examples:
  * <ul>
  *     <li><code>/canvas worlddistance view minecraft:overworld</code></li>
  *     <li><code>/canvas worlddistance simulation minecraft:the_nether 10</code></li>
