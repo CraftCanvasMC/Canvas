@@ -139,7 +139,7 @@ public class ItemModifyCommand implements Command {
         // TODO - TOOL
         new ComponentType.WeaponComponent().register();
         new ComponentType.AttackRangeComponent().register();
-        integerOnlyComponent(DataComponents.ENCHANTABLE, Enchantable::new).register();
+        integerOnlyComponent(DataComponents.ENCHANTABLE, Enchantable::new, 0, Integer.MAX_VALUE).register();
         // TODO - EQUIPPABLE
         // TODO - REPAIRABLE
         unitComponent(DataComponents.GLIDER).register();
@@ -149,9 +149,9 @@ public class ItemModifyCommand implements Command {
         // TODO - PIERCING_WEAPON
         // TODO - KINETIC_WEAPON
         // TODO - SWING_ANIMATION
-        integerOnlyComponent(DataComponents.DYED_COLOR, DyedItemColor::new).register();
-        integerOnlyComponent(DataComponents.MAP_COLOR, MapItemColor::new).register();
-        integerOnlyComponent(DataComponents.MAP_ID, MapId::new).register();
+        integerOnlyComponent(DataComponents.DYED_COLOR, DyedItemColor::new, Integer.MIN_VALUE, Integer.MAX_VALUE).register();
+        integerOnlyComponent(DataComponents.MAP_COLOR, MapItemColor::new, Integer.MIN_VALUE, Integer.MAX_VALUE).register();
+        integerOnlyComponent(DataComponents.MAP_ID, MapId::new, Integer.MIN_VALUE, Integer.MAX_VALUE).register();
         // TODO - MAP_DECORATIONS
         enumComponent(DataComponents.MAP_POST_PROCESSING, MapPostProcessing.class).register();
         // TODO - CHARGED_PROJECTILES
@@ -167,7 +167,7 @@ public class ItemModifyCommand implements Command {
         // TODO - BLOCK_ENTITY_DATA
         // TODO - INSTRUMENT
         // TODO - PROVIDES_TRIM_MATERIAL
-        integerOnlyComponent(DataComponents.OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier::new).register();
+        integerOnlyComponent(DataComponents.OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier::new, 0, 5).register();
         // TODO - JUKEBOX_PLAYABLE
         // TODO - PROVIDES_BANNER_PATTERNS
         // TODO - RECIPES
@@ -467,18 +467,21 @@ public class ItemModifyCommand implements Command {
             };
         }
 
-        @Contract(value = "_, _ -> new", pure = true)
-        static <T> @NonNull ComponentType<T> integerOnlyComponent(DataComponentType<T> nms, Function<Integer, T> parser) {
+        @Contract(value = "_, _, _, _ -> new", pure = true)
+        static <T> @NonNull ComponentType<T> integerOnlyComponent(DataComponentType<T> nms, Function<Integer, T> parser, int min, int max) {
             return new ComponentType<>() {
                 @Override
                 public T parse(@NonNull final String raw) throws CommandSyntaxException {
                     try {
-                        Integer integer = Integer.parseInt(raw);
+                        int integer = Integer.parseInt(raw);
+                        if (integer < min || integer > max) {
+                            throw new NumberFormatException();
+                        }
                         return parser.apply(integer);
                     } catch (NumberFormatException outofbounds) {
                         throw new DynamicCommandExceptionType(
                             obj -> Component.literal(obj.toString())
-                        ).create(String.format("Integer out of range: %s (valid: %.2E to %.2E)", raw, (double) Integer.MIN_VALUE, (double) Integer.MAX_VALUE));
+                        ).create(String.format("Integer out of range: %s (valid: %.2E to %.2E)", raw, (double) min, (double) max));
                     }
                 }
 
