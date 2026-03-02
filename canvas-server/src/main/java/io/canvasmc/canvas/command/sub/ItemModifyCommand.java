@@ -68,6 +68,7 @@ import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.MapPostProcessing;
 import net.minecraft.world.item.component.UseEffects;
+import net.minecraft.world.item.component.UseRemainder;
 import net.minecraft.world.item.component.Weapon;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -94,7 +95,6 @@ public class ItemModifyCommand implements Command {
 
     static {
         final CommandBuildContext context = RootCommandTree.INSTANCE.buildContext;
-
         // register all component mappings here
         integerComponent(DataComponents.MAX_STACK_SIZE).register();
         integerComponent(DataComponents.MAX_DAMAGE).register();
@@ -119,7 +119,7 @@ public class ItemModifyCommand implements Command {
         unitComponent(DataComponents.INTANGIBLE_PROJECTILE).register();
         new ComponentType.FoodPropertiesComponent().register();
         // TODO - CONSUMABLE
-        // TODO - USE_REMAINDER
+        new ComponentType.UseRemainderComponent().register();
         // TODO - USE_COOLDOWN
         // TODO - DAMAGE_RESISTANT
         // TODO - TOOL
@@ -662,6 +662,23 @@ public class ItemModifyCommand implements Command {
             @Override
             public DataComponentType<ItemLore> nms() {
                 return DataComponents.LORE;
+            }
+        }
+
+        class UseRemainderComponent implements ComponentType<UseRemainder> {
+            @Override
+            public UseRemainder parse(@NonNull final String raw) throws CommandSyntaxException {
+                return new UseRemainder(BuiltInRegistries.ITEM.getValue(Identifier.tryParse(raw.replaceAll("\"", ""))).getDefaultInstance());
+            }
+
+            @Override
+            public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                return SharedSuggestionProvider.suggestResource(BuiltInRegistries.ITEM.keySet(), builder);
+            }
+
+            @Override
+            public DataComponentType<UseRemainder> nms() {
+                return DataComponents.USE_REMAINDER;
             }
         }
 
