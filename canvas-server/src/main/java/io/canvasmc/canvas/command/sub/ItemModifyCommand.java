@@ -25,6 +25,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -70,13 +71,16 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.component.AttackRange;
 import net.minecraft.world.item.component.DamageResistant;
+import net.minecraft.world.item.component.DyedItemColor;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.item.component.MapItemColor;
 import net.minecraft.world.item.component.MapPostProcessing;
 import net.minecraft.world.item.component.ResolvableProfile;
 import net.minecraft.world.item.component.UseCooldown;
 import net.minecraft.world.item.component.UseEffects;
 import net.minecraft.world.item.component.UseRemainder;
 import net.minecraft.world.item.component.Weapon;
+import net.minecraft.world.level.saveddata.maps.MapId;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
@@ -91,6 +95,7 @@ import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.flo
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.holderComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.identifierComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.integerComponent;
+import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.integerOnlyComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.unitComponent;
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -142,9 +147,9 @@ public class ItemModifyCommand implements Command {
         // TODO - PIERCING_WEAPON
         // TODO - KINETIC_WEAPON
         // TODO - SWING_ANIMATION
-        // TODO - DYED_COLOR
-        // TODO - MAP_COLOR
-        // TODO - MAP_ID
+        integerOnlyComponent(DataComponents.DYED_COLOR, DyedItemColor::new).register();
+        integerOnlyComponent(DataComponents.MAP_COLOR, MapItemColor::new).register();
+        integerOnlyComponent(DataComponents.MAP_ID, MapId::new).register();
         // TODO - MAP_DECORATIONS
         enumComponent(DataComponents.MAP_POST_PROCESSING, MapPostProcessing.class).register();
         // TODO - CHARGED_PROJECTILES
@@ -455,6 +460,33 @@ public class ItemModifyCommand implements Command {
 
                 @Override
                 public DataComponentType<EitherHolder<R>> nms() {
+                    return nms;
+                }
+            };
+        }
+
+        @Contract(value = "_, _ -> new", pure = true)
+        static <T> @NonNull ComponentType<T> integerOnlyComponent(DataComponentType<T> nms, Function<Integer, T> parser) {
+            return new ComponentType<>() {
+                @Override
+                public T parse(@NonNull final String raw) throws CommandSyntaxException {
+                    try {
+                        Integer integer = Integer.parseInt(raw);
+                        return parser.apply(integer);
+                    } catch (NumberFormatException outofbounds) {
+                        throw new DynamicCommandExceptionType(
+                            obj -> Component.literal(obj.toString())
+                        ).create(String.format("Integer out of range: %s (valid: %.2E to %.2E)", raw, (double) Integer.MIN_VALUE, (double) Integer.MAX_VALUE));
+                    }
+                }
+
+                @Override
+                public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                    return IntegerArgumentType.integer().listSuggestions(context, builder);
+                }
+
+                @Override
+                public DataComponentType<T> nms() {
                     return nms;
                 }
             };
