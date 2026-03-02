@@ -1,12 +1,12 @@
 package io.canvasmc.canvas.spark.profiler;
 
-import io.canvasmc.canvas.tick.CRSThreadPool;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
+import io.canvasmc.canvas.tick.SchedulerUtil;
 import me.lucko.spark.paper.common.sampler.ThreadDumper;
 import me.lucko.spark.paper.common.util.ThreadFinder;
 import me.lucko.spark.paper.proto.SparkSamplerProtos;
@@ -24,12 +24,8 @@ public class PinningThreadDumper implements ThreadDumper {
 
     @Override
     public boolean isThreadIncluded(long threadId, String threadName) {
-        CRSThreadPool.TickThreadRunner threadRunner =
-            SparkRegionProfilerExtension.TRACKING_THREAD.get();
-
-        if (threadRunner != null) {
-            // we are profiling, use the thread we are tracking
-            return threadRunner.backingThread.getName().equalsIgnoreCase(threadName);
+        if (SchedulerUtil.getHandle().isRunningRegionProfiler()) {
+            return SchedulerUtil.getHandle().isRunningRegionProfilerOnThread(threadId, threadName);
         }
 
         // get from cache or compute+cache
