@@ -17,6 +17,7 @@ import com.mojang.serialization.JsonOps;
 import io.canvasmc.canvas.command.Command;
 import io.canvasmc.canvas.command.RootCommandTree;
 import io.canvasmc.canvas.util.JsonArgumentParser;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -47,8 +48,10 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.Unit;
 import net.minecraft.util.parsing.packrat.commands.CommandArgumentParser;
+import net.minecraft.world.damagesource.DamageType;
 import net.minecraft.world.entity.SlotAccess;
 import net.minecraft.world.entity.animal.axolotl.Axolotl;
 import net.minecraft.world.entity.animal.cow.MushroomCow;
@@ -65,6 +68,7 @@ import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.EitherHolder;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
+import net.minecraft.world.item.component.DamageResistant;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.MapPostProcessing;
 import net.minecraft.world.item.component.ResolvableProfile;
@@ -123,7 +127,7 @@ public class ItemModifyCommand implements Command {
         // TODO - CONSUMABLE
         new ComponentType.UseRemainderComponent().register();
         new ComponentType.UseCooldownComponent().register();
-        // TODO - DAMAGE_RESISTANT
+        new ComponentType.DamageResistantComponent().register();
         // TODO - TOOL
         new ComponentType.WeaponComponent().register();
         // TODO - ATTACK_RANGE
@@ -681,6 +685,28 @@ public class ItemModifyCommand implements Command {
             @Override
             public DataComponentType<UseRemainder> nms() {
                 return DataComponents.USE_REMAINDER;
+            }
+        }
+
+        class DamageResistantComponent implements ComponentType<DamageResistant> {
+            @Override
+            public DamageResistant parse(@NonNull final String raw) throws CommandSyntaxException {
+                TagKey<DamageType> tagKey = TagKey.create(Registries.DAMAGE_TYPE, Objects.requireNonNull(Identifier.tryParse(raw), "Identifier " + raw + " invalid"));
+                return new DamageResistant(tagKey);
+            }
+
+            @Override
+            public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                List<Identifier> identifiers = new ArrayList<>();
+                MinecraftServer.getServer().registryAccess().lookup(Registries.DAMAGE_TYPE).orElseThrow().listTagIds().forEach(id -> {
+                    identifiers.add(id.location());
+                });
+                return SharedSuggestionProvider.suggestResource(identifiers, builder);
+            }
+
+            @Override
+            public DataComponentType<DamageResistant> nms() {
+                return DataComponents.DAMAGE_RESISTANT;
             }
         }
 
