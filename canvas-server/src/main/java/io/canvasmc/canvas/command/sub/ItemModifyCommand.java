@@ -68,6 +68,7 @@ import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.EitherHolder;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
+import net.minecraft.world.item.component.AttackRange;
 import net.minecraft.world.item.component.DamageResistant;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.MapPostProcessing;
@@ -130,7 +131,7 @@ public class ItemModifyCommand implements Command {
         new ComponentType.DamageResistantComponent().register();
         // TODO - TOOL
         new ComponentType.WeaponComponent().register();
-        // TODO - ATTACK_RANGE
+        new ComponentType.AttackRangeComponent().register();
         // TODO - ENCHANTABLE
         // TODO - EQUIPPABLE
         // TODO - REPAIRABLE
@@ -769,6 +770,30 @@ public class ItemModifyCommand implements Command {
             @Override
             public DataComponentType<FoodProperties> nms() {
                 return DataComponents.FOOD;
+            }
+        }
+
+        class AttackRangeComponent implements ComponentType<AttackRange> {
+            @Override
+            public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                return jsonSuggestions(context, builder);
+            }
+
+            @Override
+            public Map<String, FieldInfo> jsonFields() {
+                return Map.of(
+                    "min_reach", FieldInfo.floatField("0.0"),
+                    "max_reach", FieldInfo.floatField("3.0"),
+                    "min_creative_reach", FieldInfo.floatField("0.0"),
+                    "max_creative_reach", FieldInfo.floatField("5.0"),
+                    "hitbox_margin", FieldInfo.floatField("0.3"),
+                    "mob_factor", FieldInfo.floatField("1.0")
+                );
+            }
+
+            @Override
+            public DataComponentType<AttackRange> nms() {
+                return DataComponents.ATTACK_RANGE;
             }
         }
     }
