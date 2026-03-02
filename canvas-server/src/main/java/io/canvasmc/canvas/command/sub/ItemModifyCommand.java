@@ -67,6 +67,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.MapPostProcessing;
+import net.minecraft.world.item.component.ResolvableProfile;
 import net.minecraft.world.item.component.UseEffects;
 import net.minecraft.world.item.component.UseRemainder;
 import net.minecraft.world.item.component.Weapon;
@@ -160,7 +161,7 @@ public class ItemModifyCommand implements Command {
         // TODO - LODESTONE_TRACKER
         // TODO - FIREWORK_EXPLOSION
         // TODO - FIREWORKS
-        // TODO - PROFILE
+        new ComponentType.ResolvableProfileComponent().register();
         identifierComponent(DataComponents.NOTE_BLOCK_SOUND).register();
         // TODO - BANNER_PATTERNS
         enumComponent(DataComponents.BASE_COLOR, DyeColor.class).register();
@@ -679,6 +680,27 @@ public class ItemModifyCommand implements Command {
             @Override
             public DataComponentType<UseRemainder> nms() {
                 return DataComponents.USE_REMAINDER;
+            }
+        }
+
+        class ResolvableProfileComponent implements ComponentType<ResolvableProfile> {
+            @Override
+            public ResolvableProfile parse(@NonNull final String raw) throws CommandSyntaxException {
+                final ServerPlayer searchedLocally = MinecraftServer.getServer().getPlayerList().getPlayerByName(raw);
+                if (searchedLocally != null) {
+                    return ResolvableProfile.createResolved(searchedLocally.getGameProfile());
+                }
+                return ResolvableProfile.createUnresolved(raw.replaceAll("\"", ""));
+            }
+
+            @Override
+            public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                return SharedSuggestionProvider.suggest(MinecraftServer.getServer().getPlayerList().getPlayerNamesArray(), builder);
+            }
+
+            @Override
+            public DataComponentType<ResolvableProfile> nms() {
+                return DataComponents.PROFILE;
             }
         }
 
