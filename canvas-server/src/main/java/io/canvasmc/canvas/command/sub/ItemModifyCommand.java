@@ -69,6 +69,7 @@ import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.EitherHolder;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Rarity;
+import net.minecraft.world.item.SwingAnimationType;
 import net.minecraft.world.item.component.AttackRange;
 import net.minecraft.world.item.component.DamageResistant;
 import net.minecraft.world.item.component.DyedItemColor;
@@ -77,6 +78,7 @@ import net.minecraft.world.item.component.MapItemColor;
 import net.minecraft.world.item.component.MapPostProcessing;
 import net.minecraft.world.item.component.OminousBottleAmplifier;
 import net.minecraft.world.item.component.ResolvableProfile;
+import net.minecraft.world.item.component.SwingAnimation;
 import net.minecraft.world.item.component.UseCooldown;
 import net.minecraft.world.item.component.UseEffects;
 import net.minecraft.world.item.component.UseRemainder;
@@ -148,7 +150,7 @@ public class ItemModifyCommand implements Command {
         // TODO - BLOCKS_ATTACKS
         // TODO - PIERCING_WEAPON
         // TODO - KINETIC_WEAPON
-        // TODO - SWING_ANIMATION
+        new ComponentType.SwingAnimationComponent().register();
         integerOnlyComponent(DataComponents.DYED_COLOR, DyedItemColor::new, Integer.MIN_VALUE, Integer.MAX_VALUE).register();
         integerOnlyComponent(DataComponents.MAP_COLOR, MapItemColor::new, Integer.MIN_VALUE, Integer.MAX_VALUE).register();
         integerOnlyComponent(DataComponents.MAP_ID, MapId::new, Integer.MIN_VALUE, Integer.MAX_VALUE).register();
@@ -831,6 +833,26 @@ public class ItemModifyCommand implements Command {
             @Override
             public DataComponentType<AttackRange> nms() {
                 return DataComponents.ATTACK_RANGE;
+            }
+        }
+
+        class SwingAnimationComponent implements ComponentType<SwingAnimation> {
+            @Override
+            public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                return jsonSuggestions(context, builder);
+            }
+
+            @Override
+            public Map<String, FieldInfo> jsonFields() {
+                return Map.of(
+                    "type", FieldInfo.stringField(Arrays.stream(SwingAnimationType.values()).map(SwingAnimationType::getSerializedName).toArray(String[]::new)),
+                    "duration", FieldInfo.intField("6")
+                );
+            }
+
+            @Override
+            public DataComponentType<SwingAnimation> nms() {
+                return DataComponents.SWING_ANIMATION;
             }
         }
     }
