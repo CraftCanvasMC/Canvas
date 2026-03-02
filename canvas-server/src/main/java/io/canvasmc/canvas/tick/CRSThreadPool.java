@@ -5,18 +5,18 @@ import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
 import ca.spottedleaf.concurrentutil.set.LinkedSortedSet;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
-import it.unimi.dsi.fastutil.objects.ObjectBidirectionalIterator;
-import it.unimi.dsi.fastutil.objects.ObjectRBTreeSet;
 import java.lang.invoke.VarHandle;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Predicate;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -37,7 +37,7 @@ public final class CRSThreadPool extends Scheduler {
             return timeCompare;
         }
 
-        return Long.compare(t1.id, t2.id);
+        return Long.signum(t1.id - t2.id);
     };
     private final LinkedSortedSet<ScheduledState> awaiting = new LinkedSortedSet<>(TICK_COMPARATOR_BY_TIME);
     private final StealingQueue queued = new StealingQueue(TICK_COMPARATOR_BY_TIME);
@@ -273,6 +273,7 @@ public final class CRSThreadPool extends Scheduler {
             this.queued.remove(reschedule);
             if (reschedule.isPinned()) {
                 final int pinnedThreadId = reschedule.getPinnedThreadId();
+                this.queued.add(reschedule, pinnedThreadId);
 
                 // if task is now pinned to a *different* thread than the one that just ran it,
                 // we need to wake up the new pinned thread if it's idle
@@ -280,10 +281,13 @@ public final class CRSThreadPool extends Scheduler {
                     this.idleThreads.clear(pinnedThreadId);
                     final TickThreadRunner targetRunner = this.runners[pinnedThreadId];
 
+                    // remove before handing off
+                    this.queued.remove(reschedule);
+
                     // send task to idle runner
                     reschedule.awaitingLink = this.awaiting.addLast(reschedule);
                     targetRunner.acceptTask(reschedule);
-                } else this.queued.add(reschedule, pinnedThreadId);
+                }
             } else {
                 this.queued.add(reschedule, runner.id);
             }
@@ -293,7 +297,7 @@ public final class CRSThreadPool extends Scheduler {
         if (!this.queued.isEmpty()) {
             final boolean runnerIsPinned = runner.isPinnedTo();
 
-            ret = this.queued.pollFor(runner.id, runnerIsPinned);
+            ret = this.queued.pollFor(runner.id, runnerIsPinned);;
         }
 
         if (ret == null) {
@@ -739,23 +743,23 @@ public final class CRSThreadPool extends Scheduler {
     @NullMarked
     private final class StealingQueue {
 
-        private final ObjectRBTreeSet<ScheduledState> queue;
+        private final TickPriorityQueue<ScheduledState> queue;
 
         public StealingQueue(Comparator<ScheduledState> comparator) {
-            this.queue = new ObjectRBTreeSet<>(comparator);
+            this.queue = new TickPriorityQueue<>(150, comparator, ScheduledState.class);
         }
 
         public void add(ScheduledState state) {
-            queue.add(state);
+            queue.offer(state);
         }
 
         public void add(ScheduledState state, int partitionKey) {
             state.setPartitionKey(partitionKey);
-            queue.add(state);
+            queue.offer(state);
         }
 
         public boolean isEmpty() {
-            return queue.isEmpty();
+            return queue.size == 0;
         }
 
         public boolean remove(ScheduledState state) {
@@ -764,8 +768,8 @@ public final class CRSThreadPool extends Scheduler {
 
         public @Nullable ScheduledState pollFor(final int partitionKey, final boolean runnerIsPinned) {
             long initialPollTimeNanos = System.nanoTime();
-            for (ObjectBidirectionalIterator<ScheduledState> iterator = queue.iterator(); iterator.hasNext(); ) {
-                final ScheduledState element = iterator.next();
+            for (int i = 0; i < queue.size; i++) {
+                ScheduledState element = queue.arr[i];
                 final Integer assoc = element.getPartitionKey();
                 final boolean canSteal = element.canSteal(initialPollTimeNanos);
                 if (assoc == null || assoc == partitionKey || canSteal) {
@@ -773,20 +777,20 @@ public final class CRSThreadPool extends Scheduler {
 
                     // tasks pinned to the runner
                     if (taskIsPinned && element.getPinnedThreadId() == partitionKey) {
-                        iterator.remove();
+                        remove(element);
                         return element; // stop iterating
                     }
 
                     // work stealing is prioritized, since if we are stealing, it means
                     // the task that is being stolen has missed its deadline...
                     if (!runnerIsPinned && !taskIsPinned && canSteal) {
-                        iterator.remove();
+                        remove(element);
                         return element; // stop iterating
                     }
 
                     // fallback to local work
                     if (!runnerIsPinned && !taskIsPinned) {
-                        iterator.remove();
+                        remove(element);
                         return element; // stop iterating
                     }
                 }
