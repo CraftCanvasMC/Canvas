@@ -68,6 +68,7 @@ import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.MapPostProcessing;
 import net.minecraft.world.item.component.ResolvableProfile;
+import net.minecraft.world.item.component.UseCooldown;
 import net.minecraft.world.item.component.UseEffects;
 import net.minecraft.world.item.component.UseRemainder;
 import net.minecraft.world.item.component.Weapon;
@@ -121,7 +122,7 @@ public class ItemModifyCommand implements Command {
         new ComponentType.FoodPropertiesComponent().register();
         // TODO - CONSUMABLE
         new ComponentType.UseRemainderComponent().register();
-        // TODO - USE_COOLDOWN
+        new ComponentType.UseCooldownComponent().register();
         // TODO - DAMAGE_RESISTANT
         // TODO - TOOL
         new ComponentType.WeaponComponent().register();
@@ -701,6 +702,26 @@ public class ItemModifyCommand implements Command {
             @Override
             public DataComponentType<ResolvableProfile> nms() {
                 return DataComponents.PROFILE;
+            }
+        }
+
+        class UseCooldownComponent implements ComponentType<UseCooldown> {
+            @Override
+            public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                return jsonSuggestions(context, builder);
+            }
+
+            @Override
+            public Map<String, FieldInfo> jsonFields() {
+                return Map.of(
+                    "seconds", FieldInfo.floatField(),
+                    "cooldown_group", FieldInfo.stringField()
+                );
+            }
+
+            @Override
+            public DataComponentType<UseCooldown> nms() {
+                return DataComponents.USE_COOLDOWN;
             }
         }
 
