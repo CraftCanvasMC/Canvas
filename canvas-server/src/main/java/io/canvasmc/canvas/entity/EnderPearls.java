@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import it.unimi.dsi.fastutil.booleans.BooleanConsumer;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
@@ -40,6 +41,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.TagValueOutput;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
     private static final AtomicLong LAST_AUTOSAVE = new AtomicLong(System.nanoTime());
@@ -72,19 +74,24 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         return new EnderPearls(new ConcurrentHashMap<>());
     }
 
-    public @NonNull CompletableFuture<Void> save() {
-        CompletableFuture<Void> future = new CompletableFuture<>();
+    public @NonNull CompletableFuture<Boolean> save(@Nullable BooleanConsumer callback) {
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
         Util.ioPool().execute(() -> {
             try {
                 Tag tag = CODEC.encodeStart(NbtOps.INSTANCE, this).getOrThrow();
                 NbtIo.writeCompressed((CompoundTag) tag, SAVE_PATH);
-                future.complete(null);
+                future.complete(true);
             } catch (Throwable thrown) {
-                future.complete(null);
-                throw new RuntimeException("Couldn't save pearls", thrown);
+                future.completeExceptionally(thrown);
             }
         });
-        return future;
+        return future.handle((result, thrown) -> {
+            if (result == null || !result) {
+                Config.LOGGER.warn("Could not save to pearls.dat", thrown);
+            }
+            if (callback != null) callback.accept(thrown == null);
+            return result;
+        });
     }
 
     public void spawnPearls(final @NonNull ServerPlayer player) {
@@ -115,7 +122,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         final long currTime = System.nanoTime();
         final long last = LAST_AUTOSAVE.get();
         if ((currTime - last) > periodNanos && LAST_AUTOSAVE.compareAndSet(last, currTime)) {
-            save();
+            save(null);
         }
     }
 
