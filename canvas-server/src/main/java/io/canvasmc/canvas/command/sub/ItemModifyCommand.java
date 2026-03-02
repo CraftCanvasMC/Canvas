@@ -75,11 +75,13 @@ import net.minecraft.world.item.component.DyedItemColor;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.MapItemColor;
 import net.minecraft.world.item.component.MapPostProcessing;
+import net.minecraft.world.item.component.OminousBottleAmplifier;
 import net.minecraft.world.item.component.ResolvableProfile;
 import net.minecraft.world.item.component.UseCooldown;
 import net.minecraft.world.item.component.UseEffects;
 import net.minecraft.world.item.component.UseRemainder;
 import net.minecraft.world.item.component.Weapon;
+import net.minecraft.world.item.enchantment.Enchantable;
 import net.minecraft.world.level.saveddata.maps.MapId;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -137,7 +139,7 @@ public class ItemModifyCommand implements Command {
         // TODO - TOOL
         new ComponentType.WeaponComponent().register();
         new ComponentType.AttackRangeComponent().register();
-        // TODO - ENCHANTABLE
+        integerOnlyComponent(DataComponents.ENCHANTABLE, Enchantable::new).register();
         // TODO - EQUIPPABLE
         // TODO - REPAIRABLE
         unitComponent(DataComponents.GLIDER).register();
@@ -165,7 +167,7 @@ public class ItemModifyCommand implements Command {
         // TODO - BLOCK_ENTITY_DATA
         // TODO - INSTRUMENT
         // TODO - PROVIDES_TRIM_MATERIAL
-        // TODO - OMINOUS_BOTTLE_AMPLIFIER
+        integerOnlyComponent(DataComponents.OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier::new).register();
         // TODO - JUKEBOX_PLAYABLE
         // TODO - PROVIDES_BANNER_PATTERNS
         // TODO - RECIPES
