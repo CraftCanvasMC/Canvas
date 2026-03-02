@@ -150,7 +150,6 @@ public class ItemModifyCommand implements Command {
         // TODO - TRIM
         // TODO - DEBUG_STICK_STATE
         // TODO - ENTITY_DATA
-        // TODO - BUCKET_ENTITY_DATA
         // TODO - BLOCK_ENTITY_DATA
         // TODO - INSTRUMENT
         // TODO - PROVIDES_TRIM_MATERIAL
@@ -201,11 +200,10 @@ public class ItemModifyCommand implements Command {
         for (final DataComponentType<?> nms : BuiltInRegistries.DATA_COMPONENT_TYPE.stream().toList()) {
             Identifier identifier = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(nms);
             // We will not touch this, or enchantments, use Bukkit or the enchant command
-            if (identifier.getPath().equalsIgnoreCase("custom_data"))
-                continue;
-            if (identifier.getPath().equalsIgnoreCase("enchantments"))
-                continue;
-            if (identifier.getPath().equalsIgnoreCase("stored_enchantments"))
+            if (identifier.getPath().equalsIgnoreCase("custom_data") ||
+                identifier.getPath().equalsIgnoreCase("enchantments") ||
+                identifier.getPath().equalsIgnoreCase("stored_enchantments") ||
+                identifier.getPath().equalsIgnoreCase("bucket_entity_data"))
                 continue;
             if (!REGISTRY.containsKey(nms)) {
                 // TODO - enable this after PR done
