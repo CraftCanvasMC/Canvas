@@ -205,7 +205,7 @@ public class SamplerModule implements CommandModule {
         final double finalInterval = interval;
         Runnable pinCallback = () -> {
         ThreadDumper threadDumper;
-        boolean usingPinnedThreadDumper = io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.TRACKING_THREAD.get() != null;
+        boolean usingPinnedThreadDumper = io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.isProfiling();
         if (threads.isEmpty() || usingPinnedThreadDumper) {
             // use the server thread
             threadDumper = platform.getPlugin().getDefaultThreadDumper();
@@ -295,7 +295,7 @@ public class SamplerModule implements CommandModule {
                 platform.getPlugin().log(Level.SEVERE, "Profiler operation failed unexpectedly", throwable);
                     // Canvas start - rewrite scheduler
                 };
-                if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.TRACKING_THREAD.get() != null) {
+                if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.isProfiling()) {
                     // in ACTIVE profiling session, since that's atomic and doesn't have a cache
                     io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.endPinning(
                         (str) -> resp.broadcastPrefixed(text(str)),
@@ -320,7 +320,7 @@ public class SamplerModule implements CommandModule {
                 handleUpload(platform, resp, s, exportProps, saveToFile);
                 // Canvas start - rewrite scheduler
                 };
-                if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.TRACKING_THREAD.get() != null) {
+                if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.isProfiling()) {
                     // in ACTIVE profiling session, since that's atomic and doesn't have a cache
                     io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.endPinning(
                         (str) -> resp.broadcastPrefixed(text(str)),
@@ -493,7 +493,7 @@ public class SamplerModule implements CommandModule {
             resp.broadcastPrefixed(text("Profiler has been cancelled.", GOLD));
             // Canvas start - rewrite scheduler
             };
-            if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.TRACKING_THREAD.get() != null) {
+            if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.isProfiling()) {
                 // in ACTIVE profiling session, since that's atomic and doesn't have a cache
                 io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.endPinning(
                     (str) -> resp.replyPrefixed(text(str)),
@@ -535,7 +535,7 @@ public class SamplerModule implements CommandModule {
             }
             // Canvas start - rewrite scheduler
             };
-            if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.TRACKING_THREAD.get() != null) {
+            if (io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.isProfiling()) {
                 // in ACTIVE profiling session, since that's atomic and doesn't have a cache
                 io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension.endPinning(
                     (str) -> resp.replyPrefixed(text(str)),

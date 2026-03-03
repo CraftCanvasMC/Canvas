@@ -8,7 +8,6 @@ import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
 import io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension;
-import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
@@ -17,8 +16,6 @@ import java.util.concurrent.ThreadFactory;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import org.jspecify.annotations.NonNull;
-
-import static io.canvasmc.canvas.Config.LOGGER;
 
 public class SchedulerUtil {
     private static SchedulerHandler HANDLER;
@@ -30,14 +27,29 @@ public class SchedulerUtil {
         return HANDLER;
     }
 
+    public static boolean doesSupportRegionProfiler() {
+        final Scheduler scheduler = TickRegions.getScheduler().scheduler;
+        if (scheduler instanceof AffinitySchedulerThreadPool) {
+            // if has less than 2 threads, pinning would kill the server
+            return TickRegions.getScheduler().scheduler.getCoreThreads().length >= 2;
+        }
+        return false;
+    }
+
     public static void startScheduler() {
         final Scheduler scheduler = TickRegions.getScheduler().scheduler;
         if (scheduler instanceof EDFSchedulerThreadPool edfSchedulerThreadPool) {
+            TickRegionScheduler.LOGGER.info("Starting EDF region scheduler");
             edfSchedulerThreadPool.start();
         }
-        if (scheduler instanceof CRSThreadPool crsThreadPool) {
-            crsThreadPool.start();
+        if (scheduler instanceof AffinitySchedulerThreadPool affinitySchedulerThreadPool) {
+            TickRegionScheduler.LOGGER.info("Starting AFFINITY region scheduler");
+            affinitySchedulerThreadPool.start();
         }
+        if (doesSupportRegionProfiler()) {
+            TickRegionScheduler.LOGGER.info("Region profiling marked as supported in this environment");
+        }
+        else TickRegionScheduler.LOGGER.warn("Region profiling not supported in this environment");
     }
 
     public static @NonNull Scheduler decideScheduler(final TickRegionScheduler.@NonNull SchedulerType schedulerType, final int initialThreads, final ThreadFactory threadFactory) {
@@ -54,17 +66,12 @@ public class SchedulerUtil {
                 HANDLER = new NullHandler();
                 return scheduler;
             }
-            case CRS: {
+            case AFFINITY: {
                 long runBufferNanos = (long) (Config.INSTANCE.scheduler.runTasksBufferMillis * 1_000_000L);
-                long stealThresh = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
-                CRSThreadPool scheduler = new CRSThreadPool(initialThreads, threadFactory, runBufferNanos, stealThresh);
-                // configure if we can use CRS pinning
-                if (initialThreads < 2) {
-                    LOGGER.warn("Too little threads allocated, cannot enable region profiling capabilities");
-                    scheduler.markPinningUnsupported();
-                }
-                HANDLER = new CRSHandler();
-                return scheduler;
+                HANDLER = new AffinityHandler();
+                return new AffinitySchedulerThreadPool(
+                    initialThreads, threadFactory, runBufferNanos, SchedulerUtil::doesSupportRegionProfiler
+                );
             }
             default: {
                 throw new IllegalStateException("Unknown scheduler type: " + schedulerType);
@@ -72,7 +79,7 @@ public class SchedulerUtil {
         }
     }
 
-    public interface SchedulerHandler {
+    public sealed interface SchedulerHandler permits NullHandler, AffinityHandler {
         boolean isRunningRegionProfiler();
 
         boolean isRunningRegionProfilerOnThread(final long threadId, final String threadName);
@@ -88,7 +95,7 @@ public class SchedulerUtil {
         void onRegionInactive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region);
     }
 
-    public static class NullHandler implements SchedulerHandler {
+    public static final class NullHandler implements SchedulerHandler {
         @Override
         public boolean isRunningRegionProfiler() {
             return false;
@@ -120,83 +127,67 @@ public class SchedulerUtil {
         }
     }
 
-    @Deprecated(forRemoval = true)
-    public static class CRSHandler implements SchedulerHandler {
+    public static final class AffinityHandler implements SchedulerHandler {
         @Override
         public boolean isRunningRegionProfiler() {
-            if (TickRegions.getScheduler().scheduler instanceof CRSThreadPool) {
-                CRSThreadPool.TickThreadRunner threadRunner =
-                    SparkRegionProfilerExtension.TRACKING_THREAD.get();
-                return threadRunner != null;
-            }
-            return false;
+            return SparkRegionProfilerExtension.isProfiling();
         }
 
         @Override
         public boolean isRunningRegionProfilerOnThread(final long threadId, final String threadName) {
-            if (TickRegions.getScheduler().scheduler instanceof CRSThreadPool) {
-                CRSThreadPool.TickThreadRunner threadRunner =
-                    SparkRegionProfilerExtension.TRACKING_THREAD.get();
-                return threadRunner.backingThread.getName().equalsIgnoreCase(threadName);
+            if (isRunningRegionProfiler()) {
+                AffinitySchedulerThreadPool.TickThreadRunner threadRunner = SparkRegionProfilerExtension.STATE.get().threadRunner();
+                return threadRunner.getRunnerThread().getName().equalsIgnoreCase(threadName);
             }
             return false;
         }
 
         @Override
-        public void tryTransferPinningState(final TickRegionScheduler.@NonNull RegionScheduleHandle ret, final TickRegionScheduler.RegionScheduleHandle to) {
-            if (ret.state instanceof CRSThreadPool.ScheduledState crsState)
-                crsState.pin(((CRSThreadPool.ScheduledState) to.state).getPinnedThreadId(), crsState.schedulerOwnedBy);
+        public void tryTransferPinningState(final TickRegionScheduler.@NonNull RegionScheduleHandle from, final TickRegionScheduler.RegionScheduleHandle to) {
+            if (!isRunningRegionProfiler() || !(TickRegions.getScheduler().scheduler instanceof AffinitySchedulerThreadPool affinitySchedulerThreadPool)) {
+                return;
+            }
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = affinitySchedulerThreadPool.getCurrentTickThreadRunner();
+            // if not linked to the previous, don't try and change
+            if (!threadRunner.isLinkedTo(from)) return;
+            threadRunner.unlink();
+            threadRunner.link((AffinitySchedulerThreadPool.ScheduledState) to.state, true);
         }
 
         @Override
-        public void onRegionMerge(final TickRegions.@NonNull TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel world) {
-            TickRegionScheduler.RegionScheduleHandle scheduleHandle = from.getRegionSchedulingHandle();
-            CRSThreadPool.TickThreadRunner tickThreadRunner = SparkRegionProfilerExtension.TRACKING_THREAD.get();
-            if (scheduleHandle.state != null && ((CRSThreadPool.ScheduledState) scheduleHandle.state).isPinned() && tickThreadRunner != null) {
-                ChunkPos pos = new ChunkPos(RegionScheduleHandlePinner.RegionPinner.PROFILING_CHUNKS.getArray()[0]);
-                RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                    world, pos.x, pos.z, () -> {
-                        ((CRSThreadPool.ScheduledState) scheduleHandle.state).unpin(tickThreadRunner.scheduler);
-                        ((CRSThreadPool.ScheduledState) TickRegionScheduler.getCurrentTickingTask().state).pin(tickThreadRunner.id, tickThreadRunner.scheduler);
-                    }
-                );
-            }
+        public void onRegionMerge(final TickRegions.TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel world) {
+            if (!isRunningRegionProfiler()) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = SparkRegionProfilerExtension.STATE.get().threadRunner();
+            if (!threadRunner.isLinkedTo(from.tickHandle)) return;
+            tryTransferPinningState(from.tickHandle, to.tickHandle);
         }
 
         @Override
-        public void onRegionSplit(final TickRegions.@NonNull TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel world) {
-            TickRegionScheduler.RegionScheduleHandle scheduleHandle = from.getRegionSchedulingHandle();
-            CRSThreadPool.TickThreadRunner tickThreadRunner =
-                SparkRegionProfilerExtension.TRACKING_THREAD.get();
-            if (scheduleHandle.state != null && ((CRSThreadPool.ScheduledState) scheduleHandle.state).isPinned() && tickThreadRunner != null) {
-                // a profiler IS running, ON THIS REGION, split time!!
-                // we know this is safe because if this is pinned, we have a profiling set of chunks
-                long[] curr = RegionScheduleHandlePinner.RegionPinner.PROFILING_CHUNKS.getArray();
-                ChunkPos entry0 = new ChunkPos(curr[0]);
-                RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                    world, entry0.x, entry0.z, () -> {
-                        ((CRSThreadPool.ScheduledState) scheduleHandle.state).unpin(tickThreadRunner.scheduler);
-                        ((CRSThreadPool.ScheduledState) TickRegionScheduler.getCurrentTickingTask().state).pin(tickThreadRunner.id, tickThreadRunner.scheduler);
-                    }
-                );
-            }
+        public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel world) {
+            if (!isRunningRegionProfiler()) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = SparkRegionProfilerExtension.STATE.get().threadRunner();
+            if (!threadRunner.isLinkedTo(from.tickHandle)) return;
+            ChunkPos center = ((RegionScheduleHandlePinner.RegionPinner) SparkRegionProfilerExtension.STATE.get().handlePinner()).getCenter();
+            tryTransferPinningState(from.tickHandle, into.get(center.longKey).getData().tickHandle);
         }
 
+        // both destroy and inactive only happen on split and merge
         @Override
         public void onRegionDestroy(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
-            TickRegionScheduler.RegionScheduleHandle scheduleHandle = region.getData().getRegionSchedulingHandle();
-            CRSThreadPool.TickThreadRunner tickThreadRunner = SparkRegionProfilerExtension.TRACKING_THREAD.get();
-            if (tickThreadRunner != null && scheduleHandle.state != null && ((CRSThreadPool.ScheduledState) scheduleHandle.state).isPinned()) {
-                ((CRSThreadPool.ScheduledState) scheduleHandle.state).unpin(tickThreadRunner.scheduler);
-            }
+            tryDestroyLink(region);
         }
 
         @Override
         public void onRegionInactive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
+            tryDestroyLink(region);
+        }
+
+        private void tryDestroyLink(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
             final TickRegions.TickRegionData data = region.getData();
-            CRSThreadPool.TickThreadRunner tickThreadRunner = SparkRegionProfilerExtension.TRACKING_THREAD.get();
-            if (tickThreadRunner != null && data.tickHandle.state != null && ((CRSThreadPool.ScheduledState) data.tickHandle.state).isPinned()) {
-                ((CRSThreadPool.ScheduledState) data.tickHandle.state).unpin(tickThreadRunner.scheduler);
+            if (!isRunningRegionProfiler()) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = SparkRegionProfilerExtension.STATE.get().threadRunner();
+            if (data.tickHandle.state != null && threadRunner.isLinkedTo(data.tickHandle)) {
+                threadRunner.unlink();
             }
         }
     }

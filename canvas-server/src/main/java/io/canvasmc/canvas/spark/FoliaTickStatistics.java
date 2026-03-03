@@ -19,7 +19,7 @@ public class FoliaTickStatistics implements TickStatistics {
     private static double getTpsFor(TimeSpan span) {
         // we must include global tick, and all regions
         if (isRunningIndependentRegion()) {
-            return getTpsFor(SparkRegionProfilerExtension.SCHEDULE_HANDLE_CACHE.get(), span);
+            return getTpsFor(SparkRegionProfilerExtension.STATE.get().regionScheduleHandle(), span);
         }
         DoubleArrayList tpsCounts = new DoubleArrayList();
         tpsCounts.add(getTpsFor(RegionizedServer.getGlobalTickData(), span));
