@@ -11,12 +11,10 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
-import java.util.function.Predicate;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -26,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  * that supports intermediate task execution and task pinning
  */
 @Deprecated(forRemoval = true)
-public final class CRSThreadPool extends Scheduler {
+public final class StealingQueueSchedulerThreadPool extends Scheduler {
 
     private static final Comparator<ScheduledState> TICK_COMPARATOR_BY_TIME = (final ScheduledState s1, final ScheduledState s2) -> {
         final SchedulableTick t1 = s1.tick;
@@ -60,7 +58,7 @@ public final class CRSThreadPool extends Scheduler {
      * @param threadFactory Specified thread factory
      * @see #start()
      */
-    public CRSThreadPool(final int threads, final ThreadFactory threadFactory, long runTaskBuff, long stealThresh) {
+    public StealingQueueSchedulerThreadPool(final int threads, final ThreadFactory threadFactory, long runTaskBuff, long stealThresh) {
         final BitSet idleThreads = new BitSet(threads);
         for (int i = 0; i < threads; ++i) {
             idleThreads.set(i);
@@ -329,7 +327,7 @@ public final class CRSThreadPool extends Scheduler {
 
     @Override
     public boolean cancel(final @NonNull SchedulableTick task) {
-        throw new UnsupportedOperationException("Unsupported in CRS Scheduler");
+        throw new UnsupportedOperationException("Unsupported in StealingQueue Scheduler");
     }
 
     @Override
@@ -361,7 +359,7 @@ public final class CRSThreadPool extends Scheduler {
         private static final int SCHEDULE_STATE_CANCELLED = 2;
         private final SchedulableTick tick;
         private final AtomicInteger scheduled = new AtomicInteger();
-        public CRSThreadPool schedulerOwnedBy;
+        public StealingQueueSchedulerThreadPool schedulerOwnedBy;
         private TickThreadRunner ownedBy;
         private int pinnedThreadId = PINNED_NOT_SET;
         private @Nullable Integer assocPartition = null;
@@ -421,7 +419,7 @@ public final class CRSThreadPool extends Scheduler {
             return (int) PINNED_THREAD_ID_HANDLE.getVolatile(this);
         }
 
-        public void setPinnedThreadId(final int threadId, final CRSThreadPool scheduler) {
+        public void setPinnedThreadId(final int threadId, final StealingQueueSchedulerThreadPool scheduler) {
             final int prev = (int) PINNED_THREAD_ID_HANDLE.getAndSet(this, threadId);
 
             // only update pin counts if actually changing
@@ -475,7 +473,7 @@ public final class CRSThreadPool extends Scheduler {
          *
          * @param threadId the ID of the thread to pin the task to. If the value is -1, the task will be unpinned.
          */
-        public void pin(final int threadId, final CRSThreadPool scheduler) {
+        public void pin(final int threadId, final StealingQueueSchedulerThreadPool scheduler) {
             if (threadId > scheduler.threadCount) {
                 // don't pin, this isn't a valid thread
                 return;
@@ -490,7 +488,7 @@ public final class CRSThreadPool extends Scheduler {
             this.setPinnedThreadId(threadId, scheduler);
         }
 
-        public void unpin(final CRSThreadPool scheduler) {
+        public void unpin(final StealingQueueSchedulerThreadPool scheduler) {
             this.setPinnedThreadId(PINNED_NOT_SET, scheduler);
         }
     }
@@ -524,13 +522,13 @@ public final class CRSThreadPool extends Scheduler {
         private static final VarHandle LINKED_TO_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "linkedTo", ScheduledState.class);
         private static final VarHandle IS_PINNED_TO_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "pinnedTasks", int.class);
         public final int id;
-        public final CRSThreadPool scheduler;
+        public final StealingQueueSchedulerThreadPool scheduler;
         public volatile Thread backingThread;
         private volatile TickThreadRunnerState state = new TickThreadRunnerState(null, STATE_IDLE);
         private volatile ScheduledState linkedTo = null;
         private int pinnedTasks = 0;
 
-        public TickThreadRunner(final int id, final CRSThreadPool scheduler) {
+        public TickThreadRunner(final int id, final StealingQueueSchedulerThreadPool scheduler) {
             this.id = id;
             this.scheduler = scheduler;
         }
@@ -733,7 +731,7 @@ public final class CRSThreadPool extends Scheduler {
 
         @Override
         public String toString() {
-            return "CRSThread-" + id;
+            return "StealingQueueThread-" + id;
         }
 
         private record TickThreadRunnerState(ScheduledState stateTarget, int state) {
