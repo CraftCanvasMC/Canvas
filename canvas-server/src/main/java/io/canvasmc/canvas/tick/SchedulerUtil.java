@@ -84,7 +84,7 @@ public class SchedulerUtil {
 
         boolean isRunningRegionProfilerOnThread(final long threadId, final String threadName);
 
-        void tryTransferPinningState(TickRegionScheduler.@NonNull RegionScheduleHandle ret, TickRegionScheduler.RegionScheduleHandle to);
+        void tryTransferPinningState(TickRegionScheduler.@NonNull RegionScheduleHandle from, TickRegionScheduler.RegionScheduleHandle to);
 
         void onRegionMerge(TickRegions.TickRegionData from, TickRegions.TickRegionData to, ServerLevel world);
 
@@ -107,7 +107,7 @@ public class SchedulerUtil {
         }
 
         @Override
-        public void tryTransferPinningState(final TickRegionScheduler.@NonNull RegionScheduleHandle ret, final TickRegionScheduler.RegionScheduleHandle to) {
+        public void tryTransferPinningState(final TickRegionScheduler.@NonNull RegionScheduleHandle from, final TickRegionScheduler.RegionScheduleHandle to) {
         }
 
         @Override
