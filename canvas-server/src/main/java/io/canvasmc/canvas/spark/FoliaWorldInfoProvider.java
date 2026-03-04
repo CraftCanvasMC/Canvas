@@ -45,7 +45,6 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
     @Override
     public CountsResult pollCounts() {
-        MinecraftServer.LOGGER.info("Polling FoliaWorldInfoProvider");
         if (SparkRegionProfilerExtension.isProfiling()) {
             // we need tile entities, chunks, entities, and players
             // if this isn't a region pinner, this is the global tick
