@@ -20,7 +20,7 @@ public class TickPriorityQueue<K> {
 
     public void offer(K element) {
         if (element == null) throw new NullPointerException("Provided element cannot be null");
-        if (size == arr.length) arr = ObjectArrays.grow(arr, size * 2);
+        if (size == arr.length) arr = ObjectArrays.grow(arr, Math.max(size * 2, 1));
         arr[size++] = element;
         ObjectHeaps.upHeap(arr, size, size - 1, c);
     }
