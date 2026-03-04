@@ -162,6 +162,9 @@ public class SchedulerUtil {
             tryTransferPinningState(from.tickHandle, to.tickHandle);
         }
 
+        // note: we can safely cast to region pinner here, since if we are linked at this point
+        //       then it wouldn't be a global tick, it would be a region tick we are profiling
+        //       because the global tick can't call split
         @Override
         public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel world) {
             if (!isRunningRegionProfiler()) return;
