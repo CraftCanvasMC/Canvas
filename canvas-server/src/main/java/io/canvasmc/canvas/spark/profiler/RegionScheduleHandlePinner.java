@@ -207,9 +207,9 @@ public interface RegionScheduleHandlePinner {
         public void unpin(Consumer<SchedulableTick> finalizer) {
             final long[] curr = gatherChunksToProfile();
 
-            long packed = curr[0];
-            int chunkX = (int) packed;
-            int chunkZ = (int) (packed >> 32);
+            final ChunkPos center = getCenter();
+            final int chunkX = center.x;
+            final int chunkZ = center.z;
 
             // Note: this should be loaded already, however we run this safe version just to be sure
             world.canvas$loadOrRunAtChunksAsync(
