@@ -68,9 +68,10 @@ public class SchedulerUtil {
             }
             case AFFINITY: {
                 long runBufferNanos = (long) (Config.INSTANCE.scheduler.runTasksBufferMillis * 1_000_000L);
+                long stealThresh = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
                 HANDLER = new AffinityHandler();
                 return new AffinitySchedulerThreadPool(
-                    initialThreads, threadFactory, runBufferNanos, SchedulerUtil::doesSupportRegionProfiler
+                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler
                 );
             }
             default: {

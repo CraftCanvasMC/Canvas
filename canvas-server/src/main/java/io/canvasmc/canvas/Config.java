@@ -158,6 +158,13 @@ public class Config {
 
     public static class Scheduler {
         @Comment({
+            "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
+            "before allowing other threads to steal it for execution.",
+            "Note: A smaller value reduces task start delays but increases potential task stealing between threads"
+        })
+        public long stealThresholdMillis = 3L;
+
+        @Comment({
             "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
             "Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done.",
             "Default: 0.1ms"

@@ -7,9 +7,11 @@ import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.util.CpuTopology;
+import io.canvasmc.canvas.util.queue.FastHeapPriorityQueue;
 import net.openhft.affinity.Affinity;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import java.lang.invoke.VarHandle;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -56,17 +58,20 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     private final TickThreadRunner[] runners;
     private final Thread[] threads;
     private final LinkedSortedSet<ScheduledState> awaiting = new LinkedSortedSet<>(TICK_COMPARATOR_BY_TIME);
-    private final TickPriorityQueue<ScheduledState> queued = new TickPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
+    private final FastHeapPriorityQueue<ScheduledState> globalQueue = new FastHeapPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
     private final BitSet idleThreads;
 
     private final Object scheduleLock = new Object();
     private final long runTaskBuff;
+    private final long stealThresh;
     private final BooleanSupplier linkingSupported;
 
     private volatile boolean halted;
+    private int nextSteal = 0;
 
-    public AffinitySchedulerThreadPool(final int threads, final ThreadFactory threadFactory, long runTaskBuff, BooleanSupplier linkingSupported) {
+    public AffinitySchedulerThreadPool(final int threads, final ThreadFactory threadFactory, long runTaskBuff, long stealThresh, BooleanSupplier linkingSupported) {
         this.runTaskBuff = runTaskBuff;
+        this.stealThresh = stealThresh;
         this.linkingSupported = linkingSupported;
         final BitSet idleThreads = new BitSet(threads);
         for (int i = 0; i < threads; ++i) {
@@ -132,10 +137,6 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
             })
             .forEach(affinitySet::set);
         return affinitySet;
-    }
-
-    public BooleanSupplier getLinkingSupported() {
-        return linkingSupported;
     }
 
     public void start() {
@@ -233,6 +234,66 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         return ret.toArray(new Thread[0]);
     }
 
+    public @Nullable ScheduledState poll(final @NonNull TickThreadRunner runner) {
+        final long now = System.nanoTime();
+
+        ScheduledState globalHead = globalQueue.peek();
+        ScheduledState localHead = runner.localQueue.peek();
+
+        if (globalHead != null && globalHead == localHead) {
+            throw new IllegalStateException("Global queue and local queue contain same element");
+        } else {
+            // if local is overdue at all, just use that, we shouldn't be
+            // trying to take others if it is overdue already
+            if (localHead != null && localHead.isOverdue(now)) {
+                return runner.localQueue.poll();
+            }
+            // try the same thing before, but with global head
+            if (globalHead != null && globalHead.isOverdue(now)) {
+                return globalQueue.poll();
+            }
+        }
+
+        ScheduledState best = null;
+        boolean bestIsLocal = false;
+
+        if (localHead != null && globalHead != null) {
+            if (TICK_COMPARATOR_BY_TIME.compare(localHead, globalHead) <= 0) {
+                best = localHead;
+                bestIsLocal = true;
+            } else {
+                best = globalHead;
+            }
+        } else if (localHead != null) {
+            best = localHead;
+            bestIsLocal = true;
+        } else if (globalHead != null) {
+            best = globalHead;
+        }
+
+        if (nextSteal >= runners.length) {
+            nextSteal = 0;
+        }
+
+        final TickThreadRunner stealingFrom = runners[nextSteal++];
+
+        if (stealingFrom != runner) {
+            final ScheduledState stealCandidate = stealingFrom.localQueue.peek();
+            if (stealCandidate != null && stealCandidate.isStealable(now)) {
+                if (best == null ||
+                    TICK_COMPARATOR_BY_TIME.compare(stealCandidate, best) < 0) {
+                    return stealingFrom.localQueue.poll();
+                }
+            }
+        }
+
+        if (best != null) {
+            return bestIsLocal ? runner.localQueue.poll() : globalQueue.poll();
+        }
+
+        return null;
+    }
+
     private void insertFresh(final ScheduledState task) {
         final TickThreadRunner[] runners = this.runners;
 
@@ -250,7 +311,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         }
 
         // add to queue, will be picked up later
-        this.queued.offer(task);
+        this.globalQueue.offer(task);
     }
 
     private void takeTask(final @NonNull ScheduledState tick) {
@@ -264,11 +325,11 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         if (reschedule != null) {
             // we don't wanna send this to the queue if linked
             if (runner.linked == null || runner.linked != reschedule) {
-                this.queued.offer(reschedule);
+                runner.localQueue.offer(reschedule);
             }
         }
         // if linked, return that, don't even bother polling
-        final ScheduledState ret = runner.linked != null ? runner.linked : this.queued.poll();
+        final ScheduledState ret = runner.linked != null ? runner.linked : this.poll(runner);
         if (ret == null && runner.linked == null) {
             this.idleThreads.set(runner.id);
         } else {
@@ -303,6 +364,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
     @Override
     public void notifyTasks(final @NonNull SchedulableTick task) {
+        if (task.state == null) return;
         ((ScheduledState) task.state).markedWithTasks.set(true);
     }
 
@@ -343,6 +405,15 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         private boolean isScheduled() {
             return this.scheduled.get() == SCHEDULE_STATE_SCHEDULED;
         }
+
+        // this ignores steal threshold
+        public boolean isOverdue(long nanos) {
+            return (this.tick.getScheduledStart() - nanos) <= 0L;
+        }
+
+        public boolean isStealable(long nanos) {
+            return (this.tick.getScheduledStart() - nanos) + schedulerOwnedBy.stealThresh <= 0L;
+        }
     }
 
     public static final class TickThreadRunner implements Runnable {
@@ -379,6 +450,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         private volatile TickThreadRunnerState state = new TickThreadRunnerState(null, STATE_IDLE);
         private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "state", TickThreadRunnerState.class);
 
+        private final FastHeapPriorityQueue<ScheduledState> localQueue = new FastHeapPriorityQueue<>(20, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
         private volatile ScheduledState linked;
 
         // if swapping, the one we are swapping with must be unscheduled
@@ -390,7 +462,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                 if (task.ownedBy != this && !isSwapping) {
                     throw new IllegalStateException("Cannot link task not owned by runner(" + this + "), owned by (" + task.ownedBy + ")");
                 }
-                if (task.awaitingLink != null || scheduler.queued.contains(task)) {
+                if (task.awaitingLink != null) {
                     throw new IllegalStateException("Cannot link queued/awaiting task");
                 }
                 if (this.linked != null) {

@@ -15,6 +15,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
+import io.canvasmc.canvas.util.queue.FastHeapPriorityQueue;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -741,10 +742,10 @@ public final class StealingQueueSchedulerThreadPool extends Scheduler {
     @NullMarked
     private final class StealingQueue {
 
-        private final TickPriorityQueue<ScheduledState> queue;
+        private final FastHeapPriorityQueue<ScheduledState> queue;
 
         public StealingQueue(Comparator<ScheduledState> comparator) {
-            this.queue = new TickPriorityQueue<>(150, comparator, ScheduledState.class);
+            this.queue = new FastHeapPriorityQueue<>(150, comparator, ScheduledState.class);
         }
 
         public void add(ScheduledState state) {
@@ -757,7 +758,7 @@ public final class StealingQueueSchedulerThreadPool extends Scheduler {
         }
 
         public boolean isEmpty() {
-            return queue.size == 0;
+            return queue.size() == 0;
         }
 
         public boolean remove(ScheduledState state) {
@@ -766,7 +767,7 @@ public final class StealingQueueSchedulerThreadPool extends Scheduler {
 
         public @Nullable ScheduledState pollFor(final int partitionKey, final boolean runnerIsPinned) {
             long initialPollTimeNanos = System.nanoTime();
-            for (int i = 0; i < queue.size; i++) {
+            for (int i = 0; i < queue.size(); i++) {
                 ScheduledState element = queue.arr[i];
                 final Integer assoc = element.getPartitionKey();
                 final boolean canSteal = element.canSteal(initialPollTimeNanos);

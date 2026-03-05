@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.tick;
+package io.canvasmc.canvas.util.queue;
 
 import it.unimi.dsi.fastutil.objects.ObjectArrays;
 import it.unimi.dsi.fastutil.objects.ObjectHeaps;
@@ -6,13 +6,14 @@ import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.Comparator;
 
-public class TickPriorityQueue<K> {
-    protected transient K[] arr;
+// based off object heap priority queue provided by fastutil
+public class FastHeapPriorityQueue<K> {
+    public transient K[] arr;
     protected int size;
     protected Comparator<? super K> c;
 
     @SuppressWarnings("unchecked")
-    public TickPriorityQueue(int capacity, Comparator<? super K> c, Class<K> classOf) {
+    public FastHeapPriorityQueue(int capacity, Comparator<? super K> c, Class<K> classOf) {
         if (capacity <= 0) capacity = 1;
         this.arr = (K[]) Array.newInstance(classOf, capacity);
         this.c = c;
