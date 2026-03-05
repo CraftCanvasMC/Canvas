@@ -13,6 +13,7 @@ import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.commands.arguments.SlotArgument;
 import net.minecraft.commands.arguments.selector.EntitySelector;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.SlotAccess;
@@ -61,6 +62,7 @@ public class ItemModifyCommand implements Command {
 
                                     stack.remove(type.nms());
                                     slotAccess.set(stack);
+                                    context.getSource().sendSuccess(() -> Component.literal("Successfully removed component \"" + type.identifier() + "\" on slot " + slot + " for player " + player.getPlainTextName()), true);
                                 });
                             }
                             return 0;
@@ -87,6 +89,7 @@ public class ItemModifyCommand implements Command {
 
                                             type.apply(stack, value);
                                             slotAccess.set(stack);
+                                            context.getSource().sendSuccess(() -> Component.literal("Successfully modified component \"" + type.identifier() + "\" on slot " + slot + " for player " + player.getPlainTextName()), true);
                                         });
                                     }
                                     return 0;
