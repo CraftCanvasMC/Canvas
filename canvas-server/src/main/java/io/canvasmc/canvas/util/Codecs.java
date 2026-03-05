@@ -4,6 +4,8 @@ import com.google.common.util.concurrent.AtomicDouble;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
@@ -15,6 +17,16 @@ import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.NotNull;
 
 public interface Codecs {
+    Codec<UUID> UUID_CODEC = Codec.STRING
+        .comapFlatMap(s -> {
+            // try-catch so we don't swallow malformed uuids
+            try {
+                return DataResult.success(UUID.fromString(s));
+            } catch (Throwable thrown) {
+                return DataResult.error(thrown::getMessage);
+            }
+        }, UUID::toString);
+
     Codec<AtomicInteger> ATOMIC_INTEGER = Codec.INT
         .comapFlatMap(i -> DataResult.success(new AtomicInteger(i)), AtomicInteger::get);
 
@@ -50,6 +62,19 @@ public interface Codecs {
                 return java.util.Arrays.stream(result).boxed().toList();
             }
         );
+    Codec<AABB> AABB_CODEC = Codec.DOUBLE
+        .listOf()
+        .comapFlatMap(
+            list -> Util.fixedSize(list, 6).map(listx -> new AABB(listx.getFirst(), listx.get(1), listx.get(2), listx.get(3), listx.get(4), listx.get(5))),
+            aabb -> List.of(aabb.minX, aabb.minY, aabb.minZ, aabb.maxX, aabb.maxY, aabb.maxZ)
+        );
+
+    static <T> Codec<List<T>> copyOnWriteArrayListCodec(@NotNull Codec<List<T>> innerCodec) {
+        return innerCodec.comapFlatMap(
+            l -> DataResult.success(new CopyOnWriteArrayList<>(l)),
+            (l) -> l
+        );
+    }
 
     static <T> Codec<AtomicReference<T>> atomicReferenceCodec(@NotNull Codec<T> innerCodec) {
         return innerCodec.comapFlatMap(
@@ -57,11 +82,4 @@ public interface Codecs {
             AtomicReference::get
         );
     }
-
-    Codec<AABB> AABB_CODEC = Codec.DOUBLE
-        .listOf()
-        .comapFlatMap(
-            list -> Util.fixedSize(list, 6).map(listx -> new AABB(listx.getFirst(), listx.get(1), listx.get(2), listx.get(3), listx.get(4), listx.get(5))),
-            aabb -> List.of(aabb.minX, aabb.minY, aabb.minZ, aabb.maxX, aabb.maxY, aabb.maxZ)
-        );
 }

@@ -1,7 +1,7 @@
 package io.canvasmc.canvas.spark;
 
 import io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension;
-import io.canvasmc.canvas.tick.CRSThreadPool;
+import io.canvasmc.canvas.tick.SchedulerUtil;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
@@ -56,9 +56,7 @@ public class FoliaTickStatistics implements TickStatistics {
     }
 
     private static boolean isRunningIndependentRegion() {
-        CRSThreadPool.TickThreadRunner threadRunner =
-            SparkRegionProfilerExtension.TRACKING_THREAD.get();
-        return threadRunner != null;
+        return SchedulerUtil.getHandle().isRunningRegionProfiler();
     }
 
     @Override

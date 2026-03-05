@@ -25,7 +25,7 @@ import org.jspecify.annotations.Nullable;
  * Scheduler thread pool implementation based off EDF scheduler in ConcurrentUtil
  * that supports intermediate task execution and task pinning
  */
-// TODO - rewrite queue
+@Deprecated(forRemoval = true)
 public final class CRSThreadPool extends Scheduler {
 
     private static final Comparator<ScheduledState> TICK_COMPARATOR_BY_TIME = (final ScheduledState s1, final ScheduledState s2) -> {
