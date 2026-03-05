@@ -68,6 +68,7 @@ import net.minecraft.world.item.AdventureModePredicate;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.EitherHolder;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.JukeboxPlayable;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.SwingAnimationType;
 import net.minecraft.world.item.component.AttackRange;
@@ -77,6 +78,7 @@ import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.MapItemColor;
 import net.minecraft.world.item.component.MapPostProcessing;
 import net.minecraft.world.item.component.OminousBottleAmplifier;
+import net.minecraft.world.item.component.ProvidesTrimMaterial;
 import net.minecraft.world.item.component.ResolvableProfile;
 import net.minecraft.world.item.component.SwingAnimation;
 import net.minecraft.world.item.component.UseCooldown;
@@ -94,6 +96,7 @@ import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.adv
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.booleanComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.chatComponentComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.eitherHolderComponent;
+import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.eitherHolderOnlyComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.enumComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.floatComponent;
 import static io.canvasmc.canvas.command.sub.ItemModifyCommand.ComponentType.holderComponent;
@@ -168,9 +171,9 @@ public class ItemModifyCommand implements Command {
         // TODO - ENTITY_DATA
         // TODO - BLOCK_ENTITY_DATA
         // TODO - INSTRUMENT
-        // TODO - PROVIDES_TRIM_MATERIAL
+        eitherHolderOnlyComponent(DataComponents.PROVIDES_TRIM_MATERIAL, ProvidesTrimMaterial::new, Registries.TRIM_MATERIAL).register();
         integerOnlyComponent(DataComponents.OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier::new, 0, 5).register();
-        // TODO - JUKEBOX_PLAYABLE
+        eitherHolderOnlyComponent(DataComponents.JUKEBOX_PLAYABLE, JukeboxPlayable::new, Registries.JUKEBOX_SONG).register();
         // TODO - PROVIDES_BANNER_PATTERNS
         // TODO - RECIPES
         // TODO - LODESTONE_TRACKER
@@ -490,6 +493,26 @@ public class ItemModifyCommand implements Command {
                 @Override
                 public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
                     return IntegerArgumentType.integer().listSuggestions(context, builder);
+                }
+
+                @Override
+                public DataComponentType<T> nms() {
+                    return nms;
+                }
+            };
+        }
+
+        @Contract(value = "_, _, _ -> new", pure = true)
+        static <T, R> @NonNull ComponentType<T> eitherHolderOnlyComponent(DataComponentType<T> nms, Function<EitherHolder<R>, T> parser, ResourceKey<Registry<R>> registry) {
+            return new ComponentType<T>() {
+                @Override
+                public T parse(@NonNull final String raw) throws CommandSyntaxException {
+                    return parser.apply(new EitherHolder<>(MinecraftServer.getServer().registryAccess().lookupOrThrow(registry).get(Objects.requireNonNull(Identifier.tryParse(raw), "Couldn't parse " + raw)).orElseThrow()));
+                }
+
+                @Override
+                public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+                    return SharedSuggestionProvider.suggestResource(MinecraftServer.getServer().registryAccess().lookupOrThrow(registry).keySet(), builder);
                 }
 
                 @Override
