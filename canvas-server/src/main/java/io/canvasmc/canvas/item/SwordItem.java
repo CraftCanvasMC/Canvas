@@ -25,6 +25,7 @@ public class SwordItem extends Item {
         Optional.empty(),
         Optional.empty()
     );
+
     public SwordItem(final Properties properties) {
         super(properties);
     }
@@ -38,16 +39,19 @@ public class SwordItem extends Item {
         Consumable consumable = itemInHand.get(DataComponents.CONSUMABLE);
         if (consumable != null) {
             return consumable.startConsuming(player, itemInHand, hand);
-        } else {
+        }
+        else {
             Equippable equippable = itemInHand.get(DataComponents.EQUIPPABLE);
             if (equippable != null && equippable.swappable()) {
                 return equippable.swapWithEquipmentSlot(itemInHand, player);
-            } else {
+            }
+            else {
                 BlocksAttacks blocksAttacks = itemInHand.get(DataComponents.BLOCKS_ATTACKS);
                 if (blocksAttacks != null) {
                     player.startUsingItem(hand);
                     return InteractionResult.CONSUME;
-                } else {
+                }
+                else {
                     // Canvas start - implement sword blocking
                     // we already know this is a sword, so we just apply the component for block attacks on this
                     if (Config.INSTANCE.combat.imitateSwordBlocking) {
