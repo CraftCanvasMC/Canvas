@@ -70,6 +70,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.JukeboxPlayable;
 import net.minecraft.world.item.Rarity;
 import net.minecraft.world.item.component.DyedItemColor;
+import net.minecraft.world.item.component.InstrumentComponent;
 import net.minecraft.world.item.component.MapItemColor;
 import net.minecraft.world.item.component.MapPostProcessing;
 import net.minecraft.world.item.component.OminousBottleAmplifier;
@@ -146,7 +147,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         // TODO - DEBUG_STICK_STATE
         // TODO - ENTITY_DATA
         // TODO - BLOCK_ENTITY_DATA
-        // TODO - INSTRUMENT
+        register(eitherHolderOnlyComponent(DataComponents.INSTRUMENT, InstrumentComponent::new, Registries.INSTRUMENT));
         register(eitherHolderOnlyComponent(DataComponents.PROVIDES_TRIM_MATERIAL, ProvidesTrimMaterial::new, Registries.TRIM_MATERIAL));
         register(integerOnlyComponent(DataComponents.OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier::new, 0, 5));
         register(eitherHolderOnlyComponent(DataComponents.JUKEBOX_PLAYABLE, JukeboxPlayable::new, Registries.JUKEBOX_SONG));
