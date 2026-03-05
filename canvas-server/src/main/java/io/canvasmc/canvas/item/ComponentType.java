@@ -17,6 +17,7 @@ import io.canvasmc.canvas.item.components.AttackRangeComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
 import io.canvasmc.canvas.item.components.ItemLoreComponent;
+import io.canvasmc.canvas.item.components.RepairableComponent;
 import io.canvasmc.canvas.item.components.ResolvableProfileComponent;
 import io.canvasmc.canvas.item.components.SwingAnimationComponent;
 import io.canvasmc.canvas.item.components.UseCooldownComponent;
@@ -31,6 +32,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -123,7 +125,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(new AttackRangeComponent());
         register(integerOnlyComponent(DataComponents.ENCHANTABLE, Enchantable::new, 0, Integer.MAX_VALUE));
         // TODO - EQUIPPABLE
-        // TODO - REPAIRABLE
+        register(new RepairableComponent());
         register(unitComponent(DataComponents.GLIDER));
         register(identifierComponent(DataComponents.TOOLTIP_STYLE, Stream::empty));
         // TODO - DEATH_PROTECTION
@@ -546,6 +548,28 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
                 obj -> Component.literal(obj.toString())
             ).create(e.getMessage());
         }
+    }
+
+    public CompletableFuture<Suggestions> listOfSuggestions(CommandContext<CommandSourceStack> context, @NonNull SuggestionsBuilder builder, BiFunction<CommandContext<CommandSourceStack>, SuggestionsBuilder, CompletableFuture<Suggestions>> suggestionProvider) {
+        String remaining = builder.getRemaining().stripTrailing();
+
+        if (remaining.isEmpty()) {
+            return SharedSuggestionProvider.suggest(List.of("["), builder);
+        }
+        if (remaining.endsWith("]")) {
+            return builder.buildFuture();
+        }
+        if (remaining.matches(".*}\\s*")) {
+            SuggestionsBuilder offset = builder.createOffset(builder.getStart() + remaining.length());
+            return SharedSuggestionProvider.suggest(List.of(",", "]"), offset);
+        }
+
+        int entryStart = Math.max(remaining.lastIndexOf('['), remaining.lastIndexOf(',')) + 1;
+        String afterSep = remaining.substring(entryStart);
+        int whitespace = afterSep.length() - afterSep.stripLeading().length();
+        int absoluteEntryStart = builder.getStart() + entryStart + whitespace;
+
+        return suggestionProvider.apply(context, builder.createOffset(absoluteEntryStart));
     }
 
     public void apply(@NonNull ItemStack stack, T value) {
