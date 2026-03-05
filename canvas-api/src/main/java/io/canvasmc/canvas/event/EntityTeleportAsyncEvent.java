@@ -12,8 +12,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * Called when an entity is about to be teleported from one location to another.
  * <br>
- * This may be as a result of natural causes (Enderman, Shulker), pathfinding
- * (Wolf), or commands (/teleport).
+ * This may be as a result of natural causes (Enderman, Shulker), pathfinding (Wolf), or commands (/teleport).
  * <br>
  * This <b>*can*</b> be a player!
  */
@@ -59,7 +58,8 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
     /**
      * Sets the location that this entity moved to
      *
-     * @param to New Location this entity moved to
+     * @param to
+     *     New Location this entity moved to
      */
     public void setTo(Location to) {
         this.to = to.clone();

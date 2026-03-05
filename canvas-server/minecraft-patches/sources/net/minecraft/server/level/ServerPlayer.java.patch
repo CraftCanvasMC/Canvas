@@ -1,5 +1,14 @@
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -266,7 +_,7 @@
+     private @Nullable BlockPos raidOmenPosition;
+     private Vec3 lastKnownClientMovement = Vec3.ZERO;
+     private Input lastClientInput = Input.EMPTY;
+-    private final Set<ThrownEnderpearl> enderPearls = new HashSet<>();
++    private final Set<ThrownEnderpearl> enderPearls = java.util.concurrent.ConcurrentHashMap.newKeySet(); // Canvas - region threading
+     private long timeEntitySatOnShoulder;
+     private CompoundTag shoulderEntityLeft = new CompoundTag();
+     private CompoundTag shoulderEntityRight = new CompoundTag();
 @@ -428,6 +_,9 @@
      public boolean sentListPacket = false;
      public boolean suppressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
@@ -68,6 +77,45 @@
      }
  
      private void saveParentVehicle(ValueOutput output) {
+@@ -755,6 +_,7 @@
+     }
+ 
+     private void saveEnderPearls(ValueOutput output) {
++        if (true) return; // Canvas - region threading
+         if (!this.enderPearls.isEmpty()) {
+             ValueOutput.ValueOutputList valueOutputList = output.childrenList("ender_pearls");
+ 
+@@ -770,9 +_,30 @@
+             }
+         }
+     }
++    // Canvas start - region threading
++
++    public void savePearls(boolean removePearl) {
++        for (ThrownEnderpearl thrownEnderpearl : enderPearls) {
++            if (thrownEnderpearl.level().paperConfig().misc.legacyEnderPearlBehavior) continue;
++
++            Runnable task = () -> {
++                MinecraftServer.getServer().pearls.addPearl(this.uuid, thrownEnderpearl);
++                if (removePearl) thrownEnderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
++            };
++
++            if (io.papermc.paper.threadedregions.RegionShutdownThread.isShutdownThread()) {
++                task.run();
++                continue;
++            }
++
++            thrownEnderpearl.scheduleToOrRun(task);
++        }
++    }
++    // Canvas end - region threading
+ 
+     public void loadAndSpawnEnderPearls(ValueInput input) {
+         input.childrenListOrEmpty("ender_pearls").forEach(this::loadAndSpawnEnderPearl);
++        MinecraftServer.getServer().pearls.spawnPearls(this); // Canvas - region threading
+     }
+ 
+     private void loadAndSpawnEnderPearl(ValueInput input) {
 @@ -1400,6 +_,7 @@
          if (killCredit != null) {
              this.awardStat(Stats.ENTITY_KILLED_BY.get(killCredit.getType()));
@@ -181,7 +229,7 @@
 +                // use all the events location for this, they may have changed the world
 +                ServerLevel respawnAt = ((org.bukkit.craftbukkit.CraftWorld) respawnEvent.getRespawnLocation().getWorld()).getHandle();
 +                respawnAt.canvas$loadOrRunAtChunksAsync(
-+                    new BlockPos(spawnLoc.getBlockX(), spawnLoc.getBlockY(), spawnLoc.getBlockZ()),
++                    new BlockPos(respawnEvent.getRespawnLocation().getBlockX(), respawnEvent.getRespawnLocation().getBlockY(), respawnEvent.getRespawnLocation().getBlockZ()),
 +                    16, ca.spottedleaf.concurrentutil.util.Priority.HIGHER, finalize
 +                );
 +            } else {
@@ -242,7 +290,7 @@
      }
  
      @Override
-@@ -1925,12 +_,17 @@
+@@ -1925,12 +_,22 @@
                  return false;
              }
              this.wonGame = true;
@@ -254,6 +302,11 @@
 +            // the end credits, or else we get the player stuck in the
 +            // void, and they can't escape...
 +            this.canvas$isDisplayingEndCredits = !this.seenCredits && !this.level().paperConfig().misc.disableEndCredits; // ensure we respect paper config
++            io.canvasmc.canvas.event.PlayerViewEndCreditsEvent viewEndCreditsEvent = new io.canvasmc.canvas.event.PlayerViewEndCreditsEvent(
++                getBukkitEntity(), this.canvas$isDisplayingEndCredits
++            );
++            viewEndCreditsEvent.callEvent();
++            this.canvas$isDisplayingEndCredits = viewEndCreditsEvent.willShowCredits();
 +            this.exitEndCredits(); // note: this calls 'unRide()'
 +            if (this.canvas$isDisplayingEndCredits) {
                  this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
@@ -299,28 +352,22 @@
          this.ejectPassengers();
  
          // Paper start - Workaround vehicle not tracking the passenger disconnection dismount
-@@ -3402,13 +_,19 @@
-         return getInputVector(new Vec3(f, 0.0, f1), 1.0F, this.getYRot());
+@@ -3403,11 +_,13 @@
      }
  
-+    // Canvas start - region threading
      public void registerEnderPearl(ThrownEnderpearl enderPearl) {
 -        //this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
-+        this.scheduleToOrRun(() -> {
-+            this.enderPearls.add(enderPearl);
-+        });
++        if (!io.canvasmc.canvas.Config.INSTANCE.restoreVanillaEnderPearlBehavior) return; // Canvas - restore vanilla ender pearl behavior
++        this.enderPearls.add(enderPearl);
      }
  
      public void deregisterEnderPearl(ThrownEnderpearl enderPearl) {
 -        //this.enderPearls.remove(enderPearl); // Folia - region threading - do not track ender pearls
-+        this.scheduleToOrRun(() -> {
-+            this.enderPearls.remove(enderPearl);
-+        });
++        if (!io.canvasmc.canvas.Config.INSTANCE.restoreVanillaEnderPearlBehavior) return; // Canvas - restore vanilla ender pearl behavior
++        this.enderPearls.remove(enderPearl);
      }
-+    // Canvas end - region threading
  
      public Set<ThrownEnderpearl> getEnderPearls() {
-         return this.enderPearls;
 @@ -3453,7 +_,7 @@
      }
  

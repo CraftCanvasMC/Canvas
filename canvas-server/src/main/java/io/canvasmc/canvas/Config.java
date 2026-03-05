@@ -453,6 +453,17 @@ public class Config {
             "Steep surface rule condition only works on the north and east faces of slopes"
         })
         public boolean mc258859 = false;
+
+        @Comment({
+            "In Vanilla, pearls can be duplicated during shutdown because pearls are saved to its owning player data",
+            "and in the chunk data. Meaning, when the chunk is loaded, it loads that pearl, and when the player is loaded",
+            "it loads the pearl in the player data.",
+            "",
+            "This fixes that, so that when 'restoreVanillaEnderPearlBehavior' is enabled, it unloads the pearl during shutdown",
+            "so that the duplication doesn't occur. With that configuration disabled, it just loads the pearl from the",
+            "chunk like normal."
+        })
+        public boolean pearlDuplication = false;
     }
 
     @Comment({
@@ -722,6 +733,6 @@ public class Config {
     @Comment("The server mod name displayed in server listings and client info")
     public String serverModName = io.papermc.paper.ServerBuildInfo.buildInfo().brandName();
 
-    @Comment("Restores vanilla ender pearl behavior to match Paper, which is disabled in Folia.")
+    @Comment("Restores Vanilla ender pearl behavior to match Paper, which is disabled in Folia.")
     public boolean restoreVanillaEnderPearlBehavior = false;
 }
