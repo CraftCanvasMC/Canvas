@@ -15,6 +15,7 @@ import com.mojang.serialization.JsonOps;
 import io.canvasmc.canvas.command.RootCommandTree;
 import io.canvasmc.canvas.item.components.AttackRangeComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
+import io.canvasmc.canvas.item.components.EquippableComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
 import io.canvasmc.canvas.item.components.ItemLoreComponent;
 import io.canvasmc.canvas.item.components.RepairableComponent;
@@ -124,7 +125,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(new WeaponComponent());
         register(new AttackRangeComponent());
         register(integerOnlyComponent(DataComponents.ENCHANTABLE, Enchantable::new, 0, Integer.MAX_VALUE));
-        // TODO - EQUIPPABLE
+        register(new EquippableComponent());
         register(new RepairableComponent());
         register(unitComponent(DataComponents.GLIDER));
         register(identifierComponent(DataComponents.TOOLTIP_STYLE, Stream::empty));
