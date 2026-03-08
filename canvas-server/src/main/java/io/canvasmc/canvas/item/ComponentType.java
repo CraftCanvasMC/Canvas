@@ -14,6 +14,7 @@ import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.mojang.serialization.JsonOps;
 import io.canvasmc.canvas.command.RootCommandTree;
 import io.canvasmc.canvas.item.components.AttackRangeComponent;
+import io.canvasmc.canvas.item.components.AttributeModifiersComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
@@ -109,7 +110,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(enumComponent(DataComponents.RARITY, Rarity.class));
         register(adventureModePredicateComponent(DataComponents.CAN_PLACE_ON, context));
         register(adventureModePredicateComponent(DataComponents.CAN_BREAK, context));
-        // TODO - ATTRIBUTE_MODIFIERS
+        register(new AttributeModifiersComponent());
         // TODO - CUSTOM_MODEL_DATA
         // TODO - TOOLTIP_DISPLAY
         register(integerComponent(DataComponents.REPAIR_COST));
