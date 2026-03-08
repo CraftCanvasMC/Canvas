@@ -23,6 +23,7 @@ import io.canvasmc.canvas.item.components.ItemLoreComponent;
 import io.canvasmc.canvas.item.components.RepairableComponent;
 import io.canvasmc.canvas.item.components.ResolvableProfileComponent;
 import io.canvasmc.canvas.item.components.SwingAnimationComponent;
+import io.canvasmc.canvas.item.components.TooltipDisplayComponent;
 import io.canvasmc.canvas.item.components.UseCooldownComponent;
 import io.canvasmc.canvas.item.components.UseEffectsComponent;
 import io.canvasmc.canvas.item.components.UseRemainderComponent;
@@ -113,7 +114,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(adventureModePredicateComponent(DataComponents.CAN_BREAK, context));
         register(new AttributeModifiersComponent());
         register(new CustomModelDataComponent());
-        // TODO - TOOLTIP_DISPLAY
+        register(new TooltipDisplayComponent());
         register(integerComponent(DataComponents.REPAIR_COST));
         register(unitComponent(DataComponents.CREATIVE_SLOT_LOCK));
         register(booleanComponent(DataComponents.ENCHANTMENT_GLINT_OVERRIDE));

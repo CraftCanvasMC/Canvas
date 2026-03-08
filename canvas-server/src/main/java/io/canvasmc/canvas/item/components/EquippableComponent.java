@@ -10,6 +10,8 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.mojang.serialization.JsonOps;
 import io.canvasmc.canvas.item.ComponentType;
+import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.core.component.DataComponentType;
@@ -18,8 +20,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.equipment.Equippable;
 import org.jspecify.annotations.NonNull;
-import java.util.Arrays;
-import java.util.concurrent.CompletableFuture;
 
 public class EquippableComponent extends ComponentType<Equippable> {
     @Override
