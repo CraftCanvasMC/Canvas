@@ -20,6 +20,7 @@ import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
 import io.canvasmc.canvas.item.components.ItemLoreComponent;
+import io.canvasmc.canvas.item.components.PiercingWeaponComponent;
 import io.canvasmc.canvas.item.components.RepairableComponent;
 import io.canvasmc.canvas.item.components.ResolvableProfileComponent;
 import io.canvasmc.canvas.item.components.SwingAnimationComponent;
@@ -134,7 +135,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(identifierComponent(DataComponents.TOOLTIP_STYLE, Stream::empty));
         // TODO - DEATH_PROTECTION
         // TODO - BLOCKS_ATTACKS
-        // TODO - PIERCING_WEAPON
+        register(new PiercingWeaponComponent());
         // TODO - KINETIC_WEAPON
         register(new SwingAnimationComponent());
         register(integerOnlyComponent(DataComponents.DYED_COLOR, DyedItemColor::new, Integer.MIN_VALUE, Integer.MAX_VALUE));
