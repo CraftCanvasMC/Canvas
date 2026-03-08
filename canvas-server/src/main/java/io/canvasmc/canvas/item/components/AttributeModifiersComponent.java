@@ -33,7 +33,7 @@ public class AttributeModifiersComponent extends ComponentType<ItemAttributeModi
 
     private static final Map<String, FieldInfo> ENTRY_FIELDS = Map.of(
         "attribute", FieldInfo.identifierField(ctx -> BuiltInRegistries.ATTRIBUTE.keySet()),
-        "amount", FieldInfo.floatField("1.0"),
+        "amount", FieldInfo.floatField(),
         "operation", FieldInfo.dynamicStringField(ctx ->
             Arrays.stream(AttributeModifier.Operation.values())
                 .map(o -> o.name().toLowerCase())

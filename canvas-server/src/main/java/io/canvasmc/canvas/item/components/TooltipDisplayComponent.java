@@ -11,12 +11,10 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import io.canvasmc.canvas.item.ComponentType;
 import it.unimi.dsi.fastutil.objects.ReferenceLinkedOpenHashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.SequencedSet;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -29,10 +27,32 @@ import org.jspecify.annotations.NonNull;
 public class TooltipDisplayComponent extends ComponentType<TooltipDisplay> {
 
     @Override
+    public Map<String, FieldInfo> jsonFields(CommandContext<CommandSourceStack> context) {
+        return Map.of(
+            "hide_tooltip", FieldInfo.bool(),
+            "hidden_components", FieldInfo.listField(
+                FieldInfo.identifierField(ctx ->
+                    ctx.getSource().getServer().registryAccess()
+                        .lookupOrThrow(Registries.DATA_COMPONENT_TYPE)
+                        .keySet()
+                )
+            )
+        );
+    }
+
+    @Override
+    public CompletableFuture<Suggestions> suggestions(
+        final CommandContext<CommandSourceStack> context,
+        final @NonNull SuggestionsBuilder builder
+    ) {
+        return jsonSuggestions(context, builder);
+    }
+
+    @Override
     public TooltipDisplay parse(@NonNull final String raw) throws CommandSyntaxException {
         try {
             String fixed = raw.replaceAll(
-                "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
+                "([\\[,{:])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)(?=[\\s,}\\]])",
                 "$1\"$2\""
             );
             JsonElement json = JsonParser.parseString(fixed);
@@ -56,43 +76,6 @@ public class TooltipDisplayComponent extends ComponentType<TooltipDisplay> {
                 obj -> Component.literal(obj.toString())
             ).create(e.getMessage());
         }
-    }
-
-    @Override
-    public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final @NonNull SuggestionsBuilder builder) {
-        String remaining = builder.getRemaining().stripTrailing();
-
-        if (remaining.contains("\"hidden_components\":[")) {
-            int arrayStart = remaining.indexOf("\"hidden_components\":[") + "\"hidden_components\":[".length();
-            String afterArray = remaining.substring(arrayStart);
-
-            if (afterArray.contains("]")) {
-                if (!remaining.endsWith("}")) {
-                    return SharedSuggestionProvider.suggest(List.of("}"),
-                        builder.createOffset(builder.getStart() + remaining.length()));
-                }
-                return builder.buildFuture();
-            }
-
-            return listOfSuggestions(context, builder, (ctx, b) ->
-                SharedSuggestionProvider.suggestResource(
-                    ctx.getSource().getServer().registryAccess()
-                        .lookupOrThrow(Registries.DATA_COMPONENT_TYPE)
-                        .keySet().stream(),
-                    b
-                )
-            );
-        }
-
-        return jsonSuggestions(context, builder);
-    }
-
-    @Override
-    public Map<String, FieldInfo> jsonFields() {
-        return Map.of(
-            "hide_tooltip", FieldInfo.bool(),
-            "hidden_components", FieldInfo.listField(FieldInfo.stringField())
-        );
     }
 
     @Override
