@@ -74,7 +74,7 @@
  * Splits introduce complexity. Given chunks can be loaded and unloaded, the area being
  * profiled is kept loaded. This means we can encounter splits, however they can also
  * happen for a wide number of other reasons. So, we store the chunks being profiled in
- * {@link io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner.RegionPinner#PROFILING_CHUNKS}, so when a split occurs we can mark the region
+ * {@link io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner.RegionPinner#gatherChunksToProfile()}, so when a split occurs we can mark the region
  * with those chunks as the one needing to be pinned. The original one will be unpinned,
  * and profiling will continue as normal.
  * </p>
@@ -125,7 +125,7 @@
  * <p>
  * Utilizing our spark plugin internals, we create an interchangeable system that swaps
  * between REGEX pattern-based matching and thread name matching, since
- * {@link io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension#TRACKING_THREAD} can provide us with the {@link io.canvasmc.canvas.tick.CRSThreadPool.TickThreadRunner}
+ * {@link io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension#STATE} can provide us with the {@link io.canvasmc.canvas.tick.AffinitySchedulerThreadPool.TickThreadRunner}
  * we are actively profiling. When there are no regions pinned, the system defaults to
  * the standard REGEX pattern, {@code "Region Scheduler Thread #\d+"}.
  * </p>

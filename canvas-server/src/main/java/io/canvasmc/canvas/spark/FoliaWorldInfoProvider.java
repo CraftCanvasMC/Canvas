@@ -1,10 +1,8 @@
 package io.canvasmc.canvas.spark;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
-import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
-import com.mojang.datafixers.util.Pair;
+import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
 import io.canvasmc.canvas.spark.profiler.SparkRegionProfilerExtension;
-import io.canvasmc.canvas.util.COWLongArrayList;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import java.util.ArrayList;
@@ -21,7 +19,9 @@ import java.util.stream.Collectors;
 import me.lucko.spark.paper.common.platform.world.AbstractChunkInfo;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
@@ -32,6 +32,7 @@ import org.bukkit.craftbukkit.CraftChunk;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.jspecify.annotations.NonNull;
 
 public class FoliaWorldInfoProvider implements WorldInfoProvider {
     private final FoliaSparkPlugin plugin;
@@ -44,41 +45,46 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
     @Override
     public CountsResult pollCounts() {
-        // Note: if we are ending a profiler, this will be cached, otherwise this is current
-        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.get();
-        if (profilerResultCache != null) {
-            ServerLevel world = profilerResultCache.getFirst();
-            COWLongArrayList chunkKeys = profilerResultCache.getSecond();
-            // use first entry, this shouldn't ever be null or out of bounds
-            final int chunkX = CoordinateUtils.getChunkX(chunkKeys.getArray()[0]);
-            final int chunkZ = CoordinateUtils.getChunkZ(chunkKeys.getArray()[0]);
-            CompletableFuture<CountsResult> result = new CompletableFuture<>();
+        if (SparkRegionProfilerExtension.isProfiling()) {
+            // we need tile entities, chunks, entities, and players
+            // if this isn't a region pinner, this is the global tick
+            if (SparkRegionProfilerExtension.STATE.get().handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
+                final ServerLevel world = pinner.world();
+                final ChunkPos target = pinner.getCenter();
 
-            // schedule to region we were profiling at
-            RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                world, chunkX, chunkZ, () -> {
-                    // we are scheduled to the region here, fetch localized information
-                    RegionizedWorldData localWorldData = world.getCurrentWorldData();
+                final CompletableFuture<CountsResult> result = new CompletableFuture<>();
 
-                    int players = localWorldData.getPlayerCount();
-                    int entities = localWorldData.getEntityCount();
-                    int chunks = localWorldData.getChunkCount();
-                    int tileEntities = 0;
+                // schedule to region we were profiling at
+                RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
+                    world, target.x, target.z, () -> {
+                        // we are scheduled to the region here, fetch localized information
+                        RegionizedWorldData localWorldData = world.getCurrentWorldData();
 
-                    // we only use block ticking chunks, matches with what spark does for global polling
-                    for (final LevelChunk tickingChunk : localWorldData.getTickingChunks()) {
-                        tileEntities += tickingChunk.canvas$getAllBlockEntities().length;
-                    }
+                        int players = localWorldData.getPlayerCount();
+                        int entities = localWorldData.getEntityCount();
+                        int chunks = localWorldData.getChunkCount();
+                        int tileEntities = 0;
 
-                    result.complete(new CountsResult(players, entities, tileEntities, chunks));
-                }, Priority.BLOCKING // highest possible priority, we need this information now please
-            );
+                        // we only use block ticking chunks, matches with what spark does for global polling
+                        for (final LevelChunk tickingChunk : localWorldData.getTickingChunks()) {
+                            tileEntities += tickingChunk.canvas$getAllBlockEntities().length;
+                        }
 
-            try {
-                // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
-                return result.get(5, TimeUnit.SECONDS);
-            } catch (InterruptedException | TimeoutException | ExecutionException e) {
-                throw new RuntimeException("Couldn't fetch localized world data", e);
+                        result.complete(new CountsResult(players, entities, tileEntities, chunks));
+                    }, Priority.BLOCKING // highest possible priority, we need this information now please
+                );
+
+                try {
+                    // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
+                    return result.get(5, TimeUnit.SECONDS);
+                } catch (InterruptedException | TimeoutException | ExecutionException e) {
+                    throw new RuntimeException("Couldn't fetch localized world data", e);
+                }
+            }
+            else {
+                // global tick owns nothing. we *could* have players be populated with connections it's
+                // handling, but that isn't entirely accurate, especially at the interval it polls at
+                return new CountsResult(0, 0, 0, 0);
             }
         }
         int players = this.server.getOnlinePlayers().size();
@@ -101,36 +107,35 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         ChunksResult<FoliaChunkInfo> data = new ChunksResult<>();
 
         // Note: if we are ending a profiler, this will be cached, otherwise this is current
-        Pair<ServerLevel, COWLongArrayList> profilerResultCache = SparkRegionProfilerExtension.PROFILING_RESULTS_CACHE.get();
-        if (profilerResultCache != null) {
-            ServerLevel world = profilerResultCache.getFirst();
-            COWLongArrayList chunkKeys = profilerResultCache.getSecond();
-            // use first entry, this shouldn't ever be null or out of bounds
-            final int chunkX = CoordinateUtils.getChunkX(chunkKeys.getArray()[0]);
-            final int chunkZ = CoordinateUtils.getChunkZ(chunkKeys.getArray()[0]);
-            CompletableFuture<List<FoliaChunkInfo>> result = new CompletableFuture<>();
+        if (SparkRegionProfilerExtension.isProfiling()) {
+            if (SparkRegionProfilerExtension.STATE.get().handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
+                final ServerLevel world = pinner.world();
+                final ChunkPos target = pinner.getCenter();
+                final CompletableFuture<List<FoliaChunkInfo>> result = new CompletableFuture<>();
 
-            // schedule to region we were profiling at
-            RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                world, chunkX, chunkZ, () -> {
-                    List<FoliaChunkInfo> retVal = new ArrayList<>();
-                    RegionizedWorldData worldData = world.getCurrentWorldData();
-                    for (final LevelChunk nmsChunk : worldData.getChunks()) {
-                        Chunk chunk = new CraftChunk(nmsChunk);
-                        retVal.add(new FoliaChunkInfo(chunk, world.getWorld(), this.plugin));
-                    }
-                    result.complete(retVal);
-                }, Priority.BLOCKING // highest possible priority, we need this information now please
-            );
+                RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
+                    world, target.x, target.z, () -> {
+                        List<FoliaChunkInfo> chunks = new ArrayList<>();
+                        RegionizedWorldData worldData = world.getCurrentWorldData();
+                        for (final LevelChunk nms : worldData.getChunks()) {
+                            chunks.add(new FoliaChunkInfo(new CraftChunk(nms), world.getWorld(), this.plugin));
+                        }
+                        result.complete(chunks);
+                    }, Priority.BLOCKING
+                );
 
-            try {
-                // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
-                data.put(world.getWorld().getName(), result.get(5, TimeUnit.SECONDS));
-                return data;
-            } catch (InterruptedException | TimeoutException | ExecutionException e) {
-                throw new RuntimeException("Couldn't fetch localized world data", e);
+                try {
+                    // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
+                    data.put(world.getWorld().getName(), result.get(5, TimeUnit.SECONDS));
+                    return data;
+                } catch (InterruptedException | TimeoutException | ExecutionException e) {
+                    throw new RuntimeException("Couldn't fetch localized world data", e);
+                }
             }
+            else return new ChunksResult<>(); // global tick, doesn't own chunks
         }
+
+        // non-specific region profiler, just fetch everything (god I hate this)
         for (World world : this.server.getWorlds()) {
             Chunk[] chunks = world.getLoadedChunks();
 
@@ -174,7 +179,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         return data;
     }
 
-    @SuppressWarnings({"removal", "UnstableApiUsage"})
+    @SuppressWarnings({"removal"})
     @Override
     public Collection<DataPackInfo> pollDataPacks() {
         return this.server.getDatapackManager().getEnabledPacks().stream()
@@ -186,17 +191,17 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             .collect(Collectors.toList());
     }
 
-    static final class FoliaChunkInfo extends AbstractChunkInfo<EntityType> {
+    public static final class FoliaChunkInfo extends AbstractChunkInfo<EntityType> {
         private final CompletableFuture<CountMap<EntityType>> entityCounts;
 
-        FoliaChunkInfo(Chunk chunk, World world, FoliaSparkPlugin plugin) {
+        FoliaChunkInfo(@NonNull Chunk chunk, World world, FoliaSparkPlugin plugin) {
             super(chunk.getX(), chunk.getZ());
 
             Executor executor = task -> RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(((CraftWorld) world).getHandle(), getX(), getZ(), task, Priority.BLOCKING);
             this.entityCounts = CompletableFuture.supplyAsync(() -> calculate(chunk), executor);
         }
 
-        private CountMap<EntityType> calculate(Chunk chunk) {
+        private @NonNull CountMap<EntityType> calculate(@NonNull Chunk chunk) {
             CountMap<EntityType> entityCounts = new CountMap.EnumKeyed<>(EntityType.class);
             for (Entity entity : chunk.getEntities()) {
                 if (entity != null) {
