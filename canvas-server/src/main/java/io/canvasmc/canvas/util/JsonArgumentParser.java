@@ -15,6 +15,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.SharedSuggestionProvider;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 public interface JsonArgumentParser {
 
@@ -61,10 +62,31 @@ public interface JsonArgumentParser {
                 yield SharedSuggestionProvider.suggest(hints, offset);
             }
 
-            case COMMA_OR_CLOSE -> SharedSuggestionProvider.suggest(
-                state.availableKeys().isEmpty() ? List.of("}") : List.of(",", "}"),
-                offset
-            );
+            case LIST_VALUE -> SharedSuggestionProvider.suggest(List.of("["), offset);
+
+            case LIST_ELEMENT -> {
+                FieldInfo info = state.currentField();
+                if (info == null || info.elementType() == null) yield builder.buildFuture();
+                FieldInfo elemType = info.elementType();
+                List<String> hints = switch (elemType.valueMode()) {
+                    case BOOL_VALUE -> List.of("true", "false");
+                    case INT_VALUE, FLOAT_VALUE -> elemType.examples().isEmpty() ? List.of() : elemType.examples();
+                    case STRING_VALUE -> elemType.examples().stream().map(e -> "\"" + e + "\"").toList();
+                    default -> List.of();
+                };
+                yield SharedSuggestionProvider.suggest(hints, offset);
+            }
+
+            case COMMA_OR_CLOSE -> {
+                FieldInfo info = state.currentField();
+                if (info != null && info.valueMode() == JsonState.Mode.LIST_VALUE) {
+                    yield SharedSuggestionProvider.suggest(List.of(",", "]"), offset);
+                }
+                yield SharedSuggestionProvider.suggest(
+                    state.availableKeys().isEmpty() ? List.of("}") : List.of(",", "}"),
+                    offset
+                );
+            }
 
             case CLOSE_BRACE -> SharedSuggestionProvider.suggest(List.of("}"), offset);
 
@@ -118,6 +140,27 @@ public interface JsonArgumentParser {
 
         if (trimmed.endsWith(",")) {
             return new JsonState(JsonState.Mode.KEY, trimmed.length(), remainingKeys, usedKeys, null);
+        }
+
+        Matcher insideList = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\\[([^]]*)$").matcher(trimmed);
+        if (insideList.find()) {
+            String key = insideList.group(1);
+            String listContent = insideList.group(2);
+            FieldInfo info = fields.get(key);
+            if (info != null && info.valueMode() == JsonState.Mode.LIST_VALUE) {
+                if (listContent.stripTrailing().endsWith("[") || listContent.stripTrailing().endsWith(",")) {
+                    return new JsonState(JsonState.Mode.LIST_ELEMENT, trimmed.length(), remainingKeys, usedKeys, info);
+                }
+                if (listContent.matches(".*([^\",\\[])\\s*") || listContent.matches(".*\"[^\"]+\"\\s*")) {
+                    return new JsonState(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys, info);
+                }
+                return new JsonState(JsonState.Mode.LIST_ELEMENT, trimmed.length(), remainingKeys, usedKeys, info);
+            }
+        }
+
+        Matcher closedList = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\\[[^]]*]\\s*$").matcher(trimmed);
+        if (closedList.find()) {
+            return new JsonState(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys, null);
         }
 
         Matcher afterColon = Pattern.compile("\"([^\"]+)\"\\s*:\\s*$").matcher(trimmed);
@@ -193,31 +236,38 @@ public interface JsonArgumentParser {
             INT_VALUE,
             FLOAT_VALUE,
             STRING_VALUE,
+            LIST_VALUE,
+            LIST_ELEMENT,
             COMMA_OR_CLOSE,
             CLOSE_BRACE,
             NONE
         }
     }
 
-    record FieldInfo(JsonState.Mode valueMode, List<String> examples) {
+    record FieldInfo(JsonState.Mode valueMode, List<String> examples, @Nullable FieldInfo elementType) {
         @Contract(" -> new")
         public static @NonNull FieldInfo bool() {
-            return new FieldInfo(JsonState.Mode.BOOL_VALUE, List.of());
+            return new FieldInfo(JsonState.Mode.BOOL_VALUE, List.of(), null);
         }
 
         @Contract("_ -> new")
         public static @NonNull FieldInfo floatField(String... examples) {
-            return new FieldInfo(JsonState.Mode.FLOAT_VALUE, List.of(examples));
+            return new FieldInfo(JsonState.Mode.FLOAT_VALUE, List.of(examples), null);
         }
 
         @Contract("_ -> new")
         public static @NonNull FieldInfo intField(String... examples) {
-            return new FieldInfo(JsonState.Mode.INT_VALUE, List.of(examples));
+            return new FieldInfo(JsonState.Mode.INT_VALUE, List.of(examples), null);
         }
 
         @Contract("_ -> new")
         public static @NonNull FieldInfo stringField(String... examples) {
-            return new FieldInfo(JsonState.Mode.STRING_VALUE, List.of(examples));
+            return new FieldInfo(JsonState.Mode.STRING_VALUE, List.of(examples), null);
+        }
+
+        @Contract("_ -> new")
+        public static @NonNull FieldInfo listField(@NonNull FieldInfo elementType) {
+            return new FieldInfo(JsonState.Mode.LIST_VALUE, List.of(), elementType);
         }
     }
 }

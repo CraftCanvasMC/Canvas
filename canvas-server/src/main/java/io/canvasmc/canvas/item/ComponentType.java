@@ -15,6 +15,7 @@ import com.mojang.serialization.JsonOps;
 import io.canvasmc.canvas.command.RootCommandTree;
 import io.canvasmc.canvas.item.components.AttackRangeComponent;
 import io.canvasmc.canvas.item.components.AttributeModifiersComponent;
+import io.canvasmc.canvas.item.components.CustomModelDataComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
@@ -111,7 +112,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(adventureModePredicateComponent(DataComponents.CAN_PLACE_ON, context));
         register(adventureModePredicateComponent(DataComponents.CAN_BREAK, context));
         register(new AttributeModifiersComponent());
-        // TODO - CUSTOM_MODEL_DATA
+        register(new CustomModelDataComponent());
         // TODO - TOOLTIP_DISPLAY
         register(integerComponent(DataComponents.REPAIR_COST));
         register(unitComponent(DataComponents.CREATIVE_SLOT_LOCK));
