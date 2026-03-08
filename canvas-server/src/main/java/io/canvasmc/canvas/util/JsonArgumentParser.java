@@ -162,33 +162,28 @@ public interface JsonArgumentParser {
         List<String> remainingKeys,
         Set<String> usedKeys
     ) {
-        String listTrimmed = listContent.stripTrailing();
-
-        if (listTrimmed.isEmpty() || listTrimmed.endsWith(","))
+        String trimmedList = listContent.stripTrailing();
+        if (trimmedList.isEmpty() || trimmedList.endsWith(","))
             return new JsonState(JsonState.Mode.LIST_ELEMENT, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
-
-        if (listTrimmed.matches(".*\"[^\"]+\"\\s*"))
+        if (trimmedList.matches(".*\"[^\"]*$"))
+            return new JsonState(JsonState.Mode.LIST_ELEMENT, trimmed.lastIndexOf('"'),
+                remainingKeys, usedKeys, Set.of(), null, info);
+        if (trimmedList.matches(".*\"[^\"]+\"\\s*$"))
             return new JsonState(JsonState.Mode.LIST_COMMA_OR_CLOSE, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
 
-        if (listTrimmed.matches(".*[a-z0-9_./-]\\s*")
-            || listTrimmed.matches(".*[0-9]\\s*"))
-            return new JsonState(JsonState.Mode.LIST_COMMA_OR_CLOSE, trimmed.length(),
-                remainingKeys, usedKeys, Set.of(), null, info);
-
-        if (listTrimmed.matches(".*\"[^\"]*$")) {
-            int quoteStart = trimmed.lastIndexOf('"');
-            return new JsonState(JsonState.Mode.LIST_ELEMENT, quoteStart,
-                remainingKeys, usedKeys, Set.of(), null, info);
-        }
-
-        Matcher midToken = Pattern.compile("[^,\\[\\]\"]*$").matcher(listTrimmed);
-        if (midToken.find() && !midToken.group().isBlank()) {
-            int tokenStart = trimmed.length() - midToken.group().length();
+        Matcher midUnquoted = Pattern.compile("(?:^|[,\\[])\\s*([a-z0-9_.-]*:?[a-z0-9_./-]*)$").matcher(trimmedList);
+        if (midUnquoted.find() && !midUnquoted.group(1).isEmpty()) {
+            String token = midUnquoted.group(1);
+            int tokenStart = trimmed.length() - token.length();
             return new JsonState(JsonState.Mode.LIST_ELEMENT, tokenStart,
                 remainingKeys, usedKeys, Set.of(), null, info);
         }
+
+        if (trimmedList.matches(".*[a-z0-9_./:+-]\\s+") || trimmedList.matches(".*[0-9]\\s+"))
+            return new JsonState(JsonState.Mode.LIST_COMMA_OR_CLOSE, trimmed.length(),
+                remainingKeys, usedKeys, Set.of(), null, info);
 
         return new JsonState(JsonState.Mode.LIST_ELEMENT, trimmed.length(),
             remainingKeys, usedKeys, Set.of(), null, info);
@@ -328,10 +323,25 @@ public interface JsonArgumentParser {
     static CompletableFuture<Suggestions> suggestIdentifiers(
         Iterable<Identifier> resources,
         @NonNull SuggestionsBuilder builder,
-        String prefix
+        @SuppressWarnings("unused") String ignoredPrefix
+    ) {
+        return suggestIdentifiers(resources, builder);
+    }
+
+    static CompletableFuture<Suggestions> suggestIdentifiers(
+        @NonNull Iterable<Identifier> resources,
+        @NonNull SuggestionsBuilder builder
     ) {
         String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
-        filterResources(resources, remaining, prefix, id -> id, id -> builder.suggest(prefix + id));
+        boolean hasColon = remaining.indexOf(':') > -1;
+        for (Identifier id : resources) {
+            if (remaining.isEmpty()
+                || (hasColon
+                ? matchesSubStr(remaining, id.toString())
+                : matchesSubStr(remaining, id.getNamespace()) || matchesSubStr(remaining, id.getPath()))) {
+                builder.suggest(id.toString());
+            }
+        }
         return builder.buildFuture();
     }
 
@@ -430,7 +440,7 @@ public interface JsonArgumentParser {
                 Iterable<Identifier> ids = info.identifierSupplier() != null
                     ? info.identifierSupplier().apply(context)
                     : List.of();
-                yield suggestIdentifiers(ids, offset, "");
+                yield suggestIdentifiers(ids, offset);
             }
 
             case LIST_VALUE -> SharedSuggestionProvider.suggest(List.of("["), offset);
@@ -453,7 +463,7 @@ public interface JsonArgumentParser {
                         Iterable<Identifier> ids = elem.identifierSupplier() != null
                             ? elem.identifierSupplier().apply(context)
                             : List.of();
-                        yield suggestIdentifiers(ids, offset, "");
+                        yield suggestIdentifiers(ids, offset);
                     }
                     default -> builder.buildFuture();
                 };
@@ -498,7 +508,7 @@ public interface JsonArgumentParser {
                         Iterable<Identifier> ids = valueInfo.identifierSupplier() != null
                             ? valueInfo.identifierSupplier().apply(context)
                             : List.of();
-                        yield suggestIdentifiers(ids, offset, "");
+                        yield suggestIdentifiers(ids, offset);
                     }
                     default -> builder.buildFuture();
                 };
