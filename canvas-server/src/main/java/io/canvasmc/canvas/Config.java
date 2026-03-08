@@ -177,6 +177,12 @@ public class Config {
             "or help identify deadline missing issues"
         })
         public long overloadedLogMillis = 5_000L;
+
+        @Comment("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
+        public List<String> tickRegionAffinity = new ArrayList<>();
+
+        @Comment("Enables pinning threads of the AFFINITY region scheduler to cpu cores")
+        public boolean enableAffinitySchedulerCpuAffinity = false;
     }
 
     public Chunks chunks = new Chunks();

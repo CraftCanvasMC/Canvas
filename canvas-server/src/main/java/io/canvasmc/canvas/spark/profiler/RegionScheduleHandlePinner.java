@@ -2,26 +2,30 @@ package io.canvasmc.canvas.spark.profiler;
 
 import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.util.Priority;
+import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
+import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
-import io.canvasmc.canvas.tick.CRSThreadPool;
-import io.canvasmc.canvas.util.COWLongArrayList;
+import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongComparator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ColumnPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.Ticket;
 import net.minecraft.server.level.TicketType;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.border.WorldBorder;
 import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,7 +51,7 @@ public interface RegionScheduleHandlePinner {
      * @throws CommandSyntaxException
      *     if an error occurs in setup and should be sent as an error to the sender
      */
-    void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, CRSThreadPool.TickThreadRunner> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException;
+    void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, AffinitySchedulerThreadPool.TickThreadRunner> finalizer) throws CommandSyntaxException;
 
     /**
      * Wraps up pinning for the current {@link RegionScheduleHandlePinner}. This should do the following:
@@ -65,7 +69,7 @@ public interface RegionScheduleHandlePinner {
      * @throws CommandSyntaxException
      *     if an error occurs in completion and should be sent as an error to the sender
      */
-    void unpin(Consumer<SchedulableTick> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException;
+    void unpin(Consumer<SchedulableTick> finalizer) throws CommandSyntaxException;
 
     /**
      * Fetches the logger for this region pinner, used for debugging purposes
@@ -86,11 +90,55 @@ public interface RegionScheduleHandlePinner {
      *     the world we are operating on
      */
     record RegionPinner(ColumnPos fromPos, ColumnPos toPos, ServerLevel world) implements RegionScheduleHandlePinner {
-        public static final COWLongArrayList PROFILING_CHUNKS = new COWLongArrayList();
-        public static final AtomicReference<ServerLevel> PROFILING_LEVEL = new AtomicReference<>();
+        public @NonNull ChunkPos getCenter() {
+            final LongArrayList chunks = LongArrayList.wrap(gatherChunksToProfile());
+
+            final LongComparator comparator = (final long k1, final long k2) -> {
+                final int x1 = CoordinateUtils.getChunkX(k1);
+                final int x2 = CoordinateUtils.getChunkX(k2);
+
+                final int z1 = CoordinateUtils.getChunkZ(k1);
+                final int z2 = CoordinateUtils.getChunkZ(k2);
+
+                final int zCompare = Integer.compare(z1, z2);
+                if (zCompare != 0) {
+                    return zCompare;
+                }
+
+                return Integer.compare(x1, x2);
+            };
+            chunks.sort(comparator);
+
+            final long middle = chunks.getLong(chunks.size() >> 1);
+
+            return new ChunkPos(CoordinateUtils.getChunkX(middle), CoordinateUtils.getChunkZ(middle));
+        }
+
+        // note: this is unchecked, no validation of the border or chunk count
+        public long[] gatherChunksToProfile() {
+            LongArrayList ret = new LongArrayList();
+            // note: this is the BLOCK pos, not to be confused with the CHUNK pos
+            int minX = Math.min(fromPos.x(), toPos.x());
+            int minZ = Math.min(fromPos.z(), toPos.z());
+            int maxX = Math.max(fromPos.x(), toPos.x());
+            int maxZ = Math.max(fromPos.z(), toPos.z());
+
+            // convert to section coordinates
+            int minChunkX = minX >> 4;
+            int minChunkZ = minZ >> 4;
+            int maxChunkX = maxX >> 4;
+            int maxChunkZ = maxZ >> 4;
+
+            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+                for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                    ret.add(CoordinateUtils.getChunkKey(chunkX, chunkZ));
+                }
+            }
+            return ret.toLongArray();
+        }
 
         @Override
-        public void pin(final BiConsumer<TickRegionScheduler.RegionScheduleHandle, CRSThreadPool.TickThreadRunner> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException {
+        public void pin(final BiConsumer<TickRegionScheduler.RegionScheduleHandle, AffinitySchedulerThreadPool.TickThreadRunner> finalizer) throws CommandSyntaxException {
             // note: this is the BLOCK pos, not to be confused with the CHUNK pos
             int minX = Math.min(fromPos.x(), toPos.x());
             int minZ = Math.min(fromPos.z(), toPos.z());
@@ -126,7 +174,6 @@ public interface RegionScheduleHandlePinner {
                     final long longCoord = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
                     Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
                     world.chunkSource.ticketStorage.addTicket(longCoord, ticket);
-                    PROFILING_CHUNKS.add(longCoord);
                 }
             }
 
@@ -135,15 +182,21 @@ public interface RegionScheduleHandlePinner {
 
             // load chunks and schedule finalizing
             world.canvas$loadOrRunAtChunksAsync(
-                minChunkX, minChunkZ, maxChunkX, maxChunkZ, Priority.HIGHEST, () -> {
-                    PROFILING_LEVEL.set(world); // set the level
+                // minX, maxX, minZ, maxZ
+                minChunkX, maxChunkX, minChunkZ, maxChunkZ, Priority.HIGHEST, () -> {
                     final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
                         world.regioniser.getRegionAtSynchronised(minChunkX, minChunkZ);
                     if (region == null) {
                         throw new IllegalStateException("Region must be present at the profiling coordinates");
                     }
+                    if (!TickThread.isTickThreadFor(world, minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
+                        throw new IllegalStateException("Not ticking on scheduled region");
+                    }
+                    if (region != TickRegionScheduler.getCurrentRegion()) {
+                        throw new IllegalStateException("Not current region? Running region around " + region.getCenterChunk() + ", but scheduled to region owning " + getCenter());
+                    }
                     final TickRegionScheduler.RegionScheduleHandle schedulingHandle = region.getData().getRegionSchedulingHandle();
-                    final CRSThreadPool.TickThreadRunner thread = crsThreadPool.getCurrentTickThreadRunner();
+                    final AffinitySchedulerThreadPool.TickThreadRunner thread = ((AffinitySchedulerThreadPool) TickRegions.getScheduler().scheduler).getCurrentTickThreadRunner();
 
                     finalizer.accept(schedulingHandle, thread);
                 }
@@ -151,18 +204,15 @@ public interface RegionScheduleHandlePinner {
         }
 
         @Override
-        public void unpin(Consumer<SchedulableTick> finalizer, CRSThreadPool crsThreadPool) {
-            final long[] curr = PROFILING_CHUNKS.getArray();
-            final ServerLevel level = PROFILING_LEVEL.getAndSet(null);
-            if (level == null)
-                throw new IllegalStateException("World was null when attempting to end region profiling");
+        public void unpin(Consumer<SchedulableTick> finalizer) {
+            final long[] curr = gatherChunksToProfile();
 
-            long packed = curr[0];
-            int chunkX = (int) packed;
-            int chunkZ = (int) (packed >> 32);
+            final ChunkPos center = getCenter();
+            final int chunkX = center.x;
+            final int chunkZ = center.z;
 
             // Note: this should be loaded already, however we run this safe version just to be sure
-            level.canvas$loadOrRunAtChunksAsync(
+            world.canvas$loadOrRunAtChunksAsync(
                 // offset by 8 to get the middle block of the chunk
                 new BlockPos((chunkX << 4) + 8, 0, (chunkZ << 4) + 8),
                 16,
@@ -178,9 +228,8 @@ public interface RegionScheduleHandlePinner {
                     // - clear PROFILING_CHUNKS
                     for (long longCoord : curr) {
                         Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
-                        level.chunkSource.ticketStorage.removeTicket(longCoord, ticket);
+                        world.chunkSource.ticketStorage.removeTicket(longCoord, ticket);
                     }
-                    PROFILING_CHUNKS.clear();
                 }
             );
         }
@@ -199,9 +248,9 @@ public interface RegionScheduleHandlePinner {
      */
     class GlobalTickPinner implements RegionScheduleHandlePinner {
         @Override
-        public void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, CRSThreadPool.TickThreadRunner> finalizer, CRSThreadPool crsThreadPool) throws CommandSyntaxException {
+        public void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, AffinitySchedulerThreadPool.TickThreadRunner> finalizer) throws CommandSyntaxException {
             TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
-            final CRSThreadPool.TickThreadRunner thread = ((CRSThreadPool.ScheduledState) schedulingHandle.state).getOwnedBy();
+            final AffinitySchedulerThreadPool.TickThreadRunner thread = ((AffinitySchedulerThreadPool) TickRegions.getScheduler().scheduler).getCurrentTickThreadRunner();
 
             if (thread == null) {
                 throw new IllegalStateException("Region scheduling handle returned null task or runner");
@@ -211,9 +260,13 @@ public interface RegionScheduleHandlePinner {
         }
 
         @Override
-        public void unpin(@NotNull Consumer<SchedulableTick> finalizer, CRSThreadPool crsThreadPool) {
+        public void unpin(@NotNull Consumer<SchedulableTick> finalizer) {
             TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
-            finalizer.accept(schedulingHandle);
+            if (RegionizedServer.isGlobalTickThread()) {
+                finalizer.accept(schedulingHandle);
+            } else RegionizedServer.getInstance().addTask(() -> {
+                finalizer.accept(schedulingHandle);
+            });
         }
 
         @Override
