@@ -24,6 +24,7 @@ import io.canvasmc.canvas.item.components.ItemLoreComponent;
 import io.canvasmc.canvas.item.components.PiercingWeaponComponent;
 import io.canvasmc.canvas.item.components.RepairableComponent;
 import io.canvasmc.canvas.item.components.ResolvableProfileComponent;
+import io.canvasmc.canvas.item.components.SuspiciousStewEffectsComponent;
 import io.canvasmc.canvas.item.components.SwingAnimationComponent;
 import io.canvasmc.canvas.item.components.TooltipDisplayComponent;
 import io.canvasmc.canvas.item.components.UseCooldownComponent;
@@ -148,7 +149,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         // TODO - BUNDLE_CONTENTS
         // TODO - POTION_CONTENTS
         register(floatComponent(DataComponents.POTION_DURATION_SCALE));
-        // TODO - SUSPICIOUS_STEW_EFFECTS
+        register(new SuspiciousStewEffectsComponent());
         // TODO - WRITABLE_BOOK_CONTENT
         // TODO - WRITTEN_BOOK_CONTENT
         // TODO - TRIM
