@@ -6,6 +6,8 @@ import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.command.Command;
 import io.canvasmc.canvas.item.ComponentType;
 import java.util.Objects;
+import io.canvasmc.canvas.util.NbtTextFormatter;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.EntityArgument;
@@ -13,6 +15,8 @@ import net.minecraft.commands.arguments.IdentifierArgument;
 import net.minecraft.commands.arguments.SlotArgument;
 import net.minecraft.commands.arguments.selector.EntitySelector;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
@@ -94,6 +98,24 @@ public class ItemModifyCommand implements Command {
                                     }
                                     return 0;
                                 })))
-                    )));
+                    )
+                    .then(literal("dump")
+                        .executes((context) -> {
+                            final int slot = SlotArgument.getSlot(context, "slot");
+                            for (final ServerPlayer player : context.getArgument("players", EntitySelector.class).findPlayers(context.getSource())) {
+                                player.scheduleToOrRun(() -> {
+                                    SlotAccess access = player.getSlot(slot);
+                                    if (access == null) return;
+                                    ItemStack item = access.get();
+                                    CompoundTag tag = (CompoundTag) ItemStack.CODEC.encodeStart(NbtOps.INSTANCE, item).result().orElseThrow(
+                                        () -> new RuntimeException("Unable to encode")
+                                    );
+                                    context.getSource().sendSystemMessage(new NbtTextFormatter(3).apply(tag));
+                                });
+                            }
+                            return 0;
+                        })
+                    )
+                ));
     }
 }
