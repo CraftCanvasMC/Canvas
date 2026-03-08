@@ -15,6 +15,7 @@ import com.mojang.serialization.JsonOps;
 import io.canvasmc.canvas.command.RootCommandTree;
 import io.canvasmc.canvas.item.components.AttackRangeComponent;
 import io.canvasmc.canvas.item.components.AttributeModifiersComponent;
+import io.canvasmc.canvas.item.components.ChargedProjectilesComponent;
 import io.canvasmc.canvas.item.components.CustomModelDataComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
@@ -143,7 +144,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(integerOnlyComponent(DataComponents.MAP_ID, MapId::new, Integer.MIN_VALUE, Integer.MAX_VALUE));
         // TODO - MAP_DECORATIONS
         register(enumComponent(DataComponents.MAP_POST_PROCESSING, MapPostProcessing.class));
-        // TODO - CHARGED_PROJECTILES
+        register(new ChargedProjectilesComponent());
         // TODO - BUNDLE_CONTENTS
         // TODO - POTION_CONTENTS
         register(floatComponent(DataComponents.POTION_DURATION_SCALE));
