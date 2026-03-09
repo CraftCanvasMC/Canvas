@@ -19,6 +19,7 @@ import io.canvasmc.canvas.item.components.ChargedProjectilesComponent;
 import io.canvasmc.canvas.item.components.CustomModelDataComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
+import io.canvasmc.canvas.item.components.FireworkExplosionComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
 import io.canvasmc.canvas.item.components.ItemLoreComponent;
 import io.canvasmc.canvas.item.components.LodestoneTrackerComponent;
@@ -173,7 +174,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(new ProvidesBannerPatternsComponent());
         register(new RecipesComponent());
         register(new LodestoneTrackerComponent());
-        // TODO - FIREWORK_EXPLOSION
+        register(new FireworkExplosionComponent());
         // TODO - FIREWORKS
         register(new ResolvableProfileComponent());
         register(identifierComponent(DataComponents.NOTE_BLOCK_SOUND, Stream::empty));
