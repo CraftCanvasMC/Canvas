@@ -22,6 +22,7 @@ import io.canvasmc.canvas.item.components.EquippableComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
 import io.canvasmc.canvas.item.components.ItemLoreComponent;
 import io.canvasmc.canvas.item.components.PiercingWeaponComponent;
+import io.canvasmc.canvas.item.components.PotDecorationsComponent;
 import io.canvasmc.canvas.item.components.RepairableComponent;
 import io.canvasmc.canvas.item.components.ResolvableProfileComponent;
 import io.canvasmc.canvas.item.components.SuspiciousStewEffectsComponent;
@@ -171,7 +172,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(identifierComponent(DataComponents.NOTE_BLOCK_SOUND, Stream::empty));
         // TODO - BANNER_PATTERNS
         register(enumComponent(DataComponents.BASE_COLOR, DyeColor.class));
-        // TODO - POT_DECORATIONS
+        register(new PotDecorationsComponent());
         // TODO - CONTAINER
         // TODO - BLOCK_STATE
         // TODO - BEES
