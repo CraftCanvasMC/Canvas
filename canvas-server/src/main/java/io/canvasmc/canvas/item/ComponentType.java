@@ -161,7 +161,6 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(new WritableBookContentComponent());
         register(new WrittenBookContentComponent());
         register(new TrimComponent());
-        // TODO - DEBUG_STICK_STATE
         // TODO - ENTITY_DATA
         // TODO - BLOCK_ENTITY_DATA
         register(eitherHolderOnlyComponent(DataComponents.INSTRUMENT, InstrumentComponent::new, Registries.INSTRUMENT));
@@ -216,6 +215,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
             if (identifier.getPath().equalsIgnoreCase("custom_data") ||
                 identifier.getPath().equalsIgnoreCase("enchantments") ||
                 identifier.getPath().equalsIgnoreCase("stored_enchantments") ||
+                identifier.getPath().equalsIgnoreCase("debug_stick_state") ||
                 identifier.getPath().equalsIgnoreCase("bucket_entity_data"))
                 continue;
             if (!REGISTRY.containsKey(nms)) {
