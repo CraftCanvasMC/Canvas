@@ -68,7 +68,7 @@ public class FireworkExplosionComponent extends ComponentType<FireworkExplosion>
     @Override
     public Map<String, FieldInfo> jsonFields() {
         return Map.of(
-            "shape", FieldInfo.stringField(Arrays.stream(FireworkExplosion.Shape.values()).map(Enum::toString).distinct().toArray(String[]::new)),
+            "shape", FieldInfo.stringField(Arrays.stream(FireworkExplosion.Shape.values()).map(Enum::toString).map(String::toLowerCase).distinct().toArray(String[]::new)),
             "colors", FieldInfo.listField(FieldInfo.intField()),
             "fade_colors", FieldInfo.listField(FieldInfo.intField()),
             "has_trail", FieldInfo.bool(),
