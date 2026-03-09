@@ -47,9 +47,15 @@ public class TrimComponent extends ComponentType<ArmorTrim> {
             );
             final RegistryAccess.Frozen registryAccess = MinecraftServer.getServer().registryAccess();
             JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
+            if (!json.has("pattern")) {
+                throw new NoSuchElementException("Pattern not defined");
+            }
+            if (!json.has("material")) {
+                throw new NoSuchElementException("Material not defined");
+            }
             return new ArmorTrim(
-                registryAccess.lookupOrThrow(Registries.TRIM_MATERIAL).get(Identifier.parse(json.get("material").getAsString())).orElseThrow(() -> new NoSuchElementException("Material not found")),
-                registryAccess.lookupOrThrow(Registries.TRIM_PATTERN).get(Identifier.parse(json.get("pattern").getAsString())).orElseThrow(() -> new NoSuchElementException("Pattern not found"))
+                registryAccess.lookupOrThrow(Registries.TRIM_MATERIAL).get(Identifier.parse(json.get("material").getAsString())).orElseThrow(),
+                registryAccess.lookupOrThrow(Registries.TRIM_PATTERN).get(Identifier.parse(json.get("pattern").getAsString())).orElseThrow()
             );
         } catch (JsonSyntaxException | IllegalArgumentException e) {
             throw new DynamicCommandExceptionType(
