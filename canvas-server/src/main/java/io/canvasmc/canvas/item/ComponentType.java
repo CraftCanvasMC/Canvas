@@ -20,6 +20,7 @@ import io.canvasmc.canvas.item.components.CustomModelDataComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
 import io.canvasmc.canvas.item.components.FireworkExplosionComponent;
+import io.canvasmc.canvas.item.components.FireworksComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
 import io.canvasmc.canvas.item.components.ItemLoreComponent;
 import io.canvasmc.canvas.item.components.LodestoneTrackerComponent;
@@ -39,7 +40,7 @@ import io.canvasmc.canvas.item.components.UseRemainderComponent;
 import io.canvasmc.canvas.item.components.WeaponComponent;
 import io.canvasmc.canvas.item.components.WritableBookContentComponent;
 import io.canvasmc.canvas.item.components.WrittenBookContentComponent;
-import io.canvasmc.canvas.util.JsonArgumentParser;
+import io.canvasmc.canvas.util.JsonSuggestionProvider;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -100,7 +101,7 @@ import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.arguments.ComponentArgument.ERROR_INVALID_COMPONENT;
 
-public abstract class ComponentType<T> implements JsonArgumentParser {
+public abstract class ComponentType<T> implements JsonSuggestionProvider {
 
     private static final Map<DataComponentType<?>, ComponentType<?>> REGISTRY = new ConcurrentHashMap<>();
 
@@ -175,7 +176,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(new RecipesComponent());
         register(new LodestoneTrackerComponent());
         register(new FireworkExplosionComponent());
-        // TODO - FIREWORKS
+        register(new FireworksComponent());
         register(new ResolvableProfileComponent());
         register(identifierComponent(DataComponents.NOTE_BLOCK_SOUND, Stream::empty));
         // TODO - BANNER_PATTERNS

@@ -24,26 +24,14 @@ import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 
 public class FireworkExplosionComponent extends ComponentType<FireworkExplosion> {
-    @Override
-    public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
-        return jsonSuggestions(context, builder);
-    }
 
-    @Override
-    public FireworkExplosion parse(@NonNull final String raw) throws CommandSyntaxException {
-        try {
-            String fixed = raw.replaceAll(
-                "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
-                "$1\"$2\""
-            );
-            JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
-            return getExplosionFromJson(json);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
-            throw new DynamicCommandExceptionType(
-                obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
-        }
-    }
+    protected static final Map<String, FieldInfo> EXPLOSION_FIELDS = Map.of(
+        "shape", FieldInfo.stringField(Arrays.stream(FireworkExplosion.Shape.values()).map(Enum::toString).map(String::toLowerCase).distinct().toArray(String[]::new)),
+        "colors", FieldInfo.listField(FieldInfo.intField()),
+        "fade_colors", FieldInfo.listField(FieldInfo.intField()),
+        "has_trail", FieldInfo.bool(),
+        "has_twinkle", FieldInfo.bool()
+    );
 
     @Contract("_ -> new")
     protected static @NonNull FireworkExplosion getExplosionFromJson(final @NonNull JsonObject json) {
@@ -66,14 +54,29 @@ public class FireworkExplosionComponent extends ComponentType<FireworkExplosion>
     }
 
     @Override
+    public CompletableFuture<Suggestions> suggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
+        return jsonSuggestions(context, builder);
+    }
+
+    @Override
+    public FireworkExplosion parse(@NonNull final String raw) throws CommandSyntaxException {
+        try {
+            String fixed = raw.replaceAll(
+                "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
+                "$1\"$2\""
+            );
+            JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
+            return getExplosionFromJson(json);
+        } catch (JsonSyntaxException | IllegalArgumentException e) {
+            throw new DynamicCommandExceptionType(
+                obj -> Component.literal(obj.toString())
+            ).create(e.getMessage());
+        }
+    }
+
+    @Override
     public Map<String, FieldInfo> jsonFields() {
-        return Map.of(
-            "shape", FieldInfo.stringField(Arrays.stream(FireworkExplosion.Shape.values()).map(Enum::toString).map(String::toLowerCase).distinct().toArray(String[]::new)),
-            "colors", FieldInfo.listField(FieldInfo.intField()),
-            "fade_colors", FieldInfo.listField(FieldInfo.intField()),
-            "has_trail", FieldInfo.bool(),
-            "has_twinkle", FieldInfo.bool()
-        );
+        return EXPLOSION_FIELDS;
     }
 
     @Override

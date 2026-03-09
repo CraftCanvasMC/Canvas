@@ -21,14 +21,174 @@ import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
-public interface JsonArgumentParser {
+public interface JsonSuggestionProvider {
 
-    private static @NonNull JsonState analyzeObjectListArray(
+    private static @NonNull JsonState analyzeNestedObject(
         String trimmed,
-        @NonNull String arrayContent,
-        FieldInfo info,
+        @NonNull String nestedInput,
+        @NonNull FieldInfo info,
         List<String> remainingKeys,
         Set<String> usedKeys
+    ) {
+        Map<String, FieldInfo> nestedFields = info.entryFields();
+
+        if (isFullyClosed(nestedInput))
+            return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
+
+        int nestedStart = trimmed.length() - nestedInput.length();
+
+        Set<String> nestedUsedKeys = new HashSet<>();
+        Matcher usedMatcher = Pattern.compile("\"([^\"]+)\"\\s*:").matcher(nestedInput);
+        while (usedMatcher.find()) nestedUsedKeys.add(usedMatcher.group(1));
+
+        List<String> nestedRemainingKeys = nestedFields.keySet().stream()
+            .filter(k -> !nestedUsedKeys.contains(k))
+            .toList();
+
+        String nt = nestedInput.stripTrailing();
+
+        if (nt.equals("{"))
+            return new JsonState(JsonState.Mode.KEY, nestedStart + nt.length(),
+                nestedRemainingKeys, nestedUsedKeys, Set.of(), null, info);
+
+        if (nt.endsWith(",") && depthAt(nt) == 1)
+            return new JsonState(JsonState.Mode.KEY, nestedStart + nt.length(),
+                nestedRemainingKeys, nestedUsedKeys, Set.of(), null, info);
+
+        Matcher afterColon = Pattern.compile("\"([^\"]+)\"\\s*:\\s*$").matcher(nt);
+        if (afterColon.find()) {
+            String key = afterColon.group(1);
+            FieldInfo fi = nestedFields.get(key);
+            if (fi != null) {
+                if (fi.valueMode() == JsonState.Mode.OBJECT_VALUE)
+                    return new JsonState(JsonState.Mode.OPEN_BRACE, nestedStart + nt.length(),
+                        nestedRemainingKeys, nestedUsedKeys, Set.of(), null, fi);
+                return new JsonState(fi.valueMode(), nestedStart + nt.length(),
+                    nestedRemainingKeys, nestedUsedKeys, Set.of(), null, fi);
+            }
+        }
+
+        Matcher innerObjectMatcher = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*(\\{.*)$", Pattern.DOTALL
+        ).matcher(nt);
+        if (innerObjectMatcher.find()) {
+            String key = innerObjectMatcher.group(1);
+            FieldInfo fi = nestedFields.get(key);
+            if (fi != null && fi.valueMode() == JsonState.Mode.OBJECT_VALUE) {
+                String innerInput = innerObjectMatcher.group(2);
+                return analyzeNestedObject(trimmed, innerInput, fi, nestedRemainingKeys, nestedUsedKeys);
+            }
+        }
+
+        Matcher insideObjectList = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*\\[(.*)$", Pattern.DOTALL
+        ).matcher(nt);
+        if (insideObjectList.find()) {
+            FieldInfo fi = nestedFields.get(insideObjectList.group(1));
+            if (fi != null && fi.valueMode() == JsonState.Mode.LIST_OBJECT)
+                return analyzeObjectListArray(trimmed, insideObjectList.group(2), fi, nestedRemainingKeys, nestedUsedKeys);
+        }
+
+        Matcher insideList = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*\\[([^]\\[]*)$"
+        ).matcher(nt);
+        if (insideList.find()) {
+            FieldInfo fi = nestedFields.get(insideList.group(1));
+            if (fi != null && fi.valueMode() == JsonState.Mode.LIST_VALUE)
+                return analyzeSimpleListArray(trimmed, insideList.group(2), fi, nestedRemainingKeys, nestedUsedKeys);
+        }
+
+        Matcher completedId = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*[a-z0-9_.-]+:[a-z0-9_./-]+\\s*$"
+        ).matcher(nt);
+        if (completedId.find()) {
+            FieldInfo fi = nestedFields.get(completedId.group(1));
+            if (fi != null && fi.valueMode() == JsonState.Mode.IDENTIFIER_VALUE)
+                return new JsonState(JsonState.Mode.COMMA_OR_CLOSE, nestedStart + nt.length(),
+                    nestedRemainingKeys, nestedUsedKeys, Set.of(), null, fi);
+        }
+
+        Matcher midId = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*([a-z0-9_.-]*:?[a-z0-9_./-]*)$"
+        ).matcher(nt);
+        if (midId.find()) {
+            String token = midId.group(2);
+            FieldInfo fi = nestedFields.get(midId.group(1));
+            if (fi != null && fi.valueMode() == JsonState.Mode.IDENTIFIER_VALUE && !token.isEmpty())
+                return new JsonState(JsonState.Mode.IDENTIFIER_VALUE,
+                    trimmed.length() - token.length(),
+                    nestedRemainingKeys, nestedUsedKeys, Set.of(), null, fi);
+        }
+
+        Matcher midBool = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*(t|tr|tru|f|fa|fal|fals)$"
+        ).matcher(nt);
+        if (midBool.find()) {
+            FieldInfo fi = nestedFields.get(midBool.group(1));
+            if (fi != null && fi.valueMode() == JsonState.Mode.BOOL_VALUE)
+                return new JsonState(JsonState.Mode.BOOL_VALUE,
+                    trimmed.length() - midBool.group(2).length(),
+                    nestedRemainingKeys, nestedUsedKeys, Set.of(), null, fi);
+        }
+
+        Matcher midNum = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*(-?[0-9]*\\.?[0-9]+)$"
+        ).matcher(nt);
+        if (midNum.find()) {
+            FieldInfo fi = nestedFields.get(midNum.group(1));
+            if (fi != null && (fi.valueMode() == JsonState.Mode.FLOAT_VALUE
+                || fi.valueMode() == JsonState.Mode.INT_VALUE))
+                return new JsonState(fi.valueMode(),
+                    trimmed.length() - midNum.group(2).length(),
+                    nestedRemainingKeys, nestedUsedKeys, Set.of(), null, fi);
+        }
+
+        Matcher midQuoted = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)$").matcher(nt);
+        if (midQuoted.find()) {
+            FieldInfo fi = nestedFields.get(midQuoted.group(1));
+            if (fi != null)
+                return new JsonState(fi.valueMode(), trimmed.lastIndexOf('"'),
+                    nestedRemainingKeys, nestedUsedKeys, Set.of(), null, fi);
+        }
+
+        if (nt.matches(".*:\\s*(true|false|[0-9]*\\.?[0-9]+)\\s*$") && depthAt(nt) == 1)
+            return new JsonState(JsonState.Mode.COMMA_OR_CLOSE, nestedStart + nt.length(),
+                nestedRemainingKeys, nestedUsedKeys, Set.of(), null, info);
+        if (nt.matches(".*:\\s*\"[^\"]+\"\\s*$") && depthAt(nt) == 1)
+            return new JsonState(JsonState.Mode.COMMA_OR_CLOSE, nestedStart + nt.length(),
+                nestedRemainingKeys, nestedUsedKeys, Set.of(), null, info);
+        if (nt.matches(".*\"[^\"]+\"\\s*$") && lastKeyHasNoColon(nt))
+            return new JsonState(JsonState.Mode.COLON, nestedStart + nt.length(),
+                nestedRemainingKeys, nestedUsedKeys, Set.of(), null, info);
+
+        Matcher midKey = Pattern.compile("(?:\\{|,)\\s*\"([^\"]*)$").matcher(nt);
+        if (midKey.find())
+            return new JsonState(JsonState.Mode.KEY, nestedStart + nt.lastIndexOf('"'),
+                nestedRemainingKeys, nestedUsedKeys, Set.of(), null, info);
+
+        if (Pattern.compile("(?:\\{|,)\\s*$").matcher(nt).find())
+            return new JsonState(JsonState.Mode.KEY, nestedStart + nt.length(),
+                nestedRemainingKeys, nestedUsedKeys, Set.of(), null, info);
+
+        return bare(JsonState.Mode.NONE, trimmed.length(), remainingKeys, usedKeys);
+    }
+
+    private static int depthAt(@NonNull String s) {
+        int depth = 0;
+        boolean inString = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' && (i == 0 || s.charAt(i - 1) != '\\')) inString = !inString;
+            if (inString) continue;
+            if (c == '{' || c == '[') depth++;
+            else if (c == '}' || c == ']') depth--;
+        }
+        return depth;
+    }
+
+    private static @NonNull JsonState analyzeObjectListArray(
+        String trimmed, @NonNull String arrayContent, FieldInfo info,
+        List<String> remainingKeys, Set<String> usedKeys
     ) {
         int lastClose = arrayContent.lastIndexOf(']');
         if (lastClose >= 0 && !arrayContent.substring(lastClose + 1).contains("{"))
@@ -39,7 +199,6 @@ public interface JsonArgumentParser {
         if (arrTrimmed.isEmpty() || endsWithArrayLevelComma(arrTrimmed))
             return new JsonState(JsonState.Mode.LIST_OBJECT_OPEN, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
-
         if (arrTrimmed.endsWith("}"))
             return new JsonState(JsonState.Mode.ARRAY_COMMA_OR_CLOSE, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
@@ -59,7 +218,6 @@ public interface JsonArgumentParser {
         List<String> remainingKeys,
         Set<String> usedKeys
     ) {
-        assert info.entryFields() != null;
         Map<String, FieldInfo> entryFields = info.entryFields();
 
         Set<String> entryUsedKeys = new HashSet<>();
@@ -74,6 +232,16 @@ public interface JsonArgumentParser {
         if (afterColon.find())
             return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE, trimmed.length(),
                 remainingKeys, usedKeys, entryUsedKeys, afterColon.group(1), info);
+
+        Matcher entryNestedObject = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*(\\{.*)$", Pattern.DOTALL
+        ).matcher(currentObj);
+        if (entryNestedObject.find()) {
+            String entryKey = entryNestedObject.group(1);
+            FieldInfo fi = entryFields.get(entryKey);
+            if (fi != null && fi.valueMode() == JsonState.Mode.OBJECT_VALUE)
+                return analyzeNestedObject(trimmed, entryNestedObject.group(2), fi, remainingKeys, usedKeys);
+        }
 
         Matcher completedQuoted = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"[^\"]+\"\\s*$").matcher(currentObj);
         if (completedQuoted.find())
@@ -144,11 +312,26 @@ public interface JsonArgumentParser {
     private static @NonNull JsonState analyzeSimpleListArray(
         String trimmed,
         @NonNull String listContent,
-        FieldInfo info,
+        @NonNull FieldInfo info,
         List<String> remainingKeys,
         Set<String> usedKeys
     ) {
         String trimmedList = listContent.stripTrailing();
+
+        if (info.elementType() != null && info.elementType().valueMode() == JsonState.Mode.OBJECT_VALUE) {
+            FieldInfo elemInfo = info.elementType();
+            if (trimmedList.isEmpty() || endsWithArrayLevelComma(trimmedList))
+                return new JsonState(JsonState.Mode.LIST_ELEMENT, trimmed.length(),
+                    remainingKeys, usedKeys, Set.of(), null, info);
+            int lastOpen = lastUnclosedBrace(trimmedList);
+            if (lastOpen >= 0) {
+                int absStart = trimmed.length() - trimmedList.length() + lastOpen;
+                String nestedSlice = trimmed.substring(absStart);
+                return analyzeNestedObject(trimmed, nestedSlice, elemInfo, remainingKeys, usedKeys);
+            }
+            return new JsonState(JsonState.Mode.LIST_COMMA_OR_CLOSE, trimmed.length(),
+                remainingKeys, usedKeys, Set.of(), null, info);
+        }
         if (trimmedList.isEmpty() || trimmedList.endsWith(","))
             return new JsonState(JsonState.Mode.LIST_ELEMENT, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
@@ -250,9 +433,7 @@ public interface JsonArgumentParser {
                 depth++;
                 lastOpen = i;
             }
-            else if (c == '}') {
-                depth--;
-            }
+            else if (c == '}') depth--;
         }
         return depth > 0 ? lastOpen : -1;
     }
@@ -443,6 +624,7 @@ public interface JsonArgumentParser {
                             : List.of();
                         yield suggestIdentifiers(ids, offset);
                     }
+                    case OBJECT_VALUE -> SharedSuggestionProvider.suggest(List.of("{"), offset);
                     default -> builder.buildFuture();
                 };
             }
@@ -488,6 +670,7 @@ public interface JsonArgumentParser {
                             : List.of();
                         yield suggestIdentifiers(ids, offset);
                     }
+                    case OBJECT_VALUE -> SharedSuggestionProvider.suggest(List.of("{"), offset);
                     default -> builder.buildFuture();
                 };
             }
@@ -503,6 +686,8 @@ public interface JsonArgumentParser {
             }
 
             case ARRAY_COMMA_OR_CLOSE -> SharedSuggestionProvider.suggest(List.of(",", "]"), offset);
+
+            case OBJECT_VALUE -> SharedSuggestionProvider.suggest(List.of("{"), offset);
 
             case COMMA_OR_CLOSE -> SharedSuggestionProvider.suggest(
                 state.availableKeys().isEmpty() ? List.of("}") : List.of(",", "}"),
@@ -569,6 +754,15 @@ public interface JsonArgumentParser {
 
         if (Pattern.compile("\"([^\"]+)\"\\s*:\\s*\\[[^]]*]\\s*$").matcher(trimmed).find())
             return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
+
+        Matcher insideNestedObject = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*(\\{.*)$", Pattern.DOTALL
+        ).matcher(trimmed);
+        if (insideNestedObject.find()) {
+            FieldInfo info = fields.get(insideNestedObject.group(1));
+            if (info != null && info.valueMode() == JsonState.Mode.OBJECT_VALUE)
+                return analyzeNestedObject(trimmed, insideNestedObject.group(2), info, remainingKeys, usedKeys);
+        }
 
         Matcher afterColon = Pattern.compile("\"([^\"]+)\"\\s*:\\s*$").matcher(trimmed);
         if (afterColon.find()) {
@@ -673,6 +867,7 @@ public interface JsonArgumentParser {
             LIST_OBJECT_VALUE,
             LIST_OBJECT_COMMA_OR_CLOSE,
             ARRAY_COMMA_OR_CLOSE,
+            OBJECT_VALUE,
             COMMA_OR_CLOSE,
             CLOSE_BRACE,
             NONE
@@ -687,7 +882,6 @@ public interface JsonArgumentParser {
         @Nullable Function<CommandContext<CommandSourceStack>, List<String>> dynamicExamples,
         @Nullable Map<String, FieldInfo> entryFields
     ) {
-
         @Contract(" -> new")
         public static @NonNull FieldInfo bool() {
             return new FieldInfo(JsonState.Mode.BOOL_VALUE, List.of(), null, null, null, null);
@@ -730,6 +924,11 @@ public interface JsonArgumentParser {
         @Contract("_ -> new")
         public static @NonNull FieldInfo objectListField(@NonNull Map<String, FieldInfo> entryFields) {
             return new FieldInfo(JsonState.Mode.LIST_OBJECT, List.of(), null, null, null, entryFields);
+        }
+
+        @Contract("_ -> new")
+        public static @NonNull FieldInfo objectField(@NonNull Map<String, FieldInfo> nestedFields) {
+            return new FieldInfo(JsonState.Mode.OBJECT_VALUE, List.of(), null, null, null, nestedFields);
         }
 
         public List<String> resolveExamples(CommandContext<CommandSourceStack> context) {
