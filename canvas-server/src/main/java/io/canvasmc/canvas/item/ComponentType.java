@@ -28,6 +28,7 @@ import io.canvasmc.canvas.item.components.ResolvableProfileComponent;
 import io.canvasmc.canvas.item.components.SuspiciousStewEffectsComponent;
 import io.canvasmc.canvas.item.components.SwingAnimationComponent;
 import io.canvasmc.canvas.item.components.TooltipDisplayComponent;
+import io.canvasmc.canvas.item.components.TrimComponent;
 import io.canvasmc.canvas.item.components.UseCooldownComponent;
 import io.canvasmc.canvas.item.components.UseEffectsComponent;
 import io.canvasmc.canvas.item.components.UseRemainderComponent;
@@ -99,7 +100,11 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
 
     private static final Map<DataComponentType<?>, ComponentType<?>> REGISTRY = new ConcurrentHashMap<>();
 
-    static {
+    private static <T> void register(ComponentType<T> type) {
+        REGISTRY.put(type.nms(), type);
+    }
+
+    public static void buildRegistry() {
         final CommandBuildContext context = RootCommandTree.INSTANCE.buildContext;
         // register all component mappings here
         register(integerComponent(DataComponents.MAX_STACK_SIZE));
@@ -155,7 +160,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(new SuspiciousStewEffectsComponent());
         register(new WritableBookContentComponent());
         register(new WrittenBookContentComponent());
-        // TODO - TRIM
+        register(new TrimComponent());
         // TODO - DEBUG_STICK_STATE
         // TODO - ENTITY_DATA
         // TODO - BLOCK_ENTITY_DATA
@@ -218,10 +223,6 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
                 // throw new IllegalStateException("Unregistered component detected! " + identifier);
             }
         }
-    }
-
-    private static <T> void register(ComponentType<T> type) {
-        REGISTRY.put(type.nms(), type);
     }
 
     public static <T> @Nullable ComponentType<T> get(DataComponentType<T> nms) {

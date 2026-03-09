@@ -32,6 +32,7 @@ import static net.minecraft.commands.Commands.literal;
 public class ItemModifyCommand implements Command {
 
     static {
+        ComponentType.buildRegistry();
         Config.LOGGER.debug("Registered {} data components", ComponentType.ids().count());
     }
 
