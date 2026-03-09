@@ -25,6 +25,7 @@ import io.canvasmc.canvas.item.components.LodestoneTrackerComponent;
 import io.canvasmc.canvas.item.components.PiercingWeaponComponent;
 import io.canvasmc.canvas.item.components.PotDecorationsComponent;
 import io.canvasmc.canvas.item.components.ProvidesBannerPatternsComponent;
+import io.canvasmc.canvas.item.components.RecipesComponent;
 import io.canvasmc.canvas.item.components.RepairableComponent;
 import io.canvasmc.canvas.item.components.ResolvableProfileComponent;
 import io.canvasmc.canvas.item.components.SuspiciousStewEffectsComponent;
@@ -170,7 +171,7 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         register(integerOnlyComponent(DataComponents.OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier::new, 0, 5));
         register(eitherHolderOnlyComponent(DataComponents.JUKEBOX_PLAYABLE, JukeboxPlayable::new, Registries.JUKEBOX_SONG));
         register(new ProvidesBannerPatternsComponent());
-        // TODO - RECIPES
+        register(new RecipesComponent());
         register(new LodestoneTrackerComponent());
         // TODO - FIREWORK_EXPLOSION
         // TODO - FIREWORKS
