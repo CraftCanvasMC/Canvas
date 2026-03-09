@@ -31,32 +31,25 @@ public interface JsonArgumentParser {
         Set<String> usedKeys
     ) {
         int lastClose = arrayContent.lastIndexOf(']');
-        if (lastClose >= 0) {
-            String afterClose = arrayContent.substring(lastClose + 1);
-            if (!afterClose.contains("{"))
-                return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
-        }
+        if (lastClose >= 0 && !arrayContent.substring(lastClose + 1).contains("{"))
+            return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
 
         String arrTrimmed = arrayContent.stripTrailing();
 
-        if (arrTrimmed.isEmpty() || endsWithArrayLevelComma(arrTrimmed)) {
+        if (arrTrimmed.isEmpty() || endsWithArrayLevelComma(arrTrimmed))
             return new JsonState(JsonState.Mode.LIST_OBJECT_OPEN, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
-        }
 
-        if (arrTrimmed.endsWith("}")) {
+        if (arrTrimmed.endsWith("}"))
             return new JsonState(JsonState.Mode.ARRAY_COMMA_OR_CLOSE, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
-        }
 
         int lastOpen = lastUnclosedBrace(arrayContent);
-        if (lastOpen < 0) {
+        if (lastOpen < 0)
             return new JsonState(JsonState.Mode.LIST_OBJECT_OPEN, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
-        }
 
-        String currentObj = arrayContent.substring(lastOpen);
-        return analyzeEntryObject(trimmed, currentObj, info, remainingKeys, usedKeys);
+        return analyzeEntryObject(trimmed, arrayContent.substring(lastOpen), info, remainingKeys, usedKeys);
     }
 
     private static @NonNull JsonState analyzeEntryObject(
@@ -78,72 +71,65 @@ public interface JsonArgumentParser {
                 remainingKeys, usedKeys, entryUsedKeys, null, info);
 
         Matcher afterColon = Pattern.compile("\"([^\"]+)\"\\s*:\\s*$").matcher(currentObj);
-        if (afterColon.find()) {
-            String entryKey = afterColon.group(1);
+        if (afterColon.find())
             return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE, trimmed.length(),
-                remainingKeys, usedKeys, entryUsedKeys, entryKey, info);
-        }
+                remainingKeys, usedKeys, entryUsedKeys, afterColon.group(1), info);
 
-        Matcher completedQuoted = Pattern.compile(
-            "\"([^\"]+)\"\\s*:\\s*\"[^\"]+\"\\s*$"
-        ).matcher(currentObj);
+        Matcher completedQuoted = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"[^\"]+\"\\s*$").matcher(currentObj);
         if (completedQuoted.find())
             return new JsonState(JsonState.Mode.LIST_OBJECT_COMMA_OR_CLOSE, trimmed.length(),
                 remainingKeys, usedKeys, entryUsedKeys, null, info);
 
-        Matcher completedUnquoted = Pattern.compile(
-            "\"([^\"]+)\"\\s*:\\s*[^,{}\"\\[\\]]+\\s*$"
+        Matcher completedUnquotedPrimitive = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*(true|false|-?[0-9]*\\.?[0-9]+)\\s+$"
         ).matcher(currentObj);
-        if (completedUnquoted.find()) {
-            String matched = completedUnquoted.group(0);
-            if (matched.contains(":"))
+        if (completedUnquotedPrimitive.find())
+            return new JsonState(JsonState.Mode.LIST_OBJECT_COMMA_OR_CLOSE, trimmed.length(),
+                remainingKeys, usedKeys, entryUsedKeys, null, info);
+
+        Matcher completedIdentifier = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*[a-z0-9_.-]+:[a-z0-9_./-]+\\s*$"
+        ).matcher(currentObj);
+        if (completedIdentifier.find()) {
+            String entryKey = completedIdentifier.group(1);
+            if (entryFields.containsKey(entryKey))
                 return new JsonState(JsonState.Mode.LIST_OBJECT_COMMA_OR_CLOSE, trimmed.length(),
                     remainingKeys, usedKeys, entryUsedKeys, null, info);
         }
 
         Matcher midQuoted = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)$").matcher(currentObj);
-        if (midQuoted.find()) {
-            int quoteStart = trimmed.lastIndexOf('"');
-            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE, quoteStart,
+        if (midQuoted.find())
+            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE, trimmed.lastIndexOf('"'),
                 remainingKeys, usedKeys, entryUsedKeys, midQuoted.group(1), info);
-        }
 
         Matcher midIdentifier = Pattern.compile(
             "\"([^\"]+)\"\\s*:\\s*([a-z0-9_.-]*:?[a-z0-9_./-]*)$"
         ).matcher(currentObj);
-        if (midIdentifier.find() && !midIdentifier.group(2).isEmpty()) {
-            int tokenStart = trimmed.length() - midIdentifier.group(2).length();
-            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE, tokenStart,
+        if (midIdentifier.find() && !midIdentifier.group(2).isEmpty())
+            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE,
+                trimmed.length() - midIdentifier.group(2).length(),
                 remainingKeys, usedKeys, entryUsedKeys, midIdentifier.group(1), info);
-        }
 
-        Matcher midNumber = Pattern.compile(
-            "\"([^\"]+)\"\\s*:\\s*(-?[0-9]*\\.?[0-9]+)$"
-        ).matcher(currentObj);
-        if (midNumber.find()) {
-            int tokenStart = trimmed.length() - midNumber.group(2).length();
-            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE, tokenStart,
+        Matcher midNumber = Pattern.compile("\"([^\"]+)\"\\s*:\\s*(-?[0-9]*\\.?[0-9]+)$").matcher(currentObj);
+        if (midNumber.find())
+            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE,
+                trimmed.length() - midNumber.group(2).length(),
                 remainingKeys, usedKeys, entryUsedKeys, midNumber.group(1), info);
-        }
 
         Matcher midBool = Pattern.compile(
             "\"([^\"]+)\"\\s*:\\s*(t|tr|tru|f|fa|fal|fals)$"
         ).matcher(currentObj);
-        if (midBool.find()) {
-            int tokenStart = trimmed.length() - midBool.group(2).length();
-            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE, tokenStart,
+        if (midBool.find())
+            return new JsonState(JsonState.Mode.LIST_OBJECT_VALUE,
+                trimmed.length() - midBool.group(2).length(),
                 remainingKeys, usedKeys, entryUsedKeys, midBool.group(1), info);
-        }
 
         Matcher midKey = Pattern.compile("(?:\\{|,)\\s*\"([^\"]*)$").matcher(currentObj);
-        if (midKey.find()) {
-            int quoteStart = trimmed.lastIndexOf('"');
-            return new JsonState(JsonState.Mode.LIST_OBJECT_KEY, quoteStart,
+        if (midKey.find())
+            return new JsonState(JsonState.Mode.LIST_OBJECT_KEY, trimmed.lastIndexOf('"'),
                 remainingKeys, usedKeys, entryUsedKeys, null, info);
-        }
 
-        if (currentObj.matches(".*\"[^\"]+\"\\s*$")
-            && lastKeyHasNoColonIn(currentObj))
+        if (currentObj.matches(".*\"[^\"]+\"\\s*$") && lastKeyHasNoColon(currentObj))
             return new JsonState(JsonState.Mode.COLON, trimmed.length(),
                 remainingKeys, usedKeys, entryUsedKeys, null, info);
 
@@ -172,16 +158,12 @@ public interface JsonArgumentParser {
         if (trimmedList.matches(".*\"[^\"]+\"\\s*$"))
             return new JsonState(JsonState.Mode.LIST_COMMA_OR_CLOSE, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
-
         Matcher midUnquoted = Pattern.compile("(?:^|[,\\[])\\s*([a-z0-9_.-]*:?[a-z0-9_./-]*)$").matcher(trimmedList);
-        if (midUnquoted.find() && !midUnquoted.group(1).isEmpty()) {
-            String token = midUnquoted.group(1);
-            int tokenStart = trimmed.length() - token.length();
-            return new JsonState(JsonState.Mode.LIST_ELEMENT, tokenStart,
+        if (midUnquoted.find() && !midUnquoted.group(1).isEmpty())
+            return new JsonState(JsonState.Mode.LIST_ELEMENT,
+                trimmed.length() - midUnquoted.group(1).length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
-        }
-
-        if (trimmedList.matches(".*[a-z0-9_./:+-]\\s+") || trimmedList.matches(".*[0-9]\\s+"))
+        if (trimmedList.matches(".*[a-z0-9_./:+-]\\s+"))
             return new JsonState(JsonState.Mode.LIST_COMMA_OR_CLOSE, trimmed.length(),
                 remainingKeys, usedKeys, Set.of(), null, info);
 
@@ -245,12 +227,7 @@ public interface JsonArgumentParser {
         if (lastClose < 0) return false;
         int lastOpen = input.lastIndexOf('"', lastClose - 1);
         if (lastOpen < 0) return false;
-        String after = input.substring(lastClose + 1).trim();
-        return !after.startsWith(":");
-    }
-
-    private static boolean lastKeyHasNoColonIn(String fragment) {
-        return lastKeyHasNoColon(fragment);
+        return !input.substring(lastClose + 1).trim().startsWith(":");
     }
 
     private static int valueTokenStart(@NonNull String trimmed) {
@@ -321,14 +298,6 @@ public interface JsonArgumentParser {
     }
 
     static CompletableFuture<Suggestions> suggestIdentifiers(
-        Iterable<Identifier> resources,
-        @NonNull SuggestionsBuilder builder,
-        @SuppressWarnings("unused") String ignoredPrefix
-    ) {
-        return suggestIdentifiers(resources, builder);
-    }
-
-    static CompletableFuture<Suggestions> suggestIdentifiers(
         @NonNull Iterable<Identifier> resources,
         @NonNull SuggestionsBuilder builder
     ) {
@@ -343,6 +312,15 @@ public interface JsonArgumentParser {
             }
         }
         return builder.buildFuture();
+    }
+
+    @Deprecated
+    static CompletableFuture<Suggestions> suggestIdentifiers(
+        Iterable<Identifier> resources,
+        SuggestionsBuilder builder,
+        @SuppressWarnings("unused") String ignoredPrefix
+    ) {
+        return suggestIdentifiers(resources, builder);
     }
 
     static <T> void filterResources(
@@ -574,41 +552,27 @@ public interface JsonArgumentParser {
         Matcher insideObjectList = Pattern.compile(
             "\"([^\"]+)\"\\s*:\\s*\\[(.*)$", Pattern.DOTALL
         ).matcher(trimmed);
-
         if (insideObjectList.find()) {
-            String topKey = insideObjectList.group(1);
-            FieldInfo topInfo = fields.get(topKey);
-
-            if (topInfo != null && topInfo.valueMode() == JsonState.Mode.LIST_OBJECT) {
-                String arrayContent = insideObjectList.group(2);
-                return analyzeObjectListArray(trimmed, arrayContent, topInfo, remainingKeys, usedKeys);
-            }
+            FieldInfo topInfo = fields.get(insideObjectList.group(1));
+            if (topInfo != null && topInfo.valueMode() == JsonState.Mode.LIST_OBJECT)
+                return analyzeObjectListArray(trimmed, insideObjectList.group(2), topInfo, remainingKeys, usedKeys);
         }
 
         Matcher insideList = Pattern.compile(
             "\"([^\"]+)\"\\s*:\\s*\\[([^]\\[]*)$"
         ).matcher(trimmed);
-
         if (insideList.find()) {
-            String key = insideList.group(1);
-            String listContent = insideList.group(2);
-            FieldInfo info = fields.get(key);
-
-            if (info != null && info.valueMode() == JsonState.Mode.LIST_VALUE) {
-                return analyzeSimpleListArray(trimmed, listContent, info, remainingKeys, usedKeys);
-            }
+            FieldInfo info = fields.get(insideList.group(1));
+            if (info != null && info.valueMode() == JsonState.Mode.LIST_VALUE)
+                return analyzeSimpleListArray(trimmed, insideList.group(2), info, remainingKeys, usedKeys);
         }
 
-        Matcher closedList = Pattern.compile(
-            "\"([^\"]+)\"\\s*:\\s*\\[[^]]*]\\s*$"
-        ).matcher(trimmed);
-        if (closedList.find())
+        if (Pattern.compile("\"([^\"]+)\"\\s*:\\s*\\[[^]]*]\\s*$").matcher(trimmed).find())
             return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
 
         Matcher afterColon = Pattern.compile("\"([^\"]+)\"\\s*:\\s*$").matcher(trimmed);
         if (afterColon.find()) {
-            String key = afterColon.group(1);
-            FieldInfo info = fields.get(key);
+            FieldInfo info = fields.get(afterColon.group(1));
             if (info != null)
                 return new JsonState(info.valueMode(), trimmed.length(),
                     remainingKeys, usedKeys, Set.of(), null, info);
@@ -618,78 +582,65 @@ public interface JsonArgumentParser {
             "\"([^\"]+)\"\\s*:\\s*(t|tr|tru|f|fa|fal|fals)$"
         ).matcher(trimmed);
         if (midBool.find()) {
-            String key = midBool.group(1);
-            FieldInfo info = fields.get(key);
-            if (info != null && info.valueMode() == JsonState.Mode.BOOL_VALUE) {
-                int valueStart = valueTokenStart(trimmed);
-                return new JsonState(JsonState.Mode.BOOL_VALUE, valueStart,
+            FieldInfo info = fields.get(midBool.group(1));
+            if (info != null && info.valueMode() == JsonState.Mode.BOOL_VALUE)
+                return new JsonState(JsonState.Mode.BOOL_VALUE, valueTokenStart(trimmed),
                     remainingKeys, usedKeys, Set.of(), null, info);
-            }
         }
 
         Matcher midNumber = Pattern.compile(
             "\"([^\"]+)\"\\s*:\\s*(-?[0-9]*\\.?[0-9]+)$"
         ).matcher(trimmed);
         if (midNumber.find()) {
-            String key = midNumber.group(1);
-            FieldInfo info = fields.get(key);
+            FieldInfo info = fields.get(midNumber.group(1));
             if (info != null && (info.valueMode() == JsonState.Mode.FLOAT_VALUE
-                || info.valueMode() == JsonState.Mode.INT_VALUE)) {
-                int valueStart = trimmed.length() - midNumber.group(2).length();
-                return new JsonState(info.valueMode(), valueStart,
+                || info.valueMode() == JsonState.Mode.INT_VALUE))
+                return new JsonState(info.valueMode(),
+                    trimmed.length() - midNumber.group(2).length(),
                     remainingKeys, usedKeys, Set.of(), null, info);
-            }
         }
 
         Matcher midQuoted = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)$").matcher(trimmed);
         if (midQuoted.find()) {
-            String key = midQuoted.group(1);
-            FieldInfo info = fields.get(key);
-            if (info != null) {
-                int quoteStart = trimmed.lastIndexOf('"');
-                return new JsonState(info.valueMode(), quoteStart,
+            FieldInfo info = fields.get(midQuoted.group(1));
+            if (info != null)
+                return new JsonState(info.valueMode(), trimmed.lastIndexOf('"'),
                     remainingKeys, usedKeys, Set.of(), null, info);
-            }
         }
 
-        Matcher completedQuoted = Pattern.compile(
-            "\"([^\"]+)\"\\s*:\\s*\"[^\"]+\"\\s*$"
-        ).matcher(trimmed);
-        if (completedQuoted.find())
+        if (Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"[^\"]+\"\\s*$").matcher(trimmed).find())
             return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
+
+        Matcher completedIdentifier = Pattern.compile(
+            "\"([^\"]+)\"\\s*:\\s*[a-z0-9_.-]+:[a-z0-9_./-]+\\s*$"
+        ).matcher(trimmed);
+        if (completedIdentifier.find()) {
+            String key = completedIdentifier.group(1);
+            FieldInfo info = fields.get(key);
+            if (info != null && info.valueMode() == JsonState.Mode.IDENTIFIER_VALUE)
+                return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
+        }
 
         Matcher midIdentifier = Pattern.compile(
             "\"([^\"]+)\"\\s*:\\s*([a-z0-9_.-]*:?[a-z0-9_./-]*)$"
         ).matcher(trimmed);
         if (midIdentifier.find()) {
-            String key = midIdentifier.group(1);
             String token = midIdentifier.group(2);
-            FieldInfo info = fields.get(key);
-            if (info != null && info.valueMode() == JsonState.Mode.IDENTIFIER_VALUE
-                && !token.isEmpty()) {
-                int tokenStart = trimmed.length() - token.length();
-                return new JsonState(JsonState.Mode.IDENTIFIER_VALUE, tokenStart,
+            FieldInfo info = fields.get(midIdentifier.group(1));
+            if (info != null && info.valueMode() == JsonState.Mode.IDENTIFIER_VALUE && !token.isEmpty())
+                return new JsonState(JsonState.Mode.IDENTIFIER_VALUE,
+                    trimmed.length() - token.length(),
                     remainingKeys, usedKeys, Set.of(), null, info);
-            }
         }
-
-        Matcher completedIdentifier = Pattern.compile(
-            "\"([^\"]+)\"\\s*:\\s*[a-z0-9_.-]+:[a-z0-9_./-]+\\s*$"
-        ).matcher(trimmed);
-        if (completedIdentifier.find())
-            return bare(JsonState.Mode.COMMA_OR_CLOSE, trimmed.length(), remainingKeys, usedKeys);
 
         if (trimmed.matches(".*\"[^\"]+\"\\s*$") && lastKeyHasNoColon(trimmed))
             return bare(JsonState.Mode.COLON, trimmed.length(), remainingKeys, usedKeys);
 
         Matcher midKey = Pattern.compile("(?:\\{|,)\\s*\"([^\"]*)$").matcher(trimmed);
-        if (midKey.find()) {
-            int quoteStart = trimmed.lastIndexOf('"');
-            return bare(JsonState.Mode.KEY, quoteStart, remainingKeys, usedKeys);
-        }
+        if (midKey.find())
+            return bare(JsonState.Mode.KEY, trimmed.lastIndexOf('"'), remainingKeys, usedKeys);
 
-        Matcher afterSep = Pattern.compile("(?:\\{|,)\\s*$").matcher(trimmed);
-        if (afterSep.find())
+        if (Pattern.compile("(?:\\{|,)\\s*$").matcher(trimmed).find())
             return bare(JsonState.Mode.KEY, trimmed.length(), remainingKeys, usedKeys);
 
         return bare(JsonState.Mode.NONE, input.length(), remainingKeys, usedKeys);
