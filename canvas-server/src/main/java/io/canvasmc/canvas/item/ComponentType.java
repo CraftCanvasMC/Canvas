@@ -31,6 +31,8 @@ import io.canvasmc.canvas.item.components.UseCooldownComponent;
 import io.canvasmc.canvas.item.components.UseEffectsComponent;
 import io.canvasmc.canvas.item.components.UseRemainderComponent;
 import io.canvasmc.canvas.item.components.WeaponComponent;
+import io.canvasmc.canvas.item.components.WritableBookContentComponent;
+import io.canvasmc.canvas.item.components.WrittenBookContentComponent;
 import io.canvasmc.canvas.util.JsonArgumentParser;
 import java.util.Arrays;
 import java.util.List;
@@ -150,8 +152,8 @@ public abstract class ComponentType<T> implements JsonArgumentParser {
         // TODO - POTION_CONTENTS
         register(floatComponent(DataComponents.POTION_DURATION_SCALE));
         register(new SuspiciousStewEffectsComponent());
-        // TODO - WRITABLE_BOOK_CONTENT
-        // TODO - WRITTEN_BOOK_CONTENT
+        register(new WritableBookContentComponent());
+        register(new WrittenBookContentComponent());
         // TODO - TRIM
         // TODO - DEBUG_STICK_STATE
         // TODO - ENTITY_DATA
