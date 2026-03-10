@@ -25,6 +25,7 @@ import io.canvasmc.canvas.item.components.ContainerComponent;
 import io.canvasmc.canvas.item.components.ContainerLootComponent;
 import io.canvasmc.canvas.item.components.CustomModelDataComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
+import io.canvasmc.canvas.item.components.EntityDataComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
 import io.canvasmc.canvas.item.components.FireworkExplosionComponent;
 import io.canvasmc.canvas.item.components.FireworksComponent;
@@ -175,7 +176,7 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
         register(new WritableBookContentComponent());
         register(new WrittenBookContentComponent());
         register(new TrimComponent());
-        // TODO - ENTITY_DATA
+        register(new EntityDataComponent());
         register(new BlockEntityDataComponent());
         register(eitherHolderOnlyComponent(DataComponents.INSTRUMENT, InstrumentComponent::new, Registries.INSTRUMENT));
         register(eitherHolderOnlyComponent(DataComponents.PROVIDES_TRIM_MATERIAL, ProvidesTrimMaterial::new, Registries.TRIM_MATERIAL));
