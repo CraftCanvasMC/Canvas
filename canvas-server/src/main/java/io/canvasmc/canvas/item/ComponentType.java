@@ -26,6 +26,7 @@ import io.canvasmc.canvas.item.components.FireworkExplosionComponent;
 import io.canvasmc.canvas.item.components.FireworksComponent;
 import io.canvasmc.canvas.item.components.FoodPropertiesComponent;
 import io.canvasmc.canvas.item.components.ItemLoreComponent;
+import io.canvasmc.canvas.item.components.LockComponent;
 import io.canvasmc.canvas.item.components.LodestoneTrackerComponent;
 import io.canvasmc.canvas.item.components.PiercingWeaponComponent;
 import io.canvasmc.canvas.item.components.PotDecorationsComponent;
@@ -189,7 +190,7 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
         register(new ContainerComponent());
         // TODO - BLOCK_STATE
         // TODO - BEES
-        // TODO - LOCK
+        register(new LockComponent());
         // TODO - CONTAINER_LOOT
         register(holderComponent(DataComponents.BREAK_SOUND, Registries.SOUND_EVENT, context));
         register(holderComponent(DataComponents.VILLAGER_VARIANT, Registries.VILLAGER_TYPE, context));
