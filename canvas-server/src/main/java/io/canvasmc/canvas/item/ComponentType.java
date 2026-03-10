@@ -16,6 +16,7 @@ import io.canvasmc.canvas.command.RootCommandTree;
 import io.canvasmc.canvas.item.components.AttackRangeComponent;
 import io.canvasmc.canvas.item.components.AttributeModifiersComponent;
 import io.canvasmc.canvas.item.components.BannerPatternComponent;
+import io.canvasmc.canvas.item.components.BeesComponent;
 import io.canvasmc.canvas.item.components.BlockStateComponent;
 import io.canvasmc.canvas.item.components.BundleContentsComponent;
 import io.canvasmc.canvas.item.components.ChargedProjectilesComponent;
@@ -191,7 +192,7 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
         register(new PotDecorationsComponent());
         register(new ContainerComponent());
         register(new BlockStateComponent());
-        // TODO - BEES
+        register(new BeesComponent());
         register(new LockComponent());
         register(new ContainerLootComponent());
         register(holderComponent(DataComponents.BREAK_SOUND, Registries.SOUND_EVENT, context));
