@@ -17,6 +17,7 @@ import io.canvasmc.canvas.item.components.AttackRangeComponent;
 import io.canvasmc.canvas.item.components.AttributeModifiersComponent;
 import io.canvasmc.canvas.item.components.BannerPatternComponent;
 import io.canvasmc.canvas.item.components.BeesComponent;
+import io.canvasmc.canvas.item.components.BlockEntityDataComponent;
 import io.canvasmc.canvas.item.components.BlockStateComponent;
 import io.canvasmc.canvas.item.components.BundleContentsComponent;
 import io.canvasmc.canvas.item.components.ChargedProjectilesComponent;
@@ -175,7 +176,7 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
         register(new WrittenBookContentComponent());
         register(new TrimComponent());
         // TODO - ENTITY_DATA
-        // TODO - BLOCK_ENTITY_DATA
+        register(new BlockEntityDataComponent());
         register(eitherHolderOnlyComponent(DataComponents.INSTRUMENT, InstrumentComponent::new, Registries.INSTRUMENT));
         register(eitherHolderOnlyComponent(DataComponents.PROVIDES_TRIM_MATERIAL, ProvidesTrimMaterial::new, Registries.TRIM_MATERIAL));
         register(integerOnlyComponent(DataComponents.OMINOUS_BOTTLE_AMPLIFIER, OminousBottleAmplifier::new, 0, 5));
