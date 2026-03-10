@@ -35,6 +35,7 @@ import io.canvasmc.canvas.item.components.LockComponent;
 import io.canvasmc.canvas.item.components.LodestoneTrackerComponent;
 import io.canvasmc.canvas.item.components.PiercingWeaponComponent;
 import io.canvasmc.canvas.item.components.PotDecorationsComponent;
+import io.canvasmc.canvas.item.components.PotionContentsComponent;
 import io.canvasmc.canvas.item.components.ProvidesBannerPatternsComponent;
 import io.canvasmc.canvas.item.components.RecipesComponent;
 import io.canvasmc.canvas.item.components.RepairableComponent;
@@ -170,7 +171,7 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
         register(enumComponent(DataComponents.MAP_POST_PROCESSING, MapPostProcessing.class));
         register(new ChargedProjectilesComponent());
         register(new BundleContentsComponent());
-        // TODO - POTION_CONTENTS
+        register(new PotionContentsComponent());
         register(floatComponent(DataComponents.POTION_DURATION_SCALE));
         register(new SuspiciousStewEffectsComponent());
         register(new WritableBookContentComponent());
