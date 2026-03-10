@@ -1,8 +1,6 @@
 package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -46,13 +44,13 @@ public class ItemLoreComponent extends ComponentType<ItemLore> {
                 "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
                 "$1\"$2\""
             );
-            JsonElement json = JsonParser.parseString(fixed);
+            JsonElement json = GSON.fromJson(fixed, JsonElement.class);
             return ItemLore.CODEC.parse(JsonOps.INSTANCE, json)
                 .getOrThrow(msg -> new IllegalArgumentException("Invalid lore: " + msg));
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

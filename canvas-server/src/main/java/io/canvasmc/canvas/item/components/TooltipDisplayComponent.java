@@ -2,8 +2,6 @@ package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -55,7 +53,7 @@ public class TooltipDisplayComponent extends ComponentType<TooltipDisplay> {
                 "([\\[,{:])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)(?=[\\s,}\\]])",
                 "$1\"$2\""
             );
-            JsonElement json = JsonParser.parseString(fixed);
+            JsonElement json = GSON.fromJson(fixed, JsonElement.class);
             JsonObject obj = json.getAsJsonObject();
 
             boolean hideTooltip = obj.has("hide_tooltip") && obj.get("hide_tooltip").getAsBoolean();
@@ -71,10 +69,10 @@ public class TooltipDisplayComponent extends ComponentType<TooltipDisplay> {
             }
 
             return new TooltipDisplay(hideTooltip, hiddenComponents);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

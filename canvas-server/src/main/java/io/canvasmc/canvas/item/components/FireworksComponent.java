@@ -2,8 +2,6 @@ package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -43,7 +41,7 @@ public class FireworksComponent extends ComponentType<Fireworks> {
                 "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
                 "$1\"$2\""
             );
-            JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
+            JsonObject json = GSON.fromJson(fixed, JsonObject.class);
             int duration = json.has("flight_duration") ? json.get("flight_duration").getAsInt() : 0;
             if (duration > 255) {
                 throw new IllegalArgumentException("Duration must be less than 255");
@@ -57,10 +55,10 @@ public class FireworksComponent extends ComponentType<Fireworks> {
                 }
             }
             return new Fireworks(duration, explosions);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

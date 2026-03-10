@@ -1,8 +1,6 @@
 package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -36,7 +34,7 @@ public class RepairableComponent extends ComponentType<Repairable> {
                 "$1\"$2\""
             );
             RegistryAccess.Frozen registryAccess = MinecraftServer.getServer().registryAccess();
-            JsonElement json = JsonParser.parseString(fixed);
+            JsonElement json = GSON.fromJson(fixed, JsonElement.class);
             List<Holder<Item>> holders = new ArrayList<>();
             for (final JsonElement element : json.getAsJsonArray()) {
                 holders.add(
@@ -45,10 +43,10 @@ public class RepairableComponent extends ComponentType<Repairable> {
             }
             HolderSet<Item> items = HolderSet.direct(holders);
             return new Repairable(items);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

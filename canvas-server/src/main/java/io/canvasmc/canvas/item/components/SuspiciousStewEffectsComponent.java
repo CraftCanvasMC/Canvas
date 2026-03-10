@@ -3,8 +3,6 @@ package io.canvasmc.canvas.item.components;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -59,7 +57,7 @@ public class SuspiciousStewEffectsComponent extends ComponentType<SuspiciousStew
                 "([\\[,{:])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)(?=[\\s,}\\]])",
                 "$1\"$2\""
             );
-            JsonElement json = JsonParser.parseString(fixed);
+            JsonElement json = GSON.fromJson(fixed, JsonElement.class);
             JsonArray array = json.getAsJsonObject().getAsJsonArray("effects");
 
             List<SuspiciousStewEffects.Entry> entries = new ArrayList<>();
@@ -78,10 +76,10 @@ public class SuspiciousStewEffectsComponent extends ComponentType<SuspiciousStew
             }
 
             return new SuspiciousStewEffects(entries);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

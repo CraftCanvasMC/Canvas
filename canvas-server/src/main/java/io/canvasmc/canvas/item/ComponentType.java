@@ -1,8 +1,8 @@
 package io.canvasmc.canvas.item;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
+import com.google.gson.Strictness;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -15,6 +15,7 @@ import com.mojang.serialization.JsonOps;
 import io.canvasmc.canvas.command.RootCommandTree;
 import io.canvasmc.canvas.item.components.AttackRangeComponent;
 import io.canvasmc.canvas.item.components.AttributeModifiersComponent;
+import io.canvasmc.canvas.item.components.BannerPatternComponent;
 import io.canvasmc.canvas.item.components.ChargedProjectilesComponent;
 import io.canvasmc.canvas.item.components.CustomModelDataComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
@@ -104,6 +105,7 @@ import static net.minecraft.commands.arguments.ComponentArgument.ERROR_INVALID_C
 public abstract class ComponentType<T> implements JsonSuggestionProvider {
 
     private static final Map<DataComponentType<?>, ComponentType<?>> REGISTRY = new ConcurrentHashMap<>();
+    public static final Gson GSON = new Gson().newBuilder().setStrictness(Strictness.LENIENT).create();
 
     private static <T> void register(ComponentType<T> type) {
         REGISTRY.put(type.nms(), type);
@@ -179,7 +181,7 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
         register(new FireworksComponent());
         register(new ResolvableProfileComponent());
         register(identifierComponent(DataComponents.NOTE_BLOCK_SOUND, Stream::empty));
-        // TODO - BANNER_PATTERNS
+        register(new BannerPatternComponent());
         register(enumComponent(DataComponents.BASE_COLOR, DyeColor.class));
         register(new PotDecorationsComponent());
         // TODO - CONTAINER
@@ -470,14 +472,14 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
                         "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
                         "$1\"$2\""
                     );
-                    JsonElement json = JsonParser.parseString(fixed);
+                    JsonElement json = GSON.fromJson(fixed, JsonElement.class);
                     return AdventureModePredicate.CODEC
                         .parse(context.createSerializationContext(JsonOps.INSTANCE), json)
                         .getOrThrow(msg -> new IllegalArgumentException("Invalid predicate: " + msg));
-                } catch (JsonSyntaxException | IllegalArgumentException e) {
+                } catch (Throwable thrown) {
                     throw new DynamicCommandExceptionType(
                         obj -> Component.literal(obj.toString())
-                    ).create(e.getMessage());
+                    ).create(thrown.getMessage());
                 }
             }
 
@@ -556,13 +558,13 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
                 "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
                 "$1\"$2\""
             );
-            JsonElement json = JsonParser.parseString(fixed);
+            JsonElement json = GSON.fromJson(fixed, JsonElement.class);
             return nms().codec().parse(JsonOps.INSTANCE, json)
                 .getOrThrow(msg -> new IllegalArgumentException("Invalid value: " + msg));
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

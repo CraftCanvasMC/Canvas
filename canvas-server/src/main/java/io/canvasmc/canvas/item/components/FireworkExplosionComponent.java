@@ -2,8 +2,6 @@ package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -65,12 +63,12 @@ public class FireworkExplosionComponent extends ComponentType<FireworkExplosion>
                 "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
                 "$1\"$2\""
             );
-            JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
+            JsonObject json = GSON.fromJson(fixed, JsonObject.class);
             return getExplosionFromJson(json);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

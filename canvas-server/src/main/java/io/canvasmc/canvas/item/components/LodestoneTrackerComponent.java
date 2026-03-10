@@ -1,8 +1,6 @@
 package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -50,7 +48,7 @@ public class LodestoneTrackerComponent extends ComponentType<LodestoneTracker> {
                 "([\\[,{:])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)(?=[\\s,}\\]])",
                 "$1\"$2\""
             );
-            JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
+            JsonObject json = GSON.fromJson(fixed, JsonObject.class);
             GlobalPos pos = new GlobalPos(
                 MinecraftServer.getServer().registryAccess().lookupOrThrow(Registries.DIMENSION).get(
                     Identifier.parse(json.get("world").getAsString())
@@ -63,10 +61,10 @@ public class LodestoneTrackerComponent extends ComponentType<LodestoneTracker> {
             );
             boolean tracked = json.get("tracked").getAsBoolean();
             return new LodestoneTracker(Optional.of(pos), tracked);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

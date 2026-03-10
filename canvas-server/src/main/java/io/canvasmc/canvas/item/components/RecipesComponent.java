@@ -2,8 +2,7 @@ package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
+import com.google.gson.JsonObject;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -44,16 +43,16 @@ public class RecipesComponent extends ComponentType<List<ResourceKey<Recipe<?>>>
                 "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
                 "$1\"$2\""
             ) + "}";
-            JsonArray json = JsonParser.parseString(fixed).getAsJsonObject().get("list").getAsJsonArray();
+            JsonArray json = GSON.fromJson(fixed, JsonObject.class).get("list").getAsJsonArray();
             List<ResourceKey<Recipe<?>>> resourceKeys = new ArrayList<>();
             for (final JsonElement jE : json) {
                 resourceKeys.add(ResourceKey.create(Registries.RECIPE, Identifier.parse(jE.getAsString())));
             }
             return resourceKeys;
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

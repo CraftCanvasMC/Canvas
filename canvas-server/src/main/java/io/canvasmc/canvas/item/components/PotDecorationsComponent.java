@@ -1,8 +1,6 @@
 package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -69,16 +67,16 @@ public class PotDecorationsComponent extends ComponentType<PotDecorations> {
                 "([\\[,{:])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)(?=[\\s,}\\]])",
                 "$1\"$2\""
             );
-            JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
+            JsonObject json = GSON.fromJson(fixed, JsonObject.class);
             Item back = json.has("back") ? fromString(json.get("back").getAsString()) : null;
             Item left = json.has("left") ? fromString(json.get("left").getAsString()) : null;
             Item right = json.has("right") ? fromString(json.get("right").getAsString()) : null;
             Item front = json.has("front") ? fromString(json.get("front").getAsString()) : null;
             return new PotDecorations(Optional.ofNullable(back), Optional.ofNullable(left), Optional.ofNullable(right), Optional.ofNullable(front));
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

@@ -2,8 +2,6 @@ package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -56,7 +54,7 @@ public class WrittenBookContentComponent extends ComponentType<WrittenBookConten
                 "([\\[,])\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)",
                 "$1\"$2\""
             );
-            JsonElement json = JsonParser.parseString(fixed);
+            JsonElement json = GSON.fromJson(fixed, JsonElement.class);
             JsonObject asObject = json.getAsJsonObject();
             int i = 0;
             List<String> rawPages = WritableBookContentComponent.parsePages(json, i);
@@ -77,10 +75,10 @@ public class WrittenBookContentComponent extends ComponentType<WrittenBookConten
             int generation = asObject.get("generation").getAsInt();
             boolean resolved = asObject.get("resolved").getAsBoolean();
             return new WrittenBookContent(title, author, generation, pages, resolved);
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 

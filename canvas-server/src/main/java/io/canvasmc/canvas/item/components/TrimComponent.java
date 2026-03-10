@@ -1,8 +1,6 @@
 package io.canvasmc.canvas.item.components;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonSyntaxException;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
@@ -46,7 +44,7 @@ public class TrimComponent extends ComponentType<ArmorTrim> {
                 "$1\"$2\""
             );
             final RegistryAccess.Frozen registryAccess = MinecraftServer.getServer().registryAccess();
-            JsonObject json = JsonParser.parseString(fixed).getAsJsonObject();
+            JsonObject json = GSON.fromJson(fixed, JsonObject.class);
             if (!json.has("pattern")) {
                 throw new NoSuchElementException("Pattern not defined");
             }
@@ -57,10 +55,10 @@ public class TrimComponent extends ComponentType<ArmorTrim> {
                 registryAccess.lookupOrThrow(Registries.TRIM_MATERIAL).get(Identifier.parse(json.get("material").getAsString())).orElseThrow(),
                 registryAccess.lookupOrThrow(Registries.TRIM_PATTERN).get(Identifier.parse(json.get("pattern").getAsString())).orElseThrow()
             );
-        } catch (JsonSyntaxException | IllegalArgumentException e) {
+        } catch (Throwable thrown) {
             throw new DynamicCommandExceptionType(
                 obj -> Component.literal(obj.toString())
-            ).create(e.getMessage());
+            ).create(thrown.getMessage());
         }
     }
 
