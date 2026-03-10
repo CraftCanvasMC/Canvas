@@ -18,6 +18,7 @@ import io.canvasmc.canvas.item.components.AttributeModifiersComponent;
 import io.canvasmc.canvas.item.components.BannerPatternComponent;
 import io.canvasmc.canvas.item.components.BundleContentsComponent;
 import io.canvasmc.canvas.item.components.ChargedProjectilesComponent;
+import io.canvasmc.canvas.item.components.ContainerComponent;
 import io.canvasmc.canvas.item.components.CustomModelDataComponent;
 import io.canvasmc.canvas.item.components.DamageResistantComponent;
 import io.canvasmc.canvas.item.components.EquippableComponent;
@@ -185,7 +186,7 @@ public abstract class ComponentType<T> implements JsonSuggestionProvider {
         register(new BannerPatternComponent());
         register(enumComponent(DataComponents.BASE_COLOR, DyeColor.class));
         register(new PotDecorationsComponent());
-        // TODO - CONTAINER
+        register(new ContainerComponent());
         // TODO - BLOCK_STATE
         // TODO - BEES
         // TODO - LOCK
