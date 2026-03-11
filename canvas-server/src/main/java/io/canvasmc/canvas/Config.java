@@ -15,7 +15,6 @@ import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.util.ApiClient;
 import io.canvasmc.canvas.util.CanvasVersionFetcher;
-import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedServer;
@@ -120,7 +119,6 @@ public class Config {
             .constructor(Config::new)
             .post(context -> {
                 GLOBAL_BROADCAST.accept("Running post validation consumer");
-                VirtualThreadUtils.init();
 
                 if (isServerAccessible()) {
                     for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
@@ -285,21 +283,6 @@ public class Config {
 
         @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
         public boolean asyncProtocolSwitch = false;
-    }
-
-    // TODO - test performance enhancements - is this worth keeping?
-    @Comment("Configurations for enabling virtual threads for different thread pool executors")
-    public VirtualThreads virtualThreads = new VirtualThreads();
-
-    public static class VirtualThreads {
-        @Comment("Enables virtual thread usage for the async scheduler executor")
-        public boolean asyncScheduler = false;
-
-        @Comment("Enables virtual thread usage for the text filter executor")
-        public boolean serverTextFilter = false;
-
-        @Comment("Enables virtual thread usage for the text filter executor")
-        public boolean tabCompleteExecutor = false;
     }
 
     @Comment("Check if a cactus can survive before growing. Heavily optimizes cacti farms")
