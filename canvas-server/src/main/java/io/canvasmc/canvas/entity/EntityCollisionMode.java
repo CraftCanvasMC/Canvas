@@ -7,18 +7,17 @@ public enum EntityCollisionMode {
     NO_COLLISIONS;
 
     private static final EntityCollisionMode[] VALUES = values();
+    private final int id;
+
+    EntityCollisionMode() {
+        this.id = ordinal();
+    }
 
     public static EntityCollisionMode fromOrdinal(int ordinal) {
         if (ordinal < 0 || ordinal >= VALUES.length) {
             return VANILLA;
         }
         return VALUES[ordinal];
-    }
-
-    private final int id;
-
-    EntityCollisionMode() {
-        this.id = ordinal();
     }
 
     public int getId() {

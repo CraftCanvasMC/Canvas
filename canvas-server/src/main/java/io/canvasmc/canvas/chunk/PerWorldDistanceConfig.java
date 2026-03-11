@@ -8,10 +8,13 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 
 /**
- * Per world view and simulation distance override. When the value is <= 0, it uses the value from the server properties.
+ * Per world view and simulation distance override. When the value is <= 0, it uses the value from the server
+ * properties.
  *
- * @param viewDistance       the view distance override
- * @param simulationDistance the simulation distance override
+ * @param viewDistance
+ *     the view distance override
+ * @param simulationDistance
+ *     the simulation distance override
  */
 public record PerWorldDistanceConfig(AtomicInteger viewDistance, AtomicInteger simulationDistance) {
     private static final AtomicInteger DEFAULT_DISTANCE = new AtomicInteger(-1);

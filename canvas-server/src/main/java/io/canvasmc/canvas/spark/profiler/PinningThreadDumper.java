@@ -1,12 +1,12 @@
 package io.canvasmc.canvas.spark.profiler;
 
+import io.canvasmc.canvas.tick.SchedulerUtil;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
-import io.canvasmc.canvas.tick.SchedulerUtil;
 import me.lucko.spark.paper.common.sampler.ThreadDumper;
 import me.lucko.spark.paper.common.util.ThreadFinder;
 import me.lucko.spark.paper.proto.SparkSamplerProtos;

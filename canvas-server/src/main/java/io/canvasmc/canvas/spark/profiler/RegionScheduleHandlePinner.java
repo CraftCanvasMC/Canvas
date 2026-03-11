@@ -12,10 +12,10 @@ import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongComparator;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ColumnPos;
@@ -264,7 +264,8 @@ public interface RegionScheduleHandlePinner {
             TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
             if (RegionizedServer.isGlobalTickThread()) {
                 finalizer.accept(schedulingHandle);
-            } else RegionizedServer.getInstance().addTask(() -> {
+            }
+            else RegionizedServer.getInstance().addTask(() -> {
                 finalizer.accept(schedulingHandle);
             });
         }

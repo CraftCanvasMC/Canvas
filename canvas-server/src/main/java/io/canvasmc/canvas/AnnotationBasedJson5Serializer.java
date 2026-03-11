@@ -28,20 +28,14 @@ import org.slf4j.LoggerFactory;
 
 // Note: 'C' is 'Config', or the configuration class type
 @SuppressWarnings("rawtypes")
-public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<C> configClass,
-                                                Jankson jankson,
-                                                List<AnnotationValidator> validators,
-                                                Consumer<Json5Builder.PostContext<C>> postInit,
-                                                String header,
-                                                Supplier<C> createInstance) implements ConfigSerializer<C> {
+public record AnnotationBasedJson5Serializer<C>(
+    Configuration definition, Class<C> configClass,
+    Jankson jankson,
+    List<AnnotationValidator> validators,
+    Consumer<Json5Builder.PostContext<C>> postInit,
+    String header,
+    Supplier<C> createInstance) implements ConfigSerializer<C> {
     public static final Logger LOGGER = LoggerFactory.getLogger("Json5Serializer");
-
-    public AnnotationBasedJson5Serializer(Class<C> configClass, Consumer<Json5Builder.PostContext<C>> postInit, String header, @NotNull Function<Jankson.Builder, Jankson.Builder> hook, Supplier<C> createInstance) {
-        this(
-            Objects.requireNonNull(configClass.getAnnotation(Configuration.class), "Class must contain a Configuration annotation"),
-            configClass, hook.apply(Jankson.builder()).build(), buildValidators(), postInit, header, createInstance
-        );
-    }
 
     private static @NotNull List<AnnotationValidator> buildValidators() {
         List<AnnotationValidator> services = Lists.newArrayList();
@@ -56,6 +50,13 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
             services.add(t);
         }
         return services;
+    }
+
+    public AnnotationBasedJson5Serializer(Class<C> configClass, Consumer<Json5Builder.PostContext<C>> postInit, String header, @NotNull Function<Jankson.Builder, Jankson.Builder> hook, Supplier<C> createInstance) {
+        this(
+            Objects.requireNonNull(configClass.getAnnotation(Configuration.class), "Class must contain a Configuration annotation"),
+            configClass, hook.apply(Jankson.builder()).build(), buildValidators(), postInit, header, createInstance
+        );
     }
 
     private @NotNull Path getConfigPath() {
@@ -80,7 +81,8 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
                 writer.write(file);
                 writer.close();
                 this.read();
-            } else {
+            }
+            else {
                 try {
                     String[] split = Util.splitHeader(Files.readString(configPath.toAbsolutePath()));
                     JsonObject disk = jankson.load(split[1]);
@@ -150,7 +152,8 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
                                     List<JsonElement> toVerify = Lists.newLinkedList();
                                     if (element instanceof JsonArray array) {
                                         toVerify.addAll(array);
-                                    } else toVerify.add(element);
+                                    }
+                                    else toVerify.add(element);
                                     ValidationResult result = ValidationResult.PASS;
                                     for (final JsonElement jsonElement : toVerify) {
                                         //noinspection unchecked
@@ -175,7 +178,8 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
                     if (failed[0]) {
                         LOGGER.error("Couldn't fill configuration, exiting.");
                         return null;
-                    } else {
+                    }
+                    else {
                         this.postInit.accept(
                             new Json5Builder.PostContext<>(config, loaded.toJson(true, true))
                         );
@@ -186,7 +190,8 @@ public record AnnotationBasedJson5Serializer<C>(Configuration definition, Class<
             } catch (Throwable e) {
                 throw new SerializationException(e);
             }
-        } else {
+        }
+        else {
             LOGGER.info("No config file currently present, constructing default configuration");
             return createDefault();
         }

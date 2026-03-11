@@ -126,10 +126,12 @@ public class RegionizedTpsBar {
                         if (placement == Placement.BOSS_BAR) {
                             if (enabled) {
                                 tpsBar.addViewer(bukkitEntity);
-                            } else {
+                            }
+                            else {
                                 tpsBar.removeViewer(bukkitEntity);
                             }
-                        } else {
+                        }
+                        else {
                             tpsBar.removeViewer(bukkitEntity);
                         }
 
@@ -142,12 +144,11 @@ public class RegionizedTpsBar {
 
                     switch (placement) {
                         case BOSS_BAR -> tpsBar.name(display);
-                        case ACTION_BAR ->
-                            entityPlayer.connection.send(
-                                new ClientboundSetActionBarTextPacket(
-                                    PaperAdventure.asVanillaNullToEmpty(display)
-                                )
-                            );
+                        case ACTION_BAR -> entityPlayer.connection.send(
+                            new ClientboundSetActionBarTextPacket(
+                                PaperAdventure.asVanillaNullToEmpty(display)
+                            )
+                        );
                     }
                 }
 

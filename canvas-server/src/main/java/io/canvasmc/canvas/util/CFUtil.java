@@ -1,9 +1,9 @@
 package io.canvasmc.canvas.util;
 
-import org.jspecify.annotations.NonNull;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
+import org.jspecify.annotations.NonNull;
 
 public class CFUtil {
     /**

@@ -21,18 +21,19 @@ public interface WorldRegionizer {
      *
      * <p><b>Note: This method is synchronized</b></p>
      *
-     * @param forEach The consumer to apply to each {@link ChunkRegion}.
+     * @param forEach
+     *     The consumer to apply to each {@link ChunkRegion}.
      */
     void computeForAllChunkRegions(Consumer<ChunkRegion> forEach);
 
     /**
      * Iterates over all chunk regions without synchronization.
      * <br><br>
-     * This is primarily the method used internally to iterate over
-     * regions unless we need to ensure that regions will not change
-     * while we operate, like merge, split, add, or remove chunks
+     * This is primarily the method used internally to iterate over regions unless we need to ensure that regions will
+     * not change while we operate, like merge, split, add, or remove chunks
      *
-     * @param forEach The consumer to apply to each {@link ChunkRegion}.
+     * @param forEach
+     *     The consumer to apply to each {@link ChunkRegion}.
      */
     void computeForAllChunkRegionsUnsynchronized(Consumer<ChunkRegion> forEach);
 
@@ -54,38 +55,43 @@ public interface WorldRegionizer {
     int getRegionSectionMergeRadius();
 
     /**
-     * Returns the radius (in section units) around each region section in which new empty
-     * sections are automatically created to maintain region continuity.
+     * Returns the radius (in section units) around each region section in which new empty sections are automatically
+     * created to maintain region continuity.
      *
      * @return The radius in section units for creating new empty sections.
      */
     int getEmptySectionCreateRadius();
 
     /**
-     * Returns the maximum fraction (as a percentage between 0 and 1) of dead sections
-     * allowed within a region before it is considered for recalculation or splitting.
+     * Returns the maximum fraction (as a percentage between 0 and 1) of dead sections allowed within a region before it
+     * is considered for recalculation or splitting.
      *
      * @return The maximum dead section percentage threshold.
      */
     double getMaxDeadRegionPercent();
 
     /**
-     * Retrieves the {@link ChunkRegion} that owns the specified chunk position,
-     * without acquiring synchronization locks.
+     * Retrieves the {@link ChunkRegion} that owns the specified chunk position, without acquiring synchronization
+     * locks.
      *
-     * @param chunkX The chunk X coordinate.
-     * @param chunkZ The chunk Z coordinate.
+     * @param chunkX
+     *     The chunk X coordinate.
+     * @param chunkZ
+     *     The chunk Z coordinate.
+     *
      * @return The region containing the specified chunk, or {@code null} if none exists.
      */
     @Nullable
     ChunkRegion getRegionAtUnsynchronised(final int chunkX, final int chunkZ);
 
     /**
-     * Retrieves the {@link ChunkRegion} that owns the specified chunk position,
-     * performing a synchronized read.
+     * Retrieves the {@link ChunkRegion} that owns the specified chunk position, performing a synchronized read.
      *
-     * @param chunkX The chunk X coordinate.
-     * @param chunkZ The chunk Z coordinate.
+     * @param chunkX
+     *     The chunk X coordinate.
+     * @param chunkZ
+     *     The chunk Z coordinate.
+     *
      * @return The region containing the specified chunk, or {@code null} if none exists.
      */
     @Nullable
@@ -95,8 +101,8 @@ public interface WorldRegionizer {
      * Represents a logical region within a {@link WorldRegionizer}.
      *
      * <p>A {@link ChunkRegion} groups one or more chunk sections and can represent
-     * a dynamically merging and splitting area of the world. Regions may transition
-     * through several lifecycle states defined by the {@link State}.</p>
+     * a dynamically merging and splitting area of the world. Regions may transition through several lifecycle states
+     * defined by the {@link State}.</p>
      */
     interface ChunkRegion {
 
@@ -104,8 +110,7 @@ public interface WorldRegionizer {
          * Returns whether this region currently contains no "alive" sections.
          *
          * <p>A section is considered alive if it contains or neighbors at least one
-         * non-empty chunk. When all sections are dead, the region may be considered
-         * for merging or removal.</p>
+         * non-empty chunk. When all sections are dead, the region may be considered for merging or removal.</p>
          *
          * @return {@code true} if all sections are dead, {@code false} otherwise.
          */
@@ -122,8 +127,8 @@ public interface WorldRegionizer {
          * Returns an array of all packed chunk positions owned by this region.
          *
          * <p>Each entry in the returned array is a <em>packed</em> or <em>encoded</em>
-         * chunk coordinate, represented as a single {@code long} value. This packed form
-         * combines the chunk's {@code x} and {@code z} coordinates into one 64-bit long.
+         * chunk coordinate, represented as a single {@code long} value. This packed form combines the chunk's {@code x}
+         * and {@code z} coordinates into one 64-bit long.
          *
          * <pre>
          *   long packed = ( (long) z & 0xFFFFFFFFL ) << 32 | ( (long) x & 0xFFFFFFFFL );

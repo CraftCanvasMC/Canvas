@@ -19,7 +19,6 @@ import java.util.stream.Collectors;
 import me.lucko.spark.paper.common.platform.world.AbstractChunkInfo;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -32,6 +31,7 @@ import org.bukkit.craftbukkit.CraftChunk;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 
 public class FoliaWorldInfoProvider implements WorldInfoProvider {
@@ -225,9 +225,10 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             }
         }
 
+        @Contract(pure = true)
         @SuppressWarnings("deprecation")
         @Override
-        public String entityTypeName(EntityType type) {
+        public String entityTypeName(@NonNull EntityType type) {
             return type.getName();
         }
 

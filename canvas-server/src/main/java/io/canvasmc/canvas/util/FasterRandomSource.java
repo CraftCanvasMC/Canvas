@@ -42,38 +42,6 @@ public class FasterRandomSource implements BitRandomSource {
         return (int) (nextLong() >>> (64 - bits));
     }
 
-    public static class FasterRandomSourcePositionalRandomFactory implements PositionalRandomFactory {
-        private final long seed;
-
-        public FasterRandomSourcePositionalRandomFactory(long seed) {
-            this.seed = seed;
-        }
-
-        @Override
-        public RandomSource at(int x, int y, int z) {
-            long l = Mth.getSeed(x, y, z);
-            long m = l ^ this.seed;
-            return new FasterRandomSource(m);
-        }
-
-        @Override
-        public RandomSource fromHashOf(String seed) {
-            int i = seed.hashCode();
-            return new FasterRandomSource((long) i ^ this.seed);
-        }
-
-        @Override
-        public RandomSource fromSeed(long seed) {
-            return new FasterRandomSource(seed);
-        }
-
-        @VisibleForTesting
-        @Override
-        public void parityConfigString(StringBuilder info) {
-            info.append("FasterRandomSourcePositionalRandomFactory{").append(this.seed).append("}");
-        }
-    }
-
     @Override
     public final int nextInt() {
         return rng.nextInt();
@@ -107,5 +75,37 @@ public class FasterRandomSource implements BitRandomSource {
     @Override
     public final double nextGaussian() {
         return rng.nextGaussian();
+    }
+
+    public static class FasterRandomSourcePositionalRandomFactory implements PositionalRandomFactory {
+        private final long seed;
+
+        public FasterRandomSourcePositionalRandomFactory(long seed) {
+            this.seed = seed;
+        }
+
+        @Override
+        public RandomSource at(int x, int y, int z) {
+            long l = Mth.getSeed(x, y, z);
+            long m = l ^ this.seed;
+            return new FasterRandomSource(m);
+        }
+
+        @Override
+        public RandomSource fromHashOf(String seed) {
+            int i = seed.hashCode();
+            return new FasterRandomSource((long) i ^ this.seed);
+        }
+
+        @Override
+        public RandomSource fromSeed(long seed) {
+            return new FasterRandomSource(seed);
+        }
+
+        @VisibleForTesting
+        @Override
+        public void parityConfigString(StringBuilder info) {
+            info.append("FasterRandomSourcePositionalRandomFactory{").append(this.seed).append("}");
+        }
     }
 }

@@ -40,11 +40,17 @@ public final class ApiClient {
      * <p>If {@code experimental} is true, experimental builds are included.
      * Otherwise, only stable builds are returned.</p>
      *
-     * @param minecraftVersion the target Minecraft version (non-null, but may be blank to fetch all builds)
-     * @param experimental     whether to include experimental builds in the result
+     * @param minecraftVersion
+     *     the target Minecraft version (non-null, but may be blank to fetch all builds)
+     * @param experimental
+     *     whether to include experimental builds in the result
+     *
      * @return a non-null list of matching builds (may be empty)
-     * @throws IOException          if the API request fails
-     * @throws InterruptedException if the HTTP request is interrupted
+     *
+     * @throws IOException
+     *     if the API request fails
+     * @throws InterruptedException
+     *     if the HTTP request is interrupted
      */
     public @NonNull List<Build> getAllBuilds(String minecraftVersion, boolean experimental) throws IOException, InterruptedException {
         StringBuilder url = new StringBuilder(BASE_URL + "/builds");
@@ -70,11 +76,17 @@ public final class ApiClient {
      * <p>If {@code includeExperimental} is true, experimental builds are considered.
      * Otherwise, only stable builds are used when determining the latest version.</p>
      *
-     * @param minecraftVersion    the target Minecraft version
-     * @param includeExperimental whether to include experimental builds in the search
+     * @param minecraftVersion
+     *     the target Minecraft version
+     * @param includeExperimental
+     *     whether to include experimental builds in the search
+     *
      * @return the latest build matching the filters, or {@code null} if none exist
-     * @throws IOException          if the API request fails
-     * @throws InterruptedException if the HTTP request is interrupted
+     *
+     * @throws IOException
+     *     if the API request fails
+     * @throws InterruptedException
+     *     if the HTTP request is interrupted
      */
     public @Nullable Build getLatestBuildForVersion(String minecraftVersion, boolean includeExperimental)
         throws IOException, InterruptedException {
@@ -95,10 +107,15 @@ public final class ApiClient {
      * <p>This is equivalent to calling
      * {@link #getLatestBuildForVersion(String, boolean)} with {@code includeExperimental = false}.</p>
      *
-     * @param minecraftVersion the target Minecraft version
+     * @param minecraftVersion
+     *     the target Minecraft version
+     *
      * @return the latest stable build, or {@code null} if none exist
-     * @throws IOException          if the API request fails
-     * @throws InterruptedException if the HTTP request is interrupted
+     *
+     * @throws IOException
+     *     if the API request fails
+     * @throws InterruptedException
+     *     if the HTTP request is interrupted
      */
     public @Nullable Build getLatestBuildForVersion(String minecraftVersion)
         throws IOException, InterruptedException {
@@ -108,10 +125,15 @@ public final class ApiClient {
     /**
      * Returns the latest build across <b>all Minecraft versions</b>.
      *
-     * @param experimental whether to allow experimental builds to be returned
+     * @param experimental
+     *     whether to allow experimental builds to be returned
+     *
      * @return the latest available build
-     * @throws IOException          if the API request fails
-     * @throws InterruptedException if the HTTP request is interrupted
+     *
+     * @throws IOException
+     *     if the API request fails
+     * @throws InterruptedException
+     *     if the HTTP request is interrupted
      */
     public @NonNull Build getLatestBuild(boolean experimental) throws IOException, InterruptedException {
         String url = BASE_URL + "/builds/latest" + (experimental ? "?experimental=true" : "");
@@ -122,10 +144,15 @@ public final class ApiClient {
     /**
      * Returns the build across <b>all Minecraft versions</b> related to the provided build number.
      *
-     * @param buildNum the build number
+     * @param buildNum
+     *     the build number
+     *
      * @return the build associated with the provided build number
-     * @throws IOException          if the API request fails
-     * @throws InterruptedException if the HTTP request is interrupted
+     *
+     * @throws IOException
+     *     if the API request fails
+     * @throws InterruptedException
+     *     if the HTTP request is interrupted
      */
     public @Nullable Build getBuild(int buildNum) throws IOException, InterruptedException {
         String json = sendRequest(BASE_URL + "/builds?experimental=true");
@@ -278,15 +305,42 @@ public final class ApiClient {
     }
 
     /**
+     * The release channel of this build
+     */
+    public enum Channel {
+        STABLE(NamedTextColor.GREEN),
+        BETA(NamedTextColor.YELLOW),
+        LOCAL(NamedTextColor.RED),
+        UNKNOWN(NamedTextColor.GOLD);
+
+        private final TextColor color;
+
+        Channel(TextColor color) {
+            this.color = color;
+        }
+
+        public @Nullable TextColor color() {
+            return color;
+        }
+    }
+
+    /**
      * Represents a Jenkins build
      *
-     * @param buildNumber      the build number
-     * @param url              the URL for this associated build
-     * @param downloadUrl      the download URL
-     * @param minecraftVersion the Minecraft version for this build
-     * @param timestamp        the timestamp of the associated build
-     * @param channel          the channel of this build
-     * @param commits          an array of commits in this build, can be empty
+     * @param buildNumber
+     *     the build number
+     * @param url
+     *     the URL for this associated build
+     * @param downloadUrl
+     *     the download URL
+     * @param minecraftVersion
+     *     the Minecraft version for this build
+     * @param timestamp
+     *     the timestamp of the associated build
+     * @param channel
+     *     the channel of this build
+     * @param commits
+     *     an array of commits in this build, can be empty
      */
     public record Build(
         int buildNumber,
@@ -305,29 +359,11 @@ public final class ApiClient {
     /**
      * Represents a GitHub Commit
      *
-     * @param message the commit message
-     * @param hash    the commit hash
+     * @param message
+     *     the commit message
+     * @param hash
+     *     the commit hash
      */
     public record Commit(String message, String hash) {
-    }
-
-    /**
-     * The release channel of this build
-     */
-    public enum Channel {
-        STABLE(NamedTextColor.GREEN),
-        BETA(NamedTextColor.YELLOW),
-        LOCAL(NamedTextColor.RED),
-        UNKNOWN(NamedTextColor.GOLD);
-
-        private final TextColor color;
-
-        Channel(TextColor color) {
-            this.color = color;
-        }
-
-        public @Nullable TextColor color() {
-            return color;
-        }
     }
 }
