@@ -18,9 +18,8 @@ public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
     private static final HandlerList HANDLER_LIST = new HandlerList();
 
     private final World from;
-    private World to;
     private final PortalType type;
-
+    private World to;
     private boolean cancelled;
 
     @ApiStatus.Internal
@@ -56,7 +55,8 @@ public class EntityPortalAsyncEvent extends EntityEvent implements Cancellable {
     /**
      * Sets the location that this entity will move to
      *
-     * @param to the location that this entity will move to
+     * @param to
+     *     the location that this entity will move to
      */
     public void setTo(World to) {
         this.to = to;

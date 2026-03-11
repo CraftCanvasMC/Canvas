@@ -2,6 +2,10 @@ package io.canvasmc.canvas.util;
 
 import com.destroystokyo.paper.util.VersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.util.OptionalInt;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.TextColor;
@@ -10,34 +14,27 @@ import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
 
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URL;
-import java.util.OptionalInt;
-
 import static net.kyori.adventure.text.Component.text;
 
 /**
  * This is a replacement version fetcher that is intended to replace {@link com.destroystokyo.paper.PaperVersionFetcher}
- * for general simplicity purposes of the rebrand patch(I don't want to replace half of the paper version fetcher, because I'm lazy)
+ * for general simplicity purposes of the rebrand patch(I don't want to replace half of the paper version fetcher,
+ * because I'm lazy)
  *
  * @author dueris
  */
 public class CanvasVersionFetcher implements VersionFetcher {
-    public static final ApiClient CLIENT = new ApiClient();
-    public static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
-
-    private static final ComponentLogger LOGGER = ComponentLogger.logger(BUILD_INFO.brandName() + "VersionProvider");
-
     private static final int DISTANCE_ERROR = -1;
     private static final int DISTANCE_UNKNOWN = -2;
     private static final int IS_LOCAL = -3;
-
     private static final @NotNull TextColor RED = TextColor.color(0xFF5300);
     private static final @NotNull TextColor WARN = TextColor.color(0xFFCD00);
     private static final @NotNull TextColor GREEN = TextColor.color(0x4DE54D);
-
     private static final @NotNull URL DOWNLOAD_URL;
+    private static final @NotNull Component NEW_LINE = text("\n");
+    public static final ApiClient CLIENT = new ApiClient();
+    public static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
+    private static final ComponentLogger LOGGER = ComponentLogger.logger(BUILD_INFO.brandName() + "VersionProvider");
 
     static {
         try {
@@ -46,8 +43,6 @@ public class CanvasVersionFetcher implements VersionFetcher {
             throw new RuntimeException("Couldn't create download url", e);
         }
     }
-
-    private static final @NotNull Component NEW_LINE = text("\n");
 
     public CanvasVersionFetcher() {
     }

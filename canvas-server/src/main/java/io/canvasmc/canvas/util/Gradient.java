@@ -29,7 +29,8 @@ public final class Gradient {
             this.negativePhase = true;
             this.phase = 1 + phase;
             Collections.reverse(Arrays.asList(this.colors));
-        } else {
+        }
+        else {
             this.negativePhase = false;
             this.phase = phase;
         }
@@ -57,7 +58,8 @@ public final class Gradient {
         if (this.negativePhase && this.colors.length % 2 != 0) {
             // flip the gradient segment for to allow for looping phase -1 through 1
             return this.interpolate(this.colors[this.colorIndex + 1], this.colors[this.colorIndex], factor);
-        } else {
+        }
+        else {
             return this.interpolate(this.colors[this.colorIndex], this.colors[this.colorIndex + 1], factor);
         }
     }

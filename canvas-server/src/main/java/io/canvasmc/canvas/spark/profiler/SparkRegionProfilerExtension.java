@@ -28,9 +28,12 @@ public class SparkRegionProfilerExtension {
     /**
      * Ends pinning of the currently profiling region
      *
-     * @param sendMessage   consumer to send messages to, normally used for command feedback
-     * @param sendFailure   consumer to send failure messages, normally used for command feedback
-     * @param unpinCallback callback for when the region has been fully unpinned
+     * @param sendMessage
+     *     consumer to send messages to, normally used for command feedback
+     * @param sendFailure
+     *     consumer to send failure messages, normally used for command feedback
+     * @param unpinCallback
+     *     callback for when the region has been fully unpinned
      */
     public static void endPinning(
         Consumer<String> sendMessage,
@@ -66,10 +69,14 @@ public class SparkRegionProfilerExtension {
     /**
      * Starts a region profiler process and pinning
      *
-     * @param sendMessage consumer to send messages to, normally used for command feedback
-     * @param sendFailure consumer to send failure messages, normally used for command feedback
-     * @param pinner      the handler to pin the region or global tick
-     * @param pinCallback callback for when the region is fully loaded and pinned
+     * @param sendMessage
+     *     consumer to send messages to, normally used for command feedback
+     * @param sendFailure
+     *     consumer to send failure messages, normally used for command feedback
+     * @param pinner
+     *     the handler to pin the region or global tick
+     * @param pinCallback
+     *     callback for when the region is fully loaded and pinned
      */
     public static void computeProfilePin(
         Consumer<String> sendMessage,

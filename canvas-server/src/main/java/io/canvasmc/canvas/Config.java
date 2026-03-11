@@ -18,13 +18,13 @@ import io.canvasmc.canvas.util.CanvasVersionFetcher;
 import io.canvasmc.canvas.util.virtual.VirtualThreadUtils;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
+import io.papermc.paper.threadedregions.RegionizedServer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.random.RandomGeneratorFactory;
-import io.papermc.paper.threadedregions.RegionizedServer;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -81,7 +81,8 @@ public class Config {
             int build = buildInfo.buildNumber().orElse(-1);
             if (build == -1) {
                 channel = ApiClient.Channel.LOCAL;
-            } else {
+            }
+            else {
                 try {
                     channel = CanvasVersionFetcher.CLIENT.getBuild(build).channel();
                 } catch (Throwable ignored) {
@@ -93,7 +94,8 @@ public class Config {
             switch (channel) {
                 case UNKNOWN -> GLOBAL_BROADCAST.accept("Running unknown build channel, proceed with caution");
                 case BETA -> GLOBAL_BROADCAST.accept("Running a beta build, there may be bugs, proceed with caution!");
-                case LOCAL -> GLOBAL_BROADCAST.accept("You are running a development version of Canvas, which may not be production-ready, be very careful!");
+                case LOCAL ->
+                    GLOBAL_BROADCAST.accept("You are running a development version of Canvas, which may not be production-ready, be very careful!");
             }
         }));
     }
@@ -125,7 +127,8 @@ public class Config {
                         // update all info with player, covers 1.8 combat config
                         MinecraftServer.getServer().getPlayerList().sendAllPlayerInfo(player);
                     }
-                } else {
+                }
+                else {
                     // SIMD
                     try {
                         SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
@@ -135,7 +138,8 @@ public class Config {
 
                     if (SIMDDetection.isEnabled) {
                         LOGGER.info("SIMD operations detected as functional. Will replace some operations with faster versions.");
-                    } else {
+                    }
+                    else {
                         LOGGER.warn("SIMD operations are available for your server, but are not configured!");
                         LOGGER.warn("To enable additional optimizations, add \"--add-modules=jdk.incubator.vector\" to your startup flags, BEFORE the \"-jar\".");
                         LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");

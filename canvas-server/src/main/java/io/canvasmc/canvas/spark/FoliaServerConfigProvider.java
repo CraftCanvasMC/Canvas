@@ -28,6 +28,8 @@ import org.bukkit.configuration.MemorySection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 public class FoliaServerConfigProvider extends ServerConfigProvider {
 
@@ -116,7 +118,7 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
             .create();
 
         @Override
-        public JsonElement load(String file, ExcludedConfigFilter filter) throws IOException {
+        public @Nullable JsonElement load(String file, ExcludedConfigFilter filter) throws IOException {
             Map<String, Object> values = parse(file);
             if (values == null) return null;
             return filter.apply(GSON.toJsonTree(values));
@@ -137,7 +139,7 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
     private static class SplitYamlConfigParser extends YamlConfigParser {
         public static final SplitYamlConfigParser INSTANCE = new SplitYamlConfigParser();
 
-        private static Map<String, Path> getNestedFiles(Path configDir, String prefix) {
+        private static @NonNull Map<String, Path> getNestedFiles(@NonNull Path configDir, String prefix) {
             Map<String, Path> files = new LinkedHashMap<>();
             files.put("global.yml", configDir.resolve(prefix + "-global.yml"));
             files.put("world-defaults.yml", configDir.resolve(prefix + "-world-defaults.yml"));
@@ -148,7 +150,7 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
         }
 
         @Override
-        public JsonElement load(String group, ExcludedConfigFilter filter) throws IOException {
+        public @Nullable JsonElement load(@NonNull String group, ExcludedConfigFilter filter) throws IOException {
             String prefix = group.replace("/", "");
 
             Path configDir = Paths.get("config");

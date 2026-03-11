@@ -11,13 +11,6 @@ import net.minecraft.world.level.material.Fluids;
 
 public class FlowableFluidUtils {
 
-    public static boolean needsPostProcessing(LevelReader world, BlockPos pos, BlockState blockState, FluidState fluidState) {
-        if (!fluidState.isSource()) {
-            return true;
-        }
-        return canFlowNormally(world, pos, blockState, fluidState);
-    }
-
     private static boolean canFlowNormally(LevelReader world, BlockPos pos, BlockState blockState, FluidState fluidState) {
         if (fluidState.isEmpty()) return false;
 
@@ -103,10 +96,18 @@ public class FlowableFluidUtils {
         FluidState fluidState3 = blockState3.getFluidState();
         if (!fluidState3.isEmpty() && fluidState3.getType().isSame(receiver) && FlowingFluid.canPassThroughWall(Direction.UP, world, pos, state, blockPos2, blockState3)) {
             return receiver.getFlowing(8, true);
-        } else {
+        }
+        else {
             int k = i - receiver.getDropOff(world);
             return k <= 0 ? Fluids.EMPTY.defaultFluidState() : receiver.getFlowing(k, false);
         }
+    }
+
+    public static boolean needsPostProcessing(LevelReader world, BlockPos pos, BlockState blockState, FluidState fluidState) {
+        if (!fluidState.isSource()) {
+            return true;
+        }
+        return canFlowNormally(world, pos, blockState, fluidState);
     }
 
 }

@@ -28,8 +28,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     /**
      * A rough distance scale that defines how often waypoint updates happen between faraway players.
      * <p>
-     * The idea here is simple enough: as players get farther apart, updates become less frequent.
-     * This system works great for region threading, where players are usually scattered across huge distances.
+     * The idea here is simple enough: as players get farther apart, updates become less frequent. This system works
+     * great for region threading, where players are usually scattered across huge distances.
      * <br><br>
      * In practice, it's used by {@link #shouldScheduleBasedOnDistance(ServerPlayer, ServerPlayer)} like this:
      * <pre>{@code
@@ -38,15 +38,30 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
      * That means a player right next to you almost always triggers an update, while someone thousands of blocks away
      * might only do so occasionally — depending on how unlucky (or lucky) their random roll is.
      * <br><br>
-     * A value of {@code 4000.0} is a decent middle ground. It avoids constant update spam across regions,
-     * but still keeps nearby players synced up. The ideal value probably depends on your server’s density
-     * and how forgiving you want the update delay to be.
+     * A value of {@code 4000.0} is a decent middle ground. It avoids constant update spam across regions, but still
+     * keeps nearby players synced up. The ideal value probably depends on your server’s density and how forgiving you
+     * want the update delay to be.
      */
     private static final double SCALE = Config.INSTANCE.waypointUpdateScale;
 
     private final MultiThreadedQueue<WaypointTransmitter> waypoints = new MultiThreadedQueue<>();
     private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
     private final ServerLevel world;
+
+    private static boolean shouldScheduleBasedOnDistance(@NotNull ServerPlayer origin, ServerPlayer target) {
+        final double scaled = origin.distanceTo(target) / SCALE;
+        return origin.random.nextDouble() < (1.0 / (1.0 + (scaled * scaled)));
+    }
+
+    // Note: this should be scheduled on the 'player'
+    private static void breakConnection(@NotNull ServerPlayer player) {
+        TickThread.ensureTickThread(player, "Cannot update break connection off owning thread of player");
+        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
+        for (WaypointTransmitter.Connection conn : map.values()) {
+            conn.disconnect();
+        }
+        map.clear();
+    }
 
     public RegionThreadingWaypointManager(ServerLevel world) {
         this.world = world;
@@ -66,11 +81,6 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
                 createConnection(player, waypoint);
             });
         }
-    }
-
-    private static boolean shouldScheduleBasedOnDistance(@NotNull ServerPlayer origin, ServerPlayer target) {
-        final double scaled = origin.distanceTo(target) / SCALE;
-        return origin.random.nextDouble() < (1.0 / (1.0 + (scaled * scaled)));
     }
 
     @Override
@@ -102,7 +112,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         if (conn != null) {
             CallbackHolder callbackHolder = updateConnection(player, waypoint, conn);
             if (callbackHolder != null) callbackHolder.call.run();
-        } else {
+        }
+        else {
             createConnection(player, waypoint);
         }
     }
@@ -189,16 +200,6 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         }
     }
 
-    // Note: this should be scheduled on the 'player'
-    private static void breakConnection(@NotNull ServerPlayer player) {
-        TickThread.ensureTickThread(player, "Cannot update break connection off owning thread of player");
-        final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
-        for (WaypointTransmitter.Connection conn : map.values()) {
-            conn.disconnect();
-        }
-        map.clear();
-    }
-
     @Override
     public void remakeConnections(WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
@@ -238,7 +239,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
         if (!connection.isBroken()) {
             connection.update();
-        } else {
+        }
+        else {
             CallbackHolder ref = new CallbackHolder();
             waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(newConn -> ref.call = () -> {
                 newConn.connect();
