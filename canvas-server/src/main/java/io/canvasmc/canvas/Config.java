@@ -162,7 +162,7 @@ public class Config {
         @Comment({
             "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
             "before allowing other threads to steal it for execution.",
-            "Note: A smaller value reduces task start delays but increases potential task stealing between threads"
+            "Note: A smaller value reduces task deadline delays but increases potential task stealing between threads"
         })
         public long stealThresholdMillis = 3L;
 
@@ -185,6 +185,13 @@ public class Config {
 
         @Comment("Enables pinning threads of the AFFINITY region scheduler to cpu cores")
         public boolean enableAffinitySchedulerCpuAffinity = false;
+
+        @Comment({
+            "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
+            "to improve performance. If this is enabled, and the task misses its deadline by 'stealThresholdMillis', it can",
+            "be taken by another tick thread to be run."
+        })
+        public boolean enableWorkStealing = false;
     }
 
     public Chunks chunks = new Chunks();
