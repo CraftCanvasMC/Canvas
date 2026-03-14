@@ -14,7 +14,7 @@
  
      // CraftBukkit start - Extra variables to enable modification of fishing wait time, values are minecraft defaults
      public int minWaitTime = 100;
-@@ -166,8 +_,81 @@
+@@ -166,8 +_,24 @@
          this.syncronizedRandom.setSeed(this.getUUID().getLeastSignificantBits() ^ this.level().getGameTime());
          this.getInterpolation().interpolate();
          super.tick();
@@ -23,47 +23,8 @@
 +            this.canvas$chunkHasEnderPearl = this.canvas$hasEnderPearlInCurrentChunk();
 +        }
          Player playerOwner = this.getPlayerOwner();
-+        if (this.canvas$detachedPortalBugActive
-+            && playerOwner != null
-+            && !canvas$isPortalTransitionActive(playerOwner)
-+            && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(playerOwner)
-+            && playerOwner.level().dimension() == this.level().dimension()) {
-+            this.canvas$realizeDetachedHook(playerOwner, false);
++        if (this.canvas$tryHandleDetachedHook(playerOwner)) {
 +            return;
-+        }
-+        if (this.canvas$detachedPortalBugActive
-+            && this.canvas$forceRealizeAfterCrossDimensionArrival
-+            && playerOwner != null
-+            && !canvas$isPortalTransitionActive(playerOwner)
-+            && playerOwner.level().dimension() != this.level().dimension()) {
-+            this.canvas$realizeDetachedHook(playerOwner, true);
-+            return;
-+        }
-+        if (this.canvas$detachedPortalBugActive
-+            && playerOwner != null
-+            && this.canvas$detachedOwnerUuid != null
-+            && this.canvas$detachedOwnerUuid.equals(playerOwner.getUUID())
-+            && this.getOwnerRaw() != playerOwner
-+            && !canvas$isPortalTransitionActive(playerOwner)) {
-+            this.canvas$realizeDetachedHook(playerOwner, true);
-+            return;
-+        }
-+        if (this.canvas$detachedPortalBugActive) {
-+            ServerPlayer loadingPlayer = this.canvas$getChunkLoadingPlayer();
-+            if (loadingPlayer != null && !canvas$isPortalTransitionActive(loadingPlayer)) {
-+                if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(loadingPlayer)) {
-+                    this.canvas$realizeDetachedHook(loadingPlayer, true);
-+                } else if (!this.canvas$realizeScheduled) {
-+                    this.canvas$realizeScheduled = true;
-+                    loadingPlayer.scheduleToOrRun(() -> this.scheduleToOrRun(() -> {
-+                        this.canvas$realizeScheduled = false;
-+                        if (this.canvas$detachedPortalBugActive && !this.isRemoved() && !canvas$isPortalTransitionActive(loadingPlayer)) {
-+                            this.canvas$realizeDetachedHook(loadingPlayer, true);
-+                        }
-+                    }));
-+                }
-+                return;
-+            }
 +        }
 +        // Canvas end - restore detached fishing hook portal behavior
          if (playerOwner == null) {
@@ -71,25 +32,7 @@
 +            if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
 +                && this.canvas$detachedPortalBugActive
 +                && this.canvas$detachedOwnerUuid != null) {
-+                net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
-+                if (server != null) {
-+                    ServerPlayer reloggedOwner = server.getPlayerList().getPlayer(this.canvas$detachedOwnerUuid);
-+                    if (reloggedOwner != null && !canvas$isPortalTransitionActive(reloggedOwner)) {
-+                        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(reloggedOwner)) {
-+                            this.canvas$realizeDetachedHook(reloggedOwner, true);
-+                        } else if (!this.canvas$realizeScheduled) {
-+                            this.canvas$realizeScheduled = true;
-+                            reloggedOwner.scheduleToOrRun(() -> this.scheduleToOrRun(() -> {
-+                                this.canvas$realizeScheduled = false;
-+                                if (this.canvas$detachedPortalBugActive
-+                                    && !this.isRemoved()
-+                                    && !canvas$isPortalTransitionActive(reloggedOwner)) {
-+                                    this.canvas$realizeDetachedHook(reloggedOwner, true);
-+                                }
-+                            }));
-+                        }
-+                    }
-+                }
++                this.canvas$tryHandleDetachedHook(this.canvas$getReloggedOwner());
 +                return;
 +            }
 +            // Canvas end - restore detached fishing hook portal behavior
@@ -136,7 +79,7 @@
 +                    player.scheduleToOrRun(() -> this.scheduleToOrRun(() -> {
 +                        this.canvas$realizeScheduled = false;
 +                        if (this.canvas$detachedPortalBugActive && !this.isRemoved() && !canvas$isPortalTransitionActive(player)) {
-+                            this.canvas$realizeDetachedHook(player, true);
++                            this.canvas$realizeDetachedHook(player);
 +                        }
 +                    }));
 +                }
@@ -226,13 +169,67 @@
          return this.getOwner() instanceof Player player ? player : null;
      }
  
-@@ -677,6 +_,82 @@
+@@ -677,6 +_,136 @@
              this.discard(null); // CraftBukkit - add Bukkit remove cause
          }
      }
 +
 +    // Canvas start - restore detached fishing hook portal behavior
-+    private void canvas$realizeDetachedHook(Player playerOwner, boolean scheduled) {
++    private boolean canvas$tryHandleDetachedHook(@Nullable Player playerOwner) {
++        if (!this.canvas$detachedPortalBugActive) {
++            return false;
++        }
++        if (this.canvas$shouldRealizeDetachedHook(playerOwner)) {
++            this.canvas$realizeDetachedHook(playerOwner);
++            return true;
++        }
++        ServerPlayer loadingPlayer = this.canvas$getChunkLoadingPlayer();
++        if (loadingPlayer != null && !canvas$isPortalTransitionActive(loadingPlayer)) {
++            this.canvas$scheduleOrRealizeDetachedHook(loadingPlayer);
++            return true;
++        }
++        return false;
++    }
++
++    private boolean canvas$shouldRealizeDetachedHook(@Nullable Player playerOwner) {
++        if (playerOwner == null || canvas$isPortalTransitionActive(playerOwner)) {
++            return false;
++        }
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(playerOwner)
++            && playerOwner.level().dimension() == this.level().dimension()) {
++            return true;
++        }
++        if (this.canvas$forceRealizeAfterCrossDimensionArrival && playerOwner.level().dimension() != this.level().dimension()) {
++            return true;
++        }
++        return this.canvas$detachedOwnerUuid != null
++            && this.canvas$detachedOwnerUuid.equals(playerOwner.getUUID())
++            && this.getOwnerRaw() != playerOwner;
++    }
++
++    private void canvas$scheduleOrRealizeDetachedHook(ServerPlayer player) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) {
++            this.canvas$realizeDetachedHook(player);
++        } else if (!this.canvas$realizeScheduled) {
++            this.canvas$realizeScheduled = true;
++            player.scheduleToOrRun(() -> this.scheduleToOrRun(() -> {
++                this.canvas$realizeScheduled = false;
++                if (this.canvas$detachedPortalBugActive && !this.isRemoved() && !canvas$isPortalTransitionActive(player)) {
++                    this.canvas$realizeDetachedHook(player);
++                }
++            }));
++        }
++    }
++
++    private @Nullable ServerPlayer canvas$getReloggedOwner() {
++        if (this.canvas$detachedOwnerUuid == null) {
++            return null;
++        }
++        net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
++        return server == null ? null : server.getPlayerList().getPlayer(this.canvas$detachedOwnerUuid);
++    }
++
++    private void canvas$realizeDetachedHook(Player playerOwner) {
 +        if (this.hookedIn != null
 +            && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.hookedIn)
 +            && !this.hookedIn.isRemoved()
