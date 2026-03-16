@@ -463,6 +463,14 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
          */
         private static final int STATE_EXECUTING_TICK = 2;
 
+        /**
+         * The runner is running mid-tick tasks for one of the tasks that was in its runqueue.
+         * <p>
+         * stateTarget = the task being ticked
+         * </p>
+         */
+        private static final int STATE_EXECUTING_TASKS = 3;
+
         public final int id;
         public final AffinitySchedulerThreadPool scheduler;
         private final int affinity;
@@ -545,12 +553,13 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
             LockSupport.unpark(this.getRunnerThread());
         }
 
-        private boolean takeTask(final TickThreadRunnerState state, final ScheduledState task) {
+        // note: returns false if the expected state isn't the actual current state, true otherwise
+        private boolean tryExchangeState(final TickThreadRunnerState expected, final TickThreadRunnerState newState) {
             synchronized (this.scheduler.scheduleLock) {
-                if (this.state != state) {
+                if (this.state != expected) {
                     return false;
                 }
-                this.setStatePlain(new TickThreadRunnerState(task, STATE_EXECUTING_TICK));
+                this.setStatePlain(newState);
                 return true;
             }
         }
@@ -620,7 +629,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                                 if ((diff > scheduler.runTaskBuff) && // if we are less than the buffer, then don't try run mid-tick-tasks
                                     (startStateTask.compareHasTasks() || startStateTask.tick.hasTasks())) {
                                     // try and take the tick task like it's a normal tick
-                                    if (!this.takeTask(startState, startStateTask)) {
+                                    if (!this.tryExchangeState(startState, new TickThreadRunnerState(startStateTask, STATE_EXECUTING_TASKS))) {
                                         // just park like normal, couldn't take task
                                         Thread.interrupted();
                                         LockSupport.parkNanos(startState, diff);
@@ -646,7 +655,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                                 }
                             }
 
-                            if (!this.takeTask(startState, startStateTask)) {
+                            if (!this.tryExchangeState(startState, new TickThreadRunnerState(startStateTask, STATE_EXECUTING_TICK))) {
                                 // couldn't take task, continue loop
                                 continue main_state_loop;
                             }
@@ -663,6 +672,10 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
                         case STATE_EXECUTING_TICK: {
                             throw new IllegalStateException("Tick execution must be set by runner thread, not by any other thread");
+                        }
+
+                        case STATE_EXECUTING_TASKS: {
+                            throw new IllegalStateException("Task execution must be set by runner thread, not by any other thread");
                         }
 
                         default: {
