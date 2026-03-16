@@ -76,7 +76,7 @@ public class WorldDistanceCommand implements Command {
                             int updated = Math.min(
                                 (type.equals(Type.VIEW)
                                     ? state.viewDistanceOrDefault()
-                                    : state.simulationDistanceOrDefault()) - 1,
+                                    : state.simulationDistanceOrDefault()),
                                 MoonriseConstants.MAX_VIEW_DISTANCE - 3
                             );
 
