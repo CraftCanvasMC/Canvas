@@ -2,16 +2,11 @@ package io.canvasmc.canvas.tick;
 
 import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
-import ca.spottedleaf.concurrentutil.set.LinkedSortedSet;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
 import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.util.CpuTopology;
 import io.canvasmc.canvas.util.queue.FastHeapPriorityQueue;
-import net.openhft.affinity.Affinity;
-import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
-import org.jspecify.annotations.Nullable;
 import java.lang.invoke.VarHandle;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -25,8 +20,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-
-import static io.canvasmc.canvas.Config.LOGGER;
+import net.openhft.affinity.Affinity;
+import org.jetbrains.annotations.Contract;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Scheduler thread pool implementation that uses EDF scheduling, based off {@link ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool}
@@ -43,7 +42,10 @@ import static io.canvasmc.canvas.Config.LOGGER;
  */
 public final class AffinitySchedulerThreadPool extends Scheduler {
 
-    private static final Comparator<ScheduledState> TICK_COMPARATOR_BY_TIME = (final ScheduledState s1, final ScheduledState s2) -> {
+    public static final long DEFAULT_STEAL_THRESH_MILLIS = 3L;
+    public static final double DEFAULT_RUN_TASKS_BUFFER_MILLIS = (double) 100_000 / 1_000_000;
+
+    private static final Comparator<AffinitySchedulerThreadPool.ScheduledState> TICK_COMPARATOR_BY_TIME = (final AffinitySchedulerThreadPool.ScheduledState s1, final AffinitySchedulerThreadPool.ScheduledState s2) -> {
         final SchedulableTick t1 = s1.tick;
         final SchedulableTick t2 = s2.tick;
 
@@ -52,14 +54,16 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
             return timeCompare;
         }
 
-        // compare these if the start time comparison returns 0
-        return Long.compare(t1.id, t2.id);
+        return Long.signum(t1.id - t2.id);
     };
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("Scheduler");
 
     private final TickThreadRunner[] runners;
     private final Thread[] threads;
-    private final FastHeapPriorityQueue<ScheduledState> globalQueue = new FastHeapPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
     private final BitSet idleThreads;
+
+    private final FastHeapPriorityQueue<ScheduledState> globalQueue = new FastHeapPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
 
     private final Object scheduleLock = new Object();
     private final long runTaskBuff;
@@ -71,7 +75,16 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     private volatile boolean halted;
     private int nextSteal = 0;
 
-    public AffinitySchedulerThreadPool(final int threads, final ThreadFactory threadFactory, long runTaskBuff, long stealThresh, BooleanSupplier linkingSupported, boolean enableWorkStealing, Consumer<Throwable> onException) {
+    public AffinitySchedulerThreadPool(
+        final int threads,
+        final ThreadFactory threadFactory,
+        long runTaskBuff,
+        long stealThresh,
+        BooleanSupplier linkingSupported,
+        boolean enableWorkStealing,
+        boolean enableAffinity,
+        Consumer<Throwable> onException
+    ) {
         this.runTaskBuff = runTaskBuff;
         this.stealThresh = stealThresh;
         this.linkingSupported = linkingSupported;
@@ -84,7 +97,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         this.idleThreads = idleThreads;
 
         final BitSet affinitySet;
-        if (Config.INSTANCE.scheduler.enableAffinitySchedulerCpuAffinity) {
+        if (enableAffinity) {
             if (!CpuTopology.isLinux()) {
                 LOGGER.warn("Affinity setting is only supported on Linux");
                 affinitySet = new BitSet();
@@ -238,7 +251,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         return ret.toArray(new Thread[0]);
     }
 
-    public @Nullable ScheduledState poll(final @NonNull TickThreadRunner runner) {
+    private @Nullable ScheduledState poll(final @NonNull TickThreadRunner runner) {
         final long now = System.nanoTime();
 
         ScheduledState globalHead = globalQueue.peek();
@@ -306,6 +319,11 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
     private void insertFresh(final ScheduledState task) {
         final TickThreadRunner[] runners = this.runners;
+
+        for (final TickThreadRunner runner : runners) {
+            // if task is linked, don't insert to queues
+            if (runner.linked == task) return;
+        }
 
         // iterate all idle threads, not just the first one
         for (int i = this.idleThreads.nextSetBit(0); i >= 0; i = this.idleThreads.nextSetBit(i + 1)) {
@@ -387,8 +405,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         private final AtomicBoolean markedWithTasks = new AtomicBoolean(false);
 
         public boolean compareHasTasks() {
-            if (markedWithTasks.get()) {
-                markedWithTasks.set(false);
+            if (markedWithTasks.getAndSet(false)) {
                 return true;
             }
             return tick.hasTasks();

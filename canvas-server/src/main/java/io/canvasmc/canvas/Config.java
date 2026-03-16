@@ -13,6 +13,7 @@ import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
+import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.ApiClient;
 import io.canvasmc.canvas.util.CanvasVersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
@@ -164,14 +165,14 @@ public class Config {
             "before allowing other threads to steal it for execution.",
             "Note: A smaller value reduces task deadline delays but increases potential task stealing between threads"
         })
-        public long stealThresholdMillis = 3L;
+        public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
 
         @Comment({
             "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
             "Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done.",
             "Default: 0.1ms"
         })
-        public double runTasksBufferMillis = (double) 100_000 / 1_000_000;
+        public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
 
         @Comment({
             "Amount of time between the end and next start of a region tick where the server will log a",
