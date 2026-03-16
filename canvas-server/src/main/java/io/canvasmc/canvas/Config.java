@@ -193,6 +193,11 @@ public class Config {
             "be taken by another tick thread to be run."
         })
         public boolean enableWorkStealing = false;
+
+        @Comment({
+            "Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick"
+        })
+        public boolean enableMidTickTasks = false;
     }
 
     public Chunks chunks = new Chunks();

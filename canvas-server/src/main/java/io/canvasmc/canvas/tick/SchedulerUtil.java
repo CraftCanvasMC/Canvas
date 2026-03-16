@@ -82,9 +82,10 @@ public class SchedulerUtil {
                 long stealThresh = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
                 boolean enableStealing = Config.INSTANCE.scheduler.enableWorkStealing;
                 boolean enableAffinity = Config.INSTANCE.scheduler.enableAffinitySchedulerCpuAffinity;
+                boolean enableIntermediateTasks = Config.INSTANCE.scheduler.enableMidTickTasks;
                 HANDLER = new AffinityHandler();
                 return new AffinitySchedulerThreadPool(
-                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler, enableStealing, enableAffinity, (thrown) -> {
+                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler, enableStealing, enableAffinity, enableIntermediateTasks, (thrown) -> {
                     TickRegionScheduler.LOGGER.error("Uncaught exception in scheduler internals", thrown);
 
                     CrashReport crashReport = CrashReport.forThrowable(thrown, "Scheduler Internal Exception");
