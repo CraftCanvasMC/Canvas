@@ -3,7 +3,9 @@ package io.canvasmc.canvas.util;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import net.minecraft.util.Util;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -21,6 +23,17 @@ public class CpuTopology {
     private static @Nullable String readFile(String path) {
         try (BufferedReader br = new BufferedReader(new FileReader(path))) {
             return br.readLine().trim();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static @Nullable String readFullFile(String path) {
+        try (BufferedReader br = new BufferedReader(new FileReader(path))) {
+            StringBuilder builder = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) builder.append(line).append("\n");
+            return builder.toString();
         } catch (Exception e) {
             return null;
         }
@@ -66,6 +79,11 @@ public class CpuTopology {
         List<CpuInfo> cpus = new ArrayList<>();
         int cpuCount = Runtime.getRuntime().availableProcessors();
 
+        String model = Arrays.stream(Objects.requireNonNull(readFullFile("/proc/cpuinfo"), "Couldn't read /proc/cpuinfo").split("\n"))
+            .filter(line -> line.startsWith("model name"))
+            .map(line -> line.replaceAll(".*: ", ""))
+            .findFirst().orElse("");
+        out.append("CPU Model: ").append(model).append("\n====================================\n");
         for (int cpu = 0; cpu < cpuCount; cpu++) {
             int core = readInt("/sys/devices/system/cpu/cpu" + cpu + "/topology/core_id", cpu);
             int socket = readInt("/sys/devices/system/cpu/cpu" + cpu + "/topology/physical_package_id", 0);
