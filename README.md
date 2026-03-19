@@ -88,7 +88,7 @@ Replace the version number with the appropriate version you want to target.
 
 ## REST API
 
-Canvas provides a REST interface to fetch build and version metadata. Documentation is available via [The docs page](https://docs.canvasmc.io/guides/developers/rest-api/)
+Canvas provides a REST interface to fetch build and version metadata. Documentation is available via [The docs page](https://docs.canvasmc.io/canvas/guides/developers/rest-api/)
 
 ---
 
