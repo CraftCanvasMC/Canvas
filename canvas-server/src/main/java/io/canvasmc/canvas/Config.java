@@ -729,6 +729,4 @@ public class Config {
     @Comment("Restores Vanilla ender pearl behavior to match Paper, which is disabled in Folia.")
     public boolean restoreVanillaEnderPearlBehavior = false;
 
-    @Comment("Restores Vanilla entity velocity behavior, bypassing Paper's EAR 2 velocity zeroing on inactive passengers and temporary-activation movement suppression for all entities")
-    public boolean restoreVanillaEntityVelocity = false;
 }
