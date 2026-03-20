@@ -12,8 +12,13 @@ import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
+import java.nio.file.Path;
 import java.util.concurrent.ThreadFactory;
+import net.minecraft.CrashReport;
+import net.minecraft.ReportType;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Util;
 import net.minecraft.world.level.ChunkPos;
 import org.jspecify.annotations.NonNull;
 
@@ -28,10 +33,16 @@ public class SchedulerUtil {
     }
 
     public static boolean doesSupportRegionProfiler() {
-        final Scheduler scheduler = TickRegions.getScheduler().scheduler;
+        return doesSupportRegionProfiler(TickRegions.getScheduler().scheduler);
+    }
+
+    public static boolean doesSupportRegionProfiler(final Scheduler scheduler) {
+        if (Boolean.getBoolean("Canvas.DisableRegionProfiler")) {
+            return false;
+        }
         if (scheduler instanceof AffinitySchedulerThreadPool) {
             // if has less than 2 threads, pinning would kill the server
-            return TickRegions.getScheduler().scheduler.getCoreThreads().length >= 2;
+            return scheduler.getCoreThreads().length >= 2;
         }
         return false;
     }
@@ -69,9 +80,29 @@ public class SchedulerUtil {
             case AFFINITY: {
                 long runBufferNanos = (long) (Config.INSTANCE.scheduler.runTasksBufferMillis * 1_000_000L);
                 long stealThresh = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
+                boolean enableStealing = Config.INSTANCE.scheduler.enableWorkStealing;
+                boolean enableAffinity = Config.INSTANCE.scheduler.enableAffinitySchedulerCpuAffinity;
+                boolean enableIntermediateTasks = Config.INSTANCE.scheduler.enableMidTickTasks;
                 HANDLER = new AffinityHandler();
                 return new AffinitySchedulerThreadPool(
-                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler
+                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler, enableStealing, enableAffinity, enableIntermediateTasks, (thrown) -> {
+                    TickRegionScheduler.LOGGER.error("Uncaught exception in scheduler internals", thrown);
+
+                    CrashReport crashReport = CrashReport.forThrowable(thrown, "Scheduler Internal Exception");
+                    MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
+                    Path path = MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
+                    if (crashReport.saveToFile(path, ReportType.CRASH)) {
+                        TickRegionScheduler.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
+                    }
+                    else {
+                        TickRegionScheduler.LOGGER.error("We were unable to save this crash report to disk.");
+                    }
+                    // prevent further ticks from occurring
+                    // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
+                    TickRegions.getScheduler().scheduler.halt();
+
+                    MinecraftServer.getServer().stopServer();
+                }
                 );
             }
             default: {

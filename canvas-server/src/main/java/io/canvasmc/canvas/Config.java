@@ -13,6 +13,7 @@ import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
+import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.ApiClient;
 import io.canvasmc.canvas.util.CanvasVersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
@@ -162,16 +163,16 @@ public class Config {
         @Comment({
             "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
             "before allowing other threads to steal it for execution.",
-            "Note: A smaller value reduces task start delays but increases potential task stealing between threads"
+            "Note: A smaller value reduces task deadline delays but increases potential task stealing between threads"
         })
-        public long stealThresholdMillis = 3L;
+        public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
 
         @Comment({
             "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
             "Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done.",
             "Default: 0.1ms"
         })
-        public double runTasksBufferMillis = (double) 100_000 / 1_000_000;
+        public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
 
         @Comment({
             "Amount of time between the end and next start of a region tick where the server will log a",
@@ -185,6 +186,18 @@ public class Config {
 
         @Comment("Enables pinning threads of the AFFINITY region scheduler to cpu cores")
         public boolean enableAffinitySchedulerCpuAffinity = false;
+
+        @Comment({
+            "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
+            "to improve performance. If this is enabled, and the task misses its deadline by 'stealThresholdMillis', it can",
+            "be taken by another tick thread to be run."
+        })
+        public boolean enableWorkStealing = false;
+
+        @Comment({
+            "Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick"
+        })
+        public boolean enableMidTickTasks = false;
     }
 
     public Chunks chunks = new Chunks();
