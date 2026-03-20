@@ -728,5 +728,4 @@ public class Config {
 
     @Comment("Restores Vanilla ender pearl behavior to match Paper, which is disabled in Folia.")
     public boolean restoreVanillaEnderPearlBehavior = false;
-
 }
