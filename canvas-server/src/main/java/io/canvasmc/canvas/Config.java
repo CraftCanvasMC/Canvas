@@ -304,6 +304,12 @@ public class Config {
     @Comment("Whether to cache expensive CraftEntityType#minecraftToBukkit call")
     public boolean enableCachedMTBEntityTypeConvert = false;
 
+    @Comment({
+        "Caches Level#getEntities results by bounding box for the current tick to reduce repeated lookups.",
+        "Note that plugins which query the same box multiple times in one tick with different predicates may get incorrect results.",
+    })
+    public boolean useBoxCacheForGetEntities = false;
+
     @Comment("Enables creation of tile entity snapshots on retrieving blockstates")
     public boolean tileEntitySnapshotCreation = false;
 

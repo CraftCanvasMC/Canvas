@@ -1,5 +1,30 @@
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
+@@ -107,6 +_,24 @@
+     public static final int MAX_BRIGHTNESS = 15;
+     public static final int MAX_ENTITY_SPAWN_Y = 20000000;
+     public static final int MIN_ENTITY_SPAWN_Y = -20000000;
++    // Canvas start - cache getEntities lookups by bounding box for the current tick
++    private static final io.papermc.paper.threadedregions.RegionizedData<Level.CanvasGetEntitiesBoxCache> canvas$regionizedGetEntitiesBoxCache =
++        new io.papermc.paper.threadedregions.RegionizedData<>(null, regionData -> new Level.CanvasGetEntitiesBoxCache(), new io.papermc.paper.threadedregions.RegionizedData.RegioniserCallback<>() {
++            @Override
++            public void merge(final Level.CanvasGetEntitiesBoxCache from, final Level.CanvasGetEntitiesBoxCache into, final long fromTickOffset) {
++                into.clear();
++            }
++
++            @Override
++            public void split(final Level.CanvasGetEntitiesBoxCache from, final int chunkToRegionShift,
++                              final it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap<Level.CanvasGetEntitiesBoxCache> regionToData,
++                              final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<Level.CanvasGetEntitiesBoxCache> dataSet) {
++                for (final Level.CanvasGetEntitiesBoxCache cache : dataSet) {
++                    cache.clear();
++                }
++            }
++        });
++    // Canvas end - cache getEntities lookups by bounding box for the current tick
+     public static final WeightedList<ExplosionParticleInfo> DEFAULT_EXPLOSION_BLOCK_PARTICLES = WeightedList.<ExplosionParticleInfo>builder()
+         .add(new ExplosionParticleInfo(ParticleTypes.POOF, 0.5F, 1.0F))
+         .add(new ExplosionParticleInfo(ParticleTypes.SMOKE, 1.0F, 1.0F))
 @@ -203,7 +_,7 @@
  
      @Override
@@ -95,6 +120,75 @@
          } catch (Throwable var6) {
              // Paper start - Prevent block entity and entity crashes
              final String msg = String.format("Entity threw exception at %s:%s,%s,%s", entity.level().getWorld().getName(), entity.getX(), entity.getY(), entity.getZ());
+@@ -1719,16 +_,66 @@
+         List<Entity> list = Lists.newArrayList();
+ 
+         // Paper start - rewrite chunk system
++        // Canvas start - cache getEntities lookups by bounding box for the current tick
++        if (io.canvasmc.canvas.Config.INSTANCE.useBoxCacheForGetEntities) {
++            final Level.CanvasGetEntitiesBoxCache cache = Level.canvas$regionizedGetEntitiesBoxCache.get();
++            cache.clearIfStale();
++
++            final List<Entity> cached = cache.entitiesByBoundingBox.get(Level.canvas$getEntitiesBoxCacheKey(boundingBox));
++            if (cached != null) {
++                return cached;
++            }
++        }
++
+         final List<Entity> ret = new java.util.ArrayList<>();
+-
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(entity, boundingBox, ret, predicate);
+-
+         ca.spottedleaf.moonrise.common.PlatformHooks.get().addToGetEntities((Level)(Object)this, entity, boundingBox, predicate, ret);
+ 
++        if (io.canvasmc.canvas.Config.INSTANCE.useBoxCacheForGetEntities) {
++            Level.canvas$regionizedGetEntitiesBoxCache.get().entitiesByBoundingBox.put(Level.canvas$getEntitiesBoxCacheKey(boundingBox), ret);
++        }
++        // Canvas end - cache getEntities lookups by bounding box for the current tick
++
+         return ret;
+         // Paper end - rewrite chunk system
+     }
+ 
++    // Canvas start - cache getEntities lookups by bounding box for the current tick
++    private static long canvas$getEntitiesBoxCacheKey(final AABB boundingBox) {
++        long result = 1L;
++        long bits = Double.doubleToLongBits(boundingBox.minX);
++        result = 31L * result + (bits ^ bits >>> 32);
++        bits = Double.doubleToLongBits(boundingBox.minY);
++        result = 31L * result + (bits ^ bits >>> 32);
++        bits = Double.doubleToLongBits(boundingBox.minZ);
++        result = 31L * result + (bits ^ bits >>> 32);
++        bits = Double.doubleToLongBits(boundingBox.maxX);
++        result = 31L * result + (bits ^ bits >>> 32);
++        bits = Double.doubleToLongBits(boundingBox.maxY);
++        result = 31L * result + (bits ^ bits >>> 32);
++        bits = Double.doubleToLongBits(boundingBox.maxZ);
++        return 31L * result + (bits ^ bits >>> 32);
++    }
++
++    private static final class CanvasGetEntitiesBoxCache {
++        private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<List<Entity>> entitiesByBoundingBox = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
++        private long tick = Long.MIN_VALUE;
++
++        private void clearIfStale() {
++            final long currentTick = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick();
++            if (this.tick != currentTick) {
++                this.tick = currentTick;
++                this.entitiesByBoundingBox.clear();
++            }
++        }
++
++        private void clear() {
++            this.tick = Long.MIN_VALUE;
++            this.entitiesByBoundingBox.clear();
++        }
++    }
++    // Canvas end - cache getEntities lookups by bounding box for the current tick
++
+     @Override
+     public <T extends Entity> List<T> getEntities(EntityTypeTest<Entity, T> entityTypeTest, AABB bounds, Predicate<? super T> predicate) {
+         List<T> list = Lists.newArrayList();
 @@ -1855,6 +_,35 @@
      public List<Entity> getPushableEntities(Entity entity, AABB boundingBox) {
          return this.getEntities(entity, boundingBox, EntitySelector.pushableBy(entity));
