@@ -1,0 +1,355 @@
+From e73a0d47719ebbb09ce18188c79c46e24c1c9168 Mon Sep 17 00:00:00 2001
+From: BaconCat__ <126538523+BaconCat1@users.noreply.github.com>
+Date: Thu, 19 Mar 2026 19:44:24 -0500
+Subject: [PATCH] Restore detached fishing hook portal bug
+
+---
+ net/minecraft/world/entity/player/Player.java |  22 ++
+ .../world/entity/projectile/FishingHook.java  | 225 +++++++++++++++++-
+ net/minecraft/world/item/FishingRodItem.java  |  15 +-
+ 3 files changed, 252 insertions(+), 10 deletions(-)
+
+diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
+index 874da7b..e0bf9a3 100644
+--- a/net/minecraft/world/entity/player/Player.java
++++ b/net/minecraft/world/entity/player/Player.java
+@@ -1370,6 +1370,28 @@ public abstract class Player extends Avatar implements ContainerUser {
+     @Override
+     protected void preRemove(RemovalReason reason) {
+         super.preRemove(reason);
++        // Canvas start - restore detached fishing hook portal behavior
++        if (reason == RemovalReason.CHANGED_DIMENSION && io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug) {
++            if (this.fishing != null) {
++                final boolean hasEnderPearlInHookChunk = this.fishing.canvas$hasEnderPearlInChunkSnapshot();
++                final boolean shouldPreserveDetachedState = !hasEnderPearlInHookChunk;
++                boolean hasNearbyOtherPlayer = false;
++                if (this.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
++                    final int simulationDistance = serverLevel.serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault();
++                    final double simulationDistanceBlocks = simulationDistance * 16.0;
++                    final double simulationDistanceSq = simulationDistanceBlocks * simulationDistanceBlocks;
++                    for (net.minecraft.server.level.ServerPlayer other : serverLevel.players()) {
++                        if (other != this && !other.isRemoved() && this.distanceToSqr(other) <= simulationDistanceSq) {
++                            hasNearbyOtherPlayer = true;
++                            break;
++                        }
++                    }
++                }
++                this.fishing.canvas$markPortalTransferState(shouldPreserveDetachedState, this.getUUID(), hasNearbyOtherPlayer);
++            }
++            return;
++        }
++        // Canvas end - restore detached fishing hook portal behavior
+         this.fishing = null;
+     }
+     // Folia end - region threading
+diff --git a/net/minecraft/world/entity/projectile/FishingHook.java b/net/minecraft/world/entity/projectile/FishingHook.java
+index 71f6acc..21b2d4a 100644
+--- a/net/minecraft/world/entity/projectile/FishingHook.java
++++ b/net/minecraft/world/entity/projectile/FishingHook.java
+@@ -68,6 +68,13 @@ public class FishingHook extends Projectile {
+     private final int luck;
+     private final int lureSpeed;
+     private final InterpolationHandler interpolationHandler = new InterpolationHandler(this);
++    // Canvas start - restore detached fishing hook portal behavior
++    private boolean canvas$detachedPortalBugActive = false;
++    private boolean canvas$realizeScheduled = false;
++    private volatile boolean canvas$chunkHasEnderPearl = false;
++    private java.util.UUID canvas$detachedOwnerUuid = null;
++    private boolean canvas$forceRealizeAfterCrossDimensionArrival = false;
++    // Canvas end - restore detached fishing hook portal behavior
+ 
+     // CraftBukkit start - Extra variables to enable modification of fishing wait time, values are minecraft defaults
+     public int minWaitTime = 100;
+@@ -166,8 +173,24 @@ public class FishingHook extends Projectile {
+         this.syncronizedRandom.setSeed(this.getUUID().getLeastSignificantBits() ^ this.level().getGameTime());
+         this.getInterpolation().interpolate();
+         super.tick();
++        // Canvas start - restore detached fishing hook portal behavior
++        if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug) {
++            this.canvas$chunkHasEnderPearl = this.canvas$hasEnderPearlInCurrentChunk();
++        }
+         Player playerOwner = this.getPlayerOwner();
++        if (this.canvas$tryHandleDetachedHook(playerOwner)) {
++            return;
++        }
++        // Canvas end - restore detached fishing hook portal behavior
+         if (playerOwner == null) {
++            // Canvas start - restore detached fishing hook portal behavior
++            if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
++                && this.canvas$detachedPortalBugActive
++                && this.canvas$detachedOwnerUuid != null) {
++                this.canvas$tryHandleDetachedHook(this.canvas$getReloggedOwner());
++                return;
++            }
++            // Canvas end - restore detached fishing hook portal behavior
+             this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
+         } else if (this.level().isClientSide() || !this.shouldStopFishing(playerOwner)) {
+             if (this.onGround()) {
+@@ -207,15 +230,19 @@ public class FishingHook extends Projectile {
+             } else {
+                 if (this.currentState == FishingHook.FishHookState.HOOKED_IN_ENTITY) {
+                     if (this.hookedIn != null) {
+-                        if (!this.hookedIn.isRemoved() && this.hookedIn.canInteractWithLevel() && this.hookedIn.level().dimension() == this.level().dimension()
+-                            )
+-                         {
++                        // Canvas start - restore detached fishing hook portal behavior
++                        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.hookedIn)) {
++                            if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug) {
++                                return;
++                            }
++                        } else if (!this.hookedIn.isRemoved() && this.hookedIn.canInteractWithLevel() && this.hookedIn.level().dimension() == this.level().dimension()) {
+                             this.setPos(this.hookedIn.getX(), this.hookedIn.getY(0.8), this.hookedIn.getZ());
+-                        } else {
+-                            this.setHookedEntity(null);
+-                            new io.papermc.paper.event.entity.FishHookStateChangeEvent((org.bukkit.entity.FishHook) getBukkitEntity(), org.bukkit.entity.FishHook.HookState.UNHOOKED).callEvent(); // Paper - Add FishHookStateChangeEvent. #UNHOOKED
+-                            this.currentState = FishingHook.FishHookState.FLYING;
++                            return;
+                         }
++                        this.setHookedEntity(null);
++                        new io.papermc.paper.event.entity.FishHookStateChangeEvent((org.bukkit.entity.FishHook) getBukkitEntity(), org.bukkit.entity.FishHook.HookState.UNHOOKED).callEvent(); // Paper - Add FishHookStateChangeEvent. #UNHOOKED
++                        this.currentState = FishingHook.FishHookState.FLYING;
++                        // Canvas end - restore detached fishing hook portal behavior
+                     }
+ 
+                     return;
+@@ -272,10 +299,41 @@ public class FishingHook extends Projectile {
+     private boolean shouldStopFishing(Player player) {
+         // Folia start - region threading
+         if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) {
++            // Canvas start - restore detached fishing hook portal behavior
++            if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug && this.canvas$detachedPortalBugActive) {
++                if (!this.canvas$realizeScheduled
++                    && player.level().dimension() == this.level().dimension()
++                    && !canvas$isPortalTransitionActive(player)) {
++                    this.canvas$realizeScheduled = true;
++                    player.scheduleToOrRun(() -> this.scheduleToOrRun(() -> {
++                        this.canvas$realizeScheduled = false;
++                        if (this.canvas$detachedPortalBugActive && !this.isRemoved() && !canvas$isPortalTransitionActive(player)) {
++                            this.canvas$realizeDetachedHook(player);
++                        }
++                    }));
++                }
++                return false;
++            }
++            // Canvas end - restore detached fishing hook portal behavior
+             return true;
+         }
+         // Folia end - region threading
++        // Canvas start - restore detached fishing hook portal behavior
++        if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
++            && this.canvas$detachedPortalBugActive
++            && player.isRemoved()
++            && player.getRemovalReason() == Entity.RemovalReason.CHANGED_DIMENSION) {
++            return false;
++        }
++        // Canvas end - restore detached fishing hook portal behavior
+         if (player.canInteractWithLevel()) {
++            // Canvas start - restore detached fishing hook portal behavior
++            if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
++                && this.canvas$detachedPortalBugActive
++                && player.level().dimension() != this.level().dimension()) {
++                return false;
++            }
++            // Canvas end - restore detached fishing hook portal behavior
+             ItemStack mainHandItem = player.getMainHandItem();
+             ItemStack offhandItem = player.getOffhandItem();
+             boolean isFishingRod = mainHandItem.is(Items.FISHING_ROD);
+@@ -645,11 +703,32 @@ public class FishingHook extends Projectile {
+     private void updateOwnerInfo(@Nullable FishingHook fishingHook) {
+         Player playerOwner = this.getPlayerOwner();
+         if (playerOwner != null) {
+-            playerOwner.fishing = fishingHook;
++            playerOwner.fishing = fishingHook; // Canvas - restore detached fishing hook portal behavior
+         }
+     }
+ 
+     public @Nullable Player getPlayerOwner() {
++        // Canvas start - restore detached fishing hook portal behavior
++        if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
++            && this.canvas$detachedPortalBugActive
++            && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            Entity owner = this.getOwnerRaw();
++            if (owner instanceof Player player && !player.isRemoved()) {
++                return player;
++            }
++        }
++        if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
++            && this.canvas$detachedPortalBugActive
++            && this.canvas$detachedOwnerUuid != null) {
++            net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
++            if (server != null) {
++                ServerPlayer fallback = server.getPlayerList().getPlayer(this.canvas$detachedOwnerUuid);
++                if (fallback != null) {
++                    return fallback;
++                }
++            }
++        }
++        // Canvas end - restore detached fishing hook portal behavior
+         return this.getOwner() instanceof Player player ? player : null;
+     }
+ 
+@@ -678,6 +757,136 @@ public class FishingHook extends Projectile {
+         }
+     }
+ 
++    // Canvas start - restore detached fishing hook portal behavior
++    private boolean canvas$tryHandleDetachedHook(@Nullable Player playerOwner) {
++        if (!this.canvas$detachedPortalBugActive) {
++            return false;
++        }
++        if (this.canvas$shouldRealizeDetachedHook(playerOwner)) {
++            this.canvas$realizeDetachedHook(playerOwner);
++            return true;
++        }
++        ServerPlayer loadingPlayer = this.canvas$getChunkLoadingPlayer();
++        if (loadingPlayer != null && !canvas$isPortalTransitionActive(loadingPlayer)) {
++            this.canvas$scheduleOrRealizeDetachedHook(loadingPlayer);
++            return true;
++        }
++        return false;
++    }
++
++    private boolean canvas$shouldRealizeDetachedHook(@Nullable Player playerOwner) {
++        if (playerOwner == null || canvas$isPortalTransitionActive(playerOwner)) {
++            return false;
++        }
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(playerOwner)
++            && playerOwner.level().dimension() == this.level().dimension()) {
++            return true;
++        }
++        if (this.canvas$forceRealizeAfterCrossDimensionArrival && playerOwner.level().dimension() != this.level().dimension()) {
++            return true;
++        }
++        return this.canvas$detachedOwnerUuid != null
++            && this.canvas$detachedOwnerUuid.equals(playerOwner.getUUID())
++            && this.getOwnerRaw() != playerOwner;
++    }
++
++    private void canvas$scheduleOrRealizeDetachedHook(ServerPlayer player) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) {
++            this.canvas$realizeDetachedHook(player);
++        } else if (!this.canvas$realizeScheduled) {
++            this.canvas$realizeScheduled = true;
++            player.scheduleToOrRun(() -> this.scheduleToOrRun(() -> {
++                this.canvas$realizeScheduled = false;
++                if (this.canvas$detachedPortalBugActive && !this.isRemoved() && !canvas$isPortalTransitionActive(player)) {
++                    this.canvas$realizeDetachedHook(player);
++                }
++            }));
++        }
++    }
++
++    private @Nullable ServerPlayer canvas$getReloggedOwner() {
++        if (this.canvas$detachedOwnerUuid == null) {
++            return null;
++        }
++        net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
++        return server == null ? null : server.getPlayerList().getPlayer(this.canvas$detachedOwnerUuid);
++    }
++
++    private void canvas$realizeDetachedHook(Player playerOwner) {
++        if (this.hookedIn != null
++            && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.hookedIn)
++            && !this.hookedIn.isRemoved()
++            && this.hookedIn.canInteractWithLevel()) {
++            this.pullEntity(this.hookedIn);
++        }
++        this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++        this.canvas$detachedPortalBugActive = false;
++        this.canvas$realizeScheduled = false;
++        this.canvas$detachedOwnerUuid = null;
++        this.canvas$forceRealizeAfterCrossDimensionArrival = false;
++    }
++
++    private static boolean canvas$isPortalTransitionActive(Player player) {
++        if (player.isRemoved() && player.getRemovalReason() == Entity.RemovalReason.CHANGED_DIMENSION) {
++            return true;
++        }
++        return player instanceof ServerPlayer serverPlayer && serverPlayer.isChangingDimension();
++    }
++
++    private ServerPlayer canvas$getChunkLoadingPlayer() {
++        if (!(this.level() instanceof ServerLevel serverLevel)) {
++            return null;
++        }
++        ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players =
++            serverLevel.moonrise$getNearbyPlayers().getPlayers(this.chunkPosition(), ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.VIEW_DISTANCE);
++        if (players == null || players.size() == 0) {
++            return null;
++        }
++        ServerPlayer[] raw = players.getRawDataUnchecked();
++        for (int i = 0, len = players.size(); i < len; ++i) {
++            ServerPlayer player = raw[i];
++            if (player != null && !player.isRemoved()) {
++                return player;
++            }
++        }
++        return null;
++    }
++
++    private boolean canvas$hasEnderPearlInCurrentChunk() {
++        net.minecraft.world.level.ChunkPos chunkPos = this.chunkPosition();
++        double minX = chunkPos.x << 4;
++        double minZ = chunkPos.z << 4;
++        double maxX = minX + 16.0;
++        double maxZ = minZ + 16.0;
++        net.minecraft.world.phys.AABB chunkBounds = new net.minecraft.world.phys.AABB(
++            minX,
++            this.level().getMinY(),
++            minZ,
++            maxX,
++            this.level().getMaxY(),
++            maxZ
++        );
++        return !this.level()
++            .getEntitiesOfClass(
++                net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl.class,
++                chunkBounds,
++                entity -> !entity.isRemoved()
++            )
++            .isEmpty();
++    }
++
++    public boolean canvas$hasEnderPearlInChunkSnapshot() {
++        return this.canvas$chunkHasEnderPearl;
++    }
++
++    public void canvas$markPortalTransferState(boolean active, java.util.UUID ownerUuid, boolean forceRealizeAfterCrossDimensionArrival) {
++        this.canvas$detachedPortalBugActive = active;
++        this.canvas$realizeScheduled = false;
++        this.canvas$detachedOwnerUuid = active ? ownerUuid : null;
++        this.canvas$forceRealizeAfterCrossDimensionArrival = active && forceRealizeAfterCrossDimensionArrival;
++    }
++    // Canvas end - restore detached fishing hook portal behavior
++
+     public static enum FishHookState {
+         FLYING,
+         HOOKED_IN_ENTITY,
+diff --git a/net/minecraft/world/item/FishingRodItem.java b/net/minecraft/world/item/FishingRodItem.java
+index 70d8a1c..84ca2aa 100644
+--- a/net/minecraft/world/item/FishingRodItem.java
++++ b/net/minecraft/world/item/FishingRodItem.java
+@@ -23,8 +23,19 @@ public class FishingRodItem extends Item {
+         ItemStack itemInHand = player.getItemInHand(hand);
+         if (player.fishing != null) {
+             if (!level.isClientSide()) {
+-                int i = player.fishing.retrieve(itemInHand, hand); // Paper - Add hand parameter to PlayerFishEvent
+-                itemInHand.hurtAndBreak(i, player, hand.asEquipmentSlot());
++                // Canvas start - restore detached fishing hook portal behavior
++                FishingHook hook = player.fishing; // Canvas - restore detached fishing hook portal behavior
++                if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
++                    && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(hook)) {
++                    hook.scheduleToOrRun(() -> {
++                        int i = hook.retrieve(itemInHand, hand); // Paper - Add hand parameter to PlayerFishEvent
++                        player.scheduleToOrRun(() -> itemInHand.hurtAndBreak(i, player, hand.asEquipmentSlot()));
++                    });
++                } else {
++                    int i = hook.retrieve(itemInHand, hand); // Paper - Add hand parameter to PlayerFishEvent
++                    itemInHand.hurtAndBreak(i, player, hand.asEquipmentSlot());
++                }
++                // Canvas end - restore detached fishing hook portal behavior
+             }
+ 
+             level.playSound(
+-- 
+2.53.0
