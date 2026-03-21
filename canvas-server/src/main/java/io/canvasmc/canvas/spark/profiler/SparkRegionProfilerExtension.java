@@ -98,7 +98,7 @@ public class SparkRegionProfilerExtension {
                 pinner.pin((schedulingHandle, thread) -> {
                     // pin the actual region tick to the runner
                     STATE.set(new ProfilingState(schedulingHandle, pinner, thread));
-                    thread.link((AffinitySchedulerThreadPool.ScheduledState) schedulingHandle.state, false);
+                    thread.link(schedulingHandle, false);
                     sendMessage.accept("Completed scheduler setup for region pin profiling");
                     // schedule async, since spark runs its operations in this pool
                     MCUtil.scheduleAsyncTask(pinCallback);

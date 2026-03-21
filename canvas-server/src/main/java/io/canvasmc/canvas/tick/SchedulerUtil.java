@@ -183,7 +183,7 @@ public class SchedulerUtil {
             // if not linked to the previous, don't try and change
             if (!threadRunner.isLinkedTo(from)) return;
             threadRunner.unlink();
-            threadRunner.link((AffinitySchedulerThreadPool.ScheduledState) to.state, true);
+            threadRunner.link(to, true);
         }
 
         @Override
