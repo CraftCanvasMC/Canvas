@@ -1,0 +1,335 @@
+--- a/net/minecraft/world/ticks/LevelChunkTicks.java
++++ b/net/minecraft/world/ticks/LevelChunkTicks.java
+@@ -14,10 +_,22 @@
+ import org.jspecify.annotations.Nullable;
+ 
+ public class LevelChunkTicks<T> implements SerializableTickContainer<T>, TickContainerAccess<T>, ca.spottedleaf.moonrise.patches.chunk_system.ticks.ChunkSystemLevelChunkTicks { // Paper - rewrite chunk system
++    private static volatile it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap<Object> TYPE_2_INDEX; // Canvas - lithium-inspired tick scheduler
++
++    static {
++        TYPE_2_INDEX = new it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap<>(); // Canvas - lithium-inspired tick scheduler
++        TYPE_2_INDEX.defaultReturnValue(-1);
++    }
++
++    // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
+     private final Queue<ScheduledTick<T>> tickQueue = new PriorityQueue<>(ScheduledTick.DRAIN_ORDER);
+-    private @Nullable List<SavedTick<T>> pendingTicks;
+     private final Set<ScheduledTick<?>> ticksPerPosition = new ObjectOpenCustomHashSet<>(ScheduledTick.UNIQUE_TICK_HASH);
+-    private @Nullable BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> onTickAdded;
++    private final it.unimi.dsi.fastutil.longs.Long2ReferenceAVLTreeMap<io.canvasmc.canvas.util.tick.OrderedTickQueue<T>> tickQueuesByTimeAndPriority = new it.unimi.dsi.fastutil.longs.Long2ReferenceAVLTreeMap<>();
++    private io.canvasmc.canvas.util.tick.OrderedTickQueue<T> nextTickQueue;
++    private List<SavedTick<T>> pendingTicks;
++    private final it.unimi.dsi.fastutil.ints.IntOpenHashSet allTicks = new it.unimi.dsi.fastutil.ints.IntOpenHashSet();
++    private BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> onTickAdded;
++    // Canvas end - lithium-inspired tick scheduler
+ 
+     // Paper start - rewrite chunk system
+     /*
+@@ -34,7 +_,12 @@
+ 
+     @Override
+     public final boolean moonrise$isDirty(final long tick) {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            return this.dirty || (this.nextTickQueue != null && tick != this.lastSaved);
++        }
+         return this.dirty || (!this.tickQueue.isEmpty() && tick != this.lastSaved);
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     @Override
+@@ -44,17 +_,36 @@
+     // Paper end - rewrite chunk system
+     // Folia start - region threading
+     public void offsetTicks(final long offset) {
+-        if (offset == 0 || this.tickQueue.isEmpty()) {
+-            return;
+-        }
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (offset == 0) {
++            return;
++        }
++
++        if (canvas$useLithiumStyleScheduler()) {
++            if (this.nextTickQueue == null) {
++                return;
++            }
++
++            List<ScheduledTick<T>> ticks = this.getAll().toList();
++            this.tickQueuesByTimeAndPriority.clear();
++            this.nextTickQueue = null;
++
++            for (ScheduledTick<T> entry : ticks) {
++                this.queueTick(new ScheduledTick<>(entry.type(), entry.pos(), entry.triggerTick() + offset, entry.priority(), entry.subTickOrder()));
++            }
++            return;
++        }
++
++        if (this.tickQueue.isEmpty()) {
++            return;
++        }
++
+         final ScheduledTick<T>[] queue = this.tickQueue.toArray(new ScheduledTick[0]);
+         this.tickQueue.clear();
+         for (final ScheduledTick<T> entry : queue) {
+-            final ScheduledTick<T> newEntry = new ScheduledTick<>(
+-                entry.type(), entry.pos(), entry.triggerTick() + offset, entry.subTickOrder()
+-            );
+-            this.tickQueue.add(newEntry);
++            this.tickQueue.add(new ScheduledTick<>(entry.type(), entry.pos(), entry.triggerTick() + offset, entry.priority(), entry.subTickOrder())); // Canvas - lithium-inspired tick scheduler
+         }
++        // Canvas end - lithium-inspired tick scheduler
+     }
+     // Folia end - region threading
+ 
+@@ -64,81 +_,190 @@
+     public LevelChunkTicks(List<SavedTick<T>> pendingTicks) {
+         this.pendingTicks = pendingTicks;
+ 
+-        for (SavedTick<T> savedTick : pendingTicks) {
+-            this.ticksPerPosition.add(ScheduledTick.probe(savedTick.type(), savedTick.pos()));
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            for (SavedTick<T> savedTick : pendingTicks) {
++                this.allTicks.add(tickToInt(savedTick.pos(), savedTick.type()));
++            }
++        } else {
++            for (SavedTick<T> savedTick : pendingTicks) {
++                this.ticksPerPosition.add(ScheduledTick.probe(savedTick.type(), savedTick.pos()));
++            }
+         }
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+-    public void setOnTickAdded(@Nullable BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> onTickAdded) {
++    public void setOnTickAdded(BiConsumer<LevelChunkTicks<T>, ScheduledTick<T>> onTickAdded) {
+         this.onTickAdded = onTickAdded;
+     }
+ 
+     public @Nullable ScheduledTick<T> peek() {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            return this.nextTickQueue == null ? null : this.nextTickQueue.peek();
++        }
+         return this.tickQueue.peek();
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     public @Nullable ScheduledTick<T> poll() {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            if (this.nextTickQueue == null) {
++                return null;
++            }
++
++            ScheduledTick<T> scheduledTick = this.nextTickQueue.poll();
++            if (scheduledTick != null) {
++                if (this.nextTickQueue.isEmpty()) {
++                    this.updateNextTickQueue(true);
++                }
++                this.allTicks.remove(tickToInt(scheduledTick.pos(), scheduledTick.type()));
++                this.dirty = true; // Paper - rewrite chunk system
++            }
++
++            return scheduledTick;
++        }
++
+         ScheduledTick<T> scheduledTick = this.tickQueue.poll();
+         if (scheduledTick != null) {
+-            this.ticksPerPosition.remove(scheduledTick); this.dirty = true; // Paper - rewrite chunk system
++            this.ticksPerPosition.remove(scheduledTick);
++            this.dirty = true; // Paper - rewrite chunk system
+         }
+-
+         return scheduledTick;
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     @Override
+     public void schedule(ScheduledTick<T> tick) {
+-        if (this.ticksPerPosition.add(tick)) {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            if (this.allTicks.add(tickToInt(tick.pos(), tick.type()))) {
++                this.scheduleUnchecked(tick);
++                this.dirty = true; // Paper - rewrite chunk system
++            }
++        } else if (this.ticksPerPosition.add(tick)) {
+             this.scheduleUnchecked(tick); this.dirty = true; // Paper - rewrite chunk system
+         }
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     private void scheduleUnchecked(ScheduledTick<T> tick) {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            this.queueTick(tick);
++            return;
++        }
++
+         this.tickQueue.add(tick);
+         if (this.onTickAdded != null) {
+             this.onTickAdded.accept(this, tick);
+         }
++        // Canvas end - lithium-inspired tick scheduler
++    }
++
++    private void queueTick(ScheduledTick<T> tick) {
++        io.canvasmc.canvas.util.tick.OrderedTickQueue<T> queue = this.tickQueuesByTimeAndPriority.computeIfAbsent(getBucketKey(tick.triggerTick(), tick.priority()), unused -> new io.canvasmc.canvas.util.tick.OrderedTickQueue<>()); // Canvas - lithium-inspired tick scheduler
++        if (queue.isEmpty()) {
++            this.updateNextTickQueue(false);
++        }
++        queue.offer(tick);
++
++        if (this.onTickAdded != null) {
++            this.onTickAdded.accept(this, tick);
++        }
+     }
+ 
+     @Override
+     public boolean hasScheduledTick(BlockPos pos, T type) {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            return this.allTicks.contains(tickToInt(pos, type));
++        }
+         return this.ticksPerPosition.contains(ScheduledTick.probe(type, pos));
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     public void removeIf(Predicate<ScheduledTick<T>> predicate) {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            for (it.unimi.dsi.fastutil.objects.ObjectIterator<io.canvasmc.canvas.util.tick.OrderedTickQueue<T>> iterator = this.tickQueuesByTimeAndPriority.values().iterator(); iterator.hasNext();) {
++                io.canvasmc.canvas.util.tick.OrderedTickQueue<T> queue = iterator.next();
++                queue.sort();
++                boolean removed = false;
++                for (int i = 0; i < queue.size(); i++) {
++                    ScheduledTick<T> scheduledTick = queue.getTickAtIndex(i);
++                    if (predicate.test(scheduledTick)) {
++                        queue.setTickAtIndex(i, null);
++                        this.allTicks.remove(tickToInt(scheduledTick.pos(), scheduledTick.type()));
++                        removed = true;
++                    }
++                }
++                if (removed) {
++                    this.dirty = true; // Paper - rewrite chunk system
++                    queue.removeNullsAndConsumed();
++                }
++                if (queue.isEmpty()) {
++                    iterator.remove();
++                }
++            }
++            this.updateNextTickQueue(false);
++            return;
++        }
++
+         Iterator<ScheduledTick<T>> iterator = this.tickQueue.iterator();
+-
+         while (iterator.hasNext()) {
+             ScheduledTick<T> scheduledTick = iterator.next();
+             if (predicate.test(scheduledTick)) {
+-                iterator.remove(); this.dirty = true; // Paper - rewrite chunk system
++                iterator.remove();
++                this.dirty = true; // Paper - rewrite chunk system
+                 this.ticksPerPosition.remove(scheduledTick);
+             }
+         }
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     public Stream<ScheduledTick<T>> getAll() {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            return this.tickQueuesByTimeAndPriority.values().stream().flatMap(io.canvasmc.canvas.util.tick.OrderedTickQueue::stream);
++        }
+         return this.tickQueue.stream();
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     @Override
+     public int count() {
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            return this.allTicks.size();
++        }
+         return this.tickQueue.size() + (this.pendingTicks != null ? this.pendingTicks.size() : 0);
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     @Override
+     public List<SavedTick<T>> pack(long gameTime) {
+         this.lastSaved = gameTime; // Paper - rewrite chunk system
+-        List<SavedTick<T>> list = new ArrayList<>(this.tickQueue.size());
++        List<SavedTick<T>> list = new ArrayList<>(this.count()); // Canvas - lithium-inspired tick scheduler
+         if (this.pendingTicks != null) {
+             list.addAll(this.pendingTicks);
+         }
+ 
+-        for (ScheduledTick<T> scheduledTick : this.tickQueue) {
+-            list.add(scheduledTick.toSavedTick(gameTime));
++        // Canvas start - lithium-inspired tick scheduler; adapted for Canvas/Folia region threading
++        if (canvas$useLithiumStyleScheduler()) {
++            for (io.canvasmc.canvas.util.tick.OrderedTickQueue<T> queue : this.tickQueuesByTimeAndPriority.values()) {
++                for (ScheduledTick<T> scheduledTick : queue) {
++                    list.add(scheduledTick.toSavedTick(gameTime));
++                }
++            }
++        } else {
++            for (ScheduledTick<T> scheduledTick : this.tickQueue) {
++                list.add(scheduledTick.toSavedTick(gameTime));
++            }
+         }
+-
+         return list;
++        // Canvas end - lithium-inspired tick scheduler
+     }
+ 
+     public void unpack(long gameTime) {
+@@ -152,5 +_,47 @@
+         }
+ 
+         this.pendingTicks = null;
++    }
++
++    private void updateNextTickQueue(boolean checkEmpty) {
++        if (checkEmpty && this.nextTickQueue != null && this.nextTickQueue.isEmpty()) {
++            io.canvasmc.canvas.util.tick.OrderedTickQueue<T> removed = this.tickQueuesByTimeAndPriority.remove(this.tickQueuesByTimeAndPriority.firstLongKey()); // Canvas - lithium-inspired tick scheduler
++            if (removed != this.nextTickQueue) {
++                throw new IllegalStateException("Next tick queue does not match the lowest bucket");
++            }
++        }
++
++        this.nextTickQueue = this.tickQueuesByTimeAndPriority.isEmpty() ? null : this.tickQueuesByTimeAndPriority.get(this.tickQueuesByTimeAndPriority.firstLongKey());
++    }
++
++    private static long getBucketKey(long time, TickPriority priority) {
++        return (time << 4L) | (priority.ordinal() & 15L);
++    }
++
++    private static int tickToInt(BlockPos pos, Object type) {
++        int typeIndex = TYPE_2_INDEX.getInt(type);
++        if (typeIndex == -1) {
++            typeIndex = fixMissingTypeIndex(type);
++        }
++
++        int ret = ((pos.getX() & 0xF) << 16) | ((pos.getY() & 0xFFF) << 4) | (pos.getZ() & 0xF);
++        return ret | (typeIndex << 20);
++    }
++
++    private static synchronized int fixMissingTypeIndex(Object type) {
++        int typeIndex = TYPE_2_INDEX.getInt(type);
++        if (typeIndex == -1) {
++            it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap<Object> cloned = TYPE_2_INDEX.clone(); // Canvas - lithium-inspired tick scheduler
++            cloned.put(type, typeIndex = cloned.size());
++            TYPE_2_INDEX = cloned;
++            if (typeIndex >= 4096) {
++                throw new IllegalStateException("Tick scheduler type index overflow");
++            }
++        }
++        return typeIndex;
++    }
++
++    private static boolean canvas$useLithiumStyleScheduler() {
++        return io.canvasmc.canvas.Config.INSTANCE.enableLithiumStyleTickScheduler;
+     }
+ }

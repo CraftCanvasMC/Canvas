@@ -573,6 +573,13 @@ public class Config {
     })
     public boolean enableSuffocationOptimization = false;
 
+    @Comment({
+        "Enables an optimization for scheduled block and fluid tick containers.",
+        "Credits: CaffeineMC Lithium for the original queue and duplicate tracking.",
+        "EXPERIMENTAL"
+    })
+    public boolean enableLithiumStyleTickScheduler = false;
+
     @NonNegativeNumericValueValidator.NonNegativeNumericValue
     @Comment({
         "Defines the inaccuracy of skeleton bow shots. 14 being vanilla,",
