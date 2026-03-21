@@ -32,7 +32,19 @@ public final class ApiClient {
     /**
      * The HTTP client
      */
-    private final HttpClient CLIENT = HttpClient.newHttpClient();
+    private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+    private final String project;
+
+    /**
+     * Constructs a new API client for a provided project
+     *
+     * @param project
+     *     the project id
+     */
+    public ApiClient(final @NonNull String project) {
+        this.project = project.toLowerCase();
+    }
 
     /**
      * Fetches all builds for a specific Minecraft version.
@@ -53,15 +65,13 @@ public final class ApiClient {
      *     if the HTTP request is interrupted
      */
     public @NonNull List<Build> getAllBuilds(String minecraftVersion, boolean experimental) throws IOException, InterruptedException {
-        StringBuilder url = new StringBuilder(BASE_URL + "/builds");
+        StringBuilder url = new StringBuilder(BASE_URL + "/builds?project=" + project);
 
-        boolean hasQuery = false;
         if (minecraftVersion != null && !minecraftVersion.isBlank()) {
-            url.append("?minecraft_version=").append(minecraftVersion);
-            hasQuery = true;
+            url.append("&channel=").append(minecraftVersion);
         }
         if (experimental) {
-            url.append(hasQuery ? "&" : "?").append("experimental=true");
+            url.append("&experimental=true");
         }
 
         String json = sendRequest(url.toString());
@@ -136,7 +146,7 @@ public final class ApiClient {
      *     if the HTTP request is interrupted
      */
     public @NonNull Build getLatestBuild(boolean experimental) throws IOException, InterruptedException {
-        String url = BASE_URL + "/builds/latest" + (experimental ? "?experimental=true" : "");
+        String url = BASE_URL + "/builds/latest?project=" + project + (experimental ? "&experimental=true" : "");
         String json = sendRequest(url);
         return parseSingleBuild(json);
     }
@@ -155,7 +165,7 @@ public final class ApiClient {
      *     if the HTTP request is interrupted
      */
     public @Nullable Build getBuild(int buildNum) throws IOException, InterruptedException {
-        String json = sendRequest(BASE_URL + "/builds?experimental=true");
+        String json = sendRequest(BASE_URL + "/builds?project=" + project + "&experimental=true");
         List<Build> builds = parseBuildsArray(json);
         builds.sort(Comparator.comparingInt(Build::buildNumber));
         return builds.stream()
@@ -200,12 +210,13 @@ public final class ApiClient {
         int buildNumber = extractIntElse(json, "buildNumber", -1);
         String url = extractString(json, "url");
         String downloadUrl = extractString(json, "downloadUrl");
-        String mcVersion = extractString(json, "minecraftVersion");
+        String channelVersion = extractString(json, "channelVersion");
         long timestamp = extractLong(json, "timestamp");
         boolean experimental = extractBoolean(json, "isExperimental");
+        ChannelType channelType = buildNumber == -1 ? ChannelType.LOCAL : experimental ? ChannelType.BETA : ChannelType.STABLE;
 
         List<Commit> commits = parseCommits(json);
-        return new Build(buildNumber, url, downloadUrl, mcVersion, timestamp, buildNumber == -1 ? Channel.LOCAL : experimental ? Channel.BETA : Channel.STABLE, commits.toArray(new Commit[0]));
+        return new Build(buildNumber, url, downloadUrl, channelVersion, timestamp, channelType, commits.toArray(new Commit[0]));
     }
 
     private @NonNull List<Commit> parseCommits(@NonNull String json) {
@@ -307,7 +318,7 @@ public final class ApiClient {
     /**
      * The release channel of this build
      */
-    public enum Channel {
+    public enum ChannelType {
         STABLE(NamedTextColor.GREEN),
         BETA(NamedTextColor.YELLOW),
         LOCAL(NamedTextColor.RED),
@@ -315,7 +326,7 @@ public final class ApiClient {
 
         private final TextColor color;
 
-        Channel(TextColor color) {
+        ChannelType(TextColor color) {
             this.color = color;
         }
 
@@ -333,11 +344,11 @@ public final class ApiClient {
      *     the URL for this associated build
      * @param downloadUrl
      *     the download URL
-     * @param minecraftVersion
-     *     the Minecraft version for this build
+     * @param channelVersion
+     *     the channel version for this build
      * @param timestamp
      *     the timestamp of the associated build
-     * @param channel
+     * @param channelType
      *     the channel of this build
      * @param commits
      *     an array of commits in this build, can be empty
@@ -346,9 +357,9 @@ public final class ApiClient {
         int buildNumber,
         String url,
         String downloadUrl,
-        String minecraftVersion,
+        String channelVersion,
         long timestamp,
-        Channel channel,
+        ChannelType channelType,
         Commit[] commits
     ) {
         public boolean hasChanges() {
