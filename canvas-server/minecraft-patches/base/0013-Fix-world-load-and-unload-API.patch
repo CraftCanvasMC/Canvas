@@ -1,0 +1,277 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Sun, 22 Mar 2026 17:52:45 -0700
+Subject: [PATCH] Fix world load and unload API
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 63cdfac1196aae59318125242ca71eb5e9809240..02be700d945f6511af20f108edc87913b711bb45 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -444,6 +444,42 @@ public final class RegionizedServer {
+     // A global tick only updates things like weather / worldborder, basically anything in the world that is
+     // NOT tied to a specific region, but rather shared amongst all of them.
+     private void globalTick(final ServerLevel world, final long tickCount) {
++        // Canvas start - rewrite world load and unload
++        if (world.canvas$unloadTicket.isPresent()) {
++            // we are unloading, return.
++            AtomicBoolean isSingularRegionAlive = new AtomicBoolean(false);
++            world.regioniser.computeForAllRegions((region) -> {
++                if (!region.getData().getRegionSchedulingHandle().isMarkedAsNonSchedulable()) {
++                    // region still active, possibly still saving or hasn't gotten to that yet
++                    isSingularRegionAlive.set(true);
++                }
++            });
++            if (!isSingularRegionAlive.get()) {
++                io.canvasmc.canvas.util.ticket.UnloadTicket ticket = world.canvas$unloadTicket.getOrThrow();
++                LOGGER.info("Finalizing unload of world '{}'", world.getWorld().getName());
++                final boolean save = ticket.save();
++                if (save) {
++                    org.bukkit.Bukkit.getPluginManager().callEvent(new org.bukkit.event.world.WorldSaveEvent(world.getWorld()));
++                    world.saveLevelData(true);
++                }
++                world.chunkSource.getDataStorage().close();
++                // 'save' SHOULD be false, we run this on regions, and that MUST be regionized, or we crash :)
++                world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(false, true, false, true, false);
++                io.papermc.paper.FeatureHooks.closeEntityManager(world, save);
++                try {
++                    world.levelStorageAccess.close();
++                } catch (java.io.IOException e) {
++                    throw new RuntimeException("Unable to close level storage access for world unload", e);
++                }
++                this.worlds.remove(world);
++                MinecraftServer.getServer().removeLevel(world);
++                MinecraftServer.getServer().server.worlds.remove(world.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
++                LOGGER.info("Completed unload of world '{}'", world.getWorld().getName());
++                ticket.callback().accept(io.canvasmc.canvas.WorldUnloadResult.SUCCESS);
++            }
++            return;
++        }
++        // Canvas end - rewrite world load and unload
+         // needs
+         // worldborder tick
+         // advancing the weather cycle
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 5d75c013fb2dba827c4d9c90174157b95830aa51..9a4d76ebb3517ec05669a91daf7fe733a1000a44 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1671,6 +1671,69 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                 scheduler.executeTick();
+             }
+         }
++        // Canvas start - rewrite world load and unload
++        ServerLevel world = region.world;
++        if (world.canvas$unloadTicket.isPresent()) {
++            // finish teleports
++            final ChunkPos center = region.region.getCenterChunk();
++            LOGGER.info("Beginning unload of region around chunk {} in unloading world '{}'", center, world.getWorld().getName());
++            final List<ServerLevel.PendingTeleport> pendingTeleports = world.removeAllRegionTeleports();
++            if (!pendingTeleports.isEmpty()) {
++                LOGGER.info("Completing {} pending teleports in region around chunk {} in world '{}'", pendingTeleports.size(), center, world.getWorld().getName());
++                for (final ServerLevel.PendingTeleport pendingTeleport : pendingTeleports) {
++                    LOGGER.info("Completing teleportation to target position {}", pendingTeleport.to());
++
++                    // first, add entities to entity chunk so that they will be saved
++                    for (final net.minecraft.world.entity.Entity.EntityTreeNode node : pendingTeleport.rootVehicle().getFullTree()) {
++                        // assume that world and position are set to destination here
++                        node.root.setLevel(world); // in case the pending teleport is from a portal before it finds the exact destination
++                        world.moonrise$getEntityLookup().addEntityForShutdownTeleportComplete(node.root);
++                    }
++
++                    // then, rebuild the passenger tree so that when saving only the root vehicle will be written - and if
++                    // there are any player passengers, that the later player saving will save the tree
++                    pendingTeleport.rootVehicle().restore();
++
++                    // now we are finished
++                    LOGGER.info("Completed teleportation to target position {}", pendingTeleport.to());
++                }
++            }
++
++            // essentially we need to cover the ass of dumb plugins or race conditions
++            // where a player is teleported and then the world is unloaded, allowing a small
++            // window for a race condition where the player can be thrown into an unloading
++            // world. to resolve this issue we teleport the player back to where they came from
++            // Note: this covers the following:
++            //  - Portaling
++            //  - Teleporting (via command, plugin, etc.)
++            //  - Plugin
++            for (ServerPlayer localPlayer : world.getCurrentWorldData().getLocalPlayers()) {
++                io.canvasmc.canvas.util.ServerLocation lastTeleportPos = localPlayer.canvas$lastTeleportOrigin;
++                // this *really* shouldn't ever happen... ever
++                if (lastTeleportPos == null) {
++                    LOGGER.warn("Player does not contain a last origin teleport position, skipping unload return");
++                    continue;
++                }
++                LOGGER.info("Returning player to position {}/{} due to world unload", lastTeleportPos.world(), lastTeleportPos.pos());
++                localPlayer.teleportAsync(
++                    lastTeleportPos.world(),
++                    lastTeleportPos.pos(),
++                    lastTeleportPos.yaw(), lastTeleportPos.pitch(),
++                    null,
++                    org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
++                    net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK,
++                    null
++                );
++            }
++
++            LOGGER.info("Saving chunks in region around chunk {} in world '{}'", center, world.getWorld().getName());
++            world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(world.canvas$unloadTicket.getOrThrow().save(), true, false, false, false);
++
++            LOGGER.info("Descheduling region around chunk {} in world '{}'", center, world.getWorld().getName());
++            region.getRegionSchedulingHandle().markNonSchedulable();
++            return;
++        }
++        // Canvas end - rewrite world load and unload
+         // Folia end - region threading
+         //this.tickCount++; // Folia - region threading
+         //this.tickRateManager.tick(); // Folia - region threading
+@@ -1914,7 +1977,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public @Nullable ServerLevel getLevel(ResourceKey<Level> dimension) {
+-        return this.levels.get(dimension);
++        // Canvas start - region threading
++        ServerLevel world = this.levels.get(dimension);
++        if (world != null && world.canvas$unloadTicket.isPresent()) return null;
++        return world;
++        // Canvas end - region threading
+     }
+ 
+     // CraftBukkit start
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index d5fbbcde65fa16f13dd172e1330434112c216d47..702ed101f2345bcdc99612bddce70d4e5566f6bb 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -734,6 +734,38 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         );
+     }
+     public final io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData taskQueueRegionData = new io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData(this);
++    // Canvas start - region threading
++    public final io.canvasmc.canvas.util.ticket.TicketHolder<io.canvasmc.canvas.util.ticket.UnloadTicket>
++        canvas$unloadTicket = new io.canvasmc.canvas.util.ticket.TicketHolder<>();
++    // this lock should be used whenever we need to check or modify the unload state of the world
++    private final java.util.concurrent.locks.ReentrantLock canvas$worldStageLock = new java.util.concurrent.locks.ReentrantLock();
++    public final java.util.concurrent.CopyOnWriteArrayList<String> canvas$joiningPlayers = new java.util.concurrent.CopyOnWriteArrayList<>();
++
++    public void canvas$executeUnderWorldStageLock(Runnable runnable) {
++        canvas$obtainWorldStageLock();
++        try {
++            runnable.run();
++        } finally {
++            canvas$releaseWorldStageLock();
++        }
++    }
++
++    public void canvas$obtainWorldStageLock() {
++        canvas$worldStageLock.lock();
++    }
++
++    public void canvas$releaseWorldStageLock() {
++        canvas$worldStageLock.unlock();
++    }
++
++    public void canvas$incrementJoiningPlayers(String key) {
++        canvas$executeUnderWorldStageLock(() -> canvas$joiningPlayers.add(key));
++    }
++
++    public void canvas$decrementJoiningPlayers(String key) {
++        canvas$executeUnderWorldStageLock(() -> canvas$joiningPlayers.remove(key));
++    }
++    // Canvas end - region threading
+ 
+     public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
+     private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+index 2cc3dd1f267ae78d3aacb84509d4bf668235688f..39ecd727493f1322c8a4a7f4a8c9a35a5c00fb57 100644
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -90,6 +90,13 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
+         if (this.prepareSpawnTask != null) {
+             this.prepareSpawnTask.close();
+             this.prepareSpawnTask = null;
++            // Canvas start - region threading
++            // ensure that if we disconnect for some reason, we clear us from the join list
++            // this covers if exceptions are thrown during join
++            for (final net.minecraft.server.level.ServerLevel world : net.minecraft.server.MinecraftServer.getServer().getAllLevels()) {
++                world.canvas$decrementJoiningPlayers(gameProfile.name());
++            }
++            // Canvas end - region threading
+         }
+ 
+         super.onDisconnect(details);
+diff --git a/net/minecraft/server/network/config/PrepareSpawnTask.java b/net/minecraft/server/network/config/PrepareSpawnTask.java
+index 1fd5a68fcb685646c5c28c8e94ffef5eb319d7d8..bc5e4f96ed258d0142c26b965a7226d05ba632cd 100644
+--- a/net/minecraft/server/network/config/PrepareSpawnTask.java
++++ b/net/minecraft/server/network/config/PrepareSpawnTask.java
+@@ -96,16 +96,32 @@ public class PrepareSpawnTask implements ConfigurationTask {
+                 vanillaDefaultLevel = this.server.overworld();
+             }
+             ServerLevel serverLevel1;
++            boolean obtainedWorldStageLock = false; // Canvas - region threading
+             if (resourceKey == null) {
+                 serverLevel1 = vanillaDefaultLevel;
+             } else {
+                 serverLevel1 = this.server.getLevel(resourceKey);
+-                if (serverLevel1 == null) {
++                // Canvas start - region threading
++                if (serverLevel1 != null) {
++                    serverLevel1.canvas$obtainWorldStageLock();
++                    obtainedWorldStageLock = true;
++                }
++                // if it is null, the dimension doesn't exist
++                if (serverLevel1 == null || serverLevel1.canvas$unloadTicket.isPresent()) {
++                    if (serverLevel1 != null) {
++                        // if we reach here, we are unloading
++                        serverLevel1.canvas$releaseWorldStageLock();
++                        obtainedWorldStageLock = false;
++                    }
++                    // the overworld cannot be unloaded because of the bukkit api rule
++                // Canvas end - region threading
+                     LOGGER.warn("Unknown respawn dimension {}, defaulting to overworld", resourceKey);
+                     serverLevel1 = vanillaDefaultLevel;
+                 }
+             }
+             final ServerLevel serverLevel = serverLevel1;
++            serverLevel.canvas$incrementJoiningPlayers(nameAndId.name()); // Canvas - region threading
++            if (obtainedWorldStageLock) serverLevel.canvas$releaseWorldStageLock(); // Canvas - region threading
+             // Paper end - move logic in Entity to here, to use bukkit supplied world UUID & reset to main world spawn if no valid world is found
+             // Folia start - region threading
+             CompletableFuture<Vec3> completableFuture = new java.util.concurrent.CompletableFuture<>();
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 19c7a9f1a4486ca3ff671be868d355ebd3899c08..0f4f5b6bfeda52fd88bb3085d8c39e5aa80091ef 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -297,6 +297,7 @@ public abstract class PlayerList {
+         player.suppressTrackerForLogin = true;
+         this.sendLevelInfo(player, serverLevel);
+         serverLevel.addNewPlayer(player);
++        serverLevel.canvas$decrementJoiningPlayers(nameAndId.name()); // Canvas - region threading - we are added to player list by now, meaning it will be caught by unload preconditions
+         this.server.getCustomBossEvents().onPlayerConnect(player); // see commented out section below serverLevel.addPlayerJoin(player);
+         // Paper end - Fire PlayerJoinEvent when Player is actually ready
+         player.initInventoryMenu();
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 75027ce8fd85c1b49a9431a90c393ce312b64287..1caba4a4ec839ac20d00f8efd7af501c5af279db 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4333,6 +4333,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             return false;
+         }
+         this.getBukkitEntity(); // force bukkit entity to be created before TPing
++
++        if (destination.canvas$unloadTicket.isPresent()) {
++            // destination world unload propagated, do not teleport
++            return false;
++        }
++
+         if ((teleportFlags & TELEPORT_FLAG_UNMOUNT) == 0L) {
+             for (Entity entity : this.getIndirectPassengers()) {
+                 if (!entity.canTeleportAsync()) {
+@@ -4661,7 +4667,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             }
+         }
+ 
+-        return true;
++        return !to.canvas$unloadTicket.isPresent(); // Canvas - region threading
+     }
+ 
+     protected void prePortalLogic(ServerLevel origin, ServerLevel destination, PortalType type) {

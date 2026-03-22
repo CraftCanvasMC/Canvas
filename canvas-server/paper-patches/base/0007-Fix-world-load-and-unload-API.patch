@@ -1,0 +1,87 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Sun, 22 Mar 2026 17:52:22 -0700
+Subject: [PATCH] Fix world load and unload API
+
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 6252c253937cbb8781181d28769c6053886d6868..6a2ee34767a44a98f5f9079fddc57e022d09031a 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1206,7 +1206,7 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public World createWorld(WorldCreator creator) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot create worlds off global tick"); // Canvas - region threading
+         Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
+@@ -1349,6 +1349,67 @@ public final class CraftServer implements Server {
+ 
+         return serverLevel.getWorld();
+     }
++    // Canvas start - region threading
++
++    // note: we need to check these things:
++    //       - joining players
++    //       - teleporting players -- we need to check all players in the server, see if their world
++    //                                points to the unloading world. this is a safer way, since we
++    //                                can guarentee each player will have the destination world set correctly
++    //                                for teleporting on same-world regions
++    //       - portaling players   -- during region unloading, check the pending teleports and if there is a player
++    //                                then we send them back to their origin pos. this covers cross-dimension
++    //                                teleportation and also portaling between dimensions
++
++    @Override
++    public void unloadWorldAsync(@NotNull final String name, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++        unloadWorldAsync(Preconditions.checkNotNull(this.worlds.get(name), "Unknown world with name " + name), save, callback);
++    }
++
++    @Override
++    public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
++        ServerLevel handle = ((CraftWorld) world).getHandle();
++        try {
++            handle.canvas$obtainWorldStageLock();
++            if (handle.canvas$unloadTicket.isPresent()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_ALREADY_UNLOADING);
++                return;
++            }
++            if (handle.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_OVERWORLD);
++                return;
++            }
++            if (this.console.hasStartedShutdownThread.get()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_SHUTDOWN);
++                return;
++            }
++            if (!handle.canvas$joiningPlayers.isEmpty()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_JOINING);
++                return;
++            }
++            for (final net.minecraft.server.level.ServerPlayer player : console.getPlayerList().players) {
++                if (player.level() == handle) {
++                    callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_PRESENT);
++                    return;
++                }
++            }
++            if (!new WorldUnloadEvent(handle.getWorld()).callEvent()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNLOAD_EVENT);
++                return;
++            }
++
++            net.minecraft.server.MinecraftServer.LOGGER.info("Marking world '{}' for unload", world.getName());
++            handle.canvas$unloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
++        } catch (Throwable thrown) {
++            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
++            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
++        } finally {
++            handle.canvas$releaseWorldStageLock();
++        }
++    }
++
++    // Canvas end - region threading
+ 
+     @Override
+     public boolean unloadWorld(String name, boolean save) {
