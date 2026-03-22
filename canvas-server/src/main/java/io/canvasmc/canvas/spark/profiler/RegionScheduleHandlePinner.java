@@ -43,7 +43,6 @@ public interface RegionScheduleHandlePinner {
      * <br>
      * - Ensure the schedule handle will *never* disappear until profiling is over
      * <br></br>
-     * <b>Note:</b> This will *always* be called on the global tick
      *
      * @param finalizer
      *     the consumer that finishes the Spark profiler setup
@@ -61,7 +60,6 @@ public interface RegionScheduleHandlePinner {
      * <br>
      * - Call the finalizer <i>on the profiling schedule handle</i>
      * <br></br>
-     * <b>Note:</b> This will *always* be called on the global tick
      *
      * @param finalizer
      *     the consumer that finishes the Spark profiler completion
@@ -249,14 +247,19 @@ public interface RegionScheduleHandlePinner {
     class GlobalTickPinner implements RegionScheduleHandlePinner {
         @Override
         public void pin(BiConsumer<TickRegionScheduler.RegionScheduleHandle, AffinitySchedulerThreadPool.TickThreadRunner> finalizer) throws CommandSyntaxException {
-            TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
-            final AffinitySchedulerThreadPool.TickThreadRunner thread = ((AffinitySchedulerThreadPool) TickRegions.getScheduler().scheduler).getCurrentTickThreadRunner();
+            Runnable pinTask = () -> {
+                TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
+                final AffinitySchedulerThreadPool.TickThreadRunner thread = ((AffinitySchedulerThreadPool) TickRegions.getScheduler().scheduler).getCurrentTickThreadRunner();
 
-            if (thread == null) {
-                throw new IllegalStateException("Region scheduling handle returned null task or runner");
-            }
+                if (thread == null) {
+                    throw new IllegalStateException("Region scheduling handle returned null task or runner");
+                }
 
-            finalizer.accept(schedulingHandle, thread);
+                finalizer.accept(schedulingHandle, thread);
+            };
+            if (RegionizedServer.isGlobalTickThread()) {
+                pinTask.run();
+            } else RegionizedServer.getInstance().addTask(pinTask);
         }
 
         @Override
