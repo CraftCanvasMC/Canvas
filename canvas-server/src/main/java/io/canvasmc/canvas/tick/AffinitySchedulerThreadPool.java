@@ -692,7 +692,9 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                 }
             }
 
-            return false;
+            // if the scheduler is halted, return true so it kills the thread
+            // immediately instead of trying to run a tick
+            return this.scheduler.halted;
         }
 
         @Override
