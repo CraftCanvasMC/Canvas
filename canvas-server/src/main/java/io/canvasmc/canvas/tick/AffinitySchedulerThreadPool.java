@@ -352,9 +352,19 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
             }
         }
         // if linked, return that, don't even bother polling
-        final ScheduledState ret = enableWorkStealing ?
-            runner.linked != null && runner.linked.state != null ? (ScheduledState) runner.linked.state : this.poll(runner) :
-            globalQueue.poll();
+        final ScheduledState ret;
+        if (runner.linked != null && runner.linked.state != null) {
+            // pinned
+            ret = (ScheduledState) runner.linked.state;
+        }
+        else if (enableWorkStealing) {
+            // not pinned, using work stealing
+            ret = this.poll(runner);
+        }
+        else {
+            // not work stealing, not pinned, use global
+            ret = globalQueue.poll();
+        }
         if (ret == null && runner.linked == null) {
             this.idleThreads.set(runner.id);
             final int s = runner.localQueue.size();
