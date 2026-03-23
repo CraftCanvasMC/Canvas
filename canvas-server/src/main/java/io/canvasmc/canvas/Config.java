@@ -628,8 +628,8 @@ public class Config {
         public boolean fishingRodPulls = true;
 
         @Comment({
-            "Restores vanilla detached fishing-hook behavior used by wireless redstone setups.",
-            "When enabled, hooks keep their attached state while owner or target are on another region thread."
+            "Restores vanilla behavior where fishing hooks can remain detached from their owner, as used by some wireless redstone setups.",
+            "When enabled, hooks that cross region-thread or dimension boundaries (e.g. via portals) remain in this detached state instead of being reset or reattached."
         })
         public boolean restoreDetachedFishingHookPortalBug = false;
 
