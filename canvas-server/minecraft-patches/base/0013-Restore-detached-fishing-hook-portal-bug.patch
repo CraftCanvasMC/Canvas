@@ -5,10 +5,10 @@ Subject: [PATCH] Restore detached fishing hook portal bug
 
 
 diff --git a/net/minecraft/world/entity/player/Player.java b/net/minecraft/world/entity/player/Player.java
-index 874da7be8423434b4c0ea429e4a88026f90f1338..22138dbd4b1b8701ad2fee9e55579bb8cc4eb541 100644
+index 874da7be8423434b4c0ea429e4a88026f90f1338..b0a3f151b0648699c8daba19fda7d3d614cbb60c 100644
 --- a/net/minecraft/world/entity/player/Player.java
 +++ b/net/minecraft/world/entity/player/Player.java
-@@ -1370,6 +1372,20 @@ public abstract class Player extends Avatar implements ContainerUser {
+@@ -1370,6 +1370,20 @@ public abstract class Player extends Avatar implements ContainerUser {
      @Override
      protected void preRemove(RemovalReason reason) {
          super.preRemove(reason);
@@ -30,7 +30,7 @@ index 874da7be8423434b4c0ea429e4a88026f90f1338..22138dbd4b1b8701ad2fee9e55579bb8
      }
      // Folia end - region threading
 diff --git a/net/minecraft/world/entity/projectile/FishingHook.java b/net/minecraft/world/entity/projectile/FishingHook.java
-index 71f6acc07d222fe512bf8d9fbaad35cb36bcf2d6..8a066f807f29a2b33803b581535be9fefef45206 100644
+index 71f6acc07d222fe512bf8d9fbaad35cb36bcf2d6..cd4c6bc4b2cfe202fbf39c55cfb13b8a2da0888d 100644
 --- a/net/minecraft/world/entity/projectile/FishingHook.java
 +++ b/net/minecraft/world/entity/projectile/FishingHook.java
 @@ -68,6 +68,17 @@ public class FishingHook extends Projectile {
@@ -164,25 +164,40 @@ index 71f6acc07d222fe512bf8d9fbaad35cb36bcf2d6..8a066f807f29a2b33803b581535be9fe
              ItemStack mainHandItem = player.getMainHandItem();
              ItemStack offhandItem = player.getOffhandItem();
              boolean isFishingRod = mainHandItem.is(Items.FISHING_ROD);
-@@ -513,9 +591,17 @@ public class FishingHook extends Projectile {
+@@ -513,6 +591,15 @@ public class FishingHook extends Projectile {
      public int retrieve(ItemStack stack, net.minecraft.world.InteractionHand hand) {
          // Paper end - Add hand parameter to PlayerFishEvent
          Player playerOwner = this.getPlayerOwner();
 +        if (!this.level().isClientSide()
-+            && io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
-+            && this.canvas$detachedPortalBugActive
 +            && playerOwner instanceof ServerPlayer serverPlayer
-+            && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverPlayer)) {
-+            this.canvas$scheduleOrRealizeDetachedHook(serverPlayer);
++            && (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)
++                || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverPlayer))) {
++            if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug) {
++                this.scheduleToOrRun(() -> this.canvas$tryRealizeDetachedHookFromDifferentRegion(serverPlayer));
++            }
 +            return 0;
 +        }
          if (!this.level().isClientSide() && playerOwner != null && !this.shouldStopFishing(playerOwner)) {
              int i = 0;
-            if (this.hookedIn != null) {
-                 // CraftBukkit start
-                 org.bukkit.event.player.PlayerFishEvent playerFishEvent = new org.bukkit.event.player.PlayerFishEvent((org.bukkit.entity.Player) playerOwner.getBukkitEntity(), this.hookedIn.getBukkitEntity(), (org.bukkit.entity.FishHook) this.getBukkitEntity(), org.bukkit.craftbukkit.CraftEquipmentSlot.getHand(hand), org.bukkit.event.player.PlayerFishEvent.State.CAUGHT_ENTITY); // Paper - Add hand parameter to PlayerFishEvent
-                 if (!playerFishEvent.callEvent()) {
-@@ -645,11 +744,45 @@ public class FishingHook extends Projectile {
+             if (this.hookedIn != null) {
+@@ -595,6 +682,16 @@ public class FishingHook extends Projectile {
+         }
+     }
+ 
++    public void canvas$tryRealizeDetachedHookFromDifferentRegion(ServerPlayer player) {
++        if (!io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
++            || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            return;
++        }
++        if (this.canvas$detachedPortalBugActive && !this.isRemoved()) {
++            this.canvas$scheduleOrRealizeDetachedHook(player);
++        }
++    }
++
+     @Override
+     public void handleEntityEvent(byte id) {
+         if (id == EntityEvent.FISHING_ROD_REEL_IN && this.level().isClientSide() && this.hookedIn instanceof Player player && player.isLocalPlayer()) {
+@@ -645,11 +742,45 @@ public class FishingHook extends Projectile {
      private void updateOwnerInfo(@Nullable FishingHook fishingHook) {
          Player playerOwner = this.getPlayerOwner();
          if (playerOwner != null) {
@@ -229,7 +244,7 @@ index 71f6acc07d222fe512bf8d9fbaad35cb36bcf2d6..8a066f807f29a2b33803b581535be9fe
          return this.getOwner() instanceof Player player ? player : null;
      }
  
-@@ -678,6 +811,135 @@ public class FishingHook extends Projectile {
+@@ -678,6 +809,135 @@ public class FishingHook extends Projectile {
          }
      }
  
@@ -366,10 +381,17 @@ index 71f6acc07d222fe512bf8d9fbaad35cb36bcf2d6..8a066f807f29a2b33803b581535be9fe
          FLYING,
          HOOKED_IN_ENTITY,
 diff --git a/net/minecraft/world/item/FishingRodItem.java b/net/minecraft/world/item/FishingRodItem.java
-index 70d8a1caa896665f3f88a637cab3e8ad7ea52b56..84ca2aabc439d7d75de57cafdfceba966202a41d 100644
+index 70d8a1caa896665f3f88a637cab3e8ad7ea52b56..6b49bc8e1e28f94bc0e1112f58741f5e8da16eb8 100644
 --- a/net/minecraft/world/item/FishingRodItem.java
 +++ b/net/minecraft/world/item/FishingRodItem.java
-@@ -23,8 +23,19 @@ public class FishingRodItem extends Item {
+@@ -1,5 +1,6 @@
+ package net.minecraft.world.item;
+ 
++import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+@@ -23,8 +24,16 @@ public class FishingRodItem extends Item {
          ItemStack itemInHand = player.getItemInHand(hand);
          if (player.fishing != null) {
              if (!level.isClientSide()) {
@@ -379,10 +401,7 @@ index 70d8a1caa896665f3f88a637cab3e8ad7ea52b56..84ca2aabc439d7d75de57cafdfceba96
 +                FishingHook hook = player.fishing; // Canvas - restore detached fishing hook portal behavior
 +                if (io.canvasmc.canvas.Config.INSTANCE.combat.restoreDetachedFishingHookPortalBug
 +                    && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(hook)) {
-+                    hook.scheduleToOrRun(() -> {
-+                        int i = hook.retrieve(itemInHand, hand); // Paper - Add hand parameter to PlayerFishEvent
-+                        player.scheduleToOrRun(() -> itemInHand.hurtAndBreak(i, player, hand.asEquipmentSlot()));
-+                    });
++                    hook.scheduleToOrRun(() -> hook.canvas$tryRealizeDetachedHookFromDifferentRegion((ServerPlayer)player));
 +                } else {
 +                    int i = hook.retrieve(itemInHand, hand); // Paper - Add hand parameter to PlayerFishEvent
 +                    itemInHand.hurtAndBreak(i, player, hand.asEquipmentSlot());
