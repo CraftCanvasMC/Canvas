@@ -1,0 +1,198 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Sun, 22 Mar 2026 20:36:36 -0700
+Subject: [PATCH] Rewrite Waypoints
+
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index d86d5a8e9abc5f941d89fed410db323bb57b7dab..1a22759c4dba723920b5d116b6d55592a3bcce22 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -256,7 +256,7 @@ public class Commands {
+         TimeCommand.register(this.dispatcher);
+         TitleCommand.register(this.dispatcher, context);
+         //TriggerCommand.register(this.dispatcher); // Folia - region threading - TODO later
+-        //WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later
++        WaypointCommand.register(this.dispatcher, context);
+         WeatherCommand.register(this.dispatcher);
+         WorldBorderCommand.register(this.dispatcher);
+         if (JvmProfiler.INSTANCE.isAvailable()) {
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 702ed101f2345bcdc99612bddce70d4e5566f6bb..9d86118655dd3b0ef349770280ad3e9143f4d118 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -698,7 +698,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
+         this.sleepStatus = new SleepStatus();
+         this.gameEventDispatcher = new GameEventDispatcher(this);
+         this.randomSequences = Objects.requireNonNullElseGet(randomSequences, () -> this.getDataStorage().computeIfAbsent(RandomSequences.TYPE));
+-        this.waypointManager = new ServerWaypointManager();
++        this.waypointManager = new io.canvasmc.canvas.waypoints.RegionThreadingWaypointManager(this); // Canvas - region threading
+         this.environmentAttributes = EnvironmentAttributeSystem.builder().addDefaultLayers(this).build();
+         //this.updateSkyBrightness(); // Folia - region threading - delay until first tick
+         // Paper start - rewrite chunk system
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index aca88b9ec53debc85387fcd5920eef1d0292b769..3777c81fb5123cae478af94048e6b843c207b5c0 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -435,6 +435,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     // Paper start - rewrite chunk system
+     private ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.PlayerChunkLoaderData chunkLoader;
+     private final ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.ViewDistanceHolder viewDistanceHolder = new ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.ViewDistanceHolder();
++    public final it.unimi.dsi.fastutil.objects.Object2ObjectMap<net.minecraft.world.waypoints.WaypointTransmitter, net.minecraft.world.waypoints.WaypointTransmitter.Connection> canvas$activeWaypoints = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>(); // Canvas - region threading
+ 
+     @Override
+     public final boolean moonrise$isRealPlayer() {
+diff --git a/net/minecraft/server/waypoints/ServerWaypointManager.java b/net/minecraft/server/waypoints/ServerWaypointManager.java
+index 1cbc46e480cc7d109c6128f109a1a9e38bf1a193..ed9cba657d336b4577c4c1f3b808ae9d90644b4e 100644
+--- a/net/minecraft/server/waypoints/ServerWaypointManager.java
++++ b/net/minecraft/server/waypoints/ServerWaypointManager.java
+@@ -27,25 +27,12 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+ 
+     @Override
+     public void updateWaypoint(WaypointTransmitter waypoint) {
+-        if (this.waypoints.contains(waypoint)) {
+-            Map<ServerPlayer, WaypointTransmitter.Connection> map = Tables.transpose(this.connections).row(waypoint);
+-            SetView<ServerPlayer> set = Sets.difference(this.players, map.keySet());
+-
+-            for (Entry<ServerPlayer, WaypointTransmitter.Connection> entry : ImmutableSet.copyOf(map.entrySet())) {
+-                this.updateConnection(entry.getKey(), waypoint, entry.getValue());
+-            }
+-
+-            for (ServerPlayer serverPlayer : set) {
+-                this.createConnection(serverPlayer, waypoint);
+-            }
+-        }
++        // Canvas - region threading
+     }
+ 
+     @Override
+     public void untrackWaypoint(WaypointTransmitter waypoint) {
+-        this.connections.column(waypoint).forEach((serverPlayer, connection) -> connection.disconnect());
+-        Tables.transpose(this.connections).row(waypoint).clear();
+-        this.waypoints.remove(waypoint);
++        // Canvas - region threading
+     }
+ 
+     public void addPlayer(ServerPlayer player) {
+@@ -61,18 +48,15 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+     }
+ 
+     public void breakAllConnections() {
+-        this.connections.values().forEach(WaypointTransmitter.Connection::disconnect);
+-        this.connections.clear();
++        // Canvas - region threading
+     }
+ 
+     public void remakeConnections(WaypointTransmitter waypoint) {
+-        for (ServerPlayer serverPlayer : this.players) {
+-            this.createConnection(serverPlayer, waypoint);
+-        }
++        // Canvas - region threading
+     }
+ 
+     public Set<WaypointTransmitter> transmitters() {
+-        return this.waypoints;
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     private static boolean isLocatorBarEnabledFor(ServerPlayer player) {
+@@ -80,36 +64,10 @@ public class ServerWaypointManager implements WaypointManager<WaypointTransmitte
+     }
+ 
+     private void createConnection(ServerPlayer player, WaypointTransmitter waypoint) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection -> {
+-                    this.connections.put(player, waypoint, connection);
+-                    connection.connect();
+-                }, () -> {
+-                    WaypointTransmitter.Connection connection = this.connections.remove(player, waypoint);
+-                    if (connection != null) {
+-                        connection.disconnect();
+-                    }
+-                });
+-            }
+-        }
++        // Canvas - region threading
+     }
+ 
+     private void updateConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection connection) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                if (!connection.isBroken()) {
+-                    connection.update();
+-                } else {
+-                    waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection1 -> {
+-                        connection1.connect();
+-                        this.connections.put(player, waypoint, connection1);
+-                    }, () -> {
+-                        connection.disconnect();
+-                        this.connections.remove(player, waypoint);
+-                    });
+-                }
+-            }
+-        }
++        // Canvas - region threading
+     }
+ }
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 1caba4a4ec839ac20d00f8efd7af501c5af279db..b19db8806c21ef526cfa30cb64885f47d598dbb8 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4378,7 +4378,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             }
+ 
+             for (EntityTreeNode entity : passengerTree.getFullTree()) {
++                if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().untrackWaypoint(player); // Canvas - region threading
+                 entity.root.teleportSyncSameRegion(pos, yaw, pitch, velocity);
++                if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().trackWaypoint(player); // Canvas - region threading
+             }
+ 
+             if (hasPassengers) {
+diff --git a/net/minecraft/world/waypoints/WaypointTransmitter.java b/net/minecraft/world/waypoints/WaypointTransmitter.java
+index df85e70a7a2bb2591cab7879b9910f6aa60ad166..00c3adea98f477acff63b5e62456f6202ea6bad4 100644
+--- a/net/minecraft/world/waypoints/WaypointTransmitter.java
++++ b/net/minecraft/world/waypoints/WaypointTransmitter.java
+@@ -20,19 +20,36 @@ public interface WaypointTransmitter extends Waypoint {
+     Waypoint.Icon waypointIcon();
+ 
+     static boolean doesSourceIgnoreReceiver(LivingEntity entity, ServerPlayer player) {
+-        if (!player.getBukkitEntity().canSee(entity.getBukkitEntity())) return true; // Paper - ignore if entity is hidden from player
++        // Canvas start - region threading
+         if (player.isSpectator()) {
+             return false;
+-        } else if (!entity.isSpectator() && !entity.hasIndirectPassenger(player)) {
+-            double min = Math.min(entity.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE), player.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE));
+-            return entity.distanceTo(player) >= min;
+-        } else {
+-            return true;
+         }
++
++        if (!entity.isSpectator()) {
++            double dx = entity.getX() - player.getX();
++            double dz = entity.getZ() - player.getZ();
++            double horizontalDistSq = dx * dx + dz * dz;
++
++            if (horizontalDistSq < 4.0) {
++                if (entity.hasIndirectPassenger(player)) {
++                    return true;
++                }
++            }
++
++            double transmitRange = entity.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE);
++            double receiveRange = player.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE);
++            double minRange = Math.min(transmitRange, receiveRange);
++
++            return entity.distanceTo(player) >= minRange;
++        }
++
++        return true;
++        // Canvas end - region threading
+     }
+ 
+     static boolean isChunkVisible(ChunkPos pos, ServerPlayer player) {
+         // Paper start - rewrite chunk system
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) return false; // Canvas - region threading - if isn't current tick thread, not visible
+         final ca.spottedleaf.moonrise.patches.chunk_system.player.RegionizedPlayerChunkLoader.PlayerChunkLoaderData playerChunkLoader = ((ca.spottedleaf.moonrise.patches.chunk_system.player.ChunkSystemServerPlayer)player).moonrise$getChunkLoader();
+         return playerChunkLoader != null && playerChunkLoader.getSentChunksRaw().contains(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkKey(pos));
+         // Paper end - rewrite chunk system
