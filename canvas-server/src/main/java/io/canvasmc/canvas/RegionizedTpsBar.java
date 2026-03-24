@@ -16,7 +16,9 @@ import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
@@ -27,12 +29,16 @@ import org.jspecify.annotations.Nullable;
 import static net.kyori.adventure.text.Component.text;
 
 public class RegionizedTpsBar {
-    private static final ThreadLocal<DecimalFormat> TWO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0.00");
-    });
-    private static final ThreadLocal<DecimalFormat> ONE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0.0");
-    });
+    private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
+    private static final ThreadLocal<DecimalFormat> TPS_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
+    private static final ThreadLocal<DecimalFormat> MSPT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
+    private static final ThreadLocal<DecimalFormat> UTIL_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
+    private static final ThreadLocal<DecimalFormat> INT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0"));
+    private static final String DEFAULT_FORMAT =
+        "<gradient:#357cef:#f21af4><b>TPS</b></gradient>: <tps>  -  " +
+        "<gradient:#357cef:#f21af4><b>MSPT</b></gradient>: <mspt>  -  " +
+        "<gradient:#357cef:#f21af4><b>Util</b></gradient>: <util>%  -  " +
+        "<gradient:#357cef:#f21af4><b>Players</b></gradient>: <players>";
     private final RegionizedWorldData worldData;
     private final boolean canTick;
     private long nextTick = System.nanoTime();
@@ -70,22 +76,9 @@ public class RegionizedTpsBar {
             final double util = tickReportData.utilisation() * 100;
             final double tps = tpsAverage.segmentAll().average();
             final double mspt = msptAverage.segmentAll().average() / 1.0E6;
-            String tpsTruncated = TWO_DECIMAL_PLACES.get().format(tps);
-            String msptTruncated = TWO_DECIMAL_PLACES.get().format(mspt);
-            String utilizationTruncated = ONE_DECIMAL_PLACES.get().format(util) + "%";
-            // build component
-            final Component textComponent =
-                gradient("TPS", (builder) -> builder.decorate(TextDecoration.BOLD), NamedTextColor.BLUE, NamedTextColor.AQUA)
-                    .append(Component.text(": ", NamedTextColor.WHITE))
-                    .append(Component.text(tpsTruncated, this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0 ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps)))
-                    .append(Component.text("  -  ", NamedTextColor.WHITE))
-                    .append(gradient("MSPT", (builder) -> builder.decorate(TextDecoration.BOLD), NamedTextColor.BLUE, NamedTextColor.AQUA))
-                    .append(Component.text(": ", NamedTextColor.WHITE))
-                    .append(Component.text(msptTruncated, this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0 ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt)))
-                    .append(Component.text("  -  ", NamedTextColor.WHITE))
-                    .append(gradient("Util", (builder) -> builder.decorate(TextDecoration.BOLD), NamedTextColor.BLUE, NamedTextColor.AQUA))
-                    .append(Component.text(": ", NamedTextColor.WHITE))
-                    .append(Component.text(utilizationTruncated, this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0 ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(util / 100)));
+            final int players = this.worldData.getPlayerCount();
+            final boolean sprinting = this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0;
+            final Component textComponent = buildComponent(tps, mspt, util, players, sprinting);
             // update players
             for (final ServerPlayer localPlayer : this.worldData.getLocalPlayers()) {
                 localPlayer.canvas$tpsBarDisplay.setDisplay(textComponent);
@@ -93,6 +86,37 @@ public class RegionizedTpsBar {
             }
             this.nextTick = startTime + 1_000_000_000;
         }
+    }
+
+    private Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
+        String format = Config.INSTANCE.tpsBarFormat;
+        if (format == null || format.isBlank()) {
+            format = DEFAULT_FORMAT;
+        }
+
+        // convert legacy %tokens% to minimessage tags
+        format = format
+            .replace("%tps%", "<tps>")
+            .replace("%mspt%", "<mspt>")
+            .replace("%util%", "<util>")
+            .replace("%players%", "<players>");
+
+        final TextColor tpsColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps);
+        final TextColor msptColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt);
+        final TextColor utilColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(utilPercent / 100);
+
+        TagResolver resolver = TagResolver.builder()
+            .resolver(Placeholder.component("tps", number(tps, TPS_FORMAT, tpsColor)))
+            .resolver(Placeholder.component("mspt", number(mspt, MSPT_FORMAT, msptColor)))
+            .resolver(Placeholder.component("util", number(utilPercent, UTIL_FORMAT, utilColor)))
+            .resolver(Placeholder.component("players", number(players, INT_FORMAT, NamedTextColor.WHITE)))
+            .build();
+
+        return MINI_MESSAGE.deserialize(format, resolver);
+    }
+
+    private Component number(final double value, final ThreadLocal<DecimalFormat> fmt, final TextColor color) {
+        return Component.text(fmt.get().format(value), color);
     }
 
     public enum Placement {
