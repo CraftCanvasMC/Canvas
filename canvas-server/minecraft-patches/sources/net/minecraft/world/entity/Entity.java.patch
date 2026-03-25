@@ -1,0 +1,712 @@
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -260,6 +_,10 @@
+     private Vec3 deltaMovement = Vec3.ZERO;
+     private float yRot;
+     private float xRot;
++    // Canvas start - region threading
++    private volatile float canvas$threadSafeYRot;
++    private volatile float canvas$threadSafeXRot;
++    // Canvas end - region threading
+     public float yRotO;
+     public float xRotO;
+     private AABB bb = INITIAL_AABB;
+@@ -285,9 +_,14 @@
+     public int tickCount;
+     private int remainingFireTicks;
+     public boolean wasTouchingWater;
+-    protected Object2DoubleMap<TagKey<Fluid>> fluidHeight = new Object2DoubleArrayMap<>(2);
++    public double[] canvas$fluidHeightArray = new double[2]; // Canvas - optimize fluid height - protected -> public
+     protected boolean wasEyeInWater;
+-    private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
++    // Canvas start - optimize fluidOnEyes
++    // private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
++    private int canvas$fluidOnEyesMask = 0;
++    private static final int EYE_IN_WATER = 1 << 0;
++    private static final int EYE_IN_LAVA  = 1 << 1;
++    // Canvas end - optimize fluidOnEyes
+     public int invulnerableTime;
+     protected boolean firstTick = true;
+     protected final SynchedEntityData entityData;
+@@ -317,7 +_,7 @@
+     protected UUID uuid = Mth.createInsecureUUID(this.random);
+     protected String stringUUID = this.uuid.toString();
+     private boolean hasGlowingTag;
+-    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl
++    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new java.util.concurrent.CopyOnWriteArraySet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl // Canvas - region threading
+     private final double[] pistonDeltas = new double[]{0.0, 0.0, 0.0};
+     private long pistonDeltasGameTime = Long.MIN_VALUE; // Folia - region threading
+     protected EntityDimensions dimensions;
+@@ -877,7 +_,7 @@
+         }
+ 
+         //if (this instanceof ServerPlayer) this.handlePortal(); // CraftBukkit - Moved up to postTick // Folia - region threading - ONLY allow in postTick()
+-        if (this.canSpawnSprintParticle()) {
++        if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableSprintParticles && this.canSpawnSprintParticle()) { // Canvas - particles config
+             this.spawnSprintParticle();
+         }
+ 
+@@ -912,7 +_,16 @@
+ 
+         this.checkBelowWorld();
+         if (!this.level().isClientSide()) {
++            // Canvas start - hide flames on entities with fire resistance or invis
++            if (this instanceof net.minecraft.world.entity.LivingEntity livingEntity) {
++                this.setSharedFlagOnFire(this.remainingFireTicks > 0 &&
++                    (!io.canvasmc.canvas.Config.INSTANCE.networking.hideFlamesOnEntitiesWithFireResistance || !livingEntity.hasEffect(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE)) &&
++                    (!io.canvasmc.canvas.Config.INSTANCE.networking.hideFlamesOnEntitiesWithInvisibility || !livingEntity.isInvisible())
++                );
++            } else {
++            // Canvas end - hide flames on entities with fire resistance or invis
+             this.setSharedFlagOnFire(this.remainingFireTicks > 0);
++            } // Canvas - hide flames on entities with fire resistance or invis
+         }
+ 
+         this.firstTick = false;
+@@ -1115,6 +_,17 @@
+         final Vec3 originalMovement = movement; // Paper - Expose pre-collision velocity
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot move an entity off-main"); // Folia - region threading
+         if (this.noPhysics) {
++            // Canvas start - safely abort tick when very large movement crosses region ownership
++            Vec3 vec32 = this.position();
++            Vec3 vec33 = vec32.add(movement);
++            if (movement.lengthSqr() >= (30.0D * 30.0D)
++                && !Double.isNaN(vec33.x) && !Double.isNaN(vec33.y) && !Double.isNaN(vec33.z)
++                && !this.isVehicle()
++                && !this.isPassenger()
++                && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), vec32, movement, 0)) {
++                throw new io.canvasmc.canvas.entity.EntityMoveOutOfRegionException(this, type, movement);
++            }
++            // Canvas end - safely abort tick when very large movement crosses region ownership
+             this.setPos(this.getX() + movement.x, this.getY() + movement.y, this.getZ() + movement.z);
+             this.horizontalCollision = false;
+             this.verticalCollision = false;
+@@ -1163,6 +_,18 @@
+ 
+                 Vec3 vec32 = this.position();
+                 Vec3 vec33 = vec32.add(vec3);
++                // Canvas start - safely abort tick when very large movement crosses region ownership
++                // This is after collide(movement) so we evaluate resolved displacement, not raw input.
++                // Moonrise collision lookups treat out-of-region/unloaded chunks as blocking, so this point avoids
++                // applying a large cross-region setPos while preserving normal collision resolution first.
++                if (vec3.lengthSqr() >= (30.0D * 30.0D)
++                    && !Double.isNaN(vec33.x) && !Double.isNaN(vec33.y) && !Double.isNaN(vec33.z)
++                    && !this.isVehicle()
++                    && !this.isPassenger()
++                    && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), vec32, vec3, 0)) {
++                    throw new io.canvasmc.canvas.entity.EntityMoveOutOfRegionException(this, type, vec3);
++                }
++                // Canvas end - safely abort tick when very large movement crosses region ownership
+                 this.addMovementThisTick(new Entity.Movement(vec32, vec33, movement));
+                 this.setPos(vec33);
+             }
+@@ -1689,6 +_,11 @@
+         boolean flag1 = this.level instanceof ServerLevel serverLevel
+             && serverLevel.getServer().debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.ENTITY_BLOCK_INTERSECTIONS);
+         AtomicInteger atomicInteger = new AtomicInteger();
++        // Canvas start - optimize checkInsideBlocks
++        // use element array for lambdas
++        final net.minecraft.world.level.chunk.ChunkAccess[] cachedChunk = new  net.minecraft.world.level.chunk.ChunkAccess[] { null };
++        final long[] lastChunkPos = { Long.MIN_VALUE };
++        // Canvas end - optimize checkInsideBlocks
+         BlockGetter.forEachBlockIntersectedBetween(
+             from,
+             to,
+@@ -1699,13 +_,25 @@
+                 } else if (index >= maxSteps) {
+                     return false;
+                 } else {
+-                    // Folia start - region threading
+-                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(Entity.this.level, pos, 16)) {
+-                        return false;
+-                    }
+-                    // Folia end - region threading
++                    // Canvas start - optimize checkInsideBlocks
++                    // remove thread check here, as if the chunk is loaded, and we are NEXT TO IT, then it
++                    // should always be inside the current region
+                     atomicInteger.set(index);
+-                    BlockState blockState = this.level().getBlockState(pos);
++                    final int chunkX = pos.getX() >> 4;
++                    final int chunkZ = pos.getZ() >> 4;
++                    final long chunkLongPos = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
++                    if (lastChunkPos[0] != chunkLongPos) {
++                        // update cache, this is a different chunk than previous
++                        lastChunkPos[0] = chunkLongPos;
++                        cachedChunk[0] = this.level.getChunkIfLoaded(chunkX, chunkZ);
++                    }
++                    net.minecraft.world.level.chunk.ChunkAccess chunk = cachedChunk[0];
++                    if (chunk == null) {
++                        // return as if it were air
++                        return true;
++                    }
++                    BlockState blockState = chunk.getBlockState(pos);
++                    // Canvas end - optimize checkInsideBlocks
+                     if (blockState.isAir()) {
+                         if (flag1) {
+                             this.debugBlockIntersection((ServerLevel)this.level(), pos.immutable(), false, false);
+@@ -1716,7 +_,7 @@
+                         VoxelShape entityInsideCollisionShape = blockState.getEntityInsideCollisionShape(this.level(), pos, this);
+                         boolean flag2 = entityInsideCollisionShape == Shapes.block()
+                             || this.collidedWithShapeMovingFrom(from, to, entityInsideCollisionShape.move(new Vec3(pos)).toAabbs());
+-                        boolean flag3 = this.collidedWithFluid(blockState.getFluidState(), pos, from, to);
++                        boolean flag3 = (blockState.tagFlag & io.canvasmc.canvas.chunk.block.BlockTags.FLUID) != 0 && this.collidedWithFluid(blockState.getFluidState(), pos, from, to); // Canvas - optimize checkInsideBlocks
+                         if ((flag2 || flag3) && visited.add(pos.asLong())) {
+                             if (flag2) {
+                                 try {
+@@ -1768,6 +_,7 @@
+     }
+ 
+     public boolean collidedWithFluid(FluidState fluid, BlockPos pos, Vec3 from, Vec3 to) {
++        if (fluid.isEmpty()) return false; // Canvas - optimize checkInsideBlocks
+         AABB aabb = fluid.getAABB(this.level(), pos);
+         return aabb != null && this.collidedWithShapeMovingFrom(from, to, List.of(aabb));
+     }
+@@ -2013,7 +_,7 @@
+     }
+ 
+     protected boolean updateInWaterStateAndDoFluidPushing() {
+-        this.fluidHeight.clear();
++        this.canvas$fluidHeightArray = new double[2]; // Canvas - optimize fluid height
+         this.updateInWaterStateAndDoWaterCurrentPushing();
+         double d = this.level.environmentAttributes().getDimensionValue(EnvironmentAttributes.FAST_LAVA) ? 0.007 : 0.0023333333333333335;
+         boolean flag = this.updateFluidHeightAndDoFluidPushing(FluidTags.LAVA, d);
+@@ -2036,8 +_,8 @@
+     }
+ 
+     private void updateFluidOnEyes() {
+-        this.wasEyeInWater = this.isEyeInFluid(FluidTags.WATER);
+-        this.fluidOnEyes.clear();
++        this.wasEyeInWater = this.canvas$isEyeInWater(); // Canvas - optimize fluidOnEyes
++        this.canvas$fluidOnEyesMask = 0; // Canvas - optimize fluidOnEyes
+         double eyeY = this.getEyeY();
+         if (!(
+             this.getVehicle() instanceof AbstractBoat abstractBoat
+@@ -2049,10 +_,29 @@
+             FluidState fluidState = this.level().getFluidState(blockPos);
+             double d = blockPos.getY() + fluidState.getHeight(this.level(), blockPos);
+             if (d > eyeY) {
+-                fluidState.getTags().forEach(this.fluidOnEyes::add);
++                // Canvas start - optimize fluidOnEyes - remove stream and use bitmask
++                TagKey<Fluid>[] tags = fluidState.canvas$getTagsArray();
++                for (TagKey<Fluid> tag : tags) {
++                    if (tag == FluidTags.WATER) {
++                        this.canvas$fluidOnEyesMask |= EYE_IN_WATER;
++                    } else if (tag == FluidTags.LAVA) {
++                        this.canvas$fluidOnEyesMask |= EYE_IN_LAVA;
++                    }
++                }
++                // Canvas end - optimize fluidOnEyes - remove stream and use bitmask
+             }
+         }
+     }
++    // Canvas start - optimize fluidOnEyes
++
++    public boolean canvas$isEyeInWater() {
++        return (this.canvas$fluidOnEyesMask & EYE_IN_WATER) != 0;
++    }
++
++    public boolean canvas$isEyeInLava() {
++        return (this.canvas$fluidOnEyesMask & EYE_IN_LAVA) != 0;
++    }
++    // Canvas end - optimize fluidOnEyes
+ 
+     protected void doWaterSplashEffect() {
+         Entity entity = Objects.requireNonNullElse(this.getControllingPassenger(), this);
+@@ -2069,6 +_,7 @@
+ 
+         float f1 = Mth.floor(this.getY());
+ 
++        if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableWaterSplashParticles) { // Canvas - particles config
+         for (int i = 0; i < 1.0F + this.dimensions.width() * 20.0F; i++) {
+             double d = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+             double d1 = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+@@ -2089,6 +_,7 @@
+             double d1 = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+             this.level().addParticle(ParticleTypes.SPLASH, this.getX() + d, f1 + 1.0F, this.getZ() + d1, deltaMovement.x, deltaMovement.y, deltaMovement.z);
+         }
++        } // Canvas - particles config
+ 
+         this.gameEvent(GameEvent.SPLASH);
+     }
+@@ -2130,11 +_,38 @@
+     }
+ 
+     public boolean isEyeInFluid(TagKey<Fluid> fluidTag) {
+-        return this.fluidOnEyes.contains(fluidTag);
+-    }
++    // Canvas start - optimize fluidOnEyes
++        if (fluidTag == FluidTags.WATER) {
++            return (this.canvas$fluidOnEyesMask & EYE_IN_WATER) != 0;
++        } else if (fluidTag == FluidTags.LAVA) {
++            return (this.canvas$fluidOnEyesMask & EYE_IN_LAVA) != 0;
++        }
++        return false;
++    }
++
++    // Note: realistically would want to avoid using this, just use the index
++    //    - WATER: 0
++    //    - LAVA: 1
++    private int canvas$getFluidHeightIndex(TagKey<Fluid> fluidTag) {
++        if (fluidTag == FluidTags.WATER) {
++            return 0;
++        } else if (fluidTag == FluidTags.LAVA) {
++            return 1;
++        }
++        throw new UnsupportedOperationException("Unknown fluid tag");
++    }
++
++    public double canvas$getLavaFluidHeight() {
++        return this.canvas$fluidHeightArray[1];
++    }
++
++    public double canvas$getWaterFluidHeight() {
++        return this.canvas$fluidHeightArray[0];
++    }
++    // Canvas end - optimize fluid height
+ 
+     public boolean isInLava() {
+-        return !this.firstTick && this.fluidHeight.getDouble(FluidTags.LAVA) > 0.0;
++        return !this.firstTick && canvas$getLavaFluidHeight() > 0.0; // Canvas - optimize fluid height
+     }
+ 
+     public void moveRelative(float amount, Vec3 relative) {
+@@ -2271,8 +_,8 @@
+     }
+ 
+     public void push(Entity entity) {
++        if (!entity.noPhysics && !this.noPhysics) { // Leaf - collision physics check before vehicle check
+         if (!this.isPassengerOfSameVehicle(entity)) {
+-            if (!entity.noPhysics && !this.noPhysics) {
+                 if (this.level.paperConfig().collisions.onlyPlayersCollide && !(entity instanceof ServerPlayer || this instanceof ServerPlayer)) return; // Paper - Collision option for requiring a player participant
+                 double d = entity.getX() - this.getX();
+                 double d1 = entity.getZ() - this.getZ();
+@@ -3436,6 +_,15 @@
+         return this.calculateViewVector(this.getXRot(), this.getYRot());
+     }
+ 
++    // Canvas start - region threading
++    public Vec3 canvas$getLookAngleThreadSafe() {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            return this.getLookAngle();
++        }
++        return this.calculateViewVector(this.canvas$threadSafeXRot, this.canvas$threadSafeYRot);
++    }
++
++    // Canvas end - region threading
+     public Vec3 getHeadLookAngle() {
+         return this.calculateViewVector(this.getXRot(), this.getYHeadRot());
+     }
+@@ -3778,6 +_,7 @@
+     }
+ 
+     protected static void sendBubbleColumnParticles(Level level, BlockPos pos) {
++        if (io.canvasmc.canvas.Config.INSTANCE.particles.disableBubbleColumnParticles) return; // Canvas - particles config
+         if (level instanceof ServerLevel serverLevel) {
+             for (int i = 0; i < 2; i++) {
+                 serverLevel.sendParticles(
+@@ -4060,6 +_,11 @@
+         }
+ 
+         public void adjustRiders(boolean teleport) {
++        // Canvas start - region threading
++            this.adjustRiders(teleport, false);
++        }
++        public void adjustRiders(boolean teleport, boolean trackVehicleMoveStats) {
++        // Canvas end - region threading
+             java.util.ArrayDeque<EntityTreeNode> queue = new java.util.ArrayDeque<>();
+             queue.add(this);
+ 
+@@ -4072,14 +_,22 @@
+ 
+                 for (EntityTreeNode passenger : passengers) {
+                     queue.add(passenger);
++                    // Canvas start - region threading
++                    double x = passenger.root.getX();
++                    double y = passenger.root.getY();
++                    double z = passenger.root.getZ();
+                     curr.root.positionRider(passenger.root, teleport ? Entity::snapTo : Entity::setPos);
++                    if (trackVehicleMoveStats && passenger.root instanceof ServerPlayer player) {
++                        player.checkRidingStatistics(player.getX() - x, player.getY() - y, player.getZ() - z);
++                    }
++                    // Canvas end - region threading
+                 }
+             }
+         }
+     }
+ 
+     public void repositionAllPassengers(boolean teleport) {
+-        this.makePassengerTree().adjustRiders(teleport);
++        this.makePassengerTree().adjustRiders(teleport, true); // Canvas - region threading
+     }
+ 
+     protected EntityTreeNode makePassengerTree() {
+@@ -4320,9 +_,20 @@
+         );
+     }
+ 
+-    public final boolean teleportAsync(ServerLevel destination, Vec3 pos, Float yaw, Float pitch, Vec3 velocity,
+-                                       org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
+-                                       java.util.function.Consumer<Entity> teleportComplete) {
++    // Canvas start - region threading
++    public @org.jetbrains.annotations.Nullable io.canvasmc.canvas.util.ServerLocation canvas$lastTeleportOrigin = null;
++
++    public void scheduleToOrRun(Runnable task) {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            task.run();
++            return;
++        }
++        this.getBukkitEntity().taskScheduler.schedule(
++            (entity) -> task.run(), null, 1L
++        );
++    }
++
++    private boolean canvas$checkCanTeleportAsync(ServerLevel destination, Vec3 pos, long teleportFlags) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
+ 
+         if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
+@@ -4333,6 +_,12 @@
+             return false;
+         }
+         this.getBukkitEntity(); // force bukkit entity to be created before TPing
++
++        if (destination.canvas$worldUnloadTicket.isPresent()) {
++            // destination world unload propagated, do not teleport
++            return false;
++        }
++
+         if ((teleportFlags & TELEPORT_FLAG_UNMOUNT) == 0L) {
+             for (Entity entity : this.getIndirectPassengers()) {
+                 if (!entity.canTeleportAsync()) {
+@@ -4345,16 +_,64 @@
+         }
+ 
+         if ((teleportFlags & TELEPORT_FLAG_TELEPORT_PASSENGERS) != 0L) {
+-            if (this.isPassenger()) {
+-                return false;
+-            }
++            return !this.isPassenger();
+         } else {
+-            if (this.isVehicle() || this.isPassenger()) {
++            return !this.isVehicle() && !this.isPassenger();
++        }
++    }
++
++    public static class TeleportValidationException extends IllegalStateException {
++        @Override
++        public String getMessage() {
++            return "Teleport validation must pass before and after teleport events have been fired.";
++        }
++    }
++
++    public final boolean teleportAsync(ServerLevel destination, Vec3 pos, @Nullable Float yaw, @Nullable Float pitch, Vec3 velocity,
++                                       org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
++                                       java.util.function.Consumer<Entity> teleportComplete) {
++        if (!this.canvas$checkCanTeleportAsync(destination, pos, teleportFlags)) {
++            return false;
++        } // else | we passed first go
++        // TODO - all teleport events things actually go HERE
++        // when we call events, they need to allow destination modification but also need to account
++        // for the fact that the teleport passed BEFORE, and now we need to pass AGAIN to be considered valid still
++        // we check this because of this comment in Folia#68:
++        //     "The comment where I wrote that events may be placed there is actually wrong.
++        //     It also needs to check the preconditions for teleporting again, as plugins may
++        //     modify them. Ideally, given that this is "new" API, if any of those checks fail
++        //     (i.e wrong tick thread, entity removed, or any other check it made before) then
++        //     the code needs to throw an exception." - SpottedLeaf
++        // fire teleport events
++        Vec3 currPos = this.position();
++        ServerLevel originWorld = (ServerLevel) this.level();
++        boolean shouldCallEvents =
++            // this is purely so we don't do uneeded event calls and we don't run checks twice for no reason
++            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
++            io.canvasmc.canvas.event.EntityTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++        if (shouldCallEvents) {
++            // we have listeners, call
++            org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
++            org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
++            io.canvasmc.canvas.event.EntityTeleportAsyncEvent teleportAsyncEvent =
++                new io.canvasmc.canvas.event.EntityTeleportAsyncEvent(this.getBukkitEntity(), bukkitFrom, bukkitTo, cause);
++            if (!teleportAsyncEvent.callEvent()) {
++                // event was cancelled
+                 return false;
+             }
++            org.bukkit.Location resultLocation = teleportAsyncEvent.getTo();
++            pos = new Vec3(teleportAsyncEvent.getTo().x(), teleportAsyncEvent.getTo().y(), teleportAsyncEvent.getTo().z());
++            destination = resultLocation.getWorld() == null ? destination : ((org.bukkit.craftbukkit.CraftWorld) resultLocation.getWorld()).getHandle();
++            yaw = resultLocation.getYaw();
++            pitch = resultLocation.getPitch();
+         }
+ 
+-        // TODO any events that can modify go HERE
++        if (shouldCallEvents && !canvas$checkCanTeleportAsync(destination, pos, teleportFlags)) {
++            // plugin did something funky, kill
++            throw new TeleportValidationException();
++        }
++        this.canvas$lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, currPos, this.getYRot(), this.getXRot());
++    // Canvas end - region threading
+ 
+         // check for same region
+         if (destination == this.level()
+@@ -4372,7 +_,9 @@
+             }
+ 
+             for (EntityTreeNode entity : passengerTree.getFullTree()) {
++                if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().untrackWaypoint(player); // Canvas - region threading
+                 entity.root.teleportSyncSameRegion(pos, yaw, pitch, velocity);
++                if (entity.root instanceof ServerPlayer player) destination.getWaypointManager().trackWaypoint(player); // Canvas - region threading
+             }
+ 
+             if (hasPassengers) {
+@@ -4390,12 +_,21 @@
+             if (teleportComplete != null) {
+                 teleportComplete.accept(this);
+             }
++            // Canvas start - region threading
++            if (io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
++                org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
++                org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
++                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
++                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
++                ).callEvent();
++            }
++            // Canvas end - region threading
+             return true;
+         }
+ 
+         EntityTreeNode passengerTree = this.detachPassengers();
+         List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
+-        ServerLevel originWorld = (ServerLevel)this.level;
++        // Canvas - region threading
+ 
+         for (EntityTreeNode node : fullPassengerTree) {
+             node.root.preChangeDimension();
+@@ -4405,7 +_,22 @@
+             node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, velocity);
+         }
+ 
+-        passengerTree.root.placeInAsync(originWorld, destination, teleportFlags, passengerTree, teleportComplete);
++        // Canvas start - region threading
++        final ServerLevel finalLevelDest = destination;
++        final Vec3 finalPos = pos;
++        final Float finalYaw = yaw;
++        final Float finalPitch = pitch;
++        passengerTree.root.placeInAsync(originWorld, destination, teleportFlags, passengerTree, (entity) -> {
++            if (teleportComplete != null) teleportComplete.accept(entity);
++            if (io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
++                org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
++                org.bukkit.Location bukkitTo = new org.bukkit.Location(finalLevelDest.getWorld(), finalPos.x, finalPos.y, finalPos.z, finalYaw == null ? 0 : finalYaw, finalPitch == null ? 0 : finalPitch);
++                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
++                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
++                ).callEvent();
++            }
++        });
++        // Canvas end - region threading
+ 
+         return true;
+     }
+@@ -4427,7 +_,7 @@
+     public boolean endPortalLogicAsync(BlockPos portalPos) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+ 
+-        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? Level.OVERWORLD : Level.END);
++        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey() : Level.END); // Canvas - default respawn dimension config
+         if (destination == null) {
+             // wat
+             return false;
+@@ -4439,7 +_,7 @@
+     public boolean netherPortalLogicAsync(BlockPos portalPos) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+ 
+-        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? Level.OVERWORLD : Level.NETHER);
++        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey() : Level.NETHER); // Canvas - default respawn dimension config
+         if (destination == null) {
+             // wat
+             return false;
+@@ -4660,6 +_,7 @@
+                 }
+             }
+         }
++        if (to != null && to.canvas$worldUnloadTicket.isPresent()) return false; // Canvas - region threading
+ 
+         return true;
+     }
+@@ -4671,9 +_,36 @@
+     protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
+                                     PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
++        // Canvas start - region threading
+         if (!this.canPortalAsync(destination, takePassengers)) {
+             return false;
+-        }
++        } // else | we passed first go
++        // TODO - all portal events go here
++        // fire portal events
++        ServerLevel originWorld = (ServerLevel) this.level();
++        boolean shouldCallEvents =
++            // this is purely so we don't do uneeded event calls and we don't run checks twice for no reason
++            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++        if (shouldCallEvents) {
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent portalAsyncEvent = new io.canvasmc.canvas.event.EntityPortalAsyncEvent(
++                this.getBukkitEntity(), originWorld.getWorld(), destination.getWorld(),
++                switch (type) {
++                    case END -> org.bukkit.PortalType.ENDER;
++                    case NETHER -> org.bukkit.PortalType.NETHER;
++                }
++            );
++            if (!portalAsyncEvent.callEvent()) {
++                return false;
++            }
++            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
++        }
++        if (shouldCallEvents && !this.canPortalAsync(destination, takePassengers)) {
++            // plugin did something funky, kill
++            throw new TeleportValidationException();
++        }
++        final ServerLevel finalDestination = destination;
++        // Canvas end - region threading
+ 
+         Vec3 initialPosition = this.position();
+         ChunkPos initialPositionChunk = new ChunkPos(
+@@ -4684,7 +_,8 @@
+         // first, remove entity/passengers from world
+         EntityTreeNode passengerTree = this.detachPassengers();
+         List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
+-        ServerLevel originWorld = (ServerLevel)this.level;
++        // Canvas - region threading - moved up
++        this.canvas$lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, initialPosition, this.getYRot(), this.getXRot()); // Canvas - region threading
+ 
+         for (EntityTreeNode node : fullPassengerTree) {
+             node.root.preChangeDimension();
+@@ -4696,6 +_,11 @@
+             node.root = node.root.transformForAsyncTeleport(destination, null, null, null, null);
+             // set portal cooldown
+             node.root.setPortalCooldown();
++            // Canvas start - region threading
++            if (node.root instanceof ServerPlayer player) {
++                player.connection.send(new net.minecraft.network.protocol.game.ClientboundRespawnPacket(player.createCommonSpawnInfo(destination), (byte) 3));
++            }
++            // Canvas end - region threading
+         }
+ 
+         // ensure the region is always ticking in case of a shutdown
+@@ -4731,7 +_,7 @@
+ 
+             // place
+             passengerTree.root.placeInAsync(
+-                originWorld, destination, Entity.TELEPORT_FLAG_LOAD_CHUNK | (takePassengers ? Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS : 0L),
++                originWorld, finalDestination, Entity.TELEPORT_FLAG_LOAD_CHUNK | (takePassengers ? Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS : 0L), // Canvas - region threading
+                 passengerTree,
+                 (Entity teleported) -> {
+                     if (info.postTeleportTransition() != null) {
+@@ -4741,6 +_,17 @@
+                     if (teleportComplete != null) {
+                         teleportComplete.accept(teleported);
+                     }
++                    // Canvas start - region threading
++                    if (io.canvasmc.canvas.event.EntityPostPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
++                        new io.canvasmc.canvas.event.EntityPostPortalAsyncEvent(
++                            this.getBukkitEntity(), originWorld.getWorld(), finalDestination.getWorld(),
++                            switch (type) {
++                                case END -> org.bukkit.PortalType.ENDER;
++                                case NETHER -> org.bukkit.PortalType.NETHER;
++                            }
++                        ).callEvent();
++                    }
++                    // Canvas end - region threading
+                 }
+             );
+         });
+@@ -4990,7 +_,7 @@
+ 
+     public boolean canTeleport(Level fromLevel, Level toLevel) {
+         if (!this.isAlive() || !this.valid) return false; // Paper - Fix item duplication and teleport issues
+-        if (fromLevel.dimension() == Level.END && toLevel.dimension() == Level.OVERWORLD) {
++        if (fromLevel.dimension() == Level.END && toLevel.dimension() == io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()) { // Canvas - default respawn dimension config
+             for (Entity entity : this.getPassengers()) {
+                 if (entity instanceof ServerPlayer serverPlayer && !serverPlayer.seenCredits) {
+                     return false;
+@@ -5518,9 +_,7 @@
+ 
+     // Paper start - optimise collisions
+     public boolean updateFluidHeightAndDoFluidPushing(final TagKey<Fluid> fluid, final double flowScale) {
+-        if (this.touchingUnloadedChunk()) {
+-            return false;
+-        }
++        // Canvas - optimize fluid pushing
+ 
+         final AABB boundingBox = this.getBoundingBox().deflate(1.0E-3);
+ 
+@@ -5552,6 +_,7 @@
+ 
+         final net.minecraft.world.level.chunk.ChunkSource chunkSource = world.getChunkSource();
+ 
++        int heightIndex = canvas$getFluidHeightIndex(fluid); // Canvas - optimize fluid height
+         final int chunkLenX = maxChunkX - minChunkX + 1;
+         // chunk index = (x - minX) + (maxX-minX+1)*(z - minZ)
+         //             = x + (maxX-minX+1)*z - (minX + (maxX-minX+1)*minZ)
+@@ -5562,14 +_,28 @@
+         // init chunks
+         for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
+             for (int currChunkX = minChunkX; currChunkX <= maxChunkX; ++currChunkX) {
+-                sections[currChunkX + chunkLenX*currChunkZ + chunkOffset] = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false).getSections();
++                // Canvas start - optimize fluid pushing
++                final net.minecraft.world.level.chunk.ChunkAccess chunk = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false);
++                if (chunk == null) continue;
++                sections[currChunkX + chunkLenX*currChunkZ + chunkOffset] = chunk.getSections();
++                // Canvas end - optimize fluid pushing
+             }
+         }
+ 
+         for (int currX = minBlockX; currX <= maxBlockX; ++currX) {
+             for (int currY = minBlockY; currY <= maxBlockY; ++currY) {
+                 for (int currZ = minBlockZ; currZ <= maxBlockZ; ++currZ) {
+-                    final FluidState fluidState = sections[(currX >> 4) + chunkLenX*(currZ >> 4) + chunkOffset][(currY >> 4) - minSection]
++                    // Canvas start - optimize fluid pushing
++                    final net.minecraft.world.level.chunk.LevelChunkSection[] section = sections[(currX >> 4) + chunkLenX * (currZ >> 4) + chunkOffset];
++                    if (section == null) continue;
++                    final net.minecraft.world.level.chunk.LevelChunkSection levelChunkSection = section[(currY >> 4) - minSection];
++                    if (
++                        levelChunkSection.hasOnlyAir()
++                        || (fluid == FluidTags.WATER && levelChunkSection.canvas$waterCount == 0 && levelChunkSection.canvas$bubbleCount <= 0)
++                        || (fluid == FluidTags.LAVA && levelChunkSection.canvas$lavaCount == 0)
++                    ) continue;
++                    final FluidState fluidState = levelChunkSection
++                    // Canvas end - optimize fluid pushing
+                         .states.get((currX & 15) | ((currZ & 15) << 4) | ((currY & 15) << 8)).getFluidState();
+ 
+                     if (fluidState.isEmpty() || !fluidState.is(fluid)) {
+@@ -5611,7 +_,7 @@
+             }
+         }
+ 
+-        this.fluidHeight.put(fluid, maxHeightDiff);
++        this.canvas$fluidHeightArray[heightIndex] = maxHeightDiff; // Canvas - optimize fluid height
+ 
+         if (pushVector == Vec3.ZERO) {
+             return inFluid;
+@@ -5647,7 +_,7 @@
+     }
+ 
+     public double getFluidHeight(TagKey<Fluid> fluidTag) {
+-        return this.fluidHeight.getDouble(fluidTag);
++        return this.canvas$fluidHeightArray[canvas$getFluidHeightIndex(fluidTag)]; // Canvas - optimize fluid height
+     }
+ 
+     public double getFluidJumpThreshold() {
+@@ -5913,6 +_,7 @@
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + yRot + ", discarding.");
+         } else {
+             this.yRot = yRot;
++            this.canvas$threadSafeYRot = yRot; // Canvas - region threading
+         }
+     }
+ 
+@@ -5925,6 +_,7 @@
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + xRot + ", discarding.");
+         } else {
+             this.xRot = Math.clamp(xRot % 360.0F, -90.0F, 90.0F);
++            this.canvas$threadSafeXRot = this.xRot; // Canvas - region threading
+         }
+     }
+ 

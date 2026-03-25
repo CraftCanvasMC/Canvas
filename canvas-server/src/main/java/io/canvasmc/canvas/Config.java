@@ -627,12 +627,6 @@ public class Config {
         @Comment("Allows toggling if a fishing rod can pull entities")
         public boolean fishingRodPulls = true;
 
-        @Comment({
-            "Restores vanilla behavior where fishing hooks can remain detached from their owner, as used by some wireless redstone setups.",
-            "When enabled, hooks that cross region-thread or dimension boundaries (e.g. via portals) remain in this detached state instead of being reset or reattached."
-        })
-        public boolean restoreDetachedFishingHookPortalBug = false;
-
         @Comment("Configures the damage modifier per critical hit")
         public float criticalHitMultiplier = 1.5F;
 
