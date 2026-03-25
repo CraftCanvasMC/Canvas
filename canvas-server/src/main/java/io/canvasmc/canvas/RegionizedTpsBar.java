@@ -39,6 +39,8 @@ public class RegionizedTpsBar {
         "<gradient:#357cef:#f21af4><b>MSPT</b></gradient>: <mspt>  -  " +
         "<gradient:#357cef:#f21af4><b>Util</b></gradient>: <util>%  -  " +
         "<gradient:#357cef:#f21af4><b>Players</b></gradient>: <players>";
+    private static volatile String cachedRawFormat = null;
+    private static volatile String cachedNormalizedFormat = DEFAULT_FORMAT;
     private final RegionizedWorldData worldData;
     private final boolean canTick;
     private long nextTick = System.nanoTime();
@@ -89,17 +91,14 @@ public class RegionizedTpsBar {
     }
 
     private Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
-        String format = Config.INSTANCE.tpsBarFormat;
-        if (format == null || format.isBlank()) {
-            format = DEFAULT_FORMAT;
+        String raw = Config.INSTANCE.tpsBarFormat;
+        if (raw == null || raw.isBlank()) {
+            raw = DEFAULT_FORMAT;
         }
-
-        // convert legacy %tokens% to minimessage tags
-        format = format
-            .replace("%tps%", "<tps>")
-            .replace("%mspt%", "<mspt>")
-            .replace("%util%", "<util>")
-            .replace("%players%", "<players>");
+        if (!raw.equals(cachedRawFormat)) {
+            cachedRawFormat = raw;
+            cachedNormalizedFormat = normalize(raw);
+        }
 
         final TextColor tpsColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps);
         final TextColor msptColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt);
@@ -113,10 +112,18 @@ public class RegionizedTpsBar {
             .build();
 
         try {
-            return MINI_MESSAGE.deserialize(format, resolver);
+            return MINI_MESSAGE.deserialize(cachedNormalizedFormat, resolver);
         } catch (Exception parse) {
             return MINI_MESSAGE.deserialize(DEFAULT_FORMAT, resolver);
         }
+    }
+
+    private static String normalize(final String input) {
+        return input
+            .replace("%tps%", "<tps>")
+            .replace("%mspt%", "<mspt>")
+            .replace("%util%", "<util>")
+            .replace("%players%", "<players>");
     }
 
     private Component number(final double value, final ThreadLocal<DecimalFormat> fmt, final TextColor color) {
