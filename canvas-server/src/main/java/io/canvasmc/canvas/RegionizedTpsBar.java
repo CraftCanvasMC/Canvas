@@ -112,7 +112,11 @@ public class RegionizedTpsBar {
             .resolver(Placeholder.component("players", number(players, INT_FORMAT, NamedTextColor.WHITE)))
             .build();
 
-        return MINI_MESSAGE.deserialize(format, resolver);
+        try {
+            return MINI_MESSAGE.deserialize(format, resolver);
+        } catch (Exception parse) {
+            return MINI_MESSAGE.deserialize(DEFAULT_FORMAT, resolver);
+        }
     }
 
     private Component number(final double value, final ThreadLocal<DecimalFormat> fmt, final TextColor color) {
