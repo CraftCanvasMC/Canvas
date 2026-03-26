@@ -32,7 +32,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
     private static final @NotNull TextColor GREEN = TextColor.color(0x4DE54D);
     private static final @NotNull URL DOWNLOAD_URL;
     private static final @NotNull Component NEW_LINE = text("\n");
-    public static final ApiClient CLIENT = new ApiClient();
+    public static final ApiClient CLIENT = new ApiClient("canvas");
     public static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
     private static final ComponentLogger LOGGER = ComponentLogger.logger(BUILD_INFO.brandName() + "VersionProvider");
 

@@ -325,7 +325,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
         for (final TickThreadRunner runner : runners) {
             // if task is linked, don't insert to queues
-            if (runner.linked == task) return;
+            if (runner.linked == task.tick) return;
         }
 
         // iterate all idle threads, not just the first one
@@ -346,15 +346,25 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     private ScheduledState returnTask(final TickThreadRunner runner, final ScheduledState reschedule) {
         if (reschedule != null) {
             // we don't wanna send this to the queue if linked
-            if (runner.linked == null || runner.linked != reschedule) {
+            if (runner.linked == null || runner.linked.state == null || runner.linked.state != reschedule) {
                 if (enableWorkStealing) runner.localQueue.offer(reschedule);
                 else globalQueue.offer(reschedule);
             }
         }
         // if linked, return that, don't even bother polling
-        final ScheduledState ret = enableWorkStealing ?
-            runner.linked != null ? runner.linked : this.poll(runner) :
-            globalQueue.poll();
+        final ScheduledState ret;
+        if (runner.linked != null && runner.linked.state != null) {
+            // pinned
+            ret = (ScheduledState) runner.linked.state;
+        }
+        else if (enableWorkStealing) {
+            // not pinned, using work stealing
+            ret = this.poll(runner);
+        }
+        else {
+            // not work stealing, not pinned, use global
+            ret = globalQueue.poll();
+        }
         if (ret == null && runner.linked == null) {
             this.idleThreads.set(runner.id);
             final int s = runner.localQueue.size();
@@ -483,16 +493,16 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         private static final VarHandle STATE_HANDLE = ConcurrentUtil.getVarHandle(TickThreadRunner.class, "state", TickThreadRunnerState.class);
 
         private final FastHeapPriorityQueue<ScheduledState> localQueue = new FastHeapPriorityQueue<>(20, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
-        private volatile ScheduledState linked;
+        private volatile SchedulableTick linked;
 
         // if swapping, the one we are swapping with must be unscheduled
-        public void link(final @NonNull ScheduledState task, boolean isSwapping) {
+        public void link(final @NonNull SchedulableTick task, boolean isSwapping) {
             synchronized (scheduler.scheduleLock) {
                 if (!scheduler.linkingSupported.getAsBoolean()) {
                     throw new IllegalStateException("Linking not supported in this environment");
                 }
-                if (task.ownedBy != this && !isSwapping) {
-                    throw new IllegalStateException("Cannot link task not owned by runner(" + this + "), owned by (" + task.ownedBy + ")");
+                if (task.state != null && ((ScheduledState) task.state).ownedBy != this && !isSwapping) {
+                    throw new IllegalStateException("Cannot link task not owned by runner(" + this + "), owned by (" + ((ScheduledState) task.state).ownedBy + ")");
                 }
                 if (this.linked != null) {
                     throw new IllegalStateException("Runner already linked");
@@ -500,9 +510,9 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
                 this.linked = task;
 
-                if (scheduler.idleThreads.get(id)) {
+                if (task.state != null && scheduler.idleThreads.get(id)) {
                     scheduler.idleThreads.clear(id);
-                    acceptTask(task);
+                    acceptTask((ScheduledState) task.state);
                 }
             }
         }
@@ -516,7 +526,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
         @Contract(pure = true)
         public boolean isLinkedTo(final @NonNull SchedulableTick from) {
-            return from.state instanceof ScheduledState scheduledState && scheduledState == this.linked;
+            return from.state instanceof ScheduledState && from == this.linked;
         }
 
         private void setStatePlain(final TickThreadRunnerState state) {
@@ -692,7 +702,9 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                 }
             }
 
-            return false;
+            // if the scheduler is halted, return true so it kills the thread
+            // immediately instead of trying to run a tick
+            return this.scheduler.halted;
         }
 
         @Override

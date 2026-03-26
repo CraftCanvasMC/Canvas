@@ -40,30 +40,26 @@ public class SparkRegionProfilerExtension {
         Consumer<String> sendFailure,
         Runnable unpinCallback
     ) {
-        if (!SchedulerUtil.doesSupportRegionProfiler()) {
-            sendFailure.accept(ERROR_NOT_SUPPORTED.create().getRawMessage().getString());
-            return;
-        }
-        if (!isProfiling()) {
-            // we aren't profiling, don't bother canceling
-            sendFailure.accept(ERROR_NOT_PROFILING.create().getRawMessage().getString());
-            return;
-        }
-        // this is on the async handler, spark blocks a TON,
-        // so we need this executed BEFORE scheduling.
-        // if we unpin later it doesn't really matter
-        unpinCallback.run();
-        RegionizedServer.getInstance().addTask(() -> {
-            try {
-                STATE.getAndSet(null).handlePinner.unpin((scheduleHandle) -> {
-                    AffinitySchedulerThreadPool.TickThreadRunner threadRunner = ((AffinitySchedulerThreadPool) TickRegions.getScheduler().scheduler).getCurrentTickThreadRunner();
-                    threadRunner.unlink();
-                    sendMessage.accept("Completed profiler unpin and cleared state");
-                });
-            } catch (CommandSyntaxException ex) {
-                sendFailure.accept(ex.getRawMessage().getString());
+        try {
+            if (!SchedulerUtil.doesSupportRegionProfiler()) {
+                throw ERROR_NOT_SUPPORTED.create();
             }
-        });
+            if (!isProfiling()) {
+                // we aren't profiling, don't bother canceling
+                throw ERROR_NOT_PROFILING.create();
+            }
+            // this is on the async handler, spark blocks a TON,
+            // so we need this executed BEFORE scheduling.
+            // if we unpin later it doesn't really matter
+            unpinCallback.run();
+            STATE.getAndSet(null).handlePinner.unpin((scheduleHandle) -> {
+                AffinitySchedulerThreadPool.TickThreadRunner threadRunner = ((AffinitySchedulerThreadPool) TickRegions.getScheduler().scheduler).getCurrentTickThreadRunner();
+                threadRunner.unlink();
+                sendMessage.accept("Completed profiler unpin and cleared state");
+            });
+        } catch (CommandSyntaxException ex) {
+            sendFailure.accept(ex.getRawMessage().getString());
+        }
     }
 
     /**
@@ -84,29 +80,26 @@ public class SparkRegionProfilerExtension {
         RegionScheduleHandlePinner pinner,
         Runnable pinCallback
     ) {
-        if (!SchedulerUtil.doesSupportRegionProfiler()) {
-            sendFailure.accept(ERROR_NOT_SUPPORTED.create().getRawMessage().getString());
-            return;
-        }
-        RegionizedServer.getInstance().addTask(() -> {
-            try {
-                if (isProfiling()) {
-                    // we are already profiling, don't do another one
-                    throw ERROR_ALREADY_PROFILING.create();
-                }
-                sendMessage.accept("Beginning region schedule handle pin with '" + pinner.getClass().getSimpleName() + "'");
-                pinner.pin((schedulingHandle, thread) -> {
-                    // pin the actual region tick to the runner
-                    STATE.set(new ProfilingState(schedulingHandle, pinner, thread));
-                    thread.link((AffinitySchedulerThreadPool.ScheduledState) schedulingHandle.state, false);
-                    sendMessage.accept("Completed scheduler setup for region pin profiling");
-                    // schedule async, since spark runs its operations in this pool
-                    MCUtil.scheduleAsyncTask(pinCallback);
-                });
-            } catch (CommandSyntaxException ex) {
-                sendFailure.accept(ex.getRawMessage().getString());
+        try {
+            if (!SchedulerUtil.doesSupportRegionProfiler()) {
+                throw ERROR_NOT_SUPPORTED.create();
             }
-        });
+            if (isProfiling()) {
+                // we are already profiling, don't do another one
+                throw ERROR_ALREADY_PROFILING.create();
+            }
+            sendMessage.accept("Beginning region schedule handle pin with '" + pinner.getClass().getSimpleName() + "'");
+            pinner.pin((schedulingHandle, thread) -> {
+                // pin the actual region tick to the runner
+                STATE.set(new ProfilingState(schedulingHandle, pinner, thread));
+                thread.link(schedulingHandle, false);
+                sendMessage.accept("Completed scheduler setup for region pin profiling");
+                // schedule async, since spark runs its operations in this pool
+                MCUtil.scheduleAsyncTask(pinCallback);
+            });
+        } catch (CommandSyntaxException ex) {
+            sendFailure.accept(ex.getRawMessage().getString());
+        }
     }
 
     public record ProfilingState(

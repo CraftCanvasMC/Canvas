@@ -46,7 +46,7 @@ public class Config {
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
     // Note: this field should never be used during POST, use 'context.configuration()' instead
     public static Config INSTANCE;
-    public static ApiClient.Channel ACTIVE_BUILD_CHANNEL = ApiClient.Channel.UNKNOWN;
+    public static ApiClient.ChannelType ACTIVE_BUILD_CHANNEL = ApiClient.ChannelType.UNKNOWN;
     public static final Consumer<String> GLOBAL_BROADCAST = (msg) -> {
         Component component = RegionizedTpsBar.gradient("[CanvasMC] ",
             s -> s.decorate(TextDecoration.BOLD),
@@ -76,22 +76,22 @@ public class Config {
         //noinspection ResultOfMethodCallIgnored
         ParallelSearchRadiusIteration.getSearchIteration(MoonriseConstants.MAX_VIEW_DISTANCE);
         CompletableFuture.supplyAsync(() -> {
-            ApiClient.Channel channel = ApiClient.Channel.UNKNOWN;
+            ApiClient.ChannelType channelType = ApiClient.ChannelType.UNKNOWN;
             ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
             int build = buildInfo.buildNumber().orElse(-1);
             if (build == -1) {
-                channel = ApiClient.Channel.LOCAL;
+                channelType = ApiClient.ChannelType.LOCAL;
             }
             else {
                 try {
-                    channel = CanvasVersionFetcher.CLIENT.getBuild(build).channel();
+                    channelType = CanvasVersionFetcher.CLIENT.getBuild(build).channelType();
                 } catch (Throwable ignored) {
                 }
             }
-            return channel;
-        }).thenAccept(channel -> RegionizedServer.getInstance().addTask(() -> {
-            ACTIVE_BUILD_CHANNEL = channel;
-            switch (channel) {
+            return channelType;
+        }).thenAccept(channelType -> RegionizedServer.getInstance().addTask(() -> {
+            ACTIVE_BUILD_CHANNEL = channelType;
+            switch (channelType) {
                 case UNKNOWN -> GLOBAL_BROADCAST.accept("Running unknown build channel, proceed with caution");
                 case BETA -> GLOBAL_BROADCAST.accept("Running a beta build, there may be bugs, proceed with caution!");
                 case LOCAL ->
