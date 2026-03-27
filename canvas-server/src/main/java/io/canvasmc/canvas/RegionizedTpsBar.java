@@ -25,6 +25,7 @@ import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import static net.kyori.adventure.text.Component.text;
@@ -90,7 +91,7 @@ public class RegionizedTpsBar {
         }
     }
 
-    private Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
+    private @NonNull Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
         final String raw = Config.INSTANCE.tpsBarFormat;
         final String effectiveRaw = (raw == null || raw.isBlank()) ? "" : raw;
         FormatEntry entry = cachedFormat.get();
@@ -125,7 +126,8 @@ public class RegionizedTpsBar {
         return builder.build();
     }
 
-    private Component number(final double value, final ThreadLocal<DecimalFormat> fmt, final TextColor color) {
+    @Contract("_, _, _ -> new")
+    private @NonNull Component number(final double value, final @NonNull ThreadLocal<DecimalFormat> fmt, final TextColor color) {
         return Component.text(fmt.get().format(value), color);
     }
 
@@ -238,12 +240,12 @@ public class RegionizedTpsBar {
             record Dynamic(String key) implements Segment {}
         }
 
-        static FormatEntry compile(final String effectiveRaw) {
+        static @NonNull FormatEntry compile(final @NonNull String effectiveRaw) {
             final String normalized = effectiveRaw.isEmpty() ? DEFAULT_FORMAT : normalize(effectiveRaw);
             return new FormatEntry(effectiveRaw, buildSegments(normalized));
         }
 
-        private static String normalize(final String input) {
+        private static @NonNull String normalize(final @NonNull String input) {
             return input
                 .replace("%tps%", "<tps>")
                 .replace("%mspt%", "<mspt>")
@@ -251,7 +253,7 @@ public class RegionizedTpsBar {
                 .replace("%players%", "<players>");
         }
 
-        private static List<Segment> buildSegments(final String normalized) {
+        private static @NonNull List<Segment> buildSegments(final String normalized) {
             final List<Segment> result = new ArrayList<>();
             final String[] keys = {"tps", "mspt", "util", "players"};
             String remaining = normalized;
@@ -282,7 +284,8 @@ public class RegionizedTpsBar {
             return result;
         }
 
-        private static Segment.Static parseStatic(final String text) {
+        @Contract("_ -> new")
+        private static Segment.@NonNull Static parseStatic(final String text) {
             try {
                 return new Segment.Static(MINI_MESSAGE.deserialize(text));
             } catch (final Exception e) {
