@@ -176,18 +176,23 @@ public interface WorldRegionizer {
 
         /**
          * Represents the lifecycle state of a {@link ChunkRegion}.
-         *
-         * <ul>
-         *     <li>{@link #TRANSIENT} – Region is being created or modified and is not yet stable.</li>
-         *     <li>{@link #READY} – Region is active, consistent, and ready for ticking.</li>
-         *     <li>{@link #TICKING} – Region is currently being ticked on a tick thread.</li>
-         *     <li>{@link #DEAD} – Region is destroyed or scheduled for removal.</li>
-         * </ul>
          */
         enum State {
+            /**
+             * Region is being created or modified and is not yet stable.
+             */
             TRANSIENT,
+            /**
+             * Region is active, consistent, and ready for ticking.
+             */
             READY,
+            /**
+             * Region is currently being ticked on a tick thread.
+             */
             TICKING,
+            /**
+             * Region is destroyed or scheduled for removal.
+             */
             DEAD
         }
     }
