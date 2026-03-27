@@ -9,6 +9,9 @@ import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
@@ -17,8 +20,6 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
-import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
@@ -39,8 +40,7 @@ public class RegionizedTpsBar {
         "<gradient:#357cef:#f21af4><b>MSPT</b></gradient>: <mspt>  -  " +
         "<gradient:#357cef:#f21af4><b>Util</b></gradient>: <util>%  -  " +
         "<gradient:#357cef:#f21af4><b>Players</b></gradient>: <players>";
-    private static volatile String cachedRawFormat = null;
-    private static volatile String cachedNormalizedFormat = DEFAULT_FORMAT;
+    private static final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
     private final RegionizedWorldData worldData;
     private final boolean canTick;
     private long nextTick = System.nanoTime();
@@ -91,39 +91,38 @@ public class RegionizedTpsBar {
     }
 
     private Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
-        String raw = Config.INSTANCE.tpsBarFormat;
-        if (raw == null || raw.isBlank()) {
-            raw = DEFAULT_FORMAT;
-        }
-        if (!raw.equals(cachedRawFormat)) {
-            cachedRawFormat = raw;
-            cachedNormalizedFormat = normalize(raw);
+        final String raw = Config.INSTANCE.tpsBarFormat;
+        final String effectiveRaw = (raw == null || raw.isBlank()) ? "" : raw;
+        FormatEntry entry = cachedFormat.get();
+        if (entry == null || !effectiveRaw.equals(entry.raw())) {
+            entry = FormatEntry.compile(effectiveRaw);
+            cachedFormat.set(entry);
         }
 
         final TextColor tpsColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps);
         final TextColor msptColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt);
         final TextColor utilColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(utilPercent / 100);
 
-        TagResolver resolver = TagResolver.builder()
-            .resolver(Placeholder.component("tps", number(tps, TPS_FORMAT, tpsColor)))
-            .resolver(Placeholder.component("mspt", number(mspt, MSPT_FORMAT, msptColor)))
-            .resolver(Placeholder.component("util", number(utilPercent, UTIL_FORMAT, utilColor)))
-            .resolver(Placeholder.component("players", number(players, INT_FORMAT, NamedTextColor.WHITE)))
-            .build();
+        final Component tpsComponent = number(tps, TPS_FORMAT, tpsColor);
+        final Component msptComponent = number(mspt, MSPT_FORMAT, msptColor);
+        final Component utilComponent = number(utilPercent, UTIL_FORMAT, utilColor);
+        final Component playersComponent = number(players, INT_FORMAT, NamedTextColor.WHITE);
 
-        try {
-            return MINI_MESSAGE.deserialize(cachedNormalizedFormat, resolver);
-        } catch (Exception parse) {
-            return MINI_MESSAGE.deserialize(DEFAULT_FORMAT, resolver);
+        final TextComponent.Builder builder = Component.text();
+        for (final FormatEntry.Segment segment : entry.segments()) {
+            if (segment instanceof FormatEntry.Segment.Static(Component component)) {
+                builder.append(component);
+            } else if (segment instanceof FormatEntry.Segment.Dynamic(String key)) {
+                builder.append(switch (key) {
+                    case "tps" -> tpsComponent;
+                    case "mspt" -> msptComponent;
+                    case "util" -> utilComponent;
+                    case "players" -> playersComponent;
+                    default -> Component.empty();
+                });
+            }
         }
-    }
-
-    private static String normalize(final String input) {
-        return input
-            .replace("%tps%", "<tps>")
-            .replace("%mspt%", "<mspt>")
-            .replace("%util%", "<util>")
-            .replace("%players%", "<players>");
+        return builder.build();
     }
 
     private Component number(final double value, final ThreadLocal<DecimalFormat> fmt, final TextColor color) {
@@ -231,6 +230,65 @@ public class RegionizedTpsBar {
         void updateFromEntry(Entry entry);
 
         Entry serializeDisplay();
+    }
+
+    record FormatEntry(String raw, List<Segment> segments) {
+        sealed interface Segment permits Segment.Static, Segment.Dynamic {
+            record Static(Component component) implements Segment {}
+            record Dynamic(String key) implements Segment {}
+        }
+
+        static FormatEntry compile(final String effectiveRaw) {
+            final String normalized = effectiveRaw.isEmpty() ? DEFAULT_FORMAT : normalize(effectiveRaw);
+            return new FormatEntry(effectiveRaw, buildSegments(normalized));
+        }
+
+        private static String normalize(final String input) {
+            return input
+                .replace("%tps%", "<tps>")
+                .replace("%mspt%", "<mspt>")
+                .replace("%util%", "<util>")
+                .replace("%players%", "<players>");
+        }
+
+        private static List<Segment> buildSegments(final String normalized) {
+            final List<Segment> result = new ArrayList<>();
+            final String[] keys = {"tps", "mspt", "util", "players"};
+            String remaining = normalized;
+
+            while (!remaining.isEmpty()) {
+                int earliestIdx = Integer.MAX_VALUE;
+                String earliestKey = null;
+                for (final String key : keys) {
+                    final int idx = remaining.indexOf("<" + key + ">");
+                    if (idx >= 0 && idx < earliestIdx) {
+                        earliestIdx = idx;
+                        earliestKey = key;
+                    }
+                }
+
+                if (earliestKey == null) {
+                    result.add(parseStatic(remaining));
+                    break;
+                }
+
+                if (earliestIdx > 0) {
+                    result.add(parseStatic(remaining.substring(0, earliestIdx)));
+                }
+                result.add(new Segment.Dynamic(earliestKey));
+                remaining = remaining.substring(earliestIdx + earliestKey.length() + 2); // +2 for '<' and '>'
+            }
+
+            return result;
+        }
+
+        private static Segment.Static parseStatic(final String text) {
+            try {
+                return new Segment.Static(MINI_MESSAGE.deserialize(text));
+            } catch (final Exception e) {
+                return new Segment.Static(Component.text(text));
+            }
+        }
     }
 
     public record Entry(boolean enabled, Placement placement) {
