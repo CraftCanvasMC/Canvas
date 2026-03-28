@@ -490,10 +490,10 @@ public class Config {
         "Legacy tokens %tps%, %mspt%, %util%, %players% are also accepted and auto-converted."
     })
     public String tpsBarFormat =
-        "<gradient:#357cef:#f21af4><b>TPS</b></gradient>: <tps>  -  " +
-        "<gradient:#357cef:#f21af4><b>MSPT</b></gradient>: <mspt>  -  " +
-        "<gradient:#357cef:#f21af4><b>Util</b></gradient>: <util>%  -  " +
-        "<gradient:#357cef:#f21af4><b>Players</b></gradient>: <players>";
+        "<gradient:blue:aqua><b>TPS</b></gradient>: <tps>  -  " +
+            "<gradient:blue:aqua><b>MSPT</b></gradient>: <mspt>  -  " +
+            "<gradient:blue:aqua><b>Util</b></gradient>: <util>%  -  " +
+            "<gradient:blue:aqua><b>Players</b></gradient>: <players>";
 
     @Comment(value = {
         "The default respawn dimension for the server.",
