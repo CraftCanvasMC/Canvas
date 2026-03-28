@@ -40,6 +40,6 @@ public record PerWorldDistanceConfig(AtomicInteger viewDistance, AtomicInteger s
     }
 
     public boolean isSimulationDistanceOverridden() {
-        return this.viewDistance.get() > 0;
+        return this.simulationDistance.get() > 0;
     }
 }
