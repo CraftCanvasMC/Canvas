@@ -7,6 +7,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.canvasmc.canvas.util.Gradient;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
+import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
@@ -28,6 +29,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
+import static io.papermc.paper.threadedregions.commands.CommandUtil.SPRINTING_COLOR;
 import static net.kyori.adventure.text.Component.text;
 
 public class RegionizedTpsBar {
@@ -36,11 +38,11 @@ public class RegionizedTpsBar {
     private static final ThreadLocal<DecimalFormat> MSPT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
     private static final ThreadLocal<DecimalFormat> UTIL_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
     private static final ThreadLocal<DecimalFormat> INT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0"));
-    private static final String DEFAULT_FORMAT =
-        "<gradient:#357cef:#f21af4><b>TPS</b></gradient>: <tps>  -  " +
-        "<gradient:#357cef:#f21af4><b>MSPT</b></gradient>: <mspt>  -  " +
-        "<gradient:#357cef:#f21af4><b>Util</b></gradient>: <util>%  -  " +
-        "<gradient:#357cef:#f21af4><b>Players</b></gradient>: <players>";
+    public static final String DEFAULT_FORMAT =
+        "<gradient:blue:aqua><b>TPS:</b></gradient> <tps>  <dark_gray>-</dark_gray>  " +
+        "<gradient:blue:aqua><b>MSPT:</b></gradient> <mspt>  <dark_gray>-</dark_gray>  " +
+        "<gradient:blue:aqua><b>Util:</b></gradient> <util>  <dark_gray>-</dark_gray>  " +
+        "<gradient:blue:aqua><b>Players:</b></gradient> <players>";
     private static final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
     private final RegionizedWorldData worldData;
     private final boolean canTick;
@@ -100,14 +102,15 @@ public class RegionizedTpsBar {
             cachedFormat.set(entry);
         }
 
-        final TextColor tpsColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps);
-        final TextColor msptColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt);
-        final TextColor utilColor = sprinting ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(utilPercent / 100);
+        final TextColor tpsColor = sprinting ? SPRINTING_COLOR : CommandUtil.getColourForTPS(tps);
+        final TextColor msptColor = sprinting ? SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt);
+        final TextColor utilColor = sprinting ? SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(utilPercent / 100);
+        final TextColor playerColor = sprinting ? SPRINTING_COLOR : CommandUtil.getColourForTPS(TickRegionScheduler.getTickRate());
 
         final Component tpsComponent = number(tps, TPS_FORMAT, tpsColor);
         final Component msptComponent = number(mspt, MSPT_FORMAT, msptColor);
-        final Component utilComponent = number(utilPercent, UTIL_FORMAT, utilColor);
-        final Component playersComponent = number(players, INT_FORMAT, NamedTextColor.WHITE);
+        final Component utilComponent = number(utilPercent, UTIL_FORMAT, utilColor).append(Component.text("%").color(utilColor));
+        final Component playersComponent = number(players, INT_FORMAT, playerColor);
 
         final TextComponent.Builder builder = Component.text();
         for (final FormatEntry.Segment segment : entry.segments()) {

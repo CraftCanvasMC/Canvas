@@ -489,11 +489,7 @@ public class Config {
         "MiniMessage-formatted line for the TPS bar. Placeholders: <tps>, <mspt>, <util>, <players>.",
         "Legacy tokens %tps%, %mspt%, %util%, %players% are also accepted and auto-converted."
     })
-    public String tpsBarFormat =
-        "<gradient:blue:aqua><b>TPS</b></gradient>: <tps>  -  " +
-            "<gradient:blue:aqua><b>MSPT</b></gradient>: <mspt>  -  " +
-            "<gradient:blue:aqua><b>Util</b></gradient>: <util>%  -  " +
-            "<gradient:blue:aqua><b>Players</b></gradient>: <players>";
+    public String tpsBarFormat = RegionizedTpsBar.DEFAULT_FORMAT;
 
     @Comment(value = {
         "The default respawn dimension for the server.",
