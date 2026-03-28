@@ -485,6 +485,12 @@ public class Config {
     })
     public boolean enableTpsBar = true;
 
+    @Comment({
+        "MiniMessage-formatted line for the TPS bar. Placeholders: <tps>, <mspt>, <util>, <players>.",
+        "Legacy tokens %tps%, %mspt%, %util%, %players% are also accepted and auto-converted."
+    })
+    public String tpsBarFormat = RegionizedTpsBar.DEFAULT_FORMAT;
+
     @Comment(value = {
         "The default respawn dimension for the server.",
         "This can assist for servers that need this changed to a different world",

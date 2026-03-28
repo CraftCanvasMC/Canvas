@@ -7,8 +7,12 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.canvasmc.canvas.util.Gradient;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
+import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
@@ -16,23 +20,30 @@ import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
+import static io.papermc.paper.threadedregions.commands.CommandUtil.SPRINTING_COLOR;
 import static net.kyori.adventure.text.Component.text;
 
 public class RegionizedTpsBar {
-    private static final ThreadLocal<DecimalFormat> TWO_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0.00");
-    });
-    private static final ThreadLocal<DecimalFormat> ONE_DECIMAL_PLACES = ThreadLocal.withInitial(() -> {
-        return new DecimalFormat("#,##0.0");
-    });
+    private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
+    private static final ThreadLocal<DecimalFormat> TPS_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
+    private static final ThreadLocal<DecimalFormat> MSPT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
+    private static final ThreadLocal<DecimalFormat> UTIL_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
+    private static final ThreadLocal<DecimalFormat> INT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0"));
+    public static final String DEFAULT_FORMAT =
+        "<gradient:blue:aqua><b>TPS:</b></gradient> <tps>  <dark_gray>-</dark_gray>  " +
+        "<gradient:blue:aqua><b>MSPT:</b></gradient> <mspt>  <dark_gray>-</dark_gray>  " +
+        "<gradient:blue:aqua><b>Util:</b></gradient> <util>  <dark_gray>-</dark_gray>  " +
+        "<gradient:blue:aqua><b>Players:</b></gradient> <players>";
+    private static final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
     private final RegionizedWorldData worldData;
     private final boolean canTick;
     private long nextTick = System.nanoTime();
@@ -70,22 +81,9 @@ public class RegionizedTpsBar {
             final double util = tickReportData.utilisation() * 100;
             final double tps = tpsAverage.segmentAll().average();
             final double mspt = msptAverage.segmentAll().average() / 1.0E6;
-            String tpsTruncated = TWO_DECIMAL_PLACES.get().format(tps);
-            String msptTruncated = TWO_DECIMAL_PLACES.get().format(mspt);
-            String utilizationTruncated = ONE_DECIMAL_PLACES.get().format(util) + "%";
-            // build component
-            final Component textComponent =
-                gradient("TPS", (builder) -> builder.decorate(TextDecoration.BOLD), NamedTextColor.BLUE, NamedTextColor.AQUA)
-                    .append(Component.text(": ", NamedTextColor.WHITE))
-                    .append(Component.text(tpsTruncated, this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0 ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForTPS(tps)))
-                    .append(Component.text("  -  ", NamedTextColor.WHITE))
-                    .append(gradient("MSPT", (builder) -> builder.decorate(TextDecoration.BOLD), NamedTextColor.BLUE, NamedTextColor.AQUA))
-                    .append(Component.text(": ", NamedTextColor.WHITE))
-                    .append(Component.text(msptTruncated, this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0 ? CommandUtil.SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt)))
-                    .append(Component.text("  -  ", NamedTextColor.WHITE))
-                    .append(gradient("Util", (builder) -> builder.decorate(TextDecoration.BOLD), NamedTextColor.BLUE, NamedTextColor.AQUA))
-                    .append(Component.text(": ", NamedTextColor.WHITE))
-                    .append(Component.text(utilizationTruncated, this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0 ? CommandUtil.SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(util / 100)));
+            final int players = this.worldData.getPlayerCount();
+            final boolean sprinting = this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0;
+            final Component textComponent = buildComponent(tps, mspt, util, players, sprinting);
             // update players
             for (final ServerPlayer localPlayer : this.worldData.getLocalPlayers()) {
                 localPlayer.canvas$tpsBarDisplay.setDisplay(textComponent);
@@ -93,6 +91,47 @@ public class RegionizedTpsBar {
             }
             this.nextTick = startTime + 1_000_000_000;
         }
+    }
+
+    private @NonNull Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
+        final String raw = Config.INSTANCE.tpsBarFormat;
+        final String effectiveRaw = (raw == null || raw.isBlank()) ? "" : raw;
+        FormatEntry entry = cachedFormat.get();
+        if (entry == null || !effectiveRaw.equals(entry.raw())) {
+            entry = FormatEntry.compile(effectiveRaw);
+            cachedFormat.set(entry);
+        }
+
+        final TextColor tpsColor = sprinting ? SPRINTING_COLOR : CommandUtil.getColourForTPS(tps);
+        final TextColor msptColor = sprinting ? SPRINTING_COLOR : CommandUtil.getColourForMSPT(mspt);
+        final TextColor utilColor = sprinting ? SPRINTING_COLOR : CommandUtil.getUtilisationColourRegion(utilPercent / 100);
+        final TextColor playerColor = sprinting ? SPRINTING_COLOR : CommandUtil.getColourForTPS(TickRegionScheduler.getTickRate());
+
+        final Component tpsComponent = number(tps, TPS_FORMAT, tpsColor);
+        final Component msptComponent = number(mspt, MSPT_FORMAT, msptColor);
+        final Component utilComponent = number(utilPercent, UTIL_FORMAT, utilColor).append(Component.text("%").color(utilColor));
+        final Component playersComponent = number(players, INT_FORMAT, playerColor);
+
+        final TextComponent.Builder builder = Component.text();
+        for (final FormatEntry.Segment segment : entry.segments()) {
+            if (segment instanceof FormatEntry.Segment.Static(Component component)) {
+                builder.append(component);
+            } else if (segment instanceof FormatEntry.Segment.Dynamic(String key)) {
+                builder.append(switch (key) {
+                    case "tps" -> tpsComponent;
+                    case "mspt" -> msptComponent;
+                    case "util" -> utilComponent;
+                    case "players" -> playersComponent;
+                    default -> Component.empty();
+                });
+            }
+        }
+        return builder.build();
+    }
+
+    @Contract("_, _, _ -> new")
+    private @NonNull Component number(final double value, final @NonNull ThreadLocal<DecimalFormat> fmt, final TextColor color) {
+        return Component.text(fmt.get().format(value), color);
     }
 
     public enum Placement {
@@ -196,6 +235,66 @@ public class RegionizedTpsBar {
         void updateFromEntry(Entry entry);
 
         Entry serializeDisplay();
+    }
+
+    record FormatEntry(String raw, List<Segment> segments) {
+        sealed interface Segment permits Segment.Static, Segment.Dynamic {
+            record Static(Component component) implements Segment {}
+            record Dynamic(String key) implements Segment {}
+        }
+
+        static @NonNull FormatEntry compile(final @NonNull String effectiveRaw) {
+            final String normalized = effectiveRaw.isEmpty() ? DEFAULT_FORMAT : normalize(effectiveRaw);
+            return new FormatEntry(effectiveRaw, buildSegments(normalized));
+        }
+
+        private static @NonNull String normalize(final @NonNull String input) {
+            return input
+                .replace("%tps%", "<tps>")
+                .replace("%mspt%", "<mspt>")
+                .replace("%util%", "<util>")
+                .replace("%players%", "<players>");
+        }
+
+        private static @NonNull List<Segment> buildSegments(final String normalized) {
+            final List<Segment> result = new ArrayList<>();
+            final String[] keys = {"tps", "mspt", "util", "players"};
+            String remaining = normalized;
+
+            while (!remaining.isEmpty()) {
+                int earliestIdx = Integer.MAX_VALUE;
+                String earliestKey = null;
+                for (final String key : keys) {
+                    final int idx = remaining.indexOf("<" + key + ">");
+                    if (idx >= 0 && idx < earliestIdx) {
+                        earliestIdx = idx;
+                        earliestKey = key;
+                    }
+                }
+
+                if (earliestKey == null) {
+                    result.add(parseStatic(remaining));
+                    break;
+                }
+
+                if (earliestIdx > 0) {
+                    result.add(parseStatic(remaining.substring(0, earliestIdx)));
+                }
+                result.add(new Segment.Dynamic(earliestKey));
+                remaining = remaining.substring(earliestIdx + earliestKey.length() + 2); // +2 for '<' and '>'
+            }
+
+            return result;
+        }
+
+        @Contract("_ -> new")
+        private static Segment.@NonNull Static parseStatic(final String text) {
+            try {
+                return new Segment.Static(MINI_MESSAGE.deserialize(text));
+            } catch (final Exception e) {
+                return new Segment.Static(Component.text(text));
+            }
+        }
     }
 
     public record Entry(boolean enabled, Placement placement) {
