@@ -108,6 +108,10 @@ subprojects {
             authors = listOf("CanvasMC")
             foliaSupported = true
         }
+
+        tasks.processResources {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        }
     }
 }
 
