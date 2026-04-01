@@ -120,15 +120,7 @@ tasks.register("fixupMinecraftFilePatches") {
     dependsOn(":canvas-server:fixupMinecraftSourcePatches")
 }
 
-tasks.register("prepareJenkins") {
-    val libsDirPath = providers.provider {
-        layout.projectDirectory.file("canvas-server/build/libs").asFile
-    }
-
-    doLast {
-        val libsDir = libsDirPath.get()
-        if (libsDir.exists()) {
-            libsDir.deleteRecursively()
-        }
-    }
+// TODO: remove me in 26.1
+tasks.register("createPublisherJar") {
+    dependsOn(":canvas-server:createMojmapPublisherJar")
 }
