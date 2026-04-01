@@ -124,3 +124,8 @@ tasks.register("fixupMinecraftFilePatches") {
 tasks.register("createPublisherJar") {
     dependsOn(":canvas-server:createMojmapPublisherJar")
 }
+
+// TODO: remove me in 26.1
+tasks.register("cleanCreatePublisherJar") {
+    dependsOn(":canvas-server:cleanCreateMojmapPublisherJar")
+}
