@@ -198,6 +198,12 @@ public class Config {
             "Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick"
         })
         public boolean enableMidTickTasks = false;
+
+        @Comment({
+            "The default tick rate for the scheduler. Vanilla is 20, the game will run faster or slower depending on how you adjust this value",
+            "Note this should really only be used for debugging purposes and for custom environments that require this change"
+        })
+        public float defaultTickRate = 20.0F;
     }
 
     public Chunks chunks = new Chunks();
