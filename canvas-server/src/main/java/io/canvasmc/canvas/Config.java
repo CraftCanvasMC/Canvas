@@ -46,7 +46,7 @@ public class Config {
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
     // Note: this field should never be used during POST, use 'context.configuration()' instead
     public static Config INSTANCE;
-    public static ApiClient.ChannelType ACTIVE_BUILD_CHANNEL = ApiClient.ChannelType.UNKNOWN;
+    public static ApiClient.BuildStatus ACTIVE_BUILD_CHANNEL = ApiClient.BuildStatus.UNKNOWN;
     public static final Consumer<String> GLOBAL_BROADCAST = (msg) -> {
         Component component = RegionizedTpsBar.gradient("[CanvasMC] ",
             s -> s.decorate(TextDecoration.BOLD),
@@ -76,24 +76,24 @@ public class Config {
         //noinspection ResultOfMethodCallIgnored
         ParallelSearchRadiusIteration.getSearchIteration(MoonriseConstants.MAX_VIEW_DISTANCE);
         CompletableFuture.supplyAsync(() -> {
-            ApiClient.ChannelType channelType = ApiClient.ChannelType.UNKNOWN;
+            ApiClient.BuildStatus buildStatus = ApiClient.BuildStatus.UNKNOWN;
             ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
-            int build = buildInfo.buildNumber().orElse(-1);
-            if (build == -1) {
-                channelType = ApiClient.ChannelType.LOCAL;
+            int buildNum = buildInfo.buildNumber().orElse(-1);
+            if (buildNum == -1) {
+                buildStatus = ApiClient.BuildStatus.LOCAL;
             }
             else {
                 try {
-                    channelType = CanvasVersionFetcher.CLIENT.getBuild(build).channelType();
+                    buildStatus = CanvasVersionFetcher.CLIENT.getBuild(buildNum).buildStatus();
                 } catch (Throwable ignored) {
                 }
             }
-            return channelType;
-        }).thenAccept(channelType -> RegionizedServer.getInstance().addTask(() -> {
-            ACTIVE_BUILD_CHANNEL = channelType;
-            switch (channelType) {
+            return buildStatus;
+        }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
+            ACTIVE_BUILD_CHANNEL = buildStatus;
+            switch (buildStatus) {
                 case UNKNOWN -> GLOBAL_BROADCAST.accept("Running unknown build channel, proceed with caution");
-                case BETA -> GLOBAL_BROADCAST.accept("Running a beta build, there may be bugs, proceed with caution!");
+                case EXPERIMENTAL -> GLOBAL_BROADCAST.accept("Running a beta build, there may be bugs, proceed with caution!");
                 case LOCAL ->
                     GLOBAL_BROADCAST.accept("You are running a development version of Canvas, which may not be production-ready, be very careful!");
             }
