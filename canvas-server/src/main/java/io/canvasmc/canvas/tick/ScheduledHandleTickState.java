@@ -16,10 +16,10 @@ import org.jspecify.annotations.NonNull;
 public final class ScheduledHandleTickState {
     public static final long UNSET = Long.MIN_VALUE;
 
-    private final TickRegionScheduler.RegionScheduleHandle scheduleHandle;
     // this ensures we process actions in a synchronized manner that means we can
     // ensure the state stays consistent throughout the tick
     private final ConcurrentLinkedQueue<Action> actionQueue = new ConcurrentLinkedQueue<>();
+    final TickRegionScheduler.RegionScheduleHandle scheduleHandle;
 
     private long tickCountToSprintTo = UNSET;
     private long startSprintNanos = UNSET;

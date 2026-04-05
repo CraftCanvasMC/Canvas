@@ -86,6 +86,13 @@ public interface RegionTickData {
          */
         IRegionizedCallback<T> getCallback();
 
+        /**
+         * Gets the tick state manager for this region
+         *
+         * @return the tick manager
+         */
+        RegionThreadingTickManager.RegionHandle getTickManager();
+
         interface IRegionizedCallback<T> {
 
             /**
