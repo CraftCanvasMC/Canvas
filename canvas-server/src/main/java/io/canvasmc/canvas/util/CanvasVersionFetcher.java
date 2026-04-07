@@ -32,7 +32,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
     private static final @NotNull TextColor GREEN = TextColor.color(0x4DE54D);
     private static final @NotNull URL DOWNLOAD_URL;
     private static final @NotNull Component NEW_LINE = text("\n");
-    public static final ApiClient CLIENT = new ApiClient("canvas");
+    public static final ApiClient CLIENT = ApiClient.getClientFor("canvas");
     public static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
     private static final ComponentLogger LOGGER = ComponentLogger.logger(BUILD_INFO.brandName() + "VersionProvider");
 
@@ -64,11 +64,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
         }
         final int localNum = buildNumber.getAsInt();
         try {
-            ApiClient.Build build = CLIENT.getLatestBuildForVersion(BUILD_INFO.minecraftVersionId(), true);
-            if (build == null) {
-                LOGGER.error("Unable to locate build for version {}", BUILD_INFO.minecraftVersionId());
-                return DISTANCE_UNKNOWN;
-            }
+            ApiClient.Build build = CLIENT.getLatestBuild(BUILD_INFO.minecraftVersionId(), true);
             return build.buildNumber() - localNum;
         } catch (Throwable thrown) {
             LOGGER.error(text("Error parsing version information from CanvasMC's Jenkins API", RED), thrown);

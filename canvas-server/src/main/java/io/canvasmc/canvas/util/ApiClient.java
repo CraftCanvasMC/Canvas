@@ -1,16 +1,21 @@
 package io.canvasmc.canvas.util;
 
+import com.google.common.collect.Lists;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.LinkedList;
+import java.util.Arrays;
 import java.util.List;
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextColor;
+import java.util.function.Predicate;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -25,155 +30,39 @@ import org.jspecify.annotations.Nullable;
  * <p>All returned collections are non-null but may be empty unless otherwise noted.</p>
  */
 public final class ApiClient {
-    /**
-     * The base URL for API access
-     */
-    private static final String BASE_URL = "https://canvasmc.io/api/v2";
-    /**
-     * The HTTP client
-     */
+    private static final String BASE_URL = "https://canvasmc.io/api/v2/";
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    private final String project;
+    private String project;
 
-    /**
-     * Constructs a new API client for a provided project
-     *
-     * @param project
-     *     the project id
-     */
-    public ApiClient(final @NonNull String project) {
-        this.project = project.toLowerCase();
+    @ApiStatus.Internal
+    private static @NonNull String constructUrlRequest(@NonNull Type type, @Nullable String project, String @NonNull [] args) {
+        String base = BASE_URL + switch (type) {
+            case JD -> "jd";
+            case ALL_BUILDS -> "builds/all";
+            case LATEST -> "builds/latest";
+            case PROJECTS -> "projects";
+        };
+        return appendParams(base, Lists.asList(project, args));
     }
 
-    /**
-     * Fetches all builds for a specific Minecraft version.
-     *
-     * <p>If {@code experimental} is true, experimental builds are included.
-     * Otherwise, only stable builds are returned.</p>
-     *
-     * @param minecraftVersion
-     *     the target Minecraft version (non-null, but may be blank to fetch all builds)
-     * @param experimental
-     *     whether to include experimental builds in the result
-     *
-     * @return a non-null list of matching builds (may be empty)
-     *
-     * @throws IOException
-     *     if the API request fails
-     * @throws InterruptedException
-     *     if the HTTP request is interrupted
-     */
-    public @NonNull List<Build> getAllBuilds(String minecraftVersion, boolean experimental) throws IOException, InterruptedException {
-        StringBuilder url = new StringBuilder(BASE_URL + "/builds?project=" + project);
+    @ApiStatus.Internal
+    private static @NonNull String appendParams(String base, @NonNull List<String> arguments) {
+        StringBuilder builder = new StringBuilder(base);
+        boolean first = true;
+        for (String str : arguments) {
+            if (str == null || str.isEmpty()) continue;
 
-        if (minecraftVersion != null && !minecraftVersion.isBlank()) {
-            url.append("&channel=").append(minecraftVersion);
+            builder.append(first ? "?" : "&");
+            builder.append(str);
+            first = false;
         }
-        if (experimental) {
-            url.append("&experimental=true");
-        }
-
-        String json = sendRequest(url.toString());
-        List<Build> builds = parseBuildsArray(json);
-        builds.sort(Comparator.comparingInt(Build::buildNumber));
-        return builds;
+        return builder.toString();
     }
 
-    /**
-     * Returns the latest build for the specified Minecraft version.
-     *
-     * <p>If {@code includeExperimental} is true, experimental builds are considered.
-     * Otherwise, only stable builds are used when determining the latest version.</p>
-     *
-     * @param minecraftVersion
-     *     the target Minecraft version
-     * @param includeExperimental
-     *     whether to include experimental builds in the search
-     *
-     * @return the latest build matching the filters, or {@code null} if none exist
-     *
-     * @throws IOException
-     *     if the API request fails
-     * @throws InterruptedException
-     *     if the HTTP request is interrupted
-     */
-    public @Nullable Build getLatestBuildForVersion(String minecraftVersion, boolean includeExperimental)
-        throws IOException, InterruptedException {
-
-        List<Build> builds = getAllBuilds(minecraftVersion, includeExperimental);
-        if (builds.isEmpty()) {
-            return null;
-        }
-
-        return builds.stream()
-            .max(Comparator.comparingInt(Build::buildNumber))
-            .orElse(null);
-    }
-
-    /**
-     * Returns the latest <b>stable</b> build for the specified Minecraft version.
-     *
-     * <p>This is equivalent to calling
-     * {@link #getLatestBuildForVersion(String, boolean)} with {@code includeExperimental = false}.</p>
-     *
-     * @param minecraftVersion
-     *     the target Minecraft version
-     *
-     * @return the latest stable build, or {@code null} if none exist
-     *
-     * @throws IOException
-     *     if the API request fails
-     * @throws InterruptedException
-     *     if the HTTP request is interrupted
-     */
-    public @Nullable Build getLatestBuildForVersion(String minecraftVersion)
-        throws IOException, InterruptedException {
-        return getLatestBuildForVersion(minecraftVersion, false);
-    }
-
-    /**
-     * Returns the latest build across <b>all Minecraft versions</b>.
-     *
-     * @param experimental
-     *     whether to allow experimental builds to be returned
-     *
-     * @return the latest available build
-     *
-     * @throws IOException
-     *     if the API request fails
-     * @throws InterruptedException
-     *     if the HTTP request is interrupted
-     */
-    public @NonNull Build getLatestBuild(boolean experimental) throws IOException, InterruptedException {
-        String url = BASE_URL + "/builds/latest?project=" + project + (experimental ? "&experimental=true" : "");
-        String json = sendRequest(url);
-        return parseSingleBuild(json);
-    }
-
-    /**
-     * Returns the build across <b>all Minecraft versions</b> related to the provided build number.
-     *
-     * @param buildNum
-     *     the build number
-     *
-     * @return the build associated with the provided build number
-     *
-     * @throws IOException
-     *     if the API request fails
-     * @throws InterruptedException
-     *     if the HTTP request is interrupted
-     */
-    public @Nullable Build getBuild(int buildNum) throws IOException, InterruptedException {
-        String json = sendRequest(BASE_URL + "/builds?project=" + project + "&experimental=true");
-        List<Build> builds = parseBuildsArray(json);
-        builds.sort(Comparator.comparingInt(Build::buildNumber));
-        return builds.stream()
-            .filter((build) -> build.buildNumber == buildNum)
-            .findFirst().orElse(null);
-    }
-
-    private String sendRequest(String url) throws IOException, InterruptedException {
+    @ApiStatus.Internal
+    private static JsonObject sendRequest(String url) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .header("Accept", "application/json")
@@ -185,154 +74,293 @@ public final class ApiClient {
         if (response.statusCode() != 200) {
             throw new IOException("Failed to fetch from Canvas API: " + response.statusCode());
         }
-        return response.body();
+
+        return GSON.fromJson(response.body(), JsonObject.class);
     }
 
-    private @NonNull List<Build> parseBuildsArray(@NonNull String json) {
+    @ApiStatus.Internal
+    private static @Nullable Build parseBuild(@NonNull JsonObject jsonObject) {
+        try {
+            if (!jsonObject.get("result").getAsString().equalsIgnoreCase("SUCCESS")) {
+                // failed builds don't have some of these args
+                return null;
+            }
+            int buildNumber = jsonObject.get("buildNumber").getAsInt();
+            String url = jsonObject.get("url").getAsString();
+            String downloadUrl = jsonObject.get("downloadUrl").getAsString();
+            String channel = jsonObject.get("channelVersion").getAsString();
+            long timestamp = jsonObject.get("timestamp").getAsLong();
+            boolean isExperimental = jsonObject.get("isExperimental").getAsBoolean();
+            BuildStatus buildStatus = (buildNumber == -1) ? BuildStatus.LOCAL : (isExperimental ? BuildStatus.EXPERIMENTAL : BuildStatus.STABLE);
+
+            List<Commit> commits = new ArrayList<>();
+            for (final JsonElement commitElement : jsonObject.getAsJsonArray("commits")) {
+                JsonObject commitObj = commitElement.getAsJsonObject();
+                commits.add(new Commit(
+                    commitObj.get("message").getAsString(),
+                    commitObj.get("hash").getAsString(),
+                    commitObj.get("author").getAsString()
+                ));
+            }
+
+            return new Build(buildNumber, url, downloadUrl, channel, timestamp, buildStatus, commits.toArray(new Commit[0]));
+        } catch (Throwable thrown) {
+            throw new IllegalArgumentException("Unknown object:\n" + GSON.toJson(jsonObject) + "\nStacktrace:", thrown);
+        }
+    }
+
+    /**
+     * Constructs a new API client for a provided project
+     *
+     * @param project
+     *     the project id
+     */
+    @ApiStatus.Internal
+    private ApiClient(final @NonNull String project) {
+        this.project = project.toLowerCase();
+    }
+
+    /**
+     * Constructs a new API client for project-specific actions
+     *
+     * @param project
+     *     the project for the client
+     *
+     * @return a new API client instance for the project specified
+     */
+    @Contract(value = "_ -> new", pure = true)
+    public static @NonNull ApiClient getClientFor(String project) {
+        return new ApiClient(project);
+    }
+
+    /**
+     * Gets all projects provided by CanvasMC CI
+     *
+     * @return an array of project slugs
+     */
+    public static String @NonNull [] getProjects() {
+        List<String> projects = new ArrayList<>();
+        try {
+            JsonObject json = sendRequest(constructUrlRequest(Type.PROJECTS, null, new String[0]));
+            for (final JsonElement element : json.getAsJsonArray("projects")) {
+                JsonObject project = element.getAsJsonObject();
+                projects.add(project.get("slug").getAsString());
+            }
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Unable to fetch CanvasMC REST API", e);
+        }
+        return projects.toArray(new String[0]);
+    }
+
+    /**
+     * Gets the project slug for the project associated with this client
+     *
+     * @return the slug
+     */
+    public String getProject() {
+        return project;
+    }
+
+    /**
+     * Swaps the current project slug with a new project slug
+     *
+     * @param slug
+     *     the slug to switch to
+     */
+    @Contract(mutates = "this")
+    public void switchProject(@NonNull String slug) {
+        this.project = slug.toLowerCase();
+    }
+
+    /**
+     * Gets all stable builds provided by the currently set project slug
+     *
+     * @return all stable builds
+     */
+    public Build @NonNull [] getStableBuilds() {
+        return getBuilds("", false);
+    }
+
+    /**
+     * Gets all the builds provided by the currently set project slug
+     *
+     * @param includeExperimental
+     *     If the query should include experimental builds
+     *
+     * @return all builds
+     */
+    public Build @NonNull [] getBuilds(boolean includeExperimental) {
+        return getBuilds("", includeExperimental);
+    }
+
+    /**
+     * Gets all the builds provided by the currently set project slug
+     *
+     * @param includeExperimental
+     *     If the query should include experimental builds
+     * @param channelId
+     *     The channel id. If provided an empty string, it will include builds in all channels
+     *
+     * @return all builds in the channel
+     */
+    public Build @NonNull [] getBuilds(@NonNull String channelId, boolean includeExperimental) {
         List<Build> builds = new ArrayList<>();
-        int start = json.indexOf("[");
-        int end = json.lastIndexOf("]");
-        if (start < 0 || end < 0) return builds;
-
-        String arrayContent = json.substring(start + 1, end);
-        String[] objects = splitObjects(arrayContent);
-
-        for (String obj : objects) {
-            obj = obj.strip();
-            if (!obj.isEmpty()) {
-                builds.add(parseSingleBuild(obj));
+        try {
+            JsonObject json = sendRequest(
+                constructUrlRequest(Type.ALL_BUILDS, "project=" + getProject(),
+                    new String[]{
+                        channelId.isEmpty() ? "" : "channel=" + channelId, "experimental=" + includeExperimental})
+            );
+            for (final JsonElement element : json.getAsJsonArray("builds")) {
+                JsonObject build = element.getAsJsonObject();
+                Build parsed = parseBuild(build);
+                if (parsed == null) continue;
+                builds.add(parsed);
             }
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Unable to fetch CanvasMC REST API", e);
         }
-        return builds;
+        return builds.toArray(new Build[0]);
     }
 
-    private @NonNull Build parseSingleBuild(String json) {
-        int buildNumber = extractIntElse(json, "buildNumber", -1);
-        String url = extractString(json, "url");
-        String downloadUrl = extractString(json, "downloadUrl");
-        String channelVersion = extractString(json, "channelVersion");
-        long timestamp = extractLong(json, "timestamp");
-        boolean experimental = extractBoolean(json, "isExperimental");
-        ChannelType channelType = buildNumber == -1 ? ChannelType.LOCAL : experimental ? ChannelType.BETA : ChannelType.STABLE;
-
-        List<Commit> commits = parseCommits(json);
-        return new Build(buildNumber, url, downloadUrl, channelVersion, timestamp, channelType, commits.toArray(new Commit[0]));
+    /**
+     * Gets all the builds provided by the currently set project slug
+     *
+     * @param filter
+     *     The filter to apply to the returned array
+     *
+     * @return all builds that passed the filter
+     *
+     * @apiNote Experimental builds will also pass through the filter
+     */
+    public Build @NonNull [] getBuilds(Predicate<Build> filter) {
+        return Arrays.stream(getBuilds(true))
+            .filter(filter)
+            .toArray(Build[]::new);
     }
 
-    private @NonNull List<Commit> parseCommits(@NonNull String json) {
-        List<Commit> commits = new LinkedList<>();
-        String key = "\"commits\":";
-        int start = json.indexOf(key);
-        if (start < 0) return commits;
+    /**
+     * Gets the build associated with the provided build number, regardless of channel or build status
+     *
+     * @param buildNumber
+     *     the number to search for
+     *
+     * @return the associated build
+     */
+    public @NonNull Build getBuild(int buildNumber) {
+        return Arrays.stream(getBuilds(true))
+            .filter(b -> b.buildNumber() == buildNumber)
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Unknown build " + buildNumber + " for project " + project));
+    }
 
-        start = json.indexOf("[", start);
-        int end = json.indexOf("]", start);
-        if (start < 0 || end < 0) return commits;
+    /**
+     * Gets all the builds newer than the specified build number for the provided project slug
+     *
+     * @return all builds
+     *
+     * @apiNote This will not include experimental builds, only stable builds
+     */
+    public Build @NonNull [] getStableBuildsNewerThan(int buildNumber) {
+        return getBuilds((build) -> build.buildStatus == BuildStatus.STABLE && build.buildNumber > buildNumber);
+    }
 
-        String arrayContent = json.substring(start + 1, end);
-        String[] objects = splitObjects(arrayContent);
+    /**
+     * Gets the latest stable build for the project slug
+     *
+     * @return the latest build
+     */
+    public @NonNull Build getLatestStableBuild() {
+        return getLatestBuild("", false);
+    }
 
-        for (String obj : objects) {
-            String message = extractString(obj, "message");
-            String hash = extractString(obj, "hash");
-            if (message != null && hash != null) {
-                commits.add(new Commit(message, hash));
+    /**
+     * Gets the latest build for the project slug
+     *
+     * @param allowExperimentalBuilds
+     *     If the query is allowed to return an experimental build
+     *
+     * @return the latest build
+     */
+    public @NonNull Build getLatestBuild(boolean allowExperimentalBuilds) {
+        return getLatestBuild("", allowExperimentalBuilds);
+    }
+
+    /**
+     * Gets the latest build for the project slug
+     *
+     * @param allowExperimentalBuilds
+     *     If the query is allowed to return an experimental build
+     * @param channelId
+     *     The channel id. If provided an empty string, it will include builds in all channels
+     *
+     * @return the latest build
+     */
+    public @NonNull Build getLatestBuild(@NonNull String channelId, boolean allowExperimentalBuilds) {
+        try {
+            JsonObject json = sendRequest(
+                constructUrlRequest(Type.LATEST, "project=" + getProject(),
+                    new String[]{
+                        channelId.isEmpty() ? "" : "channel=" + channelId, "experimental=" + allowExperimentalBuilds})
+            );
+            Build parsed = parseBuild(json);
+            if (parsed == null) throw new RuntimeException("Couldn't find latest build");
+            return parsed;
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Unable to fetch CanvasMC REST API", e);
+        }
+    }
+
+    /**
+     * Gets the Javadoc redirect URL for a given class
+     *
+     * @param clazz
+     *     The class to search for
+     * @param channelVersion
+     *     The channel version, or empty for latest
+     *
+     * @return the redirect URL to the Javadocs page
+     */
+    public @NonNull String getJavadocUrl(@NonNull Class<?> clazz, @NonNull String channelVersion) {
+        String redirectPath = clazz.getName().replace('.', '/').replace('$', '.') + ".html";
+
+        return constructUrlRequest(
+            Type.JD,
+            "project=" + getProject(),
+            new String[]{
+                channelVersion.isEmpty() ? "" : "channel=" + channelVersion,
+                "redirect=" + redirectPath,
+                "experimental=true"
             }
-        }
-        return commits;
-    }
-
-    private @NonNull String @NonNull [] splitObjects(@NonNull String json) {
-        List<String> objects = new LinkedList<>();
-        int braceCount = 0;
-        int lastSplit = 0;
-
-        for (int i = 0; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (c == '{') braceCount++;
-            else if (c == '}') braceCount--;
-
-            if (braceCount == 0 && c == '}') {
-                objects.add(json.substring(lastSplit, i + 1));
-                lastSplit = i + 2; // skip comma + space
-            }
-        }
-        return objects.toArray(new String[0]);
-    }
-
-    private @Nullable String extractString(@NonNull String json, String key) {
-        String k = "\"" + key + "\":";
-        int idx = json.indexOf(k);
-        if (idx < 0) return null;
-
-        idx = json.indexOf('"', idx + k.length());
-        if (idx < 0) return null;
-
-        int end = json.indexOf('"', idx + 1);
-        if (end < 0) return null;
-
-        return json.substring(idx + 1, end);
-    }
-
-    private int extractInt(String json, String key) {
-        String value = extractNumber(json, key);
-        return value == null ? 0 : Integer.parseInt(value);
-    }
-
-    private int extractIntElse(String json, String key, int fallback) {
-        String value = extractNumber(json, key);
-        return value == null ? fallback : Integer.parseInt(value);
-    }
-
-    private long extractLong(String json, String key) {
-        String value = extractNumber(json, key);
-        return value == null ? 0L : Long.parseLong(value);
-    }
-
-    private boolean extractBoolean(@NonNull String json, String key) {
-        String k = "\"" + key + "\":";
-        int idx = json.indexOf(k);
-        if (idx < 0) return false;
-
-        int start = idx + k.length();
-        int end = json.indexOf(',', start);
-        if (end < 0) end = json.indexOf('}', start);
-        if (end < 0) return false;
-
-        return Boolean.parseBoolean(json.substring(start, end).trim());
-    }
-
-    private @Nullable String extractNumber(@NonNull String json, String key) {
-        String k = "\"" + key + "\":";
-        int idx = json.indexOf(k);
-        if (idx < 0) return null;
-
-        int start = idx + k.length();
-        int end = json.indexOf(',', start);
-        if (end < 0) end = json.indexOf('}', start);
-        if (end < 0) return null;
-
-        return json.substring(start, end).trim();
+        );
     }
 
     /**
      * The release channel of this build
      */
-    public enum ChannelType {
-        STABLE(NamedTextColor.GREEN),
-        BETA(NamedTextColor.YELLOW),
-        LOCAL(NamedTextColor.RED),
-        UNKNOWN(NamedTextColor.GOLD);
+    public enum BuildStatus {
+        STABLE(0x55ff55),
+        EXPERIMENTAL(0xffff55),
+        LOCAL(0xff5555),
+        UNKNOWN(0xffaa00);
 
-        private final TextColor color;
+        private final int colorValue;
 
-        ChannelType(TextColor color) {
-            this.color = color;
+        BuildStatus(int value) {
+            this.colorValue = value;
         }
 
-        public @Nullable TextColor color() {
-            return color;
+        public int color() {
+            return colorValue;
         }
+    }
+
+    @ApiStatus.Internal
+    private enum Type {
+        PROJECTS,
+        ALL_BUILDS,
+        LATEST,
+        JD
     }
 
     /**
@@ -348,7 +376,7 @@ public final class ApiClient {
      *     the channel version for this build
      * @param timestamp
      *     the timestamp of the associated build
-     * @param channelType
+     * @param buildStatus
      *     the channel of this build
      * @param commits
      *     an array of commits in this build, can be empty
@@ -359,7 +387,7 @@ public final class ApiClient {
         String downloadUrl,
         String channelVersion,
         long timestamp,
-        ChannelType channelType,
+        BuildStatus buildStatus,
         Commit[] commits
     ) {
         public boolean hasChanges() {
@@ -375,6 +403,5 @@ public final class ApiClient {
      * @param hash
      *     the commit hash
      */
-    public record Commit(String message, String hash) {
-    }
+    public record Commit(String message, String hash, String author) {}
 }
