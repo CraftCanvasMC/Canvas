@@ -12,8 +12,8 @@
 
 ## Features & Highlights
 
-### Rewritten Scheduler
-- Canvas is primarily based on a rewritten scheduler for Folia, which makes Canvas extremely fast in comparison to other forks.
+### Alternative Scheduler
+- Canvas is primarily based on a new scheduler for Folia, which makes Canvas extremely fast in comparison to other forks.
 
 ### Optimized Chunk Generation
 - With fixed linear scaling through a complete rewrite of the chunk system executor, Canvas achieves **unparalleled chunk performance** compared to other forks.
