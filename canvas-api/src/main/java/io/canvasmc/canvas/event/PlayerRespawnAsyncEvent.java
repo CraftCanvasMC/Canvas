@@ -1,11 +1,13 @@
 package io.canvasmc.canvas.event;
 
+import com.google.common.base.Preconditions;
 import io.papermc.paper.event.player.AbstractRespawnEvent;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Called when a player is being respawned, while the player is currently unloaded from the world, but is about to be
@@ -34,6 +36,19 @@ public class PlayerRespawnAsyncEvent extends AbstractRespawnEvent {
 
     public static HandlerList getHandlerList() {
         return HANDLERS;
+    }
+
+    /**
+     * Sets the new respawn location.
+     *
+     * @param respawnLocation
+     *     new location for the respawn
+     */
+    public void setRespawnLocation(@NotNull Location respawnLocation) {
+        Preconditions.checkArgument(respawnLocation != null, "Respawn location can not be null");
+        Preconditions.checkArgument(respawnLocation.getWorld() != null, "Respawn world can not be null");
+
+        this.respawnLocation = respawnLocation.clone();
     }
 
     @Override
