@@ -87,7 +87,7 @@ public class RegionTickCommand implements Command {
             if (region == null) {
                 throw NO_REGION_EXISTS.create();
             }
-            action.accept(TickRegionScheduler.getCurrentRegion().getData().tickHandle);
+            action.accept(region.getData().tickHandle);
             return;
         }
         else if (parts.length > 2) {
