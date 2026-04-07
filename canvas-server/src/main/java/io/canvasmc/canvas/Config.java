@@ -302,6 +302,19 @@ public class Config {
 
         @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
         public boolean asyncProtocolSwitch = false;
+
+        @Comment("The maximum bytes that can be sent by the server in a single packet to a player before kicking them")
+        public int maximumPacketBytes = 8388608;
+
+        @Comment({
+        	"Paper implements an overflow fallback for container contents packets to the client, splitting the load into individual packets",
+        	"for each individual slot to prevent kicking the player for large containers. By enabling this, the server wont split the packet, and will",
+        	"kick the player if they attempt to open a container with the set contents packet larger than the max packet byte size"
+        })
+        public boolean disablePaperPacketOverflowContainerFix = false;
+
+        @Comment("The disconnet reason sent to the client when the server attempted to send a packet that was too large")
+        public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
     }
 
     @Comment("Check if a cactus can survive before growing. Heavily optimizes cacti farms")

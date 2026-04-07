@@ -108,6 +108,10 @@ subprojects {
             authors = listOf("CanvasMC")
             foliaSupported = true
         }
+
+        tasks.processResources {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        }
     }
 }
 
@@ -116,15 +120,12 @@ tasks.register("fixupMinecraftFilePatches") {
     dependsOn(":canvas-server:fixupMinecraftSourcePatches")
 }
 
-tasks.register("prepareJenkins") {
-    val libsDirPath = providers.provider {
-        layout.projectDirectory.file("canvas-server/build/libs").asFile
-    }
+// TODO: remove me in 26.1
+tasks.register("createPublisherJar") {
+    dependsOn(":canvas-server:createMojmapPublisherJar")
+}
 
-    doLast {
-        val libsDir = libsDirPath.get()
-        if (libsDir.exists()) {
-            libsDir.deleteRecursively()
-        }
-    }
+// TODO: remove me in 26.1
+tasks.register("cleanCreatePublisherJar") {
+    dependsOn(":canvas-server:cleanCreateMojmapPublisherJar")
 }

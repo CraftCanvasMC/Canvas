@@ -10,8 +10,6 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 import me.lucko.spark.api.Spark;
 import me.lucko.spark.paper.PaperCommandSender;
-import me.lucko.spark.paper.PaperTickHook;
-import me.lucko.spark.paper.PaperTickReporter;
 import me.lucko.spark.paper.api.Compatibility;
 import me.lucko.spark.paper.api.PaperClassLookup;
 import me.lucko.spark.paper.api.PaperScheduler;
@@ -39,8 +37,8 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     private final Logger logger;
     private final PaperScheduler scheduler;
     private final PaperClassLookup classLookup;
-    private final PaperTickHook tickHook;
-    private final PaperTickReporter tickReporter;
+    private final FoliaTickHook tickHook;
+    private final FoliaTickReporter tickReporter;
     private final ThreadDumper gameThreadDumper;
     private final SparkPlatform platform;
 
@@ -50,8 +48,8 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.logger = logger;
         this.scheduler = scheduler;
         this.classLookup = classLookup;
-        this.tickHook = new PaperTickHook();
-        this.tickReporter = new PaperTickReporter();
+        this.tickHook = new FoliaTickHook();
+        this.tickReporter = new FoliaTickReporter();
         this.gameThreadDumper = new PinningThreadDumper();
         this.platform = new SparkPlatform(this);
     }
