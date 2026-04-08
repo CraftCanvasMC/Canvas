@@ -12,6 +12,7 @@ plugins {
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
 paperweight {
+    filterPatches = false
     upstreams.folia {
         ref = providers.gradleProperty("foliaCommit")
 
@@ -76,12 +77,6 @@ subprojects {
             exceptionFormat = TestExceptionFormat.FULL
             events(TestLogEvent.STANDARD_OUT)
         }
-    }
-    tasks.withType<RebuildGitPatches>().configureEach {
-        filterPatches = false
-    }
-    tasks.withType<RebuildBaseGitPatches>().configureEach {
-        filterPatches = false
     }
     extensions.configure<PublishingExtension> {
         repositories {
