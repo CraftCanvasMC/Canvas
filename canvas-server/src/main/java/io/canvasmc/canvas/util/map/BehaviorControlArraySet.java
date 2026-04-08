@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.behavior.BehaviorControl;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public final class BehaviorControlArraySet<E extends LivingEntity> extends AbstractObjectSet<BehaviorControl<? super E>> {
 
@@ -100,14 +100,14 @@ public final class BehaviorControlArraySet<E extends LivingEntity> extends Abstr
     }
 
     @Override
-    public @NotNull Object[] toArray() {
+    public @NonNull Object[] toArray() {
         final int size = size();
         if (size == 0) return it.unimi.dsi.fastutil.objects.ObjectArrays.EMPTY_ARRAY;
         return java.util.Arrays.copyOf(a, size, Object[].class);
     }
 
     @Override
-    public @NotNull <T> T[] toArray(@NotNull T[] a) {
+    public @NonNull <T> T[] toArray(@NonNull T[] a) {
         if (a == null) {
             a = (T[]) new Object[size];
         } else if (a.length < size) {

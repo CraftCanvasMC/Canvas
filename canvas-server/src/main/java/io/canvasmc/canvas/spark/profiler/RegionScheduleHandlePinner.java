@@ -24,7 +24,6 @@ import net.minecraft.server.level.Ticket;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.border.WorldBorder;
-import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -263,7 +262,7 @@ public interface RegionScheduleHandlePinner {
         }
 
         @Override
-        public void unpin(@NotNull Consumer<SchedulableTick> finalizer) {
+        public void unpin(@NonNull Consumer<SchedulableTick> finalizer) {
             TickRegionScheduler.RegionScheduleHandle schedulingHandle = RegionizedServer.getGlobalTickData();
             if (RegionizedServer.isGlobalTickThread()) {
                 finalizer.accept(schedulingHandle);

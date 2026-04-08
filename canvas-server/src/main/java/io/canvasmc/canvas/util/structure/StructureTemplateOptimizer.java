@@ -13,13 +13,13 @@ import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureProcessor;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public class StructureTemplateOptimizer {
 
     private static final Map<StructureProcessor, Boolean> FINALIZE_PROCESSING_PROCESSORS = Object2BooleanMaps.synchronize(new Object2BooleanOpenHashMap<>());
 
-    public static @NotNull List<StructureTemplate.StructureBlockInfo> getStructureBlockInfosInBounds(StructureTemplate.@NotNull Palette palette, BlockPos offset, @NotNull StructurePlaceSettings structurePlaceSettings) {
+    public static @NonNull List<StructureTemplate.StructureBlockInfo> getStructureBlockInfosInBounds(StructureTemplate.@NonNull Palette palette, BlockPos offset, @NonNull StructurePlaceSettings structurePlaceSettings) {
         BoundingBox boundingBox = structurePlaceSettings.getBoundingBox();
         List<StructureTemplate.StructureBlockInfo> originalPositions = palette.blocks();
         if (boundingBox == null) {
@@ -59,7 +59,7 @@ public class StructureTemplateOptimizer {
         return listOfInBoundsRelativePositions;
     }
 
-    private static @NotNull Boolean isFinalizeProcessor(@NotNull StructureProcessor structureProcessor) {
+    private static @NonNull Boolean isFinalizeProcessor(@NonNull StructureProcessor structureProcessor) {
         try {
             var method = structureProcessor.getClass().getMethod(
                 "finalizeProcessing", ServerLevelAccessor.class, BlockPos.class, BlockPos.class, List.class, List.class, StructurePlaceSettings.class);
@@ -70,7 +70,7 @@ public class StructureTemplateOptimizer {
         }
     }
 
-    private static void transform(BlockPos.@NotNull MutableBlockPos mutableBlockPos, @NotNull Mirror mirror, Rotation rotation, BlockPos pivot) {
+    private static void transform(BlockPos.@NonNull MutableBlockPos mutableBlockPos, @NonNull Mirror mirror, Rotation rotation, BlockPos pivot) {
         int i = mutableBlockPos.getX();
         int j = mutableBlockPos.getY();
         int k = mutableBlockPos.getZ();

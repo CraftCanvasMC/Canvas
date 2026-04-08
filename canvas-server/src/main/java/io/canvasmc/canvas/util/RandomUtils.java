@@ -8,7 +8,7 @@ import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
 import net.minecraft.world.level.levelgen.Xoroshiro128PlusPlus;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public class RandomUtils {
 
@@ -41,7 +41,7 @@ public class RandomUtils {
     }
 
     @Contract("null -> fail")
-    public static @NotNull RandomSource getRandom(PositionalRandomFactory deriver) {
+    public static @NonNull RandomSource getRandom(PositionalRandomFactory deriver) {
         if (deriver instanceof XoroshiroRandomSource.XoroshiroPositionalRandomFactory) {
             return new XoroshiroRandomSource(0L, 0L);
         }

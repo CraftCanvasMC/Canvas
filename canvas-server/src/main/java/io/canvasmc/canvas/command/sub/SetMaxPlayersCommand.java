@@ -9,11 +9,12 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.dedicated.DedicatedServerProperties;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
 
+@NullMarked
 public class SetMaxPlayersCommand implements Command {
 
     private static int execute(int newSize, boolean persist) {
@@ -34,7 +35,7 @@ public class SetMaxPlayersCommand implements Command {
     }
 
     @Override
-    public @NotNull String getName() {
+    public String getName() {
         return "setmaxplayers";
     }
 
@@ -44,7 +45,7 @@ public class SetMaxPlayersCommand implements Command {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(@NotNull LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(LiteralArgumentBuilder<CommandSourceStack> base) {
         return base.then(argument("count", IntegerArgumentType.integer(0))
             .executes(ctx -> execute(
                 IntegerArgumentType.getInteger(ctx, "count"), false))

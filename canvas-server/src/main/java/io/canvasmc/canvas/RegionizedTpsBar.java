@@ -17,7 +17,6 @@ import java.util.function.Consumer;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
-import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -25,7 +24,6 @@ import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -53,7 +51,7 @@ public class RegionizedTpsBar {
         this.canTick = Config.INSTANCE.enableTpsBar;
     }
 
-    public static @NotNull Component gradient(final String textContent, final @Nullable Consumer<Style.Builder> style, final TextColor... colors) {
+    public static @NonNull Component gradient(final String textContent, final @Nullable Consumer<Style.Builder> style, final TextColor... colors) {
         final Gradient gradient = new Gradient(colors);
         final TextComponent.Builder builder = text();
         if (style != null) {
@@ -141,7 +139,7 @@ public class RegionizedTpsBar {
 
     public interface DisplayManager {
         @Contract(value = "_ -> new", pure = true)
-        static @NotNull DisplayManager createNew(ServerPlayer entityPlayer) {
+        static @NonNull DisplayManager createNew(ServerPlayer entityPlayer) {
             return new DisplayManager() {
                 private Component display = Component.text("Waiting for region update...");
                 public final BossBar tpsBar =

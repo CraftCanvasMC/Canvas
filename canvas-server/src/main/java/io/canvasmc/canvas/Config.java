@@ -37,8 +37,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Util;
 import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
+import org.jspecify.annotations.NonNull;
 
 @Configuration("canvas-server")
 public class Config {
@@ -107,7 +107,7 @@ public class Config {
         GLOBAL_BROADCAST.accept("Finished Canvas config init in " + TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS) + "ms");
     }
 
-    private static @NotNull @Unmodifiable ConfigSerializer<Config> buildGlobal(Configuration config, Class<Config> configClass) {
+    private static @NonNull @Unmodifiable ConfigSerializer<Config> buildGlobal(Configuration config, Class<Config> configClass) {
         return new AnnotationBasedJson5Serializer.Json5Builder<Config>()
             .header("""
                 This is the global Canvas configuration file.
@@ -525,7 +525,7 @@ public class Config {
     @NamespacedKeyValidator.NamespacedKey
     public String defaultRespawnDimensionKey = "minecraft:overworld";
 
-    public ResourceKey<@NotNull Level> fetchRespawnDimensionKey() {
+    public ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
         return ResourceKey.create(Registries.DIMENSION, Identifier.parse(this.defaultRespawnDimensionKey));
     }
 

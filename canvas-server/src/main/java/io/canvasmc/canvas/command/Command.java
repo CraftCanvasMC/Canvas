@@ -2,7 +2,7 @@ package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -22,7 +22,7 @@ public interface Command {
      *
      * @return the subcommand name (never {@code null})
      */
-    @NotNull
+    @NonNull
     String getName();
 
     /**

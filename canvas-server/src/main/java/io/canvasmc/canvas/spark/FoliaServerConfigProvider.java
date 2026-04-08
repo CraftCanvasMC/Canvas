@@ -26,7 +26,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.configuration.MemorySection;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -79,7 +78,7 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
         HIDDEN_PATHS = hiddenPaths.build();
     }
 
-    private static @NotNull @Unmodifiable List<String> getTimingsHiddenConfigs() {
+    private static @NonNull @Unmodifiable List<String> getTimingsHiddenConfigs() {
         return Collections.emptyList();
     }
 

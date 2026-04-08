@@ -16,7 +16,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
@@ -31,10 +31,11 @@ import static net.minecraft.commands.Commands.argument;
  *     <li><code>/canvas:worlddistance simulation minecraft:overworld 8</code></li>
  * </ul>
  */
+@NullMarked
 public class WorldDistanceCommand implements Command {
 
     @Override
-    public @NotNull String getName() {
+    public String getName() {
         return "worlddistance";
     }
 
@@ -44,7 +45,7 @@ public class WorldDistanceCommand implements Command {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final @NotNull LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
         return base.requires(stack -> stack.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command.worlddistance"))
             .then(argument("type", StringArgumentType.word())
                 .suggests((context, builder) -> {

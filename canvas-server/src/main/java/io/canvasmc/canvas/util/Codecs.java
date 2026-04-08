@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.util.Util;
 import net.minecraft.world.phys.AABB;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public interface Codecs {
     Codec<UUID> UUID_CODEC = Codec.STRING
@@ -69,14 +69,14 @@ public interface Codecs {
             aabb -> List.of(aabb.minX, aabb.minY, aabb.minZ, aabb.maxX, aabb.maxY, aabb.maxZ)
         );
 
-    static <T> Codec<List<T>> copyOnWriteArrayListCodec(@NotNull Codec<List<T>> innerCodec) {
+    static <T> Codec<List<T>> copyOnWriteArrayListCodec(@NonNull Codec<List<T>> innerCodec) {
         return innerCodec.comapFlatMap(
             l -> DataResult.success(new CopyOnWriteArrayList<>(l)),
             (l) -> l
         );
     }
 
-    static <T> Codec<AtomicReference<T>> atomicReferenceCodec(@NotNull Codec<T> innerCodec) {
+    static <T> Codec<AtomicReference<T>> atomicReferenceCodec(@NonNull Codec<T> innerCodec) {
         return innerCodec.comapFlatMap(
             t -> DataResult.success(new AtomicReference<>(t)),
             AtomicReference::get

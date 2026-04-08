@@ -36,14 +36,14 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 import static net.minecraft.commands.SharedSuggestionProvider.matchesSubStr;
 
+@NullMarked
 public class RegionTickCommand implements Command {
     private static final SimpleCommandExceptionType TOO_MANY_ARGUMENTS = new SimpleCommandExceptionType(
         Component.literal("Too many arguments provided for handle definition")
@@ -58,7 +58,7 @@ public class RegionTickCommand implements Command {
         Component.literal("No region exists at the specified block coordinates")
     );
 
-    private static void postActionTo(@NonNull String arg, @Nullable ServerPlayer player, Consumer<TickRegionScheduler.RegionScheduleHandle> action) throws CommandSyntaxException {
+    private static void postActionTo(String arg, @Nullable ServerPlayer player, Consumer<TickRegionScheduler.RegionScheduleHandle> action) throws CommandSyntaxException {
         String[] parts = arg.split("\\s+");
         if (parts.length == 0) throw UNKNOWN_ARGUMENTS.create();
         String first = parts[0].toLowerCase();
@@ -99,7 +99,7 @@ public class RegionTickCommand implements Command {
     }
 
     @Override
-    public @NotNull String getName() {
+    public String getName() {
         return "tick";
     }
 
@@ -109,7 +109,7 @@ public class RegionTickCommand implements Command {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final @NonNull LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
         return base
             .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(0.0F)).executes((context) -> {
                 float newTickRate = context.getArgument("rate", Float.class);
@@ -160,7 +160,7 @@ public class RegionTickCommand implements Command {
 
         @Contract(pure = true)
         @Override
-        public @NonNull CompletableFuture<Suggestions> getSuggestions(final CommandContext<CommandSourceStack> context, final @NonNull SuggestionsBuilder builder) throws CommandSyntaxException {
+        public CompletableFuture<Suggestions> getSuggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) throws CommandSyntaxException {
             String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
             for (String id : List.of("global", "server")) {
                 if (remaining.isEmpty()
@@ -186,7 +186,7 @@ public class RegionTickCommand implements Command {
             return builder.buildFuture();
         }
 
-        private @NonNull List<String> gatherCoordinates(final String remaining, final Collection<SharedSuggestionProvider.TextCoordinates> coordinates) {
+        private List<String> gatherCoordinates(final String remaining, final Collection<SharedSuggestionProvider.TextCoordinates> coordinates) {
             final Predicate<String> validator = Commands.createValidator(this::parse);
             List<String> list = Lists.newArrayList();
             if (Strings.isNullOrEmpty(remaining)) {
@@ -212,7 +212,7 @@ public class RegionTickCommand implements Command {
             return list;
         }
 
-        public void parse(@NonNull StringReader reader) throws CommandSyntaxException {
+        public void parse(StringReader reader) throws CommandSyntaxException {
             int cursor = reader.getCursor();
             if (!reader.canRead()) {
                 throw ERROR_NOT_COMPLETE.createWithContext(reader);

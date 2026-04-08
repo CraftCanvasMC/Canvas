@@ -21,8 +21,8 @@ import java.util.ServiceLoader;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,7 +37,7 @@ public record AnnotationBasedJson5Serializer<C>(
     Supplier<C> createInstance) implements ConfigSerializer<C> {
     public static final Logger LOGGER = LoggerFactory.getLogger("Json5Serializer");
 
-    private static @NotNull List<AnnotationValidator> buildValidators() {
+    private static @NonNull List<AnnotationValidator> buildValidators() {
         List<AnnotationValidator> services = Lists.newArrayList();
         ServiceLoader<AnnotationValidator> loader = ServiceLoader.load(AnnotationValidator.class);
         if (loader.stream().toList().isEmpty()) {
@@ -52,14 +52,14 @@ public record AnnotationBasedJson5Serializer<C>(
         return services;
     }
 
-    public AnnotationBasedJson5Serializer(Class<C> configClass, Consumer<Json5Builder.PostContext<C>> postInit, String header, @NotNull Function<Jankson.Builder, Jankson.Builder> hook, Supplier<C> createInstance) {
+    public AnnotationBasedJson5Serializer(Class<C> configClass, Consumer<Json5Builder.PostContext<C>> postInit, String header, @NonNull Function<Jankson.Builder, Jankson.Builder> hook, Supplier<C> createInstance) {
         this(
             Objects.requireNonNull(configClass.getAnnotation(Configuration.class), "Class must contain a Configuration annotation"),
             configClass, hook.apply(Jankson.builder()).build(), buildValidators(), postInit, header, createInstance
         );
     }
 
-    private @NotNull Path getConfigPath() {
+    private @NonNull Path getConfigPath() {
         return getConfigFolder().resolve(this.definition.value() + ".json5");
     }
 

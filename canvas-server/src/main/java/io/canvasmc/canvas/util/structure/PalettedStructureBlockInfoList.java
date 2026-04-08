@@ -12,7 +12,7 @@ import java.util.function.Predicate;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public class PalettedStructureBlockInfoList implements List<StructureTemplate.StructureBlockInfo> {
     private static final long[] EMPTY_DATA = new long[0];
@@ -110,7 +110,7 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
         return bits;
     }
 
-    private static <T> int indexOf(@NotNull List<T> list, T o) {
+    private static <T> int indexOf(@NonNull List<T> list, @NonNull T o) {
         for (int i = 0; i < list.size(); i++) {
             if (list.get(i) == o) {
                 return i;
@@ -119,7 +119,7 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
         return -1;
     }
 
-    private @NotNull List<StructureTemplate.StructureBlockInfo> convertBackToStructureBlockInfoListAndCache() {
+    private @NonNull List<StructureTemplate.StructureBlockInfo> convertBackToStructureBlockInfoListAndCache() {
         synchronized (data) {
             List<StructureTemplate.StructureBlockInfo> structureBlockInfos = cachedStructureBlockInfoList.get();
             if (structureBlockInfos != null) {
@@ -142,19 +142,19 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
         return this.size == 0;
     }
 
-    @NotNull
+    @NonNull
     @Override
     public Iterator<StructureTemplate.StructureBlockInfo> iterator() {
         return convertBackToStructureBlockInfoListAndCache().iterator();
     }
 
-    @NotNull
+    @NonNull
     @Override
     public ListIterator<StructureTemplate.StructureBlockInfo> listIterator() {
         return convertBackToStructureBlockInfoListAndCache().listIterator();
     }
 
-    @NotNull
+    @NonNull
     @Override
     public ListIterator<StructureTemplate.StructureBlockInfo> listIterator(int index) {
         return convertBackToStructureBlockInfoListAndCache().listIterator(index);
@@ -167,19 +167,19 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
     }
 
     @Override
-    public boolean containsAll(@NotNull Collection<?> c) {
+    public boolean containsAll(@NonNull Collection<?> c) {
         return new HashSet<>(convertBackToStructureBlockInfoListAndCache()).containsAll(c);
     }
 
-    @NotNull
+    @NonNull
     @Override
-    public Object @NotNull [] toArray() {
+    public Object @NonNull [] toArray() {
         return convertBackToStructureBlockInfoListAndCache().toArray();
     }
 
-    @NotNull
+    @NonNull
     @Override
-    public <T> T @NotNull [] toArray(@NotNull T @NotNull [] a) {
+    public <T> T @NonNull [] toArray(@NonNull T @NonNull [] a) {
         return convertBackToStructureBlockInfoListAndCache().toArray(a);
     }
 
@@ -198,7 +198,7 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
         return convertBackToStructureBlockInfoListAndCache().lastIndexOf(o);
     }
 
-    @NotNull
+    @NonNull
     @Override
     public List<StructureTemplate.StructureBlockInfo> subList(int fromIndex, int toIndex) {
         return convertBackToStructureBlockInfoListAndCache().subList(fromIndex, toIndex);
@@ -230,22 +230,22 @@ public class PalettedStructureBlockInfoList implements List<StructureTemplate.St
     }
 
     @Override
-    public boolean addAll(@NotNull Collection<? extends StructureTemplate.StructureBlockInfo> c) {
+    public boolean addAll(@NonNull Collection<? extends StructureTemplate.StructureBlockInfo> c) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public boolean addAll(int index, @NotNull Collection<? extends StructureTemplate.StructureBlockInfo> c) {
+    public boolean addAll(int index, @NonNull Collection<? extends StructureTemplate.StructureBlockInfo> c) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public boolean removeAll(@NotNull Collection<?> c) {
+    public boolean removeAll(@NonNull Collection<?> c) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public boolean retainAll(@NotNull Collection<?> c) {
+    public boolean retainAll(@NonNull Collection<?> c) {
         throw new UnsupportedOperationException();
     }
 

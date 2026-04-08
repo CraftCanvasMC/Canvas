@@ -39,9 +39,10 @@ import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnder
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.TagValueOutput;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
+@NullMarked
 public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
     private static final AtomicLong LAST_AUTOSAVE = new AtomicLong(System.nanoTime());
     public static final Path SAVE_PATH = Paths.get("pearls.dat");
@@ -73,7 +74,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         return new EnderPearls(new ConcurrentHashMap<>());
     }
 
-    public @NonNull CompletableFuture<Boolean> save(@Nullable BooleanConsumer callback) {
+    public CompletableFuture<Boolean> save(@Nullable BooleanConsumer callback) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
         Util.ioPool().execute(() -> {
             try {
@@ -93,7 +94,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         });
     }
 
-    public void spawnPearls(final @NonNull ServerPlayer player) {
+    public void spawnPearls(final ServerPlayer player) {
         pearls.computeIfPresent(player.getUUID(), (uuid, enderPearls) -> {
             for (final Pearl enderPearl : new ArrayList<>(enderPearls)) {
                 enderPearl.spawn();
@@ -103,7 +104,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         });
     }
 
-    public void addPearl(final UUID uuid, final @NonNull ThrownEnderpearl thrownEnderpearl) {
+    public void addPearl(final UUID uuid, final ThrownEnderpearl thrownEnderpearl) {
         if (thrownEnderpearl.isRemoved()) {
             Config.LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason(), new Throwable());
             return;
@@ -144,7 +145,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
     public record Pearl(CompoundTag serialized) {
 
         @Contract("_ -> new")
-        public static @NonNull Pearl of(@NonNull ThrownEnderpearl pearl) {
+        public static Pearl of(ThrownEnderpearl pearl) {
             final CompoundTag tag;
             try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
                 () -> "pearl-serialize", Config.LOGGER

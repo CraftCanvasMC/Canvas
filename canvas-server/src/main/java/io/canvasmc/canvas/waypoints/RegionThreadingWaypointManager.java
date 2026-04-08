@@ -12,8 +12,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.waypoints.ServerWaypointManager;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.waypoints.WaypointTransmitter;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A region-threading-safe implementation of the {@link ServerWaypointManager}.
@@ -48,13 +48,13 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
     private final ServerLevel world;
 
-    private static boolean shouldScheduleBasedOnDistance(@NotNull ServerPlayer origin, ServerPlayer target) {
+    private static boolean shouldScheduleBasedOnDistance(@NonNull ServerPlayer origin, ServerPlayer target) {
         final double scaled = origin.distanceTo(target) / SCALE;
         return origin.random.nextDouble() < (1.0 / (1.0 + (scaled * scaled)));
     }
 
     // Note: this should be scheduled on the 'player'
-    private static void breakConnection(@NotNull ServerPlayer player) {
+    private static void breakConnection(@NonNull ServerPlayer player) {
         TickThread.ensureTickThread(player, "Cannot update break connection off owning thread of player");
         final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
         for (WaypointTransmitter.Connection conn : map.values()) {
@@ -72,7 +72,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     @Override
-    public void trackWaypoint(WaypointTransmitter waypoint) {
+    public void trackWaypoint(@NonNull WaypointTransmitter waypoint) {
         if (isLocatorBarDisabled()) return;
         if (!waypoints.contains(waypoint)) waypoints.add(waypoint);
 
@@ -84,7 +84,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     @Override
-    public void updateWaypoint(WaypointTransmitter waypoint) {
+    public void updateWaypoint(@NonNull WaypointTransmitter waypoint) {
         if (isLocatorBarDisabled()) return;
         if (!waypoints.contains(waypoint)) return;
 
@@ -104,7 +104,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     // Note: this should be scheduled on 'player'
-    private void updateWaypoint(WaypointTransmitter waypoint, @NotNull ServerPlayer player) {
+    private void updateWaypoint(WaypointTransmitter waypoint, @NonNull ServerPlayer player) {
         TickThread.ensureTickThread(player, "Cannot update waypoint off owning thread of player");
         final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
         final WaypointTransmitter.Connection conn = map.get(waypoint);
@@ -119,7 +119,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     @Override
-    public void untrackWaypoint(WaypointTransmitter waypoint) {
+    public void untrackWaypoint(@NonNull WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
             player.scheduleToOrRun(() -> {
                 disconnectWaypoint(waypoint, player);
@@ -130,7 +130,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     // Note: this should be scheduled on the 'player'
-    private void disconnectWaypoint(WaypointTransmitter waypoint, @NotNull ServerPlayer player) {
+    private void disconnectWaypoint(WaypointTransmitter waypoint, @NonNull ServerPlayer player) {
         TickThread.ensureTickThread(player, "Cannot disconnect waypoint off owning thread of player");
         final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
         final WaypointTransmitter.Connection conn = map.remove(waypoint);
@@ -139,7 +139,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     @Override
     // Note: this should be called on the 'player'
-    public void addPlayer(ServerPlayer player) {
+    public void addPlayer(@NonNull ServerPlayer player) {
         if (!players.contains(player)) players.add(player);
 
         if (isLocatorBarDisabled()) return;
@@ -154,7 +154,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     @Override
     // Note: this should be called on the 'player'
-    public void updatePlayer(@NotNull ServerPlayer player) {
+    public void updatePlayer(@NonNull ServerPlayer player) {
         if (isLocatorBarDisabled()) return;
         player.scheduleToOrRun(() -> {
             final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
@@ -184,7 +184,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     @Override
     // Note: this should be called on the 'player'
-    public void removePlayer(@NotNull ServerPlayer player) {
+    public void removePlayer(@NonNull ServerPlayer player) {
         breakConnection(player);
 
         untrackWaypoint(player);
@@ -201,7 +201,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     @Override
-    public void remakeConnections(WaypointTransmitter waypoint) {
+    public void remakeConnections(@NonNull WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
             player.scheduleToOrRun(() -> {
                 createConnection(player, waypoint);
@@ -210,7 +210,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     @Override
-    public Set<WaypointTransmitter> transmitters() {
+    public @NonNull Set<WaypointTransmitter> transmitters() {
         return new HashSet<>(waypoints);
     }
 
@@ -231,7 +231,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     // Note: this should be scheduled on 'player'
-    private @Nullable RegionThreadingWaypointManager.CallbackHolder updateConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection connection) {
+    private RegionThreadingWaypointManager.@Nullable CallbackHolder updateConnection(ServerPlayer player, WaypointTransmitter waypoint, WaypointTransmitter.Connection connection) {
         if (player == waypoint) return null;
         TickThread.ensureTickThread(player, "Cannot update waypoint connection off owning thread of player");
 

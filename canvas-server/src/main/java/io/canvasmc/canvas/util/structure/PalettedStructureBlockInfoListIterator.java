@@ -3,7 +3,7 @@ package io.canvasmc.canvas.util.structure;
 import java.util.Iterator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public class PalettedStructureBlockInfoListIterator implements Iterator<StructureTemplate.StructureBlockInfo> {
     private final PalettedStructureBlockInfoList infos;
@@ -13,7 +13,7 @@ public class PalettedStructureBlockInfoListIterator implements Iterator<Structur
 
     private int index = 0;
 
-    public PalettedStructureBlockInfoListIterator(@NotNull PalettedStructureBlockInfoList infos) {
+    public PalettedStructureBlockInfoListIterator(@NonNull PalettedStructureBlockInfoList infos) {
         this.infos = infos;
         this.xOffset = infos.xBits;
         this.yOffset = this.xOffset + infos.yBits;

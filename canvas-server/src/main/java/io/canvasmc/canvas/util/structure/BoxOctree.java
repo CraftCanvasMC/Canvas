@@ -5,7 +5,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.phys.AABB;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public class BoxOctree {
 
@@ -22,7 +22,7 @@ public class BoxOctree {
         this(axisAlignedBB, 0);
     }
 
-    private BoxOctree(@NotNull AABB axisAlignedBB, int parentDepth) {
+    private BoxOctree(@NonNull AABB axisAlignedBB, int parentDepth) {
         boundary = axisAlignedBB.move(0, 0, 0); // deep copy
         size = new Vec3i(roundAwayFromZero(boundary.getXsize()), roundAwayFromZero(boundary.getYsize()), roundAwayFromZero(boundary.getZsize()));
         depth = parentDepth + 1;
@@ -123,7 +123,7 @@ public class BoxOctree {
         }
     }
 
-    public boolean boundaryEntirelyContains(@NotNull AABB axisAlignedBB) {
+    public boolean boundaryEntirelyContains(@NonNull AABB axisAlignedBB) {
         return boundary.contains(axisAlignedBB.minX, axisAlignedBB.minY, axisAlignedBB.minZ) &&
             boundary.contains(axisAlignedBB.maxX, axisAlignedBB.maxY, axisAlignedBB.maxZ);
     }
@@ -154,7 +154,7 @@ public class BoxOctree {
         return false;
     }
 
-    public boolean boundaryContains(@NotNull BlockPos position) {
+    public boolean boundaryContains(@NonNull BlockPos position) {
         return boundary.contains(position.getX(), position.getY(), position.getZ());
     }
 

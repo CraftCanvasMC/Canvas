@@ -9,12 +9,13 @@ import io.canvasmc.canvas.configuration.writer.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
+@NullMarked
 public class ReloadCommand implements Command {
     @Override
-    public @NotNull String getName() {
+    public String getName() {
         return "reload";
     }
 
@@ -29,7 +30,7 @@ public class ReloadCommand implements Command {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final @NotNull LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
         return base.executes(context -> {
             context.getSource().sendSystemMessage(
                 Component.literal("Some configuration options cannot be changed at runtime or may work incorrectly after reloading.")

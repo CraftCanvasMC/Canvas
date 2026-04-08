@@ -18,10 +18,11 @@ import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.commands.CommandSourceStack;
 import org.bukkit.command.CommandSender;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
 
 import static net.minecraft.commands.Commands.literal;
 
+@NullMarked
 public class RootCommandTree {
     private static final TextColor HEADER = TextColor.color(79, 164, 240);
     private static final TextColor PRIMARY = TextColor.color(48, 145, 237);
@@ -44,8 +45,7 @@ public class RootCommandTree {
 
     private final List<Command> subCommands = new LinkedList<>();
 
-    @NotNull
-    private Component buildDetailComponent(@NotNull Command subCommand) {
+    private Component buildDetailComponent(Command subCommand) {
         String name = subCommand.getName();
         String description = subCommand.getDescription();
         boolean selfCmd = subCommand.isAllowedSelfCommand();
@@ -140,7 +140,7 @@ public class RootCommandTree {
         dispatcher.register(root);
     }
 
-    public void register(@NotNull Class<? extends Command> command) {
+    public void register(Class<? extends Command> command) {
         try {
             if (command.getDeclaredConstructor().getParameterCount() != 0) {
                 throw new IllegalArgumentException("Command must have no-arg constructor");

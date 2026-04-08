@@ -14,8 +14,9 @@ import net.minecraft.world.item.component.BlocksAttacks;
 import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.equipment.Equippable;
 import net.minecraft.world.level.Level;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
 
+@NullMarked
 public class SwordItem extends Item {
     public static final BlocksAttacks BLOCKS_ATTACKS = new BlocksAttacks(
         0.0F, 0.0F,
@@ -30,7 +31,7 @@ public class SwordItem extends Item {
     }
 
     @Override
-    public @NotNull InteractionResult use(final @NotNull Level level, final @NotNull Player player, final @NotNull InteractionHand hand) {
+    public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
         // Vanilla start
         // we mark this because this is pure Vanilla code injection in a non-vanilla class
         // so it is appropriate to mark it as such

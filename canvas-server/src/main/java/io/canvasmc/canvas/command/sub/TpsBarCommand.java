@@ -10,14 +10,15 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
 
+@NullMarked
 public class TpsBarCommand implements Command {
 
-    private static void toggleTpsBar(@NotNull CommandSourceStack source, @NotNull ServerPlayer player) {
+    private static void toggleTpsBar(CommandSourceStack source, ServerPlayer player) {
         RegionizedTpsBar.DisplayManager display = player.canvas$tpsBarDisplay;
         RegionizedTpsBar.Entry current = display.serializeDisplay();
         RegionizedTpsBar.Entry updated = new RegionizedTpsBar.Entry(!current.enabled(), current.placement());
@@ -28,7 +29,7 @@ public class TpsBarCommand implements Command {
         source.sendSuccess(() -> Component.literal(message), true);
     }
 
-    private static void setTpsBarPlacement(@NotNull CommandSourceStack source, @NotNull ServerPlayer player,
+    private static void setTpsBarPlacement(CommandSourceStack source, ServerPlayer player,
                                            RegionizedTpsBar.Placement newPlacement, String argName) {
         RegionizedTpsBar.DisplayManager display = player.canvas$tpsBarDisplay;
         RegionizedTpsBar.Entry current = display.serializeDisplay();
@@ -41,7 +42,7 @@ public class TpsBarCommand implements Command {
     }
 
     @Override
-    public @NotNull String getName() {
+    public String getName() {
         return "tpsbar";
     }
 

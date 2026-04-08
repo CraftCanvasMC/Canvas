@@ -30,7 +30,7 @@ import me.lucko.spark.paper.common.util.classfinder.ClassFinder;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.Plugin;
-import org.jetbrains.annotations.NotNull;
+import org.jspecify.annotations.NonNull;
 
 public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     private final Server server;
@@ -54,7 +54,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.platform = new SparkPlatform(this);
     }
 
-    public static @NotNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
+    public static @NonNull PaperSparkModule create(Compatibility compatibility, Server server, Logger logger, PaperScheduler scheduler, PaperClassLookup classLookup) {
         return new FoliaSparkPlugin(server, logger, scheduler, classLookup);
     }
 
