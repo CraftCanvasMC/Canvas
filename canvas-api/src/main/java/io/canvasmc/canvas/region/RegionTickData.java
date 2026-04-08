@@ -52,6 +52,13 @@ public interface RegionTickData {
     <T> T getOrCreateFromIRegionizedData(IRegionizedData<T> regionizedData);
 
     /**
+     * Gets the tick state manager for this region
+     *
+     * @return the tick manager
+     */
+    RegionThreadingTickManager.RegionHandle getTickManager();
+
+    /**
      * Represents a type of region-local data that can be attached to a region through the {@link RegionTickData}
      * system.
      *
@@ -85,13 +92,6 @@ public interface RegionTickData {
          * @return The callback handling merge and split behavior for this data type.
          */
         IRegionizedCallback<T> getCallback();
-
-        /**
-         * Gets the tick state manager for this region
-         *
-         * @return the tick manager
-         */
-        RegionThreadingTickManager.RegionHandle getTickManager();
 
         interface IRegionizedCallback<T> {
 
