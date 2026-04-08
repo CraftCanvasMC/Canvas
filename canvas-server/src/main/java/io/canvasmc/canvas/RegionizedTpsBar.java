@@ -82,7 +82,7 @@ public class RegionizedTpsBar {
             final double tps = tpsAverage.segmentAll().average();
             final double mspt = msptAverage.segmentAll().average() / 1.0E6;
             final int players = this.worldData.getPlayerCount();
-            final boolean sprinting = this.worldData.regionData.getRegionSchedulingHandle().ticksToSprint > 0;
+            final boolean sprinting = this.worldData.regionData.getRegionSchedulingHandle().getTickManager().isSprinting();
             final Component textComponent = buildComponent(tps, mspt, util, players, sprinting);
             // update players
             for (final ServerPlayer localPlayer : this.worldData.getLocalPlayers()) {

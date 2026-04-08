@@ -42,7 +42,7 @@ public class FoliaTickStatistics implements TickStatistics {
     }
 
     private static double getTpsFor(final TickRegionScheduler.RegionScheduleHandle scheduleHandle, final @NonNull TimeSpan span) {
-        final long interval = TickRegionScheduler.TIME_BETWEEN_TICKS;
+        final long interval = TickRegionScheduler.getTimeBetweenTicks();
         Double d = switch (span) {
             case TPS_1_MIN -> scheduleHandle.tickTimes1m.getTPSAverage(null, interval);
             case TPS_5_MIN -> scheduleHandle.tickTimes5m.getTPSAverage(null, interval);
@@ -51,7 +51,7 @@ public class FoliaTickStatistics implements TickStatistics {
                 scheduleHandle.tickTimes15s.getTPSAverage(null, interval);
             case TPS_15_MIN -> scheduleHandle.tickTimes15m.getTPSAverage(null, interval);
         };
-        if (d == null) return TickRegionScheduler.TICK_RATE;
+        if (d == null) return TickRegionScheduler.getTickRate();
         else return d;
     }
 
