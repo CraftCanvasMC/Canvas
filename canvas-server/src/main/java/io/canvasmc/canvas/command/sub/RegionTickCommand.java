@@ -60,38 +60,40 @@ public class RegionTickCommand implements Command {
 
     private static void postActionTo(@NonNull String arg, @Nullable ServerPlayer player, Consumer<TickRegionScheduler.RegionScheduleHandle> action) throws CommandSyntaxException {
         String[] parts = arg.split("\\s+");
-        if (parts.length == 1) {
-            String raw = parts[0].toLowerCase();
-            switch (raw) {
-                case "global" -> action.accept(RegionizedServer.getGlobalTickData());
-                case "server" -> {
-                    action.accept(RegionizedServer.getGlobalTickData());
-                    for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
-                        world.regioniser.computeForAllRegionsUnsynchronised((region) -> action.accept(region.getData().tickHandle));
-                    }
+        if (parts.length == 0) throw UNKNOWN_ARGUMENTS.create();
+        String first = parts[0].toLowerCase();
+        switch (first) {
+            case "global" -> {
+                action.accept(RegionizedServer.getGlobalTickData());
+                return;
+            }
+            case "server" -> {
+                action.accept(RegionizedServer.getGlobalTickData());
+                for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
+                    world.regioniser.computeForAllRegionsUnsynchronised((region) -> action.accept(region.getData().tickHandle));
                 }
-                default -> throw UNKNOWN_ARGUMENTS.create();
+                return;
             }
-            return;
-        }
-        else if (parts.length == 2) {
-            String first = parts[0];
-            String second = parts[1];
-            if (player == null) {
-                throw MUST_BE_PLAYER.create();
+            default -> {
+                if (parts.length == 2) {
+                    String second = parts[1];
+                    if (player == null) {
+                        throw MUST_BE_PLAYER.create();
+                    }
+                    int chunkX = (first.equalsIgnoreCase("~") ? player.blockPosition.getX() : Integer.parseInt(first)) >> 4;
+                    int chunkZ = (second.equalsIgnoreCase("~") ? player.blockPosition.getZ() : Integer.parseInt(second)) >> 4;
+                    ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+                        player.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
+                    if (region == null) {
+                        throw NO_REGION_EXISTS.create();
+                    }
+                    action.accept(region.getData().tickHandle);
+                    return;
+                }
+                else if (parts.length > 2) {
+                    throw TOO_MANY_ARGUMENTS.create();
+                }
             }
-            int chunkX = (first.equalsIgnoreCase("~") ? player.blockPosition.getX() : Integer.parseInt(first)) >> 4;
-            int chunkZ = (second.equalsIgnoreCase("~") ? player.blockPosition.getZ() : Integer.parseInt(second)) >> 4;
-            ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
-                player.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
-            if (region == null) {
-                throw NO_REGION_EXISTS.create();
-            }
-            action.accept(region.getData().tickHandle);
-            return;
-        }
-        else if (parts.length > 2) {
-            throw TOO_MANY_ARGUMENTS.create();
         }
         throw UNKNOWN_ARGUMENTS.create();
     }
