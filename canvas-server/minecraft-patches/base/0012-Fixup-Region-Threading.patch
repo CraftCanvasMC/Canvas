@@ -4,6 +4,71 @@ Date: Tue, 23 Dec 2025 14:37:03 -0800
 Subject: [PATCH] Fixup Region Threading
 
 
+diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+index bbd14cf34438a9366f5ff29f1acba4282d77d983..039bf725bba8ea55e9dd40f061381d03a0113b99 100644
+--- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
++++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+@@ -148,9 +148,48 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+             this.shuttingDown = null;
+         }
+     }
++    // Canvas start - region threading
++
++    private static volatile boolean IS_IN_SHUTDOWN = false;
++
++    public static boolean canvas$isShutdown() {
++        return IS_IN_SHUTDOWN;
++    }
++
++    private void savePlayers() {
++        net.minecraft.server.players.PlayerList playerList = MinecraftServer.getServer().getPlayerList();
++        LOGGER.info("Removing players");
++        // waiting for 100ms is a stupid fix
++        List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
++        // prepare futures
++        for (final ServerPlayer serverPlayer : playerList.players) {
++            final net.minecraft.network.Connection connection = serverPlayer.connection.connection;
++            if (connection.channel == null || !connection.channel.isOpen()) continue;
++            java.util.concurrent.CompletableFuture<Void> future = new java.util.concurrent.CompletableFuture<>();
++            connection.channel.closeFuture().addListener(f -> future.complete(null));
++            futures.add(future);
++        }
++
++        // now, remove players and wait
++        playerList.removeAll(MinecraftServer.getServer().isRestarting);
++
++        // wait for player removal
++        if (!futures.isEmpty()) {
++            if (io.canvasmc.canvas.util.Util.waitFor(java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])),
++                java.util.concurrent.TimeUnit.SECONDS, 20)) {
++                LOGGER.info("Players removed");
++            } else {
++                LOGGER.warn("Players did not all get removed within 20 seconds, proceeding with shutdown anyways");
++            }
++        }
++
++        MinecraftServer.getServer().getConnection().stop();
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public final void run() {
++        IS_IN_SHUTDOWN = true; // Canvas - region threading
+         // await scheduler termination
+         LOGGER.info("Awaiting scheduler termination for 60s...");
+         if (TickRegions.getScheduler().halt(true, TimeUnit.SECONDS.toNanos(60L))) {
+@@ -161,6 +200,11 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+         }
+ 
+         MinecraftServer.getServer().stopServer(); // stop part 1: most logic, kicking players, plugins, etc
++        // Canvas start - region threading
++        // this.playerList.removeAll(this.isRestarting); // Paper
++        // try { Thread.sleep(100); } catch (InterruptedException ex) {}
++        this.savePlayers();
++        // Canvas end - region threading
+         // halt all chunk systems first so that any in-progress chunk generation stops
+         LOGGER.info("Halting chunk systems...");
+         for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
 index 399477cf0964e7774821792c78ea9bb619fbb617..09566c1a0505d112d7a03200789243d7c82f6466 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
@@ -542,7 +607,7 @@ index 8d4f092ec65d285508be81cbfadd6e747e1d067e..2db474ced22d5867b0f6315185af31d3
  
      public static ServerPlayer getPlayer(final String name) {
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..cf05a73656de1cecdc4e219db1b75f428035eb92 100644
+index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..b24997f5f11aaffa8b002831d196936218890eec 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -365,7 +365,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -562,7 +627,25 @@ index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..cf05a73656de1cecdc4e219db1b75f42
          }
  
          S minecraftServer = (S)threadFunction.apply(thread);
-@@ -1302,11 +1301,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1066,16 +1065,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         }
+         // CraftBukkit end
+         if (io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper != null) io.papermc.paper.plugin.PluginInitializerManager.instance().pluginRemapper.shutdown(); // Paper - Plugin remapping
+-        this.getConnection().stop();
+-        this.isSaving = true;
+-        if (this.playerList != null) {
+-            //LOGGER.info("Saving players"); // Folia - move to shutdown thread logic
+-            //this.playerList.saveAll(); // Folia - move to shutdown thread logic
+-            this.playerList.removeAll(this.isRestarting); // Paper
+-            try { Thread.sleep(100); } catch (InterruptedException ex) {} // CraftBukkit - SPIGOT-625 - give server at least a chance to send packets
+-        }
+-
+-        // Folia start - region threading
++        this.isSaving = true; // Canvas - region threading
+         if (true) {
+             // the rest till part 2 is handled by the region shutdown thread
+             return;
+@@ -1302,11 +1292,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                  io.papermc.paper.threadedregions.RegionizedServer.getInstance().init(); // Folia - region threading - only after loading worlds
                  final long actualDoneTimeMs = System.currentTimeMillis() - org.bukkit.craftbukkit.Main.BOOT_TIME.toEpochMilli(); // Paper - Improve startup message
                  LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1000.00D)); // Paper - Improve startup message
@@ -575,7 +658,7 @@ index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..cf05a73656de1cecdc4e219db1b75f42
              }
              // Folia end - region threading
              // Spigot start
-@@ -1405,7 +1400,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1405,7 +1391,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              }
  
              this.onServerCrash(crashReport);
@@ -584,7 +667,7 @@ index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..cf05a73656de1cecdc4e219db1b75f42
              try {
                  this.stopped = true;
                  this.stopServer();
-@@ -1851,7 +1846,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1851,7 +1837,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          regionizedWorldData.tickConnections(); // Folia - region threading
          //this.playerList.tick(); // Folia - region threading
          this.debugSubscribers.tick();

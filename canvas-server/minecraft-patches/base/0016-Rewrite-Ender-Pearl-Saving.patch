@@ -1,0 +1,176 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Thu, 9 Apr 2026 11:59:07 -0700
+Subject: [PATCH] Rewrite Ender Pearl Saving
+
+Folia removes pearl registration, breaking Vanilla behavior with pearls.
+The diff here is to help restore this behavior by rewriting how pearls are
+saved to be safe for region threading
+
+diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+index 039bf725bba8ea55e9dd40f061381d03a0113b99..ac848146197006953d2f7ccb71f390fc3f7f712e 100644
+--- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
++++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+@@ -170,6 +170,32 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+             futures.add(future);
+         }
+ 
++        // save pearls
++        for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
++            final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
++                regions = new ArrayList<>();
++            world.regioniser.computeForAllRegionsUnsynchronised(regions::add);
++
++            for (int i = 0, len = regions.size(); i < len; ++i) {
++                io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++                    region = regions.get(i);
++                ChunkPos center = null;
++                try {
++                    this.shuttingDown = region;
++                    center = region.getCenterChunk();
++                    final RegionizedWorldData worldData = region.regioniser.world.worldRegionData.get();
++                    for (final ServerPlayer localPlayer : worldData.getLocalPlayers()) {
++                        // if pearl duplication fix is enabled, remove the pearl
++                        localPlayer.savePearls(io.canvasmc.canvas.Config.INSTANCE.fixes.pearlDuplication);
++                    }
++                } catch (Throwable thrown) {
++                    LOGGER.error("Failed to save pearls for region around chunk " + center + " in world '" + region.regioniser.world.getWorld().getName() + "'", thrown);
++                } finally {
++                    this.shuttingDown = null;
++                }
++            }
++        }
++
+         // now, remove players and wait
+         playerList.removeAll(MinecraftServer.getServer().isRestarting);
+ 
+@@ -183,6 +209,8 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+             }
+         }
+ 
++        // wait for pearl save, then wait for connection shutdown
++        MinecraftServer.getServer().pearls.save(null).join();
+         MinecraftServer.getServer().getConnection().stop();
+     }
+     // Canvas end - region threading
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index e37752d6020db52107c90d82d17347c430f111ef..e3baeb9275f4cae94f10b25484a1444f6ebe455d 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -288,6 +288,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public boolean isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
+     private final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping
+     public static final long SERVER_INIT = System.nanoTime(); // Paper - Lag compensation
++    public final io.canvasmc.canvas.world.entity.EnderPearls pearls = io.canvasmc.canvas.world.entity.EnderPearls.read(); // Canvas - region threading
+     // Paper start - improve tick loop
+     public final ca.spottedleaf.moonrise.common.time.TickData tickTimes1s  = new ca.spottedleaf.moonrise.common.time.TickData(java.util.concurrent.TimeUnit.SECONDS.toNanos(1L));
+     public final ca.spottedleaf.moonrise.common.time.TickData tickTimes5s  = new ca.spottedleaf.moonrise.common.time.TickData(java.util.concurrent.TimeUnit.SECONDS.toNanos(5L));
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 437d63fdee3dfd317eab5ad9238e592716f0fa66..b96e4845e734bd0b13404b3d72b42f12e2776fd9 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -266,7 +266,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     private @Nullable BlockPos raidOmenPosition;
+     private Vec3 lastKnownClientMovement = Vec3.ZERO;
+     private Input lastClientInput = Input.EMPTY;
+-    private final Set<ThrownEnderpearl> enderPearls = new HashSet<>();
++    private final Set<ThrownEnderpearl> enderPearls = java.util.concurrent.ConcurrentHashMap.newKeySet(); // Canvas - region threading
+     private long timeEntitySatOnShoulder;
+     private CompoundTag shoulderEntityLeft = new CompoundTag();
+     private CompoundTag shoulderEntityRight = new CompoundTag();
+@@ -756,6 +756,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+ 
+     private void saveEnderPearls(ValueOutput output) {
++        if (true) return; // Canvas - region threading
+         if (!this.enderPearls.isEmpty()) {
+             ValueOutput.ValueOutputList valueOutputList = output.childrenList("ender_pearls");
+ 
+@@ -771,9 +772,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             }
+         }
+     }
++    // Canvas start - region threading
++
++    public void savePearls(boolean removePearl) {
++        for (ThrownEnderpearl thrownEnderpearl : enderPearls) {
++            if (thrownEnderpearl.level().paperConfig().misc.legacyEnderPearlBehavior) continue;
++
++            Runnable task = () -> {
++                MinecraftServer.getServer().pearls.addPearl(this.uuid, thrownEnderpearl);
++                if (removePearl) thrownEnderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
++            };
++
++            if (io.papermc.paper.threadedregions.RegionShutdownThread.isShutdownThread()) {
++                task.run();
++                continue;
++            }
++
++            thrownEnderpearl.canvas$scheduleToOrRun(task);
++        }
++    }
++    // Canvas end - region threading
+ 
+     public void loadAndSpawnEnderPearls(ValueInput input) {
+         input.childrenListOrEmpty("ender_pearls").forEach(this::loadAndSpawnEnderPearl);
++        MinecraftServer.getServer().pearls.spawnPearls(this); // Canvas - region threading
+     }
+ 
+     private void loadAndSpawnEnderPearl(ValueInput input) {
+@@ -3417,11 +3439,13 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+ 
+     public void registerEnderPearl(ThrownEnderpearl enderPearl) {
+-        //this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
++        if (!io.canvasmc.canvas.Config.INSTANCE.restoreVanillaEnderPearlBehavior) return; // Canvas - restore vanilla ender pearl behavior
++        this.enderPearls.add(enderPearl);
+     }
+ 
+     public void deregisterEnderPearl(ThrownEnderpearl enderPearl) {
+-        //this.enderPearls.remove(enderPearl); // Folia - region threading - do not track ender pearls
++        if (!io.canvasmc.canvas.Config.INSTANCE.restoreVanillaEnderPearlBehavior) return; // Canvas - restore vanilla ender pearl behavior
++        this.enderPearls.remove(enderPearl);
+     }
+ 
+     public Set<ThrownEnderpearl> getEnderPearls() {
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 5668fcfd939bd7dbabd57f7b6c49a60e5c7d1a06..23b2356ada03a78f58662e4f91be665f4a4bce43 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -554,13 +554,7 @@ public abstract class PlayerList {
+ 
+         player.unRide();
+ 
+-        for (ThrownEnderpearl thrownEnderpearl : player.getEnderPearls()) {
+-            // Paper start - Allow using old ender pearl behavior
+-            if (!thrownEnderpearl.level().paperConfig().misc.legacyEnderPearlBehavior) {
+-                thrownEnderpearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT); // CraftBukkit - add Bukkit remove cause
+-            }
+-            // Paper end - Allow using old ender pearl behavior
+-        }
++        player.savePearls(true); // Canvas - region threading
+ 
+         serverLevel.removePlayerImmediately(player, Entity.RemovalReason.UNLOADED_WITH_PLAYER);
+         player.retireScheduler(); // Paper - Folia schedulers
+diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+index a9c8f1b1c8bb32fbbc2048ac0f8a435922fa483e..16b51dae891150c07887d94947dd1a86a4824d9d 100644
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+@@ -52,11 +52,15 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+     }
+ 
+     private void deregisterFromCurrentOwner() {
+-        // Folia - region threading - we remove the registration logic, we do not need to fetch the owner
++        if (this.getOwner() instanceof ServerPlayer serverPlayer) {
++            serverPlayer.deregisterEnderPearl(this);
++        }
+     }
+ 
+     private void registerToCurrentOwner() {
+-        // Folia - region threading - we remove the registration logic, we do not need to fetch the owner
++        if (this.getOwner() instanceof ServerPlayer serverPlayer) {
++            serverPlayer.registerEnderPearl(this);
++        }
+     }
+ 
+     @Override
