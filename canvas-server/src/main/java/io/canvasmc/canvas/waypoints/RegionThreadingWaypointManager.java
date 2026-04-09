@@ -77,7 +77,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         if (!waypoints.contains(waypoint)) waypoints.add(waypoint);
 
         for (ServerPlayer player : players) {
-            player.scheduleToOrRun(() -> {
+            player.canvas$scheduleToOrRun(() -> {
                 createConnection(player, waypoint);
             });
         }
@@ -97,7 +97,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
                 continue;
             }
 
-            player.scheduleToOrRun(() -> {
+            player.canvas$scheduleToOrRun(() -> {
                 updateWaypoint(waypoint, player);
             });
         }
@@ -121,7 +121,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void untrackWaypoint(@NonNull WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
-            player.scheduleToOrRun(() -> {
+            player.canvas$scheduleToOrRun(() -> {
                 disconnectWaypoint(waypoint, player);
             });
         }
@@ -156,7 +156,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     // Note: this should be called on the 'player'
     public void updatePlayer(@NonNull ServerPlayer player) {
         if (isLocatorBarDisabled()) return;
-        player.scheduleToOrRun(() -> {
+        player.canvas$scheduleToOrRun(() -> {
             final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
             final CallbackHolder[] callbackHolders = new CallbackHolder[map.size()];
 
@@ -194,7 +194,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void breakAllConnections() {
         for (ServerPlayer player : players) {
-            player.scheduleToOrRun(() -> {
+            player.canvas$scheduleToOrRun(() -> {
                 breakConnection(player);
             });
         }
@@ -203,7 +203,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void remakeConnections(@NonNull WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
-            player.scheduleToOrRun(() -> {
+            player.canvas$scheduleToOrRun(() -> {
                 createConnection(player, waypoint);
             });
         }
