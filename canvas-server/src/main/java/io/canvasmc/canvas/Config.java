@@ -765,4 +765,10 @@ public class Config {
 
     @Comment("Restores Vanilla ender pearl behavior to match Paper, which is disabled in Folia.")
     public boolean restoreVanillaEnderPearlBehavior = false;
+
+    @Comment({
+        "Folia's portaling rewrite makes the world loading screen not display on the client, and shows more of an",
+        "empty void. With this option enabled, Canvas will make the client display this screen which can be more visually appealing"
+    })
+    public boolean displayWorldLoadScreenForPortaling = true;
 }
