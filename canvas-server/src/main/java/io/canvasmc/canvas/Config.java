@@ -10,13 +10,13 @@ import io.canvasmc.canvas.configuration.validator.numeric.NonNegativeNumericValu
 import io.canvasmc.canvas.configuration.validator.numeric.PositiveNumericValueValidator;
 import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
-import io.canvasmc.canvas.util.Json5SerializerImpl;
-import io.canvasmc.canvas.world.RegionizedTpsBar;
-import io.canvasmc.canvas.world.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
+import io.canvasmc.canvas.util.Json5SerializerImpl;
 import io.canvasmc.canvas.util.version.ApiClient;
 import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
+import io.canvasmc.canvas.world.RegionizedTpsBar;
+import io.canvasmc.canvas.world.entity.EntityCollisionMode;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedServer;
