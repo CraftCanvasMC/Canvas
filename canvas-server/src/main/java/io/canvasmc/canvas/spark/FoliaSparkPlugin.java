@@ -1,6 +1,12 @@
 package io.canvasmc.canvas.spark;
 
-import io.canvasmc.canvas.spark.profiler.PinningThreadDumper;
+import io.canvasmc.canvas.spark.plugin.FoliaClassSourceLookup;
+import io.canvasmc.canvas.spark.plugin.FoliaPlatformInfo;
+import io.canvasmc.canvas.spark.plugin.FoliaPlayerPingProvider;
+import io.canvasmc.canvas.spark.plugin.FoliaServerConfigProvider;
+import io.canvasmc.canvas.spark.plugin.FoliaTickStatistics;
+import io.canvasmc.canvas.spark.plugin.FoliaWorldInfoProvider;
+import io.canvasmc.canvas.spark.profiler.RegionThreadDumper;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
@@ -50,7 +56,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.classLookup = classLookup;
         this.tickHook = new FoliaTickHook();
         this.tickReporter = new FoliaTickReporter();
-        this.gameThreadDumper = new PinningThreadDumper();
+        this.gameThreadDumper = new RegionThreadDumper();
         this.platform = new SparkPlatform(this);
     }
 

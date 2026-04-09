@@ -5,7 +5,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.chunk.PerWorldDistanceConfig;
+import io.canvasmc.canvas.world.PerWorldDistanceConfig;
 import io.canvasmc.canvas.command.Command;
 import java.util.Locale;
 import java.util.function.BiConsumer;

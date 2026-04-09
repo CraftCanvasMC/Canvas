@@ -8,10 +8,21 @@ import net.minecraft.world.level.material.FlowingFluid;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
+/**
+ * This is part of the C2ME mod for Fabric:
+ * <p>
+ * <a
+ * href="https://github.com/RelativityMC/C2ME-fabric/blob/dev/1.21.11/c2me-rewrites-chunk-system/src/main/java/com/ishland/c2me/rewrites/chunksystem/common/quirks/FlowableFluidUtils.java">Link
+ * to file</a>
+ *
+ * @author ishland
+ */
 public class FlowableFluidUtils {
 
-    private static boolean canFlowNormally(LevelReader world, BlockPos pos, BlockState blockState, FluidState fluidState) {
+    private static boolean canFlowNormally(LevelReader world, BlockPos pos, BlockState blockState, @NonNull FluidState fluidState) {
         if (fluidState.isEmpty()) return false;
 
         BlockPos belowPos = pos.below();
@@ -32,7 +43,7 @@ public class FlowableFluidUtils {
             canSpreadToSidesNormally(world, pos, blockState, fluidState);
     }
 
-    private static boolean canSpreadToSidesNormally(LevelReader world, BlockPos pos, BlockState blockState, FluidState fluidState) {
+    private static boolean canSpreadToSidesNormally(LevelReader world, BlockPos pos, BlockState blockState, @NonNull FluidState fluidState) {
         int nextFluidLevel = fluidState.getAmount() - ((FlowingFluid) fluidState.getType()).getDropOff(world);
         if (fluidState.getValue(FlowingFluid.FALLING)) {
             nextFluidLevel = 7;
@@ -62,7 +73,7 @@ public class FlowableFluidUtils {
         return false;
     }
 
-    private static FluidState getUpdatedState(FlowingFluid receiver, LevelReader world, BlockPos pos, BlockState state) {
+    private static @Nullable FluidState getUpdatedState(FlowingFluid receiver, LevelReader world, BlockPos pos, BlockState state) {
         int i = 0;
         int j = 0;
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
@@ -103,7 +114,7 @@ public class FlowableFluidUtils {
         }
     }
 
-    public static boolean needsPostProcessing(LevelReader world, BlockPos pos, BlockState blockState, FluidState fluidState) {
+    public static boolean needsPostProcessing(LevelReader world, BlockPos pos, BlockState blockState, @NonNull FluidState fluidState) {
         if (!fluidState.isSource()) {
             return true;
         }

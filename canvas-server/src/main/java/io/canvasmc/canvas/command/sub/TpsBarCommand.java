@@ -3,7 +3,7 @@ package io.canvasmc.canvas.command.sub;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.RegionizedTpsBar;
+import io.canvasmc.canvas.world.RegionizedTpsBar;
 import io.canvasmc.canvas.command.Command;
 import java.util.Collection;
 import net.minecraft.commands.CommandSourceStack;

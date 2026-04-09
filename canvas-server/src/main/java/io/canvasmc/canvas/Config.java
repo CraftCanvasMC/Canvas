@@ -2,7 +2,6 @@ package io.canvasmc.canvas;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 import ca.spottedleaf.moonrise.patches.chunk_system.util.ParallelSearchRadiusIteration;
-import io.canvasmc.canvas.chunk.FluidPostProcessingMode;
 import io.canvasmc.canvas.configuration.ConfigSerializer;
 import io.canvasmc.canvas.configuration.Configuration;
 import io.canvasmc.canvas.configuration.internal.ConfigurationManager;
@@ -11,11 +10,13 @@ import io.canvasmc.canvas.configuration.validator.numeric.NonNegativeNumericValu
 import io.canvasmc.canvas.configuration.validator.numeric.PositiveNumericValueValidator;
 import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
-import io.canvasmc.canvas.entity.EntityCollisionMode;
+import io.canvasmc.canvas.util.Json5SerializerImpl;
+import io.canvasmc.canvas.world.RegionizedTpsBar;
+import io.canvasmc.canvas.world.entity.EntityCollisionMode;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
-import io.canvasmc.canvas.util.ApiClient;
-import io.canvasmc.canvas.util.CanvasVersionFetcher;
+import io.canvasmc.canvas.util.version.ApiClient;
+import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedServer;
@@ -108,7 +109,7 @@ public class Config {
     }
 
     private static @NonNull @Unmodifiable ConfigSerializer<Config> buildGlobal(Configuration config, Class<Config> configClass) {
-        return new AnnotationBasedJson5Serializer.Json5Builder<Config>()
+        return new Json5SerializerImpl.Json5Builder<Config>()
             .header("""
                 This is the global Canvas configuration file.
                 All configuration options here are made for vanilla-compatibility by default
@@ -226,6 +227,10 @@ public class Config {
             " - FILTERED - applies a rough filter to filter out fluids that are definitely not going to flow"
         })
         public FluidPostProcessingMode fluidPostProcessingMode = FluidPostProcessingMode.VANILLA;
+
+        public enum FluidPostProcessingMode {
+            VANILLA, DISABLED, FILTERED
+        }
 
         @Comment({
             "Whether to turn fluid postprocessing into scheduled tick",

@@ -5,8 +5,8 @@ import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
 import io.canvasmc.canvas.Config;
-import io.canvasmc.canvas.util.CpuTopology;
-import io.canvasmc.canvas.util.queue.FastHeapPriorityQueue;
+import io.canvasmc.canvas.util.CpuInfoReport;
+import io.canvasmc.canvas.util.collection.FastHeapPriorityQueue;
 import java.lang.invoke.VarHandle;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -101,7 +101,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
         final BitSet affinitySet;
         if (enableAffinity) {
-            if (!CpuTopology.isLinux()) {
+            if (!CpuInfoReport.isLinux()) {
                 LOGGER.warn("Affinity setting is only supported on Linux");
                 affinitySet = new BitSet();
             }
@@ -130,7 +130,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
 
     private @NonNull BitSet getAffinity(@NonNull List<String> affinity) {
         if (affinity.isEmpty()) {
-            LOGGER.warn("No affinity set configured, backing off, logging CPU topology:\n{}", CpuTopology.compileOutput());
+            LOGGER.warn("No affinity set configured, backing off, logging CPU topology:\n{}", CpuInfoReport.compileOutput());
             return new BitSet();
         }
         int maxAvailable = Runtime.getRuntime().availableProcessors();
