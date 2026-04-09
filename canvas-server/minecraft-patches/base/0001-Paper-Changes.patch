@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Toffikk <slodkitofik@gmail.com>
+Date: Thu, 9 Apr 2026 22:05:45 +0200
+Subject: [PATCH] Paper Changes
+
+
+diff --git a/net/minecraft/world/effect/MobEffectInstance.java b/net/minecraft/world/effect/MobEffectInstance.java
+index 5888dcb3ce9b988a6ba1ff4f810f41522bc25161..3bcfe2faca53e85a20bdbf847b25aef9c61e24f6 100644
+--- a/net/minecraft/world/effect/MobEffectInstance.java
++++ b/net/minecraft/world/effect/MobEffectInstance.java
+@@ -253,13 +253,16 @@ public class MobEffectInstance implements Comparable<MobEffectInstance> {
+     }
+ 
+     private boolean downgradeToHiddenEffect() {
+-        if (this.duration == 0 && this.hiddenEffect != null) {
++        // Paper start - Fix MC-259832
++        if (this.duration != 0 || this.hiddenEffect == null) return false;
++
++        do {
+             this.setDetailsFrom(this.hiddenEffect);
+             this.hiddenEffect = this.hiddenEffect.hiddenEffect;
+-            return true;
+-        } else {
+-            return false;
+-        }
++        } while (this.duration == 0 && this.hiddenEffect != null);
++
++        return true;
++        // Paper end - Fix MC-259832
+     }
+ 
+     public void onEffectStarted(LivingEntity entity) {
+diff --git a/net/minecraft/world/item/component/CustomData.java b/net/minecraft/world/item/component/CustomData.java
+index 418608ab95401f9c6266223ec7f0a9ec7d03d1e8..3dc4b262c81c393f2082b3c938e860fecf0578e0 100644
+--- a/net/minecraft/world/item/component/CustomData.java
++++ b/net/minecraft/world/item/component/CustomData.java
+@@ -13,19 +13,18 @@ import net.minecraft.world.item.ItemStack;
+ 
+ public final class CustomData {
+     public static final CustomData EMPTY = new CustomData(new CompoundTag());
+-    public static final Codec<CompoundTag> COMPOUND_TAG_CODEC = Codec.withAlternative(CompoundTag.CODEC, TagParser.FLATTENED_CODEC);
+     // Paper start - Item serialization as json
+     public static ThreadLocal<Boolean> SERIALIZE_CUSTOM_AS_SNBT = ThreadLocal.withInitial(() -> false);
+-    public static final Codec<CustomData> CODEC = Codec.either(CompoundTag.CODEC, TagParser.FLATTENED_CODEC)
++    public static final Codec<CompoundTag> COMPOUND_TAG_CODEC = Codec.either(CompoundTag.CODEC, TagParser.FLATTENED_CODEC)
+         .xmap(com.mojang.datafixers.util.Either::unwrap, data -> { // Both will be used for deserialization, but we decide which one to use for serialization
+             if (!SERIALIZE_CUSTOM_AS_SNBT.get()) {
+                 return com.mojang.datafixers.util.Either.left(data); // First codec
+             } else {
+                 return com.mojang.datafixers.util.Either.right(data); // Second codec
+             }
+-        })
+-        .xmap(CustomData::new, customData -> customData.tag);
++        });
+     // Paper end - Item serialization as json
++    public static final Codec<CustomData> CODEC = COMPOUND_TAG_CODEC.xmap(CustomData::new, data -> data.tag);
+     @Deprecated
+     public static final StreamCodec<ByteBuf, CustomData> STREAM_CODEC = ByteBufCodecs.COMPOUND_TAG.map(CustomData::new, data -> data.tag);
+     private final CompoundTag tag;
+diff --git a/net/minecraft/world/item/equipment/Equippable.java b/net/minecraft/world/item/equipment/Equippable.java
+index 73bb882252fec07b93fdbf13ea61ec846a17d475..fe24aff29f04027449abd68b9d0630c2b106877f 100644
+--- a/net/minecraft/world/item/equipment/Equippable.java
++++ b/net/minecraft/world/item/equipment/Equippable.java
+@@ -129,6 +129,19 @@ public record Equippable(
+             ItemStack itemBySlot = player.getItemBySlot(this.slot);
+             if ((!EnchantmentHelper.has(itemBySlot, EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE) || player.isCreative())
+                 && !ItemStack.isSameItemSameComponents(stack, itemBySlot)) {
++                // Paper start
++                final io.papermc.paper.event.player.PlayerSwapWithEquipmentSlotEvent event = new io.papermc.paper.event.player.PlayerSwapWithEquipmentSlotEvent(
++                    (org.bukkit.entity.Player) player.getBukkitEntity(),
++                    org.bukkit.craftbukkit.inventory.CraftItemStack.asBukkitCopy(stack),
++                    org.bukkit.craftbukkit.CraftEquipmentSlot.getSlot(this.slot),
++                    org.bukkit.craftbukkit.inventory.CraftItemStack.asBukkitCopy(itemBySlot)
++                );
++                event.callEvent();
++                if (event.isCancelled()) {
++                    ((org.bukkit.entity.Player) player.getBukkitEntity()).updateInventory();
++                    return InteractionResult.FAIL;
++                }
++                // Paper end
+                 if (!player.level().isClientSide()) {
+                     player.awardStat(Stats.ITEM_USED.get(stack.getItem()));
+                 }
+diff --git a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+index c8bfa1eeb847d6d9972d2f6625cc1f60063713d4..1215ac44fd30dc872f9d319be34e5e08ba880ea2 100644
+--- a/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/AbstractFurnaceBlockEntity.java
+@@ -490,7 +490,7 @@ public abstract class AbstractFurnaceBlockEntity extends BaseContainerBlockEntit
+             event = new org.bukkit.event.inventory.FurnaceExtractEvent(
+                 serverPlayer.getBukkitEntity(),
+                 org.bukkit.craftbukkit.block.CraftBlock.at(level, blockPos),
+-                org.bukkit.craftbukkit.inventory.CraftItemType.minecraftToBukkit(itemStack.getItem()),
++                itemStack.asBukkitCopy(),
+                 amount,
+                 floor
+             );
