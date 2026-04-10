@@ -92,7 +92,7 @@ index 716452f1588ceffa45e9bac664ce0da8ddb31943..2ff6e8279cf5f959032d3ccf31f4b915
                      respawnPosAngle[0] = spawnPos; // Canvas - region threading
  
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..18efe384faed89a9f05d6a234fc8faca4afbae62 100644
+index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..f7ea37c6ff57fb940442f00f0906795e0782e3cb 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -4349,29 +4349,28 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
@@ -191,7 +191,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..18efe384faed89a9f05d6a234fc8faca
 +                (destination == this.level() ? io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.CROSS_REGION :
 +                 io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.CROSS_WORLD);
 +        final boolean shouldCallEvents =
-+            // this is purely so we don't do uneeded event calls and we don't run checks twice for no reason
++            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
 +            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
 +            io.canvasmc.canvas.event.EntityTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
 +        if (shouldCallEvents) {
@@ -275,19 +275,81 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..18efe384faed89a9f05d6a234fc8faca
  
          return true;
      }
-@@ -4710,9 +4799,36 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4673,35 +4762,46 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         }
+     }
+ 
++    // Canvas start - region threading
++    // required for ServerPlayer end portal async logic
+     public boolean canPortalAsync(ServerLevel to, boolean considerPassengers) {
+-        return this.canPortalAsync(to, considerPassengers, false);
++        try {
++            canvas$ensureCanPortalAsync(to, considerPassengers);
++            return true;
++        } catch (TeleportValidationException e) {
++            return false;
++        }
++    }
++
++    public void canvas$ensureCanPortalAsync(ServerLevel to, boolean considerPassengers) throws TeleportValidationException {
++        this.canvas$ensureCanPortalAsync(to, considerPassengers, false);
+     }
+ 
+-    protected boolean canPortalAsync(ServerLevel to, boolean considerPassengers, boolean skipPassengerCheck) {
++    protected void canvas$ensureCanPortalAsync(ServerLevel to, boolean considerPassengers, boolean skipPassengerCheck) throws TeleportValidationException {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+         if (considerPassengers) {
+             if (!skipPassengerCheck && this.isPassenger()) {
+-                return false;
++                throw new TeleportValidationException("Entity is passenger");
+             }
+         } else {
+             if (this.isVehicle() || (!skipPassengerCheck && this.isPassenger())) {
+-                return false;
++                throw new TeleportValidationException("Entity is passenger or vehicle");
+             }
+         }
+         this.getBukkitEntity(); // force bukkit entity to be created before TPing
+         if (!this.canTeleportAsync()) {
+-            return false;
++            throw new TeleportValidationException("Entity not able to teleport async. Is the entity removed or in a bed?");
+         }
+         if (considerPassengers) {
+             for (Entity entity : this.passengers) {
+-                if (!entity.canPortalAsync(to, true, true)) {
+-                    return false;
+-                }
++                entity.canvas$ensureCanPortalAsync(to, true, true);
+             }
+         }
+-
+-        if (to != null && to.canvas$unloadTicket.isPresent()) return false; // Canvas - region threading
+-        return true;
++        if (to != null && to.canvas$unloadTicket.isPresent()) {
++            throw new TeleportValidationException("Destination world is marked for unload");
++        }
+     }
++    // Canvas end - region threading
+ 
+     protected void prePortalLogic(ServerLevel origin, ServerLevel destination, PortalType type) {
+ 
+@@ -4709,10 +4809,36 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+ 
      protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
                                      PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
-         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+-        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+-        if (!this.canPortalAsync(destination, takePassengers)) {
 +        // Canvas start - region threading
-         if (!this.canPortalAsync(destination, takePassengers)) {
++        try {
++            canvas$ensureCanPortalAsync(destination, takePassengers);
++        } catch (TeleportValidationException ignored) {
              return false;
 +        } // else | we passed first go
 +        // TODO - all portal events go here
 +        // fire portal events
 +        ServerLevel originWorld = (ServerLevel) this.level();
 +        boolean shouldCallEvents =
-+            // this is purely so we don't do uneeded event calls and we don't run checks twice for no reason
++            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
 +            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
 +            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
 +        if (shouldCallEvents) {
@@ -302,17 +364,15 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..18efe384faed89a9f05d6a234fc8faca
 +                return false;
 +            }
 +            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
-+        }
-+        if (shouldCallEvents && !this.canPortalAsync(destination, takePassengers)) {
-+            // plugin did something funky, kill
-+            throw new TeleportValidationException();
++            // if a plugin did a stupid, kill
++            canvas$ensureCanPortalAsync(destination, takePassengers);
          }
 +        final ServerLevel finalDestination = destination;
 +        // Canvas end - region threading
  
          Vec3 initialPosition = this.position();
          ChunkPos initialPositionChunk = new ChunkPos(
-@@ -4724,7 +4840,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4724,7 +4850,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          // first, remove entity/passengers from world
          EntityTreeNode passengerTree = this.detachPassengers();
          List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
@@ -321,7 +381,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..18efe384faed89a9f05d6a234fc8faca
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
-@@ -4771,7 +4887,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4771,7 +4897,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
  
              // place
              passengerTree.root.placeInAsync(
@@ -330,7 +390,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..18efe384faed89a9f05d6a234fc8faca
                  passengerTree,
                  (Entity teleported) -> {
                      if (info.postTeleportTransition() != null) {
-@@ -4781,6 +4897,17 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4781,6 +4907,17 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                      if (teleportComplete != null) {
                          teleportComplete.accept(teleported);
                      }
