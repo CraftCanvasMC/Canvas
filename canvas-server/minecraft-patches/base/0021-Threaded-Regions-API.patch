@@ -1,0 +1,176 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Thu, 9 Apr 2026 21:02:05 -0700
+Subject: [PATCH] Threaded Regions API
+
+
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index 7a7765691500a7a13a099f4a32a66d159e17e589..c0a4269ea775523782cc0fc7e89b9f349e589bc7 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -168,7 +168,64 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         }
+     }
+ 
+-    public static final class TickRegionData implements ThreadedRegionizer.ThreadedRegionData<TickRegionData, TickRegionSectionData> {
++    // Canvas start - region threading
++    public static final class TickRegionData implements ThreadedRegionizer.ThreadedRegionData<TickRegionData, TickRegionSectionData>, io.canvasmc.canvas.region.RegionTickData {
++
++        @Override
++        public io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion getRegion() {
++            return this.region;
++        }
++
++        @Override
++        public org.bukkit.World getWorld() {
++            return this.world.getWorld();
++        }
++
++        @Override
++        public <T> T getOrCreateFromIRegionizedData(io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> regionizedData) {
++            return this.getOrCreateRegionizedData(((ApiRegionizedData<T>) regionizedData).backend());
++        }
++
++        @Override
++        public io.canvasmc.canvas.region.RegionThreadingTickManager.RegionHandle getTickManager() {
++            return new io.canvasmc.canvas.tick.ServerRegionTickManager.ServerRegionHandle(region.getData().getRegionSchedulingHandle().getTickManager());
++        }
++
++        public static <T> io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> createRegionizedDataApiHandle(java.util.function.BiFunction<io.canvasmc.canvas.region.RegionTickData, org.bukkit.World, T> supplier, io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<T> callback) {
++            RegionizedData<T> foliaRegionizedData = new RegionizedData<>(null,
++                (tickRegionData) -> supplier.apply(tickRegionData, tickRegionData.getWorld()), new RegionizedData.RegioniserCallback<T>() {
++                    @Override
++                    public void merge(final T from, final T into, final long fromTickOffset) {
++                        callback.merge(from, into, fromTickOffset);
++                    }
++
++                    @Override
++                    public void split(
++                        final T from, final int chunkToRegionShift,
++                        final Long2ReferenceOpenHashMap<T> regionToData, final ReferenceOpenHashSet<T> dataSet
++                    ) {
++                        callback.split(from, chunkToRegionShift, regionToData, dataSet);
++                    }
++                }
++            );
++            return new ApiRegionizedData<>(
++                foliaRegionizedData, callback
++            );
++        }
++
++        public record ApiRegionizedData<A>(RegionizedData<A> backend, io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<A> callback) implements io.canvasmc.canvas.region.RegionTickData.IRegionizedData<A>{
++
++            @Override
++            public A createValue(io.canvasmc.canvas.region.RegionTickData regionTickData) {
++                return backend.createNewValue((TickRegionData) regionTickData);
++            }
++
++            @Override
++            public io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<A> getCallback() {
++                return callback;
++            }
++        }
++    // Canvas end - region threading
+ 
+         private static final AtomicLong ID_GENERATOR = new AtomicLong();
+         /** Never 0L, since 0L is reserved for global region. */
+diff --git a/io/papermc/paper/threadedregions/ThreadedRegionizer.java b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+index d7357c4e77852db1f80b68a56de616acd9dcee2c..f372124fc6f0cb31ee25b7ea7a62f6ff658a492a 100644
+--- a/io/papermc/paper/threadedregions/ThreadedRegionizer.java
++++ b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+@@ -26,7 +26,7 @@ import java.util.concurrent.locks.StampedLock;
+ import java.util.function.BooleanSupplier;
+ import java.util.function.Consumer;
+ 
+-public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegionData<R, S>, S extends ThreadedRegionizer.ThreadedRegionSectionData> {
++public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegionData<R, S>, S extends ThreadedRegionizer.ThreadedRegionSectionData> implements io.canvasmc.canvas.region.WorldRegionizer { // Canvas - region threading
+ 
+     private static final Logger LOGGER = LogUtils.getLogger();
+ 
+@@ -671,7 +671,85 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
+         }
+     }
+ 
+-    public static final class ThreadedRegion<R extends ThreadedRegionData<R, S>, S extends ThreadedRegionSectionData> {
++    // Canvas start - region threading
++    @Override
++    public org.bukkit.@org.jspecify.annotations.NonNull World getWorld() {
++        return this.world.getWorld();
++    }
++
++    @Override
++    public void computeForAllChunkRegions(@org.jspecify.annotations.NonNull Consumer<io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion> forEach) {
++        this.computeForAllRegions(forEach);
++    }
++
++    @Override
++    public void computeForAllChunkRegionsUnsynchronized(@org.jspecify.annotations.NonNull Consumer<io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion> forEach) {
++        this.computeForAllRegionsUnsynchronised(forEach);
++    }
++
++    @Override
++    public int getSectionShift() {
++        return this.sectionChunkShift;
++    }
++
++    @Override
++    public int getRegionSectionMergeRadius() {
++        return this.regionSectionMergeRadius;
++    }
++
++    @Override
++    public int getEmptySectionCreateRadius() {
++        return this.emptySectionCreateRadius;
++    }
++
++    @Override
++    public double getMaxDeadRegionPercent() {
++        return this.maxDeadRegionPercent;
++    }
++
++    public static final class ThreadedRegion<R extends ThreadedRegionData<R, S>, S extends ThreadedRegionSectionData> implements io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion {
++
++        @Override
++        public long @org.jspecify.annotations.NonNull [] getOwnedPackedChunkPositions() {
++            final boolean lock = this.regioniser.writeLockOwner != Thread.currentThread();
++            if (lock) {
++                this.regioniser.regionLock.readLock();
++            }
++            try {
++                final LongArrayList ret = new LongArrayList();
++                for (final ThreadedRegionSection<R, S> section : this.sectionByKey.values()) {
++                    ret.addAll(section.getChunks());
++                }
++
++                return ret.elements();
++            } finally {
++                if (lock) {
++                    this.regioniser.regionLock.tryUnlockRead();
++                }
++            }
++        }
++
++        @Override
++        public io.canvasmc.canvas.region.@org.jspecify.annotations.NonNull WorldRegionizer getRegionizer() {
++            return this.regioniser;
++        }
++
++        @Override
++        public io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion.@org.jspecify.annotations.NonNull State getState() {
++            return switch (this.state) {
++                case STATE_TRANSIENT -> io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion.State.TRANSIENT;
++                case STATE_READY -> io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion.State.READY;
++                case STATE_TICKING -> io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion.State.TICKING;
++                case STATE_DEAD -> io.canvasmc.canvas.region.WorldRegionizer.ChunkRegion.State.DEAD;
++                default -> throw new IllegalStateException("Unknown state");
++            };
++        }
++
++        @Override
++        public io.canvasmc.canvas.region.@org.jspecify.annotations.NonNull RegionTickData getTickData() {
++            return (TickRegions.TickRegionData) this.data;
++        }
++    // Canvas end - region threading
+ 
+         private static final AtomicLong REGION_ID_GENERATOR = new AtomicLong();
+ 
