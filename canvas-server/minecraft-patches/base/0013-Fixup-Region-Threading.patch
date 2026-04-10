@@ -864,6 +864,26 @@ index ded991859a6a94693cce183b3bf380a9241a2976..33ee081848da6d245019ae594f5b117b
  
      private static TicketType register(String name, long timeout, @TicketType.Flags int flags) {
          return Registry.register(BuiltInRegistries.TICKET_TYPE, name, new TicketType(timeout, flags));
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+index 2cc3dd1f267ae78d3aacb84509d4bf668235688f..dacf6f0ccaea50dbb0d5f0f0173d5b0d51aaceea 100644
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -290,13 +290,13 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
+     // Paper start
+     @Override
+     public void disconnectAsync(final net.minecraft.network.DisconnectionDetails disconnectionInfo) {
+-        if (this.cserver.isPrimaryThread()) {
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) { // Canvas - region threading
+             this.disconnect(disconnectionInfo);
+             return;
+         }
+ 
+         this.connection.setReadOnly();
+-        this.server.scheduleOnMain(() -> {
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> { // Canvas - region threading
+             this.disconnect(disconnectionInfo); // Currently you cannot cancel disconnect during the config stage
+         });
+     }
 diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 index bdd3062d0e2cca647c749259c8d497d05f7fed86..b0076405c2ffa2c53a51fceb7bfc4e967fecc250 100644
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
@@ -909,9 +929,18 @@ index f24c0d5157d962ba6b9146e8afd0ae6e732b0fa9..399f1760e26ee1bc5f851a489d880ef1
  
      public void sendAllPlayerInfo(ServerPlayer player) {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 75027ce8fd85c1b49a9431a90c393ce312b64287..9b826e747389453c528bdb80947b36ffd1bcafe5 100644
+index 75027ce8fd85c1b49a9431a90c393ce312b64287..14a7082b59f4dc8c0d89c47bdc17131bfa358e74 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
+@@ -317,7 +317,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     protected UUID uuid = Mth.createInsecureUUID(this.random);
+     protected String stringUUID = this.uuid.toString();
+     private boolean hasGlowingTag;
+-    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl
++    private final Set<String> tags = new io.papermc.paper.util.SizeLimitedSet<>(new java.util.concurrent.CopyOnWriteArraySet<>(), MAX_ENTITY_TAG_COUNT); // Paper - fully limit tag size - replace set impl // Canvas - region threading
+     private final double[] pistonDeltas = new double[]{0.0, 0.0, 0.0};
+     private long pistonDeltasGameTime = Long.MIN_VALUE; // Folia - region threading
+     protected EntityDimensions dimensions;
 @@ -382,6 +382,18 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          return this.dimensions.makeBoundingBox(x, y, z);
      }
@@ -931,6 +960,271 @@ index 75027ce8fd85c1b49a9431a90c393ce312b64287..9b826e747389453c528bdb80947b36ff
      // Paper start - rewrite chunk system
      private final boolean isHardColliding = this.moonrise$isHardCollidingUncached();
      private net.minecraft.server.level.FullChunkStatus chunkStatus;
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 876f69dd4c7d0cc51d98b6608cba98bf28908199..ff077f93af60d9edd5cb500f0dedbd2886646655 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -4461,21 +4461,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 this.setPos(x1, y1, z1);
+ 
+                 if (flag) {
+-                    if (!(this instanceof ServerPlayer)) {
+-                        org.bukkit.event.entity.EntityTeleportEvent teleport = new org.bukkit.event.entity.EntityTeleportEvent(this.getBukkitEntity(), new Location(this.level().getWorld(), x1, y1, z1), new Location(this.level().getWorld(), x, d, z));
+-                        this.level().getCraftServer().getPluginManager().callEvent(teleport);
+-                        if (!teleport.isCancelled() && teleport.getTo() != null) { // Paper
+-                            Location to = teleport.getTo();
+-                            this.teleportTo(to.getX(), to.getY(), to.getZ());
+-                        } else {
+-                            return Optional.empty();
+-                        }
+-                    } else {
+-                        // player teleport event is called in the underlining code
+-                        if (!((ServerPlayer) this).connection.teleport(x, d, z, this.getYRot(), this.getXRot(), cause)) {
+-                            return Optional.empty();
+-                        }
+-                    }
++                    // Canvas start - region threading
++                    boolean teleportResult = this.teleportAsync(
++                        (ServerLevel) this.level(), new Vec3(x, d, z), this.getYRot(), this.getXRot(), this.getDeltaMovement(), cause, Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_UNMOUNT, null
++                    );
++                    if (!teleportResult) return Optional.empty();
++                    // Canvas end - region threading
+                 }
+                 // CraftBukkit end
+             }
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index b6d33987855f1089a6033387ed0709e984063f3c..9d61d40c263c73b3ada563c4ade58d780fab7ab5 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -277,7 +277,7 @@ public abstract class Mob extends LivingEntity implements EquipmentUser, Leashab
+     }
+ 
+     public boolean setTarget(@Nullable LivingEntity target, EntityTargetEvent.@Nullable TargetReason reason) {
+-        if (this.getTargetRaw() == target) { // Folia - region threading
++        if (this.getTargetRaw() == target || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target)) { // Folia - region threading // Canvas - fix Folia#386
+             return false;
+         }
+         if (reason != null) {
+diff --git a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java b/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
+index d69cb6f45cba4234605c7a0f7ddf8f331eee0c62..78895155674f0c5a6a050fcbb66f41904f13bd4f 100644
+--- a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
++++ b/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
+@@ -29,6 +29,12 @@ public class BabyFollowAdult {
+                             return false;
+                         } else {
+                             LivingEntity livingEntity = instance.get(memoryAccessor);
++                            // Canvas start - region threading
++                            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(livingEntity)) {
++                                memoryAccessor.erase();
++                                return true;
++                            }
++                            // Canvas end - region threading
+                             if (entity.closerThan(livingEntity, followRange.getMaxValue() + 1) && !entity.closerThan(livingEntity, followRange.getMinValue())) {
+                                 // CraftBukkit start
+                                 org.bukkit.event.entity.EntityTargetLivingEntityEvent event = org.bukkit.craftbukkit.event.CraftEventFactory.callEntityTargetLivingEvent(entity, livingEntity, org.bukkit.event.entity.EntityTargetEvent.TargetReason.FOLLOW_LEADER);
+@@ -39,6 +45,12 @@ public class BabyFollowAdult {
+                                     memoryAccessor.erase();
+                                     return true;
+                                 }
++                                // Canvas start - region threading
++                                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((org.bukkit.craftbukkit.entity.CraftEntity)event.getTarget()).getHandleRaw())) {
++                                    memoryAccessor.erase();
++                                    return true;
++                                }
++                                // Canvas end - region threading
+                                 livingEntity = ((org.bukkit.craftbukkit.entity.CraftLivingEntity) event.getTarget()).getHandle();
+                                 // CraftBukkit end
+                                 WalkTarget walkTarget = new WalkTarget(
+diff --git a/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java b/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java
+index f952fdc9892d9b0392f30841f2c8264fef9de77b..0deb9467ca2b15bbb5b9a2d7bc6f7534fce324ee 100644
+--- a/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java
++++ b/net/minecraft/world/entity/ai/behavior/BehaviorUtils.java
+@@ -69,6 +69,7 @@ public class BehaviorUtils {
+     }
+ 
+     public static void setWalkAndLookTargetMemories(LivingEntity entity, PositionTracker positionTracker, float speedModifier, int closeEnoughDist) {
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity.level(), positionTracker.currentBlockPosition())) return; // Canvas - region threading
+         WalkTarget walkTarget = new WalkTarget(positionTracker, speedModifier, closeEnoughDist);
+         entity.getBrain().setMemory(MemoryModuleType.LOOK_TARGET, positionTracker);
+         entity.getBrain().setMemory(MemoryModuleType.WALK_TARGET, walkTarget);
+diff --git a/net/minecraft/world/entity/ai/behavior/JumpOnBed.java b/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
+index 7cd545fe7dadd2efef6ab2abf9966fccb3754c57..7903d6a0875658847612c40aff6b1fdda1081388 100644
+--- a/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
++++ b/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
+@@ -101,6 +101,11 @@ public class JumpOnBed extends Behavior<Mob> {
+     }
+ 
+     private boolean isBed(ServerLevel level, BlockPos pos) {
++        // Canvas start - region threading
++        if (!level.hasChunkAt(pos)) {
++            return false;
++        }
++        // Canvas end - region threading
+         return level.getBlockState(pos).is(BlockTags.BEDS);
+     }
+ 
+diff --git a/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java b/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
+index a0df7e116872858efa02c9c80e9812dcd97ffbf2..bd6e1196021792c34f1e2234b5fc1b59fc7886aa 100644
+--- a/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
++++ b/net/minecraft/world/entity/ai/behavior/MoveToTargetSink.java
+@@ -117,7 +117,7 @@ public class MoveToTargetSink extends Behavior<Mob> {
+ 
+     private boolean tryComputePath(Mob mob, WalkTarget target, long time) {
+         BlockPos blockPos = target.getTarget().currentBlockPosition();
+-        this.path = mob.getNavigation().createPath(blockPos, 0);
++        this.path = ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(mob.level(), blockPos) ? mob.getNavigation().createPath(blockPos, 0) : null; // Canvas - region threading
+         this.speedModifier = target.getSpeedModifier();
+         Brain<?> brain = mob.getBrain();
+         if (this.reachedTarget(mob, target)) {
+diff --git a/net/minecraft/world/entity/ai/behavior/SleepInBed.java b/net/minecraft/world/entity/ai/behavior/SleepInBed.java
+index bc6a5cacd67d46e0beb97adf30d98c1034be1a44..d5f6f9632017c4d4353936e8e257b90789aa7be2 100644
+--- a/net/minecraft/world/entity/ai/behavior/SleepInBed.java
++++ b/net/minecraft/world/entity/ai/behavior/SleepInBed.java
+@@ -42,6 +42,7 @@ public class SleepInBed extends Behavior<LivingEntity> {
+                     }
+                 }
+ 
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(owner.level(), globalPos.pos())) return false; // Canvas - region threading
+                 BlockState blockState = level.getBlockStateIfLoaded(globalPos.pos()); // Paper - Prevent sync chunk loads when villagers try to find beds
+                 if (blockState == null) { return false; } // Paper - Prevent sync chunk loads when villagers try to find beds
+                 return globalPos.pos().closerToCenterThan(owner.position(), 2.0) && blockState.is(BlockTags.BEDS) && !blockState.getValue(BedBlock.OCCUPIED);
+diff --git a/net/minecraft/world/entity/animal/allay/AllayAi.java b/net/minecraft/world/entity/animal/allay/AllayAi.java
+index 36a9887f8be04c5c3fda6d926d819a9e5b2a79f2..792f747819922e8945e538e94b0fe2dcae476438 100644
+--- a/net/minecraft/world/entity/animal/allay/AllayAi.java
++++ b/net/minecraft/world/entity/animal/allay/AllayAi.java
+@@ -114,6 +114,14 @@ public class AllayAi {
+         Optional<GlobalPos> memory = brain.getMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION);
+         if (memory.isPresent()) {
+             GlobalPos globalPos = memory.get();
++            // Canvas start - region threading
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++                net.minecraft.server.MinecraftServer.getServer().getLevel(globalPos.dimension()), globalPos.pos()
++            )) {
++                brain.eraseMemory(MemoryModuleType.LIKED_NOTEBLOCK_POSITION);
++                return Optional.empty();
++            }
++            // Canvas end - region threading
+             if (shouldDepositItemsAtLikedNoteblock(entity, brain, globalPos)) {
+                 return Optional.of(new BlockPosTracker(globalPos.pos().above()));
+             }
+diff --git a/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java b/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java
+index 8a5f59be9437b56b733d30c783f9fef60f80d5ff..f8e545d613cfd34368f7e6547cd5316df27ab351 100644
+--- a/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java
++++ b/net/minecraft/world/entity/animal/axolotl/AxolotlAi.java
+@@ -139,7 +139,13 @@ public class AxolotlAi {
+         Optional<PositionTracker> memory = entity.getBrain().getMemory(MemoryModuleType.LOOK_TARGET);
+         if (memory.isPresent()) {
+             BlockPos blockPos = memory.get().currentBlockPosition();
+-            return level.isWaterAt(blockPos) == entity.isInWater();
++            // Canvas start - region threading
++            net.minecraft.world.level.material.FluidState fluidIfLoaded = level.getFluidIfLoaded(blockPos);
++            if (fluidIfLoaded == null) {
++                return false;
++            }
++            return fluidIfLoaded.is(net.minecraft.tags.FluidTags.WATER) == entity.isInWater();
++            // Canvas end - region threading
+         } else {
+             return false;
+         }
+diff --git a/net/minecraft/world/entity/animal/sniffer/Sniffer.java b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+index f0d3c63450b7f057e98f91070306593bc9a12096..b284511686afbfa68b0f92a29990055aacdd1879 100644
+--- a/net/minecraft/world/entity/animal/sniffer/Sniffer.java
++++ b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+@@ -266,7 +266,16 @@ public class Sniffer extends Animal {
+ 
+     private boolean canDig(BlockPos pos) {
+         return this.level().getBlockState(pos).is(BlockTags.SNIFFER_DIGGABLE_BLOCK)
+-            && this.getExploredPositions().noneMatch(globalPos -> GlobalPos.of(this.level().dimension(), pos).equals(globalPos))
++            // Canvas start - region threading
++            && this.getExploredPositions().noneMatch(globalPos -> {
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++                    net.minecraft.server.MinecraftServer.getServer().getLevel(globalPos.dimension()), globalPos.pos()
++                )) {
++                    return false;
++                }
++                return GlobalPos.of(this.level().dimension(), pos).equals(globalPos);
++            })
++            // Canvas end - region threading
+             && Optional.ofNullable(this.getNavigation().createPath(pos, 1)).map(Path::canReach).orElse(false);
+     }
+ 
+diff --git a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+index 1daf8f52148043339f723aaebdf6135763dd805b..a4f51cff2ce20a32819b0d2ef0714097e227df62 100644
+--- a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
++++ b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+@@ -295,20 +295,45 @@ public class EnderDragon extends Mob implements Enemy {
+                 this.tickPart(this.wing1, cos1 * 4.5F, 2.0, sin1 * 4.5F);
+                 this.tickPart(this.wing2, cos1 * -4.5F, 2.0, sin1 * -4.5F);
+                 if (this.level() instanceof ServerLevel serverLevel2 && this.hurtTime == 0) {
+-                    this.knockBack(
+-                        serverLevel2,
+-                        serverLevel2.getEntities(
+-                            this, this.wing1.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR
+-                        )
+-                    );
+-                    this.knockBack(
+-                        serverLevel2,
+-                        serverLevel2.getEntities(
+-                            this, this.wing2.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR
+-                        )
+-                    );
+-                    this.hurt(serverLevel2, serverLevel2.getEntities(this, this.head.getBoundingBox().inflate(1.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR));
+-                    this.hurt(serverLevel2, serverLevel2.getEntities(this, this.neck.getBoundingBox().inflate(1.0), EntitySelector.NO_CREATIVE_OR_SPECTATOR));
++                    // Canvas start - region threading
++                    /*
++                        There is a race condition in Folia that allows
++                        the ender dragon body parts to exceed the region
++                        bounds(I know, stupid...). This fixes that race
++                        condition by individually checking if each body
++                        part is in the same region.
++                     */
++                    AABB wing1AABB = this.wing1.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0); // extracted from vanilla
++                    AABB wing2AABB = this.wing2.getBoundingBox().inflate(4.0, 2.0, 4.0).move(0.0, -2.0, 0.0); // extracted from vanilla
++                    // in Vanilla, the wings do knockback, the head and neck do damage
++                    // the reason we don't attempt to load these chunks and schedule
++                    // is because those chunks could be loaded next tick, and if they
++                    // are unloaded... why would we do shit with them?
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel2, wing1AABB)) {
++                        this.knockBack(
++                            serverLevel2,
++                            serverLevel2.getEntities(
++                                this, wing1AABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR
++                            )
++                        );
++                    }
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel2, wing2AABB)) {
++                        this.knockBack(
++                            serverLevel2,
++                            serverLevel2.getEntities(
++                                this, wing2AABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR
++                            )
++                        );
++                    }
++                    AABB headAABB = this.head.getBoundingBox().inflate(1.0);
++                    AABB neckAABB = this.neck.getBoundingBox().inflate(1.0);
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel2, headAABB)) {
++                        this.hurt(serverLevel2, serverLevel2.getEntities(this, headAABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR));
++                    }
++                    if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel2, neckAABB)) {
++                        this.hurt(serverLevel2, serverLevel2.getEntities(this, neckAABB, EntitySelector.NO_CREATIVE_OR_SPECTATOR));
++                    }
++                    // Canvas end - region threading
+                 }
+ 
+                 float sin2 = Mth.sin(this.getYRot() * (float) (Math.PI / 180.0) - this.yRotA * 0.01F);
+diff --git a/net/minecraft/world/entity/projectile/FishingHook.java b/net/minecraft/world/entity/projectile/FishingHook.java
+index 71f6acc07d222fe512bf8d9fbaad35cb36bcf2d6..e39cbe227e1308d34d84f2097049d869e2ce7e93 100644
+--- a/net/minecraft/world/entity/projectile/FishingHook.java
++++ b/net/minecraft/world/entity/projectile/FishingHook.java
+@@ -207,7 +207,7 @@ public class FishingHook extends Projectile {
+             } else {
+                 if (this.currentState == FishingHook.FishHookState.HOOKED_IN_ENTITY) {
+                     if (this.hookedIn != null) {
+-                        if (!this.hookedIn.isRemoved() && this.hookedIn.canInteractWithLevel() && this.hookedIn.level().dimension() == this.level().dimension()
++                        if (!this.hookedIn.isRemoved() && this.hookedIn.canInteractWithLevel() && this.hookedIn.level().dimension() == this.level().dimension() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.hookedIn) // Canvas - region threading
+                             )
+                          {
+                             this.setPos(this.hookedIn.getX(), this.hookedIn.getY(0.8), this.hookedIn.getZ());
 diff --git a/net/minecraft/world/item/Item.java b/net/minecraft/world/item/Item.java
 index a97923a94eb8a63b9a2ece6d46b8b19dd4cfb866..a82d9080d9386e93904c74dce600df30cdfe956c 100644
 --- a/net/minecraft/world/item/Item.java
@@ -957,3 +1251,16 @@ index edf1a104f971454b8bde45b1bd9a086047b45787..1d55a24cae665c7ba837dc7a78de949e
  
          int tickedEntities = 0; // Paper - rewrite chunk system
          var toRemove = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<TickingBlockEntity>(); // Paper - Fix MC-117075; use removeAll
+diff --git a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
+index 23f1b6dc3b43b12c868070c3d6b803d426ec8623..36caf6442abbaebecb8d82965fe0245be4bb6d90 100644
+--- a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
+@@ -216,7 +216,7 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
+                 teleport, net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK | net.minecraft.world.entity.Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
+                 (net.minecraft.world.entity.Entity teleportedEntity) -> {
+                     // adjust to the final exit position
+-                    Vec3 adjusted = Vec3.atCenterOf(TheEndGatewayBlockEntity.findExitPosition(portalWorld, teleportPos));
++                    Vec3 adjusted = Vec3.atCenterOf(TheEndGatewayBlockEntity.findExitPosition(portalWorld, teleportedEntity.blockPosition())); // Canvas - region threading
+                     // teleportTo will adjust rider positions
+                     teleportedEntity.teleportTo(adjusted.x, adjusted.y, adjusted.z);
+ 
