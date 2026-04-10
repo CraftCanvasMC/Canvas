@@ -92,10 +92,10 @@ index 716452f1588ceffa45e9bac664ce0da8ddb31943..2ff6e8279cf5f959032d3ccf31f4b915
                      respawnPosAngle[0] = spawnPos; // Canvas - region threading
  
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f21ac01f9 100644
+index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..18efe384faed89a9f05d6a234fc8faca4afbae62 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
-@@ -4349,9 +4349,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4349,29 +4349,28 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          );
      }
  
@@ -103,35 +103,72 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
 -                                       org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
 -                                       java.util.function.Consumer<Entity> teleportComplete) {
 +    // Canvas start - region threading
-+    private boolean canvas$checkCanTeleportAsync(ServerLevel destination, Vec3 pos, long teleportFlags) {
++    private void canvas$ensureCanTeleportAsync(ServerLevel destination, Vec3 pos, long teleportFlags) throws TeleportValidationException {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
  
          if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
-@@ -4380,21 +4379,73 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+-            return false;
++            throw new TeleportValidationException("Destination pos not in spawnable bounds");
+         }
+ 
+         if (!this.canTeleportAsync()) {
+-            return false;
++            throw new TeleportValidationException("Entity not able to teleport async. Is the entity removed or in a bed?");
+         }
+         this.getBukkitEntity(); // force bukkit entity to be created before TPing
+ 
+         if (destination.canvas$unloadTicket.isPresent()) {
+             // destination world unload propagated, do not teleport
+-            return false;
++            throw new TeleportValidationException("Destination world is marked for unload");
+         }
+ 
+         if ((teleportFlags & TELEPORT_FLAG_UNMOUNT) == 0L) {
+             for (Entity entity : this.getIndirectPassengers()) {
+                 if (!entity.canTeleportAsync()) {
+-                    return false;
++                    throw new TeleportValidationException("Indirect passenger not able to teleport async. Is the passenger removed or dead?");
+                 }
+                 entity.getBukkitEntity(); // force bukkit entity to be created before TPing
+             }
+@@ -4380,21 +4379,87 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          }
  
          if ((teleportFlags & TELEPORT_FLAG_TELEPORT_PASSENGERS) != 0L) {
 -            if (this.isPassenger()) {
 -                return false;
 -            }
-+            return !this.isPassenger();
++            if (isPassenger()) throw new TeleportValidationException("Entity is passenger");
          } else {
 -            if (this.isVehicle() || this.isPassenger()) {
-+            return !this.isVehicle() && !this.isPassenger();
++            if (isVehicle() || isPassenger()) throw new TeleportValidationException("Entity is passenger or vehicle");
 +        }
 +    }
 +
 +    public static class TeleportValidationException extends IllegalStateException {
++        private final String reason;
++
++        public TeleportValidationException() {
++            this("Unknown reason");
++        }
++
++        public TeleportValidationException(String reason) {
++            this.reason = reason;
++        }
++
 +        @Override
 +        public String getMessage() {
-+            return "Teleport validation must pass before and after teleport events have been fired.";
++            return "Teleport validation failed. Did an event change the entity state?: " + reason;
 +        }
 +    }
 +
 +    public final boolean teleportAsync(ServerLevel destination, Vec3 pos, @Nullable Float yaw, @Nullable Float pitch, Vec3 velocity,
 +                                       org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, long teleportFlags,
 +                                       java.util.function.Consumer<Entity> teleportComplete) {
-+        if (!this.canvas$checkCanTeleportAsync(destination, pos, teleportFlags)) {
++        try {
++            // we silence the catch to replicate what it is in Folia
++            canvas$ensureCanTeleportAsync(destination, pos, teleportFlags);
++        } catch (TeleportValidationException ignored) {
 +            return false;
 +        } // else | we passed first go
 +        // TODO - all teleport events things actually go HERE
@@ -161,23 +198,25 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
 +            // we have listeners, call
 +            org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +            org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
++
 +            io.canvasmc.canvas.event.EntityTeleportAsyncEvent teleportAsyncEvent =
 +                new io.canvasmc.canvas.event.EntityTeleportAsyncEvent(this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType);
 +            if (!teleportAsyncEvent.callEvent()) {
 +                // event was cancelled
                  return false;
              }
+-        }
+ 
+-        // TODO any events that can modify go HERE
++            // set the new teleport location
 +            org.bukkit.Location resultLocation = teleportAsyncEvent.getTo();
 +            pos = new Vec3(teleportAsyncEvent.getTo().x(), teleportAsyncEvent.getTo().y(), teleportAsyncEvent.getTo().z());
 +            destination = resultLocation.getWorld() == null ? destination : ((org.bukkit.craftbukkit.CraftWorld) resultLocation.getWorld()).getHandle();
 +            yaw = resultLocation.getYaw();
 +            pitch = resultLocation.getPitch();
-         }
- 
--        // TODO any events that can modify go HERE
-+        if (shouldCallEvents && !canvas$checkCanTeleportAsync(destination, pos, teleportFlags)) {
-+            // plugin did something funky, kill
-+            throw new TeleportValidationException();
++
++            // if plugin did something funky, kill
++            canvas$ensureCanTeleportAsync(destination, pos, teleportFlags);
 +        }
 +    // Canvas end - region threading
  
@@ -189,7 +228,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
              boolean hasPassengers = !this.passengers.isEmpty();
              EntityTreeNode passengerTree = this.detachPassengers();
  
-@@ -4427,12 +4478,21 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4427,12 +4492,21 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              if (teleportComplete != null) {
                  teleportComplete.accept(this);
              }
@@ -212,7 +251,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
          this.canvas$lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, currPos, this.getYRot(), this.getXRot()); // Canvas - region threading
  
          for (EntityTreeNode node : fullPassengerTree) {
-@@ -4443,7 +4503,22 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4443,7 +4517,22 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, velocity);
          }
  
@@ -236,7 +275,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
  
          return true;
      }
-@@ -4710,9 +4785,36 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4710,9 +4799,36 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
      protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
                                      PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
@@ -263,17 +302,17 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
 +                return false;
 +            }
 +            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
-         }
++        }
 +        if (shouldCallEvents && !this.canPortalAsync(destination, takePassengers)) {
 +            // plugin did something funky, kill
 +            throw new TeleportValidationException();
-+        }
+         }
 +        final ServerLevel finalDestination = destination;
 +        // Canvas end - region threading
  
          Vec3 initialPosition = this.position();
          ChunkPos initialPositionChunk = new ChunkPos(
-@@ -4724,7 +4826,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4724,7 +4840,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          // first, remove entity/passengers from world
          EntityTreeNode passengerTree = this.detachPassengers();
          List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
@@ -282,7 +321,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
-@@ -4771,7 +4873,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4771,7 +4887,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
  
              // place
              passengerTree.root.placeInAsync(
@@ -291,7 +330,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f
                  passengerTree,
                  (Entity teleported) -> {
                      if (info.postTeleportTransition() != null) {
-@@ -4781,6 +4883,17 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4781,6 +4897,17 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                      if (teleportComplete != null) {
                          teleportComplete.accept(teleported);
                      }
