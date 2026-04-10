@@ -92,7 +92,7 @@ index 716452f1588ceffa45e9bac664ce0da8ddb31943..2ff6e8279cf5f959032d3ccf31f4b915
                      respawnPosAngle[0] = spawnPos; // Canvas - region threading
  
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889deb2e3a64 100644
+index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..1a0657ecfe79c7d5a0a586828790730f21ac01f9 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -4349,9 +4349,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
@@ -107,7 +107,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
  
          if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
-@@ -4380,16 +4379,63 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4380,21 +4379,73 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          }
  
          if ((teleportFlags & TELEPORT_FLAG_TELEPORT_PASSENGERS) != 0L) {
@@ -146,7 +146,14 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
 +        // fire teleport events
 +        Vec3 currPos = this.position();
 +        ServerLevel originWorld = (ServerLevel) this.level();
-+        boolean shouldCallEvents =
++        final boolean isSameRegion = destination == this.level()
++            && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(destination, ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos), 8)
++            && (((teleportFlags & TELEPORT_FLAG_LOAD_CHUNK) == 0L) || destination.areChunksLoadedForMove(this.getBoundingBoxAt(pos.x, pos.y, pos.z)));
++        final io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType teleportType =
++            isSameRegion ? io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.SAME_REGION :
++                (destination == this.level() ? io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.CROSS_REGION :
++                 io.canvasmc.canvas.event.EntityTeleportAsyncEvent.TeleportType.CROSS_WORLD);
++        final boolean shouldCallEvents =
 +            // this is purely so we don't do uneeded event calls and we don't run checks twice for no reason
 +            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
 +            io.canvasmc.canvas.event.EntityTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
@@ -155,7 +162,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
 +            org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +            org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
 +            io.canvasmc.canvas.event.EntityTeleportAsyncEvent teleportAsyncEvent =
-+                new io.canvasmc.canvas.event.EntityTeleportAsyncEvent(this.getBukkitEntity(), bukkitFrom, bukkitTo, cause);
++                new io.canvasmc.canvas.event.EntityTeleportAsyncEvent(this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType);
 +            if (!teleportAsyncEvent.callEvent()) {
 +                // event was cancelled
                  return false;
@@ -175,8 +182,14 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
 +    // Canvas end - region threading
  
          // check for same region
-         if (destination == this.level()
-@@ -4427,12 +4473,21 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+-        if (destination == this.level()
+-                && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(destination, ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos), 8)
+-                && (((teleportFlags & TELEPORT_FLAG_LOAD_CHUNK) == 0L) || destination.areChunksLoadedForMove(this.getBoundingBoxAt(pos.x, pos.y, pos.z)))) {
++        if (isSameRegion) { // Canvas - region threading
+             boolean hasPassengers = !this.passengers.isEmpty();
+             EntityTreeNode passengerTree = this.detachPassengers();
+ 
+@@ -4427,12 +4478,21 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              if (teleportComplete != null) {
                  teleportComplete.accept(this);
              }
@@ -185,7 +198,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
 +                org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +                org.bukkit.Location bukkitTo = new org.bukkit.Location(destination.getWorld(), pos.x, pos.y, pos.z, yaw == null ? this.getYRot() : yaw, pitch == null ? this.getXRot() : pitch);
 +                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
-+                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
++                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType
 +                ).callEvent();
 +            }
 +            // Canvas end - region threading
@@ -199,7 +212,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
          this.canvas$lastTeleportOrigin = new io.canvasmc.canvas.util.ServerLocation(originWorld, currPos, this.getYRot(), this.getXRot()); // Canvas - region threading
  
          for (EntityTreeNode node : fullPassengerTree) {
-@@ -4443,7 +4498,22 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4443,7 +4503,22 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, velocity);
          }
  
@@ -215,7 +228,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
 +                org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
 +                org.bukkit.Location bukkitTo = new org.bukkit.Location(finalLevelDest.getWorld(), finalPos.x, finalPos.y, finalPos.z, finalYaw == null ? 0 : finalYaw, finalPitch == null ? 0 : finalPitch);
 +                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
-+                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause
++                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType
 +                ).callEvent();
 +            }
 +        });
@@ -223,7 +236,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
  
          return true;
      }
-@@ -4710,9 +4780,36 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4710,9 +4785,36 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
      protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
                                      PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
@@ -260,7 +273,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
  
          Vec3 initialPosition = this.position();
          ChunkPos initialPositionChunk = new ChunkPos(
-@@ -4724,7 +4821,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4724,7 +4826,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          // first, remove entity/passengers from world
          EntityTreeNode passengerTree = this.detachPassengers();
          List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
@@ -269,7 +282,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
-@@ -4771,7 +4868,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4771,7 +4873,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
  
              // place
              passengerTree.root.placeInAsync(
@@ -278,7 +291,7 @@ index f987d0ce58cb3f6dfcd2d0a4ae09933bbd1a75a3..2a554fa6072ca9f1140c7d3624c7889d
                  passengerTree,
                  (Entity teleported) -> {
                      if (info.postTeleportTransition() != null) {
-@@ -4781,6 +4878,17 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4781,6 +4883,17 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                      if (teleportComplete != null) {
                          teleportComplete.accept(teleported);
                      }

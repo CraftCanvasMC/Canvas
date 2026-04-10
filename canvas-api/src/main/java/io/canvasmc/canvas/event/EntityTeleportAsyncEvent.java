@@ -21,14 +21,16 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
     private static final HandlerList HANDLER_LIST = new HandlerList();
 
     private final Location from;
+    private final TeleportType type;
     private final PlayerTeleportEvent.TeleportCause cause;
     private Location to;
     private boolean cancelled;
 
     @ApiStatus.Internal
-    public EntityTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause) {
+    public EntityTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause, TeleportType type) {
         super(entity);
         this.from = from;
+        this.type = type;
         this.to = (to != null) ? to : from;
         this.cause = cause;
     }
@@ -74,6 +76,15 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
         return cause;
     }
 
+    /**
+     * Gets the type of teleport this is
+     *
+     * @return the teleport type
+     */
+    public TeleportType getType() {
+        return type;
+    }
+
     @Override
     public boolean isCancelled() {
         return this.cancelled;
@@ -87,5 +98,26 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
     @Override
     public HandlerList getHandlers() {
         return HANDLER_LIST;
+    }
+
+    /**
+     * The type of teleport being called
+     */
+    public enum TeleportType {
+        /**
+         * The teleport origin and destination is in the same region, calling a sync teleport
+         *
+         * @apiNote The teleport will be completed on the same tick it started on the same thread, since it's a sync
+         *     teleport
+         */
+        SAME_REGION,
+        /**
+         * The teleport origin and destination are in different regions, but the same world, calling an async teleport
+         */
+        CROSS_REGION,
+        /**
+         * The teleport origin and destination are in different worlds
+         */
+        CROSS_WORLD
     }
 }

@@ -20,13 +20,15 @@ public class EntityPostTeleportAsyncEvent extends EntityEvent {
     private static final HandlerList HANDLER_LIST = new HandlerList();
 
     private final Location from;
+    private final EntityTeleportAsyncEvent.TeleportType type;
     private final Location to;
     private final PlayerTeleportEvent.TeleportCause cause;
 
     @ApiStatus.Internal
-    public EntityPostTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause) {
+    public EntityPostTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause, EntityTeleportAsyncEvent.TeleportType type) {
         super(entity);
         this.from = from;
+        this.type = type;
         this.to = (to != null) ? to : from;
         this.cause = cause;
     }
@@ -60,6 +62,15 @@ public class EntityPostTeleportAsyncEvent extends EntityEvent {
      */
     public PlayerTeleportEvent.TeleportCause getCause() {
         return cause;
+    }
+
+    /**
+     * Gets the type of teleport this is
+     *
+     * @return the teleport type
+     */
+    public EntityTeleportAsyncEvent.TeleportType getType() {
+        return type;
     }
 
     @Override
