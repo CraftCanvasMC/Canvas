@@ -633,7 +633,7 @@ index 8d4f092ec65d285508be81cbfadd6e747e1d067e..2db474ced22d5867b0f6315185af31d3
  
      public static ServerPlayer getPlayer(final String name) {
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..b24997f5f11aaffa8b002831d196936218890eec 100644
+index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..3ef5fca023aeb70cd83a7200b0ccf20ef8ef6b18 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -365,7 +365,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -693,7 +693,40 @@ index 8ef9f0a9a018fb7e86d5bbd5860c9ebdef7dc022..b24997f5f11aaffa8b002831d1969362
              try {
                  this.stopped = true;
                  this.stopServer();
-@@ -1851,7 +1837,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1674,7 +1660,31 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         // Folia end - region threading
+         //this.tickCount++; // Folia - region threading
+         //this.tickRateManager.tick(); // Folia - region threading
+-        this.tickChildren(hasTimeLeft, region); // Folia - region threading
++        // Canvas start - region threading
++        try {
++            List<ServerPlayer> flushing = new java.util.ArrayList<>(region.world.getCurrentWorldData().getLocalPlayers());
++            for (final net.minecraft.server.level.ServerPlayer localPlayer : flushing) {
++                // by suspending flushing, this will suspend flushing on the owning thread of the player
++                // however, if a diff thread sends a packet, it automatically flushes
++                localPlayer.connection.suspendFlushing();
++            }
++            this.tickChildren(hasTimeLeft, region);
++            for (final net.minecraft.server.level.ServerPlayer localPlayer : flushing) {
++                // if this thread doesn't own the player for some reason, or they were marked to
++                // continue flushing, we don't even try and touch it
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(localPlayer)
++                    || !localPlayer.connection.suspendFlushingOnServerThread) {
++                    continue;
++                }
++                // note, this also flushes the channel
++                localPlayer.connection.resumeFlushing();
++            }
++        } catch (Throwable thrown) {
++            CrashReport crashReport = CrashReport.forThrowable(thrown, "Exception ticking region");
++            region.world.fillReportDetails(crashReport);
++            throw new ReportedException(crashReport);
++        }
++        // Canvas end - region threading
+         if (false && nanos - this.lastServerStatus >= STATUS_EXPIRE_TIME_NANOS) { // Folia - region threading
+             this.lastServerStatus = nanos;
+             this.status = this.buildServerStatus();
+@@ -1851,7 +1861,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          regionizedWorldData.tickConnections(); // Folia - region threading
          //this.playerList.tick(); // Folia - region threading
          this.debugSubscribers.tick();
@@ -825,12 +858,16 @@ index 544df762687f1762a01bd34441f7e7feedcb5e57..e993d717d965cda4b007366b9be56d55
                                  if (entity.isRemoved()) return; // Folia - region threading - if we despawned, DON'T TICK IT!
                                  if (true) { // Paper - rewrite chunk system
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index aca88b9ec53debc85387fcd5920eef1d0292b769..79360e5c65d45ab8f619bc789d0e4322ce95ffbc 100644
+index aca88b9ec53debc85387fcd5920eef1d0292b769..1fd0df462ae28d58789aba5e1f60df8615e339bc 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
-@@ -1818,6 +1818,14 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1817,7 +1817,18 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     public void preChangeDimension() {
          super.preChangeDimension();
          this.stopUsingItem();
++        // if not suspending, we resume flushing. we check this on pre dimension change
++        // since this is called for portaling *and* cross-region teleports
++        if (!this.connection.suspendFlushingOnServerThread) this.connection.resumeFlushing(); // Canvas - region threading
      }
 +    // Canvas start - region threading
 +
@@ -843,7 +880,7 @@ index aca88b9ec53debc85387fcd5920eef1d0292b769..79360e5c65d45ab8f619bc789d0e4322
  
      @Override
      protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags) {
-@@ -2254,7 +2262,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2254,7 +2265,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
      @Override
      protected void pushEntities() {
@@ -864,6 +901,26 @@ index ded991859a6a94693cce183b3bf380a9241a2976..33ee081848da6d245019ae594f5b117b
  
      private static TicketType register(String name, long timeout, @TicketType.Flags int flags) {
          return Registry.register(BuiltInRegistries.TICKET_TYPE, name, new TicketType(timeout, flags));
+diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+index 017044915b943edabf8865eda8d7bd8c415520b3..8e0aa227cd77ae308582ecc1f9bcc62967a86cde 100644
+--- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -330,10 +330,12 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+             this.close();
+         }
+ 
+-        boolean flag = !this.suspendFlushingOnServerThread || !this.server.isSameThread();
+-
++        // Canvas start - region threading
++        boolean flush = !this.suspendFlushingOnServerThread ||
++            !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(connection.getPlayer());
+         try {
+-            this.connection.send(packet, sendListener, flag);
++            this.connection.send(packet, sendListener, flush);
++        // Canvas end - region threading
+         } catch (Throwable var7) {
+             CrashReport crashReport = CrashReport.forThrowable(var7, "Sending packet");
+             CrashReportCategory crashReportCategory = crashReport.addCategory("Packet being sent");
 diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
 index 2cc3dd1f267ae78d3aacb84509d4bf668235688f..dacf6f0ccaea50dbb0d5f0f0173d5b0d51aaceea 100644
 --- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
