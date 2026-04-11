@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: noot noot <brianmaymc@gmail.com>
+Date: Fri, 10 Apr 2026 21:40:13 +0200
+Subject: [PATCH] Subspace advancement respawning fix
+
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 90a65f39997ac147247a5055b7d8d070c509dfbf..b37b4085f1f41a834d2aae834fcf3da355e34403 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1791,7 +1791,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                     if (respawnComplete != null) {
+                         respawnComplete.accept(ServerPlayer.this);
+                     }
+-                }
++                },
++                true // Canvas - region threading
+             );
+             // Canvas start - region threading
+             };
+@@ -1914,8 +1915,10 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+     // Canvas end - region threading
+ 
++    // Canvas start - region threading
++
+     @Override
+-    protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags) {
++    protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags, boolean respawning) {
+         if (destination == originWorld && (teleportFlags & TELEPORT_FLAGS_PLAYER_RESPAWN) == 0L) {
+             this.unsetRemoved();
+             destination.addDuringTeleport(this);
+@@ -2003,7 +2006,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             this.lastSentHealth = -1.0F;
+             this.lastSentFood = -1;
+ 
+-            this.triggerDimensionChangeTriggers(originWorld);
++            this.triggerDimensionChangeTriggers(originWorld, respawning);
+ 
+             // finished
+ 
+@@ -2011,6 +2014,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         }
+     }
+ 
++    @Override
++    protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags) {
++        this.placeSingleSync(originWorld, destination, treeNode, teleportFlags, false);
++    }
++    // Canvas end - region threading
++
+     @Override
+     public boolean endPortalLogicAsync(BlockPos portalPos) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+@@ -2162,7 +2171,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         this.connection.send(new ClientboundPlayerRotationPacket(yRot, yRelative, xRot, xRelative));
+     }
+ 
+-    public void triggerDimensionChangeTriggers(ServerLevel level) {
++    // Canvas start - region threading
++    public void triggerDimensionChangeTriggers(ServerLevel level, boolean respawning) {
+         ResourceKey<Level> resourceKey = level.dimension();
+         ResourceKey<Level> resourceKey1 = this.level().dimension();
+         // CraftBukkit start
+@@ -2181,7 +2191,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+         if (maindimensionkey == Level.NETHER && maindimensionkey1 == Level.OVERWORLD && this.enteredNetherPosition != null) {
+             // CraftBukkit end
+-            CriteriaTriggers.NETHER_TRAVEL.trigger(this, this.enteredNetherPosition);
++            if (!respawning) CriteriaTriggers.NETHER_TRAVEL.trigger(this, this.enteredNetherPosition); // Canvas - region threading
+         }
+ 
+         if (maindimensionkey1 != Level.NETHER) { // CraftBukkit
+@@ -2189,6 +2199,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         }
+     }
+ 
++    public void triggerDimensionChangeTriggers(ServerLevel level) {
++        this.triggerDimensionChangeTriggers(level, false);
++    }
++    // Canvas end - region threading
++
+     @Override
+     public boolean broadcastToPlayer(ServerPlayer player) {
+         return player.isSpectator() ? this.getCamera() == this : !this.isSpectator() && super.broadcastToPlayer(player);
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 2a554fa6072ca9f1140c7d3624c7889deb2e3a64..99b08eba921e691b50557837a762102c92dedbad 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4184,12 +4184,19 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+      */
+     public static final long TELEPORT_FLAG_UNMOUNT = 1L << 2;
+ 
+-    protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags) {
++    // Canvas start - region threading
++    protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags, boolean respawning) {
+         destination.addDuringTeleport(this);
+     }
+ 
++    protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags) {
++        this.placeSingleSync(originWorld, destination, treeNode, teleportFlags);
++    }
++    // Canvas end - region threading
++
++    // Canvas start - region threading
+     protected final void placeInAsync(ServerLevel originWorld, ServerLevel destination, long teleportFlags,
+-                                      EntityTreeNode passengerTree, java.util.function.Consumer<Entity> teleportComplete) {
++                                      EntityTreeNode passengerTree, java.util.function.Consumer<Entity> teleportComplete, boolean respawning) {
+         Vec3 pos = this.position();
+         ChunkPos posChunk = new ChunkPos(
+             ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos),
+@@ -4224,7 +4231,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+                     );
+                     List<EntityTreeNode> fullTree = passengerTree.getFullTree();
+                     for (EntityTreeNode node : fullTree) {
+-                        node.root.placeSingleSync(originWorld, destination, node, teleportFlags);
++                        node.root.placeSingleSync(originWorld, destination, node, teleportFlags, respawning);
+                     }
+ 
+                     // restore passenger tree
+@@ -4262,6 +4269,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         }
+     }
+ 
++    protected final void placeInAsync(ServerLevel originWorld, ServerLevel destination, long teleportFlags,
++                                      EntityTreeNode passengerTree, java.util.function.Consumer<Entity> teleportComplete) {
++        this.placeInAsync(originWorld, destination, teleportFlags, passengerTree, teleportComplete, false);
++    }
++    // Canvas finish - region threading
++
+     protected boolean canTeleportAsync() {
+         return !this.hasNullCallback() && !this.isRemoved() && this.isAlive() && (!(this instanceof net.minecraft.world.entity.LivingEntity livingEntity) || !livingEntity.isSleeping());
+     }
