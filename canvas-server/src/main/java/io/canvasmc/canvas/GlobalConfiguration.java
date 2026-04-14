@@ -464,24 +464,16 @@ public class GlobalConfiguration extends Part {
     {
         option("extraThreadChecksLevel")
             .docs(Style.wrap(
-                "Canvas adds extra thread checks to the Spigot/Paper API. This config controls how severe these thread checks are"
-                ).defineEnum(ExtraThreadChecksLevel.class, (level) -> {
-                    return switch (level) {
-                        case SILENT -> "All thread checks that don't pass won't log or throw, it goes silent. Not recommended ever";
-                        case WARN -> "All thread checks that don't pass will log a warning in console, and proceed with the operation." +
-                            " It's recommended to contact the developers of the plugin causing the unsafe access when you see said warnings";
-                        case THROW -> "All thread checks that don't pass will throw an exception, potentially crashing the server. This is" +
-                            " the safest option for trying to prevent corrupt states or prevent unsafe accesses, however not recommended" +
-                            " for runtime production without thoroughly testing plugins in a private server first";
-                    };
-                })
-            );
+                    "Canvas adds extra thread checks to the Spigot/Paper API. This config controls how severe these thread checks are",
+                    "The options are:",
+                    " - 0: All thread checks that don't pass won't log or throw, it goes silent. Not recommended ever",
+                    " - 1: All thread checks that don't pass will log a warning in console, and proceed with the operation. It's",
+                    "      recommended to contact the developers of the plugin causing the unsafe access when you see said warnings",
+                    " - 2: All thread checks that don't pass will throw an exception, potentially crashing the server. This is",
+                    "      the safest option for trying to prevent corrupt states or prevent unsafe accesses, however not recommended",
+                    "      for runtime production without thoroughly testing plugins in a private server first"
+                )
+            ).between(0, 2);
     }
-    public ExtraThreadChecksLevel extraThreadChecksLevel = ExtraThreadChecksLevel.WARN;
-
-    public enum ExtraThreadChecksLevel {
-        SILENT,
-        WARN,
-        THROW;
-    }
+    public int  extraThreadChecksLevel = 1;
 }

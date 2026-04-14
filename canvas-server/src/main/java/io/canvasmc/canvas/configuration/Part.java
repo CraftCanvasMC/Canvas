@@ -139,6 +139,10 @@ public class Part {
             return validation(new NumberComparison(NumberComparison.Type.BETWEEN, min, max));
         }
 
+        public OptionDefinition between(int min, int max) {
+            return validation(new NumberComparison(NumberComparison.Type.BETWEEN, min, max));
+        }
+
         public OptionDefinition greedyString() {
             return validation(new StringValidation(StringValidation.StringType.GREEDY_PHRASE));
         }
