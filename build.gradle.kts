@@ -1,7 +1,5 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
-import io.papermc.paperweight.tasks.RebuildGitPatches
-import io.papermc.paperweight.tasks.RebuildBaseGitPatches
 import io.papermc.paperweight.core.tasks.patchroulette.AbstractPatchRouletteTask
 
 plugins {
