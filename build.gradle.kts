@@ -2,6 +2,7 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import io.papermc.paperweight.tasks.RebuildGitPatches
 import io.papermc.paperweight.tasks.RebuildBaseGitPatches
+import io.papermc.paperweight.core.tasks.patchroulette.AbstractPatchRouletteTask
 
 plugins {
     java
@@ -77,6 +78,9 @@ subprojects {
             exceptionFormat = TestExceptionFormat.FULL
             events(TestLogEvent.STANDARD_OUT)
         }
+    }
+    tasks.withType<AbstractPatchRouletteTask>().configureEach {
+        endpoint = "https://patch-roulette.canvasmc.io/api"
     }
     extensions.configure<PublishingExtension> {
         repositories {
