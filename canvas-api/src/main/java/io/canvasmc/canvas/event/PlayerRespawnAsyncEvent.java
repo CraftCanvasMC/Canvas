@@ -15,16 +15,14 @@ import org.jetbrains.annotations.NotNull;
  * <p>
  * It is <b>NOT safe</b> to modify the entity state during this event
  * <p>
- * <b>WARNING:</b> This is called in the region of the initial target respawn location. This <b>can</b> be untrue if
- * the respawn location changes in the event, so it isn't recommended to use
- * {@link PlayerRespawnAsyncEvent#getRespawnLocation()} to find the location for the region context. As such, it isn't
- * recommended to access or modify any region state by using {@link PlayerRespawnAsyncEvent#getRespawnLocation()}, as
- * the respawn location can be modified by a different plugin. By attempting to do this, it can cause numerous issues
- * like crashes and undiagnosable and unrecoverable exceptions.
+ * <b>WARNING:</b> This is called in an unknown region state, one that does not own the player in question. It is not
+ * safe to ever modify the player state during this event. If you wish to do so, use
+ * {@link PlayerPostRespawnAsyncEvent}. Modifying the player state will cause crashes and undiagnosable issues, leaving
+ * the server in a corrupt state if done when this event is called.
  *
- * @apiNote It is not recommended to modify the entity state or the region state during this event, as results may
- *     cause issues or be unpredictable. If you need to run actions on the player, schedule to the player's entity
- *     scheduler.
+ * @apiNote It is generally recommended to use {@link io.canvasmc.canvas.event.PlayerPostRespawnAsyncEvent} in favor
+ *     over this event, as this event is called between states of the player, meaning the player isn't owned by any
+ *     region and is in a fragile state, where if exceptions were thrown, would cause major issues.
  */
 public class PlayerRespawnAsyncEvent extends AbstractRespawnEvent {
     private static final HandlerList HANDLERS = new HandlerList();
