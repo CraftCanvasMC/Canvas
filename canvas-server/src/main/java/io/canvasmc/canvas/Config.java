@@ -325,6 +325,9 @@ public class Config {
     @Comment("Check if a cactus can survive before growing. Heavily optimizes cacti farms")
     public boolean cactusCheckSurvivalBeforeGrowth = false;
 
+    @Comment("Whether to optimize the climbable check by caching the result")
+    public boolean optimizeClimbableCheck = false;
+
     @Comment("Whether to cache expensive CraftEntityType#minecraftToBukkit call")
     public boolean enableCachedMTBEntityTypeConvert = false;
 
