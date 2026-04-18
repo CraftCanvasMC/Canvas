@@ -550,6 +550,51 @@ public class Config {
     @NamespacedKeyValidator.NamespacedKey
     public String defaultRespawnDimensionKey = "minecraft:overworld";
 
+    public Entities entities = new Entities();
+
+    public static class Entities {
+        public Villagers villagers = new Villagers();
+
+        public static class Villagers {
+            @Comment({
+                "Whether to enable villager lobotomization.",
+                "This will significantly improve performance by skipping expensive AI checks",
+                "for villagers that are unable to move."
+            })
+            public boolean lobotomize = false;
+
+            @Comment({
+                "The interval in ticks at which to check if a villager should be lobotomized.",
+                "A higher value will reduce the frequency of checks, further improving performance."
+            })
+            public int lobotomizeCheckInterval = 20;
+        }
+
+        public DAB dab = new DAB();
+
+        public static class DAB {
+            @Comment({
+                "Whether to enable Dynamic Activation Range (DAB).",
+                "This will dynamically adjust the activation range of entities based on server load,",
+                "ensuring that the server stays at a stable 20 TPS."
+            })
+            public boolean enabled = false;
+
+            @Comment("The maximum tick delay for DAB. Entities will not be ticked less frequently than this.")
+            public int maxTickDelay = 20;
+
+            @Comment("The activation range for entities when the server is under heavy load.")
+            public int activationRangeMod = 7;
+        }
+
+        public Brain brain = new Brain();
+
+        public static class Brain {
+            @Comment("Whether to disable expensive brain tasks for entities to improve performance.")
+            public boolean disableExpensiveTasks = false;
+        }
+    }
+
     public ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
         return ResourceKey.create(Registries.DIMENSION, Identifier.parse(this.defaultRespawnDimensionKey));
     }
