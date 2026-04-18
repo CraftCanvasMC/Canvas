@@ -299,11 +299,10 @@ public class Config {
             "Optimizes player information packet sending by splitting players",
             "into buckets to be sent to spread out the list tick"
         })
-        public boolean optimizePlayerListTicking = false;
+        public boolean bucketPlayerInfoPackets = false;
 
-        @PositiveNumericValueValidator.PositiveNumericValue
-        @Comment("The interval in ticks for how often the server will tick the playerlist buckets")
-        public int playerInfoSendInterval = 600;
+        @Comment("Enables asynchronous packet serialization to offload work from the region tick thread")
+        public boolean enableAsyncPacketSerialization = false;
 
         @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
         public boolean asyncProtocolSwitch = false;
@@ -320,6 +319,27 @@ public class Config {
 
         @Comment("The disconnet reason sent to the client when the server attempted to send a packet that was too large")
         public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
+    }
+
+    public Performance performance = new Performance();
+
+    public static class Performance {
+        public SIMD simd = new SIMD();
+
+        public static class SIMD {
+            @Comment("Enables SIMD-accelerated entity collision and distance calculations")
+            public boolean enableSIMDPhysics = false;
+        }
+
+        public Regions regions = new Regions();
+
+        public static class Regions {
+            @Comment("Enables predictive region merging to optimize thread allocation based on load")
+            public boolean enableSmartRegionMerging = false;
+
+            @Comment("Threshold for merging adjacent regions (0.0 to 1.0, where 0.3 is 30% load)")
+            public double mergeLoadThreshold = 0.3;
+        }
     }
 
     @Comment("Check if a cactus can survive before growing. Heavily optimizes cacti farms")
@@ -529,6 +549,51 @@ public class Config {
     })
     @NamespacedKeyValidator.NamespacedKey
     public String defaultRespawnDimensionKey = "minecraft:overworld";
+
+    public Entities entities = new Entities();
+
+    public static class Entities {
+        public Villagers villagers = new Villagers();
+
+        public static class Villagers {
+            @Comment({
+                "Whether to enable villager lobotomization.",
+                "This will significantly improve performance by skipping expensive AI checks",
+                "for villagers that are unable to move."
+            })
+            public boolean lobotomize = false;
+
+            @Comment({
+                "The interval in ticks at which to check if a villager should be lobotomized.",
+                "A higher value will reduce the frequency of checks, further improving performance."
+            })
+            public int lobotomizeCheckInterval = 20;
+        }
+
+        public DAB dab = new DAB();
+
+        public static class DAB {
+            @Comment({
+                "Whether to enable Dynamic Activation Range (DAB).",
+                "This will dynamically adjust the activation range of entities based on server load,",
+                "ensuring that the server stays at a stable 20 TPS."
+            })
+            public boolean enabled = false;
+
+            @Comment("The maximum tick delay for DAB. Entities will not be ticked less frequently than this.")
+            public int maxTickDelay = 20;
+
+            @Comment("The activation range for entities when the server is under heavy load.")
+            public int activationRangeMod = 7;
+        }
+
+        public Brain brain = new Brain();
+
+        public static class Brain {
+            @Comment("Whether to disable expensive brain tasks for entities to improve performance.")
+            public boolean disableExpensiveTasks = false;
+        }
+    }
 
     public ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
         return ResourceKey.create(Registries.DIMENSION, Identifier.parse(this.defaultRespawnDimensionKey));
