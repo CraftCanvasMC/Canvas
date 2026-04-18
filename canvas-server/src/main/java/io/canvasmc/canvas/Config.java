@@ -299,11 +299,10 @@ public class Config {
             "Optimizes player information packet sending by splitting players",
             "into buckets to be sent to spread out the list tick"
         })
-        public boolean optimizePlayerListTicking = false;
+        public boolean bucketPlayerInfoPackets = false;
 
-        @PositiveNumericValueValidator.PositiveNumericValue
-        @Comment("The interval in ticks for how often the server will tick the playerlist buckets")
-        public int playerInfoSendInterval = 600;
+        @Comment("Enables asynchronous packet serialization to offload work from the region tick thread")
+        public boolean enableAsyncPacketSerialization = false;
 
         @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
         public boolean asyncProtocolSwitch = false;
@@ -320,6 +319,27 @@ public class Config {
 
         @Comment("The disconnet reason sent to the client when the server attempted to send a packet that was too large")
         public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
+    }
+
+    public Performance performance = new Performance();
+
+    public static class Performance {
+        public SIMD simd = new SIMD();
+
+        public static class SIMD {
+            @Comment("Enables SIMD-accelerated entity collision and distance calculations")
+            public boolean enableSIMDPhysics = false;
+        }
+
+        public Regions regions = new Regions();
+
+        public static class Regions {
+            @Comment("Enables predictive region merging to optimize thread allocation based on load")
+            public boolean enableSmartRegionMerging = false;
+
+            @Comment("Threshold for merging adjacent regions (0.0 to 1.0, where 0.3 is 30% load)")
+            public double mergeLoadThreshold = 0.3;
+        }
     }
 
     @Comment("Check if a cactus can survive before growing. Heavily optimizes cacti farms")
