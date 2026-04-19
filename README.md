@@ -4,7 +4,8 @@
 [![GitHub stars](https://img.shields.io/github/stars/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
 [![GitHub forks](https://img.shields.io/github/forks/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
 
-**CanvasMC** is a high-performance fork of the Folia Minecraft server software. It addresses gameplay inconsistencies and bugs, while introducing performance optimizations and enhancements to the dedicated server.
+CanvasMC is a high performance fork of Folia aiming to provide a stable and consistent region threading environment, alongside tons
+of optimizations and performance features for large scale servers.
 
 ---
 [![bStats Graph Data](https://bstats.org/signatures/server-implementation/Canvas.svg)](https://bstats.org/plugin/server-implementation/Canvas)
@@ -13,16 +14,16 @@
 ## Features & Highlights
 
 ### Alternative Scheduler
-- Canvas is primarily based on a new scheduler for Folia, which makes Canvas extremely fast in comparison to other forks.
+- Canvas provides a scheduler written by the team called the `AFFINITY` scheduler, which contains configurable features that increase performance immensely.
 
 ### Optimized Chunk Generation
-- With fixed linear scaling through a complete rewrite of the chunk system executor, Canvas achieves **unparalleled chunk performance** compared to other forks.
+- Canvas replaces a rewritten chunk system pool, providing further optimizations that help with scaling and single-threaded throughput
 
 ### Extensive Configuration
 - Fine-tune aspects of your server with fully documented configuration options and performance settings.
 
 ### Proper Region Profiling
-- Canvas introduces a genuine Spark profiler that is fully compatible with region threading, replacing the limited Folia profiling engine.
+- Canvas introduces a full Spark profiler that is fully compatible with region threading, replacing the limited Folia profiling engine.
 
 ### Powerful and Optimized
 - By fixing **numerous** Folia bugs and crashes, Canvas delivers a high-performance, stable, and reliable experience.
@@ -33,7 +34,7 @@
 
 ### Downloading & Running
 
-1. Download the latest server JAR from the **Downloads** page on [canvasmc.io](https://canvasmc.io/downloads).  
+1. Download the latest server JAR from the **Downloads** page on [canvasmc.io](https://canvasmc.io/downloads/canvas).  
 2. Launch using Java (Java 21+ required) with your preferred arguments and configuration.
 
 ### Building from Source
@@ -46,51 +47,10 @@
 **Common build commands:**
 
 ```bash
-./gradlew applyAllPatches
-./gradlew createMojmapPublisherJar
-./gradlew runDevServer
+./gradlew applyAllPatches # Applies all patches to construct the Canvas source
+./gradlew createMojmapPublisherJar # Creates the publication jar used by our Jenkins CI
+./gradlew runDevServer # Starts a development server locally
 ```
-
-There is also a helper script:
-
-```bash
-./rebuildPatches
-```
-
-which regenerates patches for modified directories.
-
----
-
-## Using the Canvas API in Plugins
-
-You can use Canvas’s API in your own Minecraft plugins. Here’s an example of how to include it in your `build.gradle.kts`:
-
-```kotlin
-repositories {
-    maven {
-        name = "Canvas"
-        url = uri("https://maven.canvasmc.io/snapshots")
-    }
-}
-
-dependencies {
-    compileOnly("io.canvasmc.canvas:canvas-api:1.21.11-R0.1-SNAPSHOT")
-}
-
-java {
-    toolchain.languageVersion.set(JavaLanguageVersion.of(21))
-}
-```
-
-Replace the version number with the appropriate version you want to target.
-
----
-
-## REST API
-
-Canvas provides a REST interface to fetch build and version metadata. Documentation is available via [The docs page](https://docs.canvasmc.io/canvas/guides/developers/rest-api/)
-
----
 
 ## Documentation & Resources
 
@@ -130,4 +90,4 @@ This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**
 
 ## Acknowledgments & Inspiration
 
-Canvas incorporates patches inspired by or derived from other high-performance projects (e.g. **Lithium**), along with its own custom optimizations.
+Canvas incorporates patches inspired by or derived from other high-performance projects (e.g. **Lithium**, **Leaf**), along with its own custom optimizations.
