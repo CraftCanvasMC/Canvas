@@ -15,6 +15,7 @@ import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.Json5SerializerImpl;
 import io.canvasmc.canvas.util.version.ApiClient;
 import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
+import io.canvasmc.canvas.world.RegionizedRamBar;
 import io.canvasmc.canvas.world.RegionizedTpsBar;
 import io.canvasmc.canvas.world.entity.EntityCollisionMode;
 import io.papermc.paper.ServerBuildInfo;
@@ -501,6 +502,19 @@ public class Config {
         "will be no \"ghost orbs\", and all xp merging is as efficient as possible"
     })
     public boolean fastOrbs = false;
+
+    @Comment({
+        "Enables a RAM-Bar implementation for Canvas",
+        "This function is per-player, with this as a global setting to disable it",
+        "To enable the ram-bar per-player, use the '/rambar' command"
+    })
+    public boolean enableRamBar = true;
+
+    @Comment({
+        "MiniMessage-formatted line for the RAM bar. Placeholders: <used>, <xmx>, <percent>.",
+        "Legacy tokens %used%, %xmx%, %percent% are also accepted and auto-converted."
+    })
+    public String ramBarFormat = RegionizedRamBar.DEFAULT_FORMAT;
 
     @Comment({
         "Enables a regionized TPS-Bar implementation for Canvas",
