@@ -3,12 +3,15 @@ package io.canvasmc.canvas.world.chunk;
 import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
 import ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue;
 import ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool;
+import ca.spottedleaf.concurrentutil.executor.thread.PrioritisedQueueExecutorThread;
 import ca.spottedleaf.concurrentutil.list.COWArrayList;
 import ca.spottedleaf.concurrentutil.util.Priority;
+import ca.spottedleaf.concurrentutil.util.TimeUtil;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
@@ -24,17 +27,19 @@ import org.slf4j.LoggerFactory;
  * @author dueris modifier
  * @author spottedleaf original author
  */
-public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
+public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
+
+    public static final long DEFAULT_GROUP_TIME_SLICE = (long)(15.0e6); // 15ms
 
     private final Logger LOGGER;
 
-    private final COWArrayList<TheChunkSystem.OrderedStreamGroup> groups = new COWArrayList<>(TheChunkSystem.OrderedStreamGroup.class);
+    private final COWArrayList<BalancedChunkSystem.OrderedStreamGroup> groups = new COWArrayList<>(BalancedChunkSystem.OrderedStreamGroup.class);
     private final COWArrayList<WorkerThread> threads = new COWArrayList<>(WorkerThread.class);
     private final COWArrayList<WorkerThread> aliveThreads = new COWArrayList<>(WorkerThread.class);
 
     private boolean shutdown;
 
-    public TheChunkSystem(final long groupTimeSliceNS, final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
+    public BalancedChunkSystem(final long groupTimeSliceNS, final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
         super(groupTimeSliceNS, threadInitializer);
         LOGGER = LoggerFactory.getLogger("TheChunkSystem/" + name);
         LOGGER.info("Initialized new LS ChunkSystem '{}' with {} allocated threads", name, workerThreadCount);
@@ -70,8 +75,8 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
         }
 
         if (shutdownQueues) {
-            for (final TheChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
-                for (final TheChunkSystem.OrderedStreamGroup.Queue queue : group.queues.getArray()) {
+            for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
+                for (final BalancedChunkSystem.OrderedStreamGroup.Queue queue : group.queues.getArray()) {
                     queue.shutdown();
                 }
             }
@@ -148,8 +153,8 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
             this.shutdown = true;
         }
 
-        for (final TheChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
-            for (final TheChunkSystem.OrderedStreamGroup.Queue queue : group.queues.getArray()) {
+        for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
+            for (final BalancedChunkSystem.OrderedStreamGroup.Queue queue : group.queues.getArray()) {
                 queue.shutdown();
             }
         }
@@ -208,17 +213,17 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    public TheChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup() {
+    public BalancedChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup() {
         return this.createChunkOrderedStreamGroup(new AtomicLong());
     }
 
-    public TheChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup(final AtomicLong subOrderGenerate) {
+    public BalancedChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup(final AtomicLong subOrderGenerate) {
         synchronized (this) {
             if (this.shutdown) {
                 throw new IllegalStateException("Queue is shutdown");
             }
 
-            final TheChunkSystem.OrderedStreamGroup ret = new TheChunkSystem.OrderedStreamGroup(subOrderGenerate);
+            final BalancedChunkSystem.OrderedStreamGroup ret = new BalancedChunkSystem.OrderedStreamGroup(subOrderGenerate);
 
             this.groups.add(ret);
 
@@ -226,25 +231,55 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    private @Nullable OrderedStreamGroup obtainGroup(final long time) {
-        final OrderedStreamGroup[] groups = this.groups.getArray();
-        if (groups.length == 1) {
-            final OrderedStreamGroup only = groups[0];
-            return only.hasAnyTasks() ? only : null;
-        }
+    private static int compareGroup(final BalancedChunkSystem.@NonNull OrderedStreamGroup g1, final BalancedChunkSystem.@NonNull OrderedStreamGroup g2) {
+        return TimeUtil.compareTimes(g1.lastRetrieved, g2.lastRetrieved);
+    }
 
-        OrderedStreamGroup best = null;
-        long bestTime = Long.MAX_VALUE;
-        for (final OrderedStreamGroup g : groups) {
-            if (g.hasAnyTasks() && g.lastRetrieved < bestTime) {
-                best = g;
-                bestTime = g.lastRetrieved;
+    private @NonNull List<BalancedChunkSystem.OrderedStreamGroup> findEligibleGroups() {
+        final List<BalancedChunkSystem.OrderedStreamGroup> nonEmpty = new ArrayList<>();
+
+        for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
+            if (group.hasAnyTasks()) {
+                nonEmpty.add(group);
             }
         }
-        if (best != null) {
-            best.lastRetrieved = time;
+
+        return nonEmpty;
+    }
+
+    private BalancedChunkSystem.@Nullable OrderedStreamGroup findFirstNonEmpty() {
+        for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
+            if (group.hasAnyTasks()) {
+                return group;
+            }
         }
-        return best;
+
+        return null;
+    }
+
+    private BalancedChunkSystem.OrderedStreamGroup obtainGroup0(final @NonNull List<BalancedChunkSystem.OrderedStreamGroup> groups, final long time) {
+        BalancedChunkSystem.OrderedStreamGroup ret = null;
+
+        for (final BalancedChunkSystem.OrderedStreamGroup group : groups) {
+            if (ret == null || compareGroup(group, ret) < 0) {
+                ret = group;
+            }
+        }
+
+        if (ret != null) {
+            ret.lastRetrieved = time;
+            return ret;
+        }
+
+        return ret;
+    }
+
+    private BalancedChunkSystem.OrderedStreamGroup obtainGroup(final long time) {
+        final List<BalancedChunkSystem.OrderedStreamGroup> groups = this.findEligibleGroups();
+
+        synchronized (this) {
+            return this.obtainGroup0(groups, time);
+        }
     }
 
     public final class OrderedStreamGroup {
@@ -252,7 +287,7 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
         private final AtomicLong subOrderGenerator;
         private final COWArrayList<Queue> queues = new COWArrayList<>(Queue.class);
 
-        private volatile long lastRetrieved = System.nanoTime();
+        private long lastRetrieved = System.nanoTime();
 
         public OrderedStreamGroup(final AtomicLong subOrderGenerator) {
             this.subOrderGenerator = subOrderGenerator;
@@ -309,8 +344,8 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
         }
 
         public @NonNull Queue createExecutor() {
-            synchronized (TheChunkSystem.this) {
-                if (TheChunkSystem.this.shutdown) {
+            synchronized (BalancedChunkSystem.this) {
+                if (BalancedChunkSystem.this.shutdown) {
                     throw new IllegalStateException("Queue is shutdown");
                 }
 
@@ -326,7 +361,7 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
 
             private final PrioritisedTaskQueue wrapped;
             private volatile boolean halt;
-            private final LongAdder executors = new LongAdder();
+            private final AtomicLong executors = new AtomicLong();
 
             public Queue(final AtomicLong subOrderGenerator) {
                 this.wrapped = new PrioritisedTaskQueue(subOrderGenerator);
@@ -337,7 +372,7 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
              */
             public void halt() {
                 this.halt = true;
-                TheChunkSystem.OrderedStreamGroup.this.queues.remove(this);
+                BalancedChunkSystem.OrderedStreamGroup.this.queues.remove(this);
             }
 
             /**
@@ -346,7 +381,7 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
              */
             public boolean isActive() {
                 if (this.halt) {
-                    return this.executors.sum() > 0L;
+                    return this.executors.get() > 0L;
                 } else {
                     if (!this.isShutdown()) {
                         return true;
@@ -397,11 +432,11 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
             @Override
             public @NonNull PrioritisedTask createTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
                 return new Task(this.wrapped.createTask(() -> {
-                    Queue.this.executors.add(1);
+                    Queue.this.executors.getAndIncrement();
                     try {
                         task.run();
                     } finally {
-                        Queue.this.executors.add(-1);
+                        Queue.this.executors.getAndDecrement();
                     }
                 }, priority, subOrder, stream));
             }
@@ -448,7 +483,7 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
                 @Override
                 public boolean queue() {
                     if (this.wrap.queue()) {
-                        TheChunkSystem.this.wakeupIdleThread();
+                        BalancedChunkSystem.this.wakeupIdleThread();
                         return true;
                     }
                     return false;
@@ -540,7 +575,7 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
 
         @Override
         protected void die() {
-            TheChunkSystem.this.die(this);
+            BalancedChunkSystem.this.die(this);
         }
 
         @Override
@@ -552,11 +587,11 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
                     break;
                 }
 
-                final TheChunkSystem.OrderedStreamGroup group = TheChunkSystem.this.obtainGroup(System.nanoTime());
+                final BalancedChunkSystem.OrderedStreamGroup group = BalancedChunkSystem.this.obtainGroup(System.nanoTime());
                 if (group == null) {
                     break;
                 }
-                final long deadline = System.nanoTime() + TheChunkSystem.this.groupTimeSliceNS;
+                final long deadline = System.nanoTime() + BalancedChunkSystem.this.groupTimeSliceNS;
                 do {
                     try {
                         if (this.halted) {
@@ -572,6 +607,7 @@ public final class TheChunkSystem extends BalancedPrioritisedThreadPool {
                     }
                 } while (System.nanoTime() - deadline <= 0L);
             }
+
 
             return ret;
         }
