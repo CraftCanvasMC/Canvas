@@ -49,10 +49,12 @@ public class RegionizedRamBar {
         final double usedMiB = usedBytes / BYTES_PER_MIB;
         final double maxMiB = maxBytes / BYTES_PER_MIB;
         final double percent = maxMiB <= 0.0 ? 0.0 : (usedMiB / maxMiB) * 100.0;
+        final float progress = (float)Math.max(0.0, Math.min(1.0, percent / 100.0));
         final Component textComponent = this.buildComponent(usedMiB, maxMiB, percent);
 
         for (final ServerPlayer localPlayer : players) {
             localPlayer.canvas$ramBarDisplay.setDisplay(textComponent);
+            localPlayer.canvas$ramBarDisplay.setProgress(progress);
             localPlayer.canvas$ramBarDisplay.tick();
         }
 
@@ -111,6 +113,7 @@ public class RegionizedRamBar {
 
                 private volatile boolean enabled = false;
                 private Placement placement = Placement.BOSS_BAR;
+                private float progress = 0.0F;
                 private boolean dirty = true;
 
                 @Override
@@ -134,7 +137,10 @@ public class RegionizedRamBar {
                     }
 
                     switch (this.placement) {
-                        case BOSS_BAR -> this.ramBar.name(this.display);
+                        case BOSS_BAR -> {
+                            this.ramBar.name(this.display);
+                            this.ramBar.progress(this.progress);
+                        }
                         case ACTION_BAR -> entityPlayer.connection.send(
                             new ClientboundSetActionBarTextPacket(PaperAdventure.asVanillaNullToEmpty(this.display))
                         );
@@ -144,6 +150,11 @@ public class RegionizedRamBar {
                 @Override
                 public void setDisplay(final Component component) {
                     this.display = component;
+                }
+
+                @Override
+                public void setProgress(final float progress) {
+                    this.progress = progress;
                 }
 
                 @Override
@@ -163,6 +174,8 @@ public class RegionizedRamBar {
         void tick();
 
         void setDisplay(Component component);
+
+        void setProgress(float progress);
 
         void updateFromEntry(Entry entry);
 
