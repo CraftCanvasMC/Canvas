@@ -27,7 +27,7 @@ public class RegionizedRamBar {
     private static final ThreadLocal<DecimalFormat> PERCENT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
     private static final double BYTES_PER_MIB = 1024.0 * 1024.0;
     public static final String DEFAULT_FORMAT =
-        "<gradient:green:aqua><b>RAM:</b></gradient> <used>/<xmx> <dark_gray>(</dark_gray><percent><dark_gray>%)</dark_gray>";
+        "<gradient:green:dark_green><b>RAM:</b></gradient> <used>/<xmx> <dark_gray>(</dark_gray><percent><dark_gray>%)</dark_gray>";
     private static final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
     private final boolean canTick;
     private long nextTick = System.nanoTime();
