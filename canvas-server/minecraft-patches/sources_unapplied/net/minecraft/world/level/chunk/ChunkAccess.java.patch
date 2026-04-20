@@ -1,0 +1,233 @@
+From fb2fa76bcfb03ba2831bd257c68fc51821e86ead Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/level/chunk/ChunkAccess.java b/net/minecraft/world/level/chunk/ChunkAccess.java
+index 54ddcf92e72b9cbd0eb442e5d0faa83c0cf3b33b..475a944e2745bffc3fb71db849b6c7d399b115f1 100644
+--- a/net/minecraft/world/level/chunk/ChunkAccess.java
++++ b/net/minecraft/world/level/chunk/ChunkAccess.java
+@@ -73,10 +73,158 @@ public abstract class ChunkAccess implements BiomeManager.NoiseBiomeSource, Ligh
+     protected @Nullable BlendingData blendingData;
+     public final Map<Heightmap.Types, Heightmap> heightmaps = Maps.newEnumMap(Heightmap.Types.class);
+     // Paper - rewrite chunk system
+-    private final Map<Structure, StructureStart> structureStarts = Maps.newHashMap();
+-    private final Map<Structure, LongSet> structuresRefences = Maps.newHashMap();
+-    protected final Map<BlockPos, CompoundTag> pendingBlockEntities = Maps.newHashMap();
+-    public final Map<BlockPos, BlockEntity> blockEntities = new Object2ObjectOpenHashMap<>();
++    private final Map<Structure, StructureStart> structureStarts = new it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap<>(); // Canvas - optimized collection
++    private final Map<Structure, LongSet> structuresRefences = new it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap<>(); // Canvas - optimized collection
++    protected final Map<BlockPos, CompoundTag> pendingBlockEntities = new Object2ObjectOpenHashMap<>(); // Canvas - optimized collection
++    // Canvas start - optimize block entity fetching
++    /*
++      When the chunk has a lot of block entities, this is much faster
++      to use than the previous 'Map<BlockPos, BlockEntity> blockEntities'
++     */
++    // public final Map<BlockPos, BlockEntity> blockEntities = new Object2ObjectOpenHashMap<>();
++    private static final BlockEntity[] EMPTY_ARRAY = new BlockEntity[0];
++    private static final int SECTION_SIZE = 16 * 16;
++    private final BlockEntity[][] canvas$blockEntitySections;
++    private final int canvas$minY;
++    private final int canvas$maxY;
++    private final int canvas$height;
++
++    /**
++     * This fetches block entity buckets from the global block coordinates
++     * <br></br>
++     * If there is no bucket at the y location we quick return null,
++     * since there shouldn't be a block entity there if there is no bucket
++     * <br></br>
++     * @param globalX global x
++     * @param y global y or local y
++     * @param globalZ global z
++     * @return nullable block entity at the local position
++     */
++    @Nullable
++    public BlockEntity canvas$getFromBuckets(int globalX, int y, int globalZ) {
++        if (y < this.canvas$minY || y > this.canvas$maxY) return null;
++        BlockEntity[] bucket = canvas$blockEntitySections[canvas$toSectionIndex(y)];
++        if (bucket == null) return null;
++        return bucket[canvas$sectionIndex(globalX, globalZ)];
++    }
++
++    @Nullable
++    // Note: if removing a block entity, don't use this, use remove method. The block entity is expected non-null
++    public BlockEntity canvas$setBlockEntityInBuckets(int globalX, int y, int globalZ, @org.jspecify.annotations.NonNull BlockEntity blockEntity) {
++        if (y < this.canvas$minY || y > this.canvas$maxY) return null;
++        int sectionIndex = canvas$toSectionIndex(y);
++        BlockEntity[] bucket = canvas$blockEntitySections[sectionIndex];
++        if (bucket == null) {
++            bucket = new BlockEntity[SECTION_SIZE];
++            canvas$blockEntitySections[sectionIndex] = bucket;
++        }
++        int i = canvas$sectionIndex(globalX, globalZ);
++        BlockEntity old = bucket[i];
++        bucket[i] = blockEntity;
++        return old;
++    }
++
++    public void canvas$removeAll(int y) {
++        if (y < this.canvas$minY || y > this.canvas$maxY) return;
++        canvas$blockEntitySections[canvas$toSectionIndex(y)] = null;
++    }
++
++    public void canvas$removeAll() {
++        java.util.Arrays.fill(canvas$blockEntitySections, null);
++    }
++
++    @Nullable
++    public BlockEntity canvas$removeFromBuckets(int globalX, int y, int globalZ) {
++        if (y < this.canvas$minY || y > this.canvas$maxY) return null;
++        int sectionIndex = canvas$toSectionIndex(y);
++        BlockEntity[] bucket = canvas$blockEntitySections[sectionIndex];
++        if (bucket != null) {
++            int i = canvas$sectionIndex(globalX, globalZ);
++            BlockEntity removed = bucket[i];
++            bucket[i] = null;
++
++            for (final BlockEntity entry : bucket) {
++                if (entry != null) return removed;
++            }
++
++            // doesn't have anymore entries, remove from buckets
++            canvas$blockEntitySections[sectionIndex] = null;
++            return removed;
++        } // else | no need to remove anything, there is no bucket
++        return null;
++    }
++
++    private int canvas$sectionIndex(int globalX, int globalZ) {
++        return (globalX & 15) | ((globalZ & 15) << 4);
++    }
++
++    private int canvas$toSectionIndex(int y) {
++        int idx = y - canvas$minY;
++        if (idx < 0 || idx >= canvas$height) {
++            throw new IndexOutOfBoundsException("Y=" + y + " out of range (" + canvas$minY + " to " + canvas$maxY + ")");
++        }
++        return idx;
++    }
++
++    public BlockEntity[] canvas$getAllBlockEntities() {
++        BlockEntity[][] sections = this.canvas$blockEntitySections;
++        int total = 0;
++
++        for (BlockEntity[] bucket : sections) {
++            if (bucket == null) continue;
++
++            for (final BlockEntity blockEntity : bucket) {
++                if (blockEntity != null) total++;
++            }
++        }
++
++        if (total == 0) return EMPTY_ARRAY;
++
++        BlockEntity[] result = new BlockEntity[total];
++        int idx = 0;
++
++        for (BlockEntity[] bucket : sections) {
++            if (bucket == null) continue;
++
++            for (BlockEntity be : bucket) {
++                if (be != null) {
++                    result[idx++] = be;
++                }
++            }
++        }
++
++        return result;
++    }
++
++    public boolean canvas$containsPos(int globalX, int y, int globalZ) {
++        if (y < this.canvas$minY || y > this.canvas$maxY) return false;
++        BlockEntity[] bucket = canvas$blockEntitySections[canvas$toSectionIndex(y)];
++        if (bucket == null) return false;
++        return bucket[canvas$sectionIndex(globalX, globalZ)] != null;
++    }
++
++    public boolean canvas$containsPos(BlockPos pos) {
++        return canvas$containsPos(pos.getX(), pos.getY(), pos.getZ());
++    }
++
++    public void canvas$iterateOverBlockEntities(java.util.function.Consumer<BlockEntity> consumer) {
++        for (BlockEntity[] bucket : canvas$blockEntitySections) {
++            if (bucket == null) continue;
++            for (final BlockEntity blockEntity : bucket) {
++                if (blockEntity == null) continue;
++                consumer.accept(blockEntity);
++            }
++        }
++    }
++
++    public Map<BlockPos, BlockEntity> canvas$buildBlockEntityMap() {
++        Map<BlockPos, BlockEntity> blockEntities = new Object2ObjectOpenHashMap<>();
++        this.canvas$iterateOverBlockEntities((blockEntity) -> {
++            blockEntities.put(blockEntity.getBlockPos(), blockEntity);
++        });
++        return blockEntities;
++    }
++    // Canvas end - optimize block entity fetching
+     protected final LevelHeightAccessor levelHeightAccessor;
+     protected final LevelChunkSection[] sections;
+     // CraftBukkit start - SPIGOT-6814: move to IChunkAccess to account for 1.17 to 1.18 chunk upgrading.
+@@ -172,6 +320,12 @@ public abstract class ChunkAccess implements BiomeManager.NoiseBiomeSource, Ligh
+         this.minSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMinSection(levelHeightAccessor);
+         this.maxSection = ca.spottedleaf.moonrise.common.util.WorldUtil.getMaxSection(levelHeightAccessor);
+         // Paper end - get block chunk optimisation
++        // Canvas start - optimize block entity fetching
++        this.canvas$minY = this.getMinY();
++        this.canvas$maxY = this.getMaxY();
++        this.canvas$height = canvas$maxY - canvas$minY + 1;
++        this.canvas$blockEntitySections = new BlockEntity[this.canvas$height][];
++        // Canvas end - optimize block entity fetching
+     }
+ 
+     private void replaceMissingSections(PalettedContainerFactory containerFactory, LevelChunkSection[] sections) { // Paper - Anti-Xray - make it a non-static method
+@@ -219,7 +373,18 @@ public abstract class ChunkAccess implements BiomeManager.NoiseBiomeSource, Ligh
+ 
+     public Set<BlockPos> getBlockEntitiesPos() {
+         Set<BlockPos> set = Sets.newHashSet(this.pendingBlockEntities.keySet());
+-        set.addAll(this.blockEntities.keySet());
++        // Canvas start - optimize block entities
++        for (int y = 0; y < canvas$blockEntitySections.length; y++) {
++            BlockEntity[] bucket = canvas$blockEntitySections[y];
++            if (bucket == null) continue;
++
++            for (int i = 0; i < bucket.length; i++) {
++                BlockEntity be = bucket[i];
++                if (be == null) continue;
++                set.add(be.getBlockPos());
++            }
++        }
++        // Canvas end - optimize block entities
+         return set;
+     }
+ 
+@@ -277,7 +442,7 @@ public abstract class ChunkAccess implements BiomeManager.NoiseBiomeSource, Ligh
+     }
+ 
+     public Map<Structure, StructureStart> getAllStarts() {
+-        return Collections.unmodifiableMap(this.structureStarts);
++        return this.structureStarts; // Canvas - optimized collection
+     }
+ 
+     public void setAllStarts(Map<Structure, StructureStart> structureStarts) {
+@@ -299,7 +464,7 @@ public abstract class ChunkAccess implements BiomeManager.NoiseBiomeSource, Ligh
+ 
+     @Override
+     public Map<Structure, LongSet> getAllReferences() {
+-        return Collections.unmodifiableMap(this.structuresRefences);
++        return this.structuresRefences; // Canvas - optimized collection
+     }
+ 
+     @Override
+@@ -374,7 +539,7 @@ public abstract class ChunkAccess implements BiomeManager.NoiseBiomeSource, Ligh
+ 
+     public void setBlockEntityNbt(CompoundTag tag) {
+         BlockPos posFromTag = BlockEntity.getPosFromTag(this.chunkPos, tag);
+-        if (!this.blockEntities.containsKey(posFromTag)) {
++        if (!this.canvas$containsPos(posFromTag)) { // Canvas - optimize block entities
+             this.pendingBlockEntities.put(posFromTag, tag);
+         }
+     }

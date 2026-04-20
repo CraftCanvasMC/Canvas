@@ -1,0 +1,208 @@
+From fb2fa76bcfb03ba2831bd257c68fc51821e86ead Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/server/commands/LootCommand.java b/net/minecraft/server/commands/LootCommand.java
+index 2b919802638b6511b702b294aba34764c7b5973c..8a2100227ecbe0fa19dc33d2d9c03b9d6d72f06b 100644
+--- a/net/minecraft/server/commands/LootCommand.java
++++ b/net/minecraft/server/commands/LootCommand.java
+@@ -277,8 +277,13 @@ public class LootCommand {
+     }
+ 
+     private static int blockDistribute(CommandSourceStack source, BlockPos pos, List<ItemStack> items, LootCommand.Callback callback) throws CommandSyntaxException {
+-        Container container = getContainer(source, pos);
++        // Canvas start - fix commands with region threading
+         List<ItemStack> list = Lists.newArrayListWithCapacity(items.size());
++        Runnable task = () -> {
++            try {
++        // Canvas end - fix commands with region threading
++        Container container = getContainer(source, pos);
++        // Canvas - fix commands with region threading - move up
+ 
+         for (ItemStack itemStack : items) {
+             if (distributeToContainer(container, itemStack.copy())) {
+@@ -288,6 +293,23 @@ public class LootCommand {
+         }
+ 
+         callback.accept(list);
++        // Canvas start - fix commands with region threading
++            } catch (CommandSyntaxException syntaxException) {
++                source.sendFailure(Component.literal(syntaxException.getMessage()));
++            }
++        };
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(source.getLevel(), pos)) {
++            // we are properly regionized for this container, we can run it here.
++            task.run();
++        } else {
++            // we are not on the right thread for this container, we must schedule
++            // this to the correct thread context
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                source.getLevel(),
++                pos.getX() >> 4, pos.getZ() >> 4, task
++            );
++        }
++        // Canvas end - fix commands with region threading
+         return list.size();
+     }
+ 
+@@ -317,11 +339,15 @@ public class LootCommand {
+     }
+ 
+     private static int blockReplace(CommandSourceStack source, BlockPos pos, int slot, int numSlots, List<ItemStack> items, LootCommand.Callback callback) throws CommandSyntaxException {
++        // Canvas start - fix commands with region threading
++        List<ItemStack> list = Lists.newArrayListWithCapacity(items.size());
++        Runnable task = () -> {
++            try {
++        // Canvas end - fix commands with region threading
+         Container container = getContainer(source, pos);
+         int containerSize = container.getContainerSize();
+         if (slot >= 0 && slot < containerSize) {
+-            List<ItemStack> list = Lists.newArrayListWithCapacity(items.size());
+-
++            // Canvas - fix commands with region threading - move up
+             for (int i = 0; i < numSlots; i++) {
+                 int i1 = slot + i;
+                 ItemStack itemStack = i < items.size() ? items.get(i) : ItemStack.EMPTY;
+@@ -332,10 +358,28 @@ public class LootCommand {
+             }
+ 
+             callback.accept(list);
+-            return list.size();
++            return; // Canvas - fix commands with region threading
+         } else {
+             throw ItemCommands.ERROR_TARGET_INAPPLICABLE_SLOT.create(slot);
+         }
++        // Canvas start - fix commands with region threading
++            } catch (CommandSyntaxException syntaxException) {
++                source.sendFailure(Component.literal(syntaxException.getMessage()));
++            }
++        };
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(source.getLevel(), pos)) {
++            // we are properly regionized for this container, we can run it here.
++            task.run();
++        } else {
++            // we are not on the right thread for this container, we must schedule
++            // this to the correct thread context
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                source.getLevel(),
++                pos.getX() >> 4, pos.getZ() >> 4, task
++            );
++        }
++        return list.size();
++        // Canvas end - fix commands with region threading
+     }
+ 
+     private static boolean canMergeItems(ItemStack first, ItemStack second) {
+@@ -347,9 +391,23 @@ public class LootCommand {
+ 
+         for (ItemStack itemStack : items) {
+             for (ServerPlayer serverPlayer : targets) {
++                Runnable task = () -> { // Canvas - fix commands with region threading
+                 if (serverPlayer.getInventory().add(itemStack.copy())) {
+                     list.add(itemStack);
+                 }
++                // Canvas start - fix commands with region threading
++                };
++                if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverPlayer)) {
++                    // we are properly regionized for this player, we can run it here.
++                    task.run();
++                } else {
++                    // we are not on the right thread for this player, we must schedule
++                    // this to the correct thread context
++                    serverPlayer.getBukkitEntity().taskScheduler.schedule((entity) -> {
++                        task.run();
++                    }, null, 0L);
++                }
++                // Canvas end - fix commands with region threading
+             }
+         }
+ 
+@@ -371,12 +429,26 @@ public class LootCommand {
+         List<ItemStack> list = Lists.newArrayListWithCapacity(items.size());
+ 
+         for (Entity entity : targets) {
++            Runnable task = () -> { // Canvas - fix commands with region threading
+             if (entity instanceof ServerPlayer serverPlayer) {
+                 setSlots(entity, items, startSlot, numSlots, list);
+                 serverPlayer.containerMenu.broadcastChanges();
+             } else {
+                 setSlots(entity, items, startSlot, numSlots, list);
+             }
++            // Canvas start - fix commands with region threading
++            };
++            if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                // we are properly regionized for this entity, we can run it here.
++                task.run();
++            } else {
++                // we are not on the right thread for this entity, we must schedule
++                // this to the correct thread context
++                entity.getBukkitEntity().taskScheduler.schedule((entity1) -> {
++                    task.run();
++                }, null, 0L);
++            }
++            // Canvas end - fix commands with region threading
+         }
+ 
+         callback.accept(list);
+@@ -386,9 +458,24 @@ public class LootCommand {
+     private static int dropInWorld(CommandSourceStack source, Vec3 pos, List<ItemStack> items, LootCommand.Callback callback) throws CommandSyntaxException {
+         ServerLevel level = source.getLevel();
+         items.forEach(itemStack -> {
++            Runnable task = () -> { // Canvas - fix commands with region threading
+             ItemEntity itemEntity = new ItemEntity(level, pos.x, pos.y, pos.z, itemStack.copy());
+             itemEntity.setDefaultPickUpDelay();
+             level.addFreshEntity(itemEntity);
++            // Canvas start - fix commands with region threading
++            };
++            if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos)) {
++                // we are properly regionized for this position, we can run it here.
++                task.run();
++            } else {
++                // we are not on the right thread for this position, we must schedule
++                // this to the correct thread context
++                io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                    source.getLevel(),
++                    net.minecraft.util.Mth.floor(pos.x) >> 4, net.minecraft.util.Mth.floor(pos.z) >> 4, task
++                );
++            }
++            // Canvas end - fix commands with region threading
+         });
+         callback.accept(items);
+         return items.size();
+@@ -435,6 +522,8 @@ public class LootCommand {
+     private static int dropBlockLoot(CommandContext<CommandSourceStack> context, BlockPos pos, ItemStack tool, LootCommand.DropConsumer dropConsumer) throws CommandSyntaxException {
+         CommandSourceStack commandSourceStack = context.getSource();
+         ServerLevel level = commandSourceStack.getLevel();
++        java.util.function.Supplier<Integer> task = () -> { // Canvas - fix commands with region threading
++            try { // Canvas - fix commands with region threading
+         BlockState blockState = level.getBlockState(pos);
+         BlockEntity blockEntity = level.getBlockEntity(pos);
+         Optional<ResourceKey<LootTable>> lootTable = blockState.getBlock().getLootTable();
+@@ -450,6 +539,25 @@ public class LootCommand {
+             List<ItemStack> drops = blockState.getDrops(builder);
+             return dropConsumer.accept(context, drops, items -> callback(commandSourceStack, items, lootTable.get()));
+         }
++        // Canvas start - fix commands with region threading
++            } catch (CommandSyntaxException syntaxException) {
++                context.getSource().sendFailure(Component.literal(syntaxException.getMessage()));
++            }
++            return 0;
++        };
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos)) {
++            // we are properly regionized for this container, we can run it here.
++            return task.get();
++        } else {
++            // we are not on the right thread for this container, we must schedule
++            // this to the correct thread context
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                level,
++                pos.getX() >> 4, pos.getZ() >> 4, task::get
++            );
++        }
++        return 0;
++        // Canvas end - fix commands with region threading
+     }
+ 
+     private static int dropKillLoot(CommandContext<CommandSourceStack> context, Entity entity, LootCommand.DropConsumer dropConsumer) throws CommandSyntaxException {

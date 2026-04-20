@@ -1,0 +1,126 @@
+From fb2fa76bcfb03ba2831bd257c68fc51821e86ead Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/level/block/entity/HopperBlockEntity.java b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+index 21546db5e061536f9e0c04a6dc7404a07c032f35..e3c633a3c63682b6e14dc3a26824ed03b4d1d3bc 100644
+--- a/net/minecraft/world/level/block/entity/HopperBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/HopperBlockEntity.java
+@@ -95,6 +95,7 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+         if (!this.tryLoadLootTable(input)) {
+             ContainerHelper.loadAllItems(input, this.items);
+         }
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
+ 
+         this.cooldownTime = input.getIntOr("TransferCooldown", -1);
+     }
+@@ -117,7 +118,11 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+     @Override
+     public ItemStack removeItem(int index, int count) {
+         this.unpackLootTable(null);
+-        return ContainerHelper.removeItem(this.getItems(), index, count);
++        // Canvas start - optimize hoppers
++        ItemStack retVal = ContainerHelper.removeItem(this.getItems(), index, count);
++        canvas$recomputeFullState(this);
++        return retVal;
++        // Canvas end - optimize hoppers
+     }
+ 
+     @Override
+@@ -125,12 +130,15 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+         this.unpackLootTable(null);
+         this.getItems().set(index, stack);
+         stack.limitSize(this.getMaxStackSize(stack));
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
+     }
+ 
+     @Override
+     public void setBlockState(BlockState blockState) {
+         super.setBlockState(blockState);
+         this.facing = blockState.getValue(HopperBlock.FACING);
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
++        // Canvas - TODO - optimize hoppers - cache is locked and run tick skip system through here?
+     }
+ 
+     @Override
+@@ -158,8 +166,17 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+     private static final int HOPPER_EMPTY = 0;
+     private static final int HOPPER_HAS_ITEMS = 1;
+     private static final int HOPPER_IS_FULL = 2;
++    // Canvas start - optimize hoppers
++    private int fullState = -1;
+ 
+-    private static int getFullState(final HopperBlockEntity hopper) {
++    @Override
++    public void setChanged() {
++        super.setChanged();
++        canvas$recomputeFullState(this);
++    }
++
++    private static void canvas$recomputeFullState(final HopperBlockEntity hopper) {
++    // Canvas end - optimize hoppers
+         hopper.unpackLootTable(null);
+ 
+         final List<ItemStack> hopperItems = hopper.items;
+@@ -176,18 +193,20 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+ 
+             if (!full) {
+                 // can't be full
+-                return HOPPER_HAS_ITEMS;
++                hopper.fullState = HOPPER_HAS_ITEMS; // Canvas - optimize hoppers
++                return; // Canvas - optimize hoppers
+             }
+ 
+             empty = false;
+ 
+             if (stack.getCount() != stack.getMaxStackSize()) {
+                 // can't be full or empty
+-                return HOPPER_HAS_ITEMS;
++                hopper.fullState = HOPPER_HAS_ITEMS; // Canvas - optimize hoppers
++                return; // Canvas - optimize hoppers
+             }
+         }
+ 
+-        return empty ? HOPPER_EMPTY : (full ? HOPPER_IS_FULL : HOPPER_HAS_ITEMS);
++        hopper.fullState = empty ? HOPPER_EMPTY : (full ? HOPPER_IS_FULL : HOPPER_HAS_ITEMS); // Canvas - optimize hoppers
+     }
+     // Paper end - Perf: Optimize Hoppers
+ 
+@@ -197,7 +216,8 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+         } else {
+             if (!blockEntity.isOnCooldown() && state.getValue(HopperBlock.ENABLED)) {
+                 boolean flag = false;
+-                final int fullState = getFullState(blockEntity); // Paper - Perf: Optimize Hoppers
++                if (blockEntity.fullState == -1) canvas$recomputeFullState(blockEntity); // Canvas - optimize hoppers
++                final int fullState = blockEntity.fullState; // Paper - Perf: Optimize Hoppers // Canvas - optimize hoppers
+                 if (fullState != HOPPER_EMPTY) { // Paper - Perf: Optimize Hoppers
+                     flag = ejectItems(level, pos, blockEntity);
+                 }
+@@ -793,7 +813,7 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+     }
+     private static @Nullable Container getContainerAt(Level level, BlockPos pos, BlockState state, double x, double y, double z, final boolean optimizeEntities) {
+         // Paper end - Perf: Optimize Hoppers
+-        Container blockContainer = getBlockContainer(level, pos, state);
++        Container blockContainer = state.hasBlockEntity() || state.getBlock() instanceof WorldlyContainerHolder ? getBlockContainer(level, pos, state) : null; // Canvas - optimize hoppers - if the block has no block entity, why check it
+         if (blockContainer == null && (!optimizeEntities || !level.paperConfig().hopper.ignoreOccludingBlocks || !state.getBukkitMaterial().isOccluding())) { // Paper - Perf: Optimize Hoppers
+             blockContainer = getEntityContainer(level, x, y, z);
+         }
+@@ -808,7 +828,7 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+             return ((WorldlyContainerHolder)block).getContainer(state, level, pos);
+         } else if (state.hasBlockEntity() && level.getBlockEntity(pos) instanceof Container container) {
+             if (container instanceof ChestBlockEntity && block instanceof ChestBlock) {
+-                container = ChestBlock.getContainer((ChestBlock)block, state, level, pos, true);
++                container = ChestBlock.canvas$getContainerForHoppers((ChestBlock)block, state, level, pos, true, container); // Canvas - optimize hoppers
+             }
+ 
+             return container;
+@@ -868,6 +888,7 @@ public class HopperBlockEntity extends RandomizableContainerBlockEntity implemen
+     @Override
+     protected void setItems(NonNullList<ItemStack> items) {
+         this.items = items;
++        canvas$recomputeFullState(this); // Canvas - optimize hoppers
+     }
+ 
+     public static void entityInside(Level level, BlockPos pos, BlockState state, Entity entity, HopperBlockEntity blockEntity) {

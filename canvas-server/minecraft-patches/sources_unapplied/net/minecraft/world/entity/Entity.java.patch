@@ -1,0 +1,430 @@
+From fb2fa76bcfb03ba2831bd257c68fc51821e86ead Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 3a4a13fc1e0f9d6fdb19d566b193087eaab996a3..b013d63eb2b83981b60290eaafcc28e0f81cb1db 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -260,6 +260,10 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     private Vec3 deltaMovement = Vec3.ZERO;
+     private float yRot;
+     private float xRot;
++    // Canvas start - region threading
++    private volatile float canvas$threadSafeYRot;
++    private volatile float canvas$threadSafeXRot;
++    // Canvas end - region threading
+     public float yRotO;
+     public float xRotO;
+     private AABB bb = INITIAL_AABB;
+@@ -285,9 +289,14 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     public int tickCount;
+     private int remainingFireTicks;
+     public boolean wasTouchingWater;
+-    protected Object2DoubleMap<TagKey<Fluid>> fluidHeight = new Object2DoubleArrayMap<>(2);
++    public double[] canvas$fluidHeightArray = new double[2]; // Canvas - optimize fluid height - protected -> public
+     protected boolean wasEyeInWater;
+-    private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
++    // Canvas start - optimize fluidOnEyes
++    // private final Set<TagKey<Fluid>> fluidOnEyes = new HashSet<>();
++    private int canvas$fluidOnEyesMask = 0;
++    private static final int EYE_IN_WATER = 1 << 0;
++    private static final int EYE_IN_LAVA  = 1 << 1;
++    // Canvas end - optimize fluidOnEyes
+     public int invulnerableTime;
+     protected boolean firstTick = true;
+     protected final SynchedEntityData entityData;
+@@ -890,7 +899,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         }
+ 
+         //if (this instanceof ServerPlayer) this.handlePortal(); // CraftBukkit - Moved up to postTick // Folia - region threading - ONLY allow in postTick()
+-        if (this.canSpawnSprintParticle()) {
++        if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableSprintParticles && this.canSpawnSprintParticle()) { // Canvas - particles config
+             this.spawnSprintParticle();
+         }
+ 
+@@ -925,7 +934,16 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+ 
+         this.checkBelowWorld();
+         if (!this.level().isClientSide()) {
++            // Canvas start - hide flames on entities with fire resistance or invis
++            if (this instanceof net.minecraft.world.entity.LivingEntity livingEntity) {
++                this.setSharedFlagOnFire(this.remainingFireTicks > 0 &&
++                    (!io.canvasmc.canvas.Config.INSTANCE.networking.hideFlamesOnEntitiesWithFireResistance || !livingEntity.hasEffect(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE)) &&
++                    (!io.canvasmc.canvas.Config.INSTANCE.networking.hideFlamesOnEntitiesWithInvisibility || !livingEntity.isInvisible())
++                );
++            } else {
++            // Canvas end - hide flames on entities with fire resistance or invis
+             this.setSharedFlagOnFire(this.remainingFireTicks > 0);
++            } // Canvas - hide flames on entities with fire resistance or invis
+         }
+ 
+         this.firstTick = false;
+@@ -1128,6 +1146,17 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         final Vec3 originalMovement = movement; // Paper - Expose pre-collision velocity
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot move an entity off-main"); // Folia - region threading
+         if (this.noPhysics) {
++            // Canvas start - safely abort tick when very large movement crosses region ownership
++            Vec3 vec32 = this.position();
++            Vec3 vec33 = vec32.add(movement);
++            if (movement.lengthSqr() >= (30.0D * 30.0D)
++                && !Double.isNaN(vec33.x) && !Double.isNaN(vec33.y) && !Double.isNaN(vec33.z)
++                && !this.isVehicle()
++                && !this.isPassenger()
++                && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), vec32, movement, 0)) {
++                throw new io.canvasmc.canvas.world.entity.EntityMoveOutOfRegionException(this, type, movement);
++            }
++            // Canvas end - safely abort tick when very large movement crosses region ownership
+             this.setPos(this.getX() + movement.x, this.getY() + movement.y, this.getZ() + movement.z);
+             this.horizontalCollision = false;
+             this.verticalCollision = false;
+@@ -1176,6 +1205,18 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+ 
+                 Vec3 vec32 = this.position();
+                 Vec3 vec33 = vec32.add(vec3);
++                // Canvas start - safely abort tick when very large movement crosses region ownership
++                // This is after collide(movement) so we evaluate resolved displacement, not raw input.
++                // Moonrise collision lookups treat out-of-region/unloaded chunks as blocking, so this point avoids
++                // applying a large cross-region setPos while preserving normal collision resolution first.
++                if (vec3.lengthSqr() >= (30.0D * 30.0D)
++                    && !Double.isNaN(vec33.x) && !Double.isNaN(vec33.y) && !Double.isNaN(vec33.z)
++                    && !this.isVehicle()
++                    && !this.isPassenger()
++                    && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), vec32, vec3, 0)) {
++                    throw new io.canvasmc.canvas.world.entity.EntityMoveOutOfRegionException(this, type, vec3);
++                }
++                // Canvas end - safely abort tick when very large movement crosses region ownership
+                 this.addMovementThisTick(new Entity.Movement(vec32, vec33, movement));
+                 this.setPos(vec33);
+             }
+@@ -1702,6 +1743,11 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         boolean flag1 = this.level instanceof ServerLevel serverLevel
+             && serverLevel.getServer().debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.ENTITY_BLOCK_INTERSECTIONS);
+         AtomicInteger atomicInteger = new AtomicInteger();
++        // Canvas start - optimize checkInsideBlocks
++        // use element array for lambdas
++        final net.minecraft.world.level.chunk.ChunkAccess[] cachedChunk = new  net.minecraft.world.level.chunk.ChunkAccess[] { null };
++        final long[] lastChunkPos = { Long.MIN_VALUE };
++        // Canvas end - optimize checkInsideBlocks
+         BlockGetter.forEachBlockIntersectedBetween(
+             from,
+             to,
+@@ -1712,13 +1758,25 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+                 } else if (index >= maxSteps) {
+                     return false;
+                 } else {
+-                    // Folia start - region threading
+-                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(Entity.this.level, pos, 16)) {
+-                        return false;
+-                    }
+-                    // Folia end - region threading
++                    // Canvas start - optimize checkInsideBlocks
++                    // remove thread check here, as if the chunk is loaded, and we are NEXT TO IT, then it
++                    // should always be inside the current region
+                     atomicInteger.set(index);
+-                    BlockState blockState = this.level().getBlockState(pos);
++                    final int chunkX = pos.getX() >> 4;
++                    final int chunkZ = pos.getZ() >> 4;
++                    final long chunkLongPos = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
++                    if (lastChunkPos[0] != chunkLongPos) {
++                        // update cache, this is a different chunk than previous
++                        lastChunkPos[0] = chunkLongPos;
++                        cachedChunk[0] = this.level.getChunkIfLoaded(chunkX, chunkZ);
++                    }
++                    net.minecraft.world.level.chunk.ChunkAccess chunk = cachedChunk[0];
++                    if (chunk == null) {
++                        // return as if it were air
++                        return true;
++                    }
++                    BlockState blockState = chunk.getBlockState(pos);
++                    // Canvas end - optimize checkInsideBlocks
+                     if (blockState.isAir()) {
+                         if (flag1) {
+                             this.debugBlockIntersection((ServerLevel)this.level(), pos.immutable(), false, false);
+@@ -1729,7 +1787,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+                         VoxelShape entityInsideCollisionShape = blockState.getEntityInsideCollisionShape(this.level(), pos, this);
+                         boolean flag2 = entityInsideCollisionShape == Shapes.block()
+                             || this.collidedWithShapeMovingFrom(from, to, entityInsideCollisionShape.move(new Vec3(pos)).toAabbs());
+-                        boolean flag3 = this.collidedWithFluid(blockState.getFluidState(), pos, from, to);
++                        boolean flag3 = (blockState.tagFlag & io.canvasmc.canvas.world.block.BlockTags.FLUID) != 0 && this.collidedWithFluid(blockState.getFluidState(), pos, from, to); // Canvas - optimize checkInsideBlocks
+                         if ((flag2 || flag3) && visited.add(pos.asLong())) {
+                             if (flag2) {
+                                 try {
+@@ -1781,6 +1839,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     }
+ 
+     public boolean collidedWithFluid(FluidState fluid, BlockPos pos, Vec3 from, Vec3 to) {
++        if (fluid.isEmpty()) return false; // Canvas - optimize checkInsideBlocks
+         AABB aabb = fluid.getAABB(this.level(), pos);
+         return aabb != null && this.collidedWithShapeMovingFrom(from, to, List.of(aabb));
+     }
+@@ -2026,7 +2085,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     }
+ 
+     protected boolean updateInWaterStateAndDoFluidPushing() {
+-        this.fluidHeight.clear();
++        this.canvas$fluidHeightArray = new double[2]; // Canvas - optimize fluid height
+         this.updateInWaterStateAndDoWaterCurrentPushing();
+         double d = this.level.environmentAttributes().getDimensionValue(EnvironmentAttributes.FAST_LAVA) ? 0.007 : 0.0023333333333333335;
+         boolean flag = this.updateFluidHeightAndDoFluidPushing(FluidTags.LAVA, d);
+@@ -2049,8 +2108,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     }
+ 
+     private void updateFluidOnEyes() {
+-        this.wasEyeInWater = this.isEyeInFluid(FluidTags.WATER);
+-        this.fluidOnEyes.clear();
++        this.wasEyeInWater = this.canvas$isEyeInWater(); // Canvas - optimize fluidOnEyes
++        this.canvas$fluidOnEyesMask = 0; // Canvas - optimize fluidOnEyes
+         double eyeY = this.getEyeY();
+         if (!(
+             this.getVehicle() instanceof AbstractBoat abstractBoat
+@@ -2062,10 +2121,29 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             FluidState fluidState = this.level().getFluidState(blockPos);
+             double d = blockPos.getY() + fluidState.getHeight(this.level(), blockPos);
+             if (d > eyeY) {
+-                fluidState.getTags().forEach(this.fluidOnEyes::add);
++                // Canvas start - optimize fluidOnEyes - remove stream and use bitmask
++                TagKey<Fluid>[] tags = fluidState.canvas$getTagsArray();
++                for (TagKey<Fluid> tag : tags) {
++                    if (tag == FluidTags.WATER) {
++                        this.canvas$fluidOnEyesMask |= EYE_IN_WATER;
++                    } else if (tag == FluidTags.LAVA) {
++                        this.canvas$fluidOnEyesMask |= EYE_IN_LAVA;
++                    }
++                }
++                // Canvas end - optimize fluidOnEyes - remove stream and use bitmask
+             }
+         }
+     }
++    // Canvas start - optimize fluidOnEyes
++
++    public boolean canvas$isEyeInWater() {
++        return (this.canvas$fluidOnEyesMask & EYE_IN_WATER) != 0;
++    }
++
++    public boolean canvas$isEyeInLava() {
++        return (this.canvas$fluidOnEyesMask & EYE_IN_LAVA) != 0;
++    }
++    // Canvas end - optimize fluidOnEyes
+ 
+     protected void doWaterSplashEffect() {
+         Entity entity = Objects.requireNonNullElse(this.getControllingPassenger(), this);
+@@ -2082,6 +2160,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+ 
+         float f1 = Mth.floor(this.getY());
+ 
++        if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableWaterSplashParticles) { // Canvas - particles config
+         for (int i = 0; i < 1.0F + this.dimensions.width() * 20.0F; i++) {
+             double d = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+             double d1 = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+@@ -2102,6 +2181,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             double d1 = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+             this.level().addParticle(ParticleTypes.SPLASH, this.getX() + d, f1 + 1.0F, this.getZ() + d1, deltaMovement.x, deltaMovement.y, deltaMovement.z);
+         }
++        } // Canvas - particles config
+ 
+         this.gameEvent(GameEvent.SPLASH);
+     }
+@@ -2143,11 +2223,38 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     }
+ 
+     public boolean isEyeInFluid(TagKey<Fluid> fluidTag) {
+-        return this.fluidOnEyes.contains(fluidTag);
++    // Canvas start - optimize fluidOnEyes
++        if (fluidTag == FluidTags.WATER) {
++            return (this.canvas$fluidOnEyesMask & EYE_IN_WATER) != 0;
++        } else if (fluidTag == FluidTags.LAVA) {
++            return (this.canvas$fluidOnEyesMask & EYE_IN_LAVA) != 0;
++        }
++        return false;
++    }
++
++    // Note: realistically would want to avoid using this, just use the index
++    //    - WATER: 0
++    //    - LAVA: 1
++    private int canvas$getFluidHeightIndex(TagKey<Fluid> fluidTag) {
++        if (fluidTag == FluidTags.WATER) {
++            return 0;
++        } else if (fluidTag == FluidTags.LAVA) {
++            return 1;
++        }
++        throw new UnsupportedOperationException("Unknown fluid tag");
++    }
++
++    public double canvas$getLavaFluidHeight() {
++        return this.canvas$fluidHeightArray[1];
++    }
++
++    public double canvas$getWaterFluidHeight() {
++        return this.canvas$fluidHeightArray[0];
+     }
++    // Canvas end - optimize fluid height
+ 
+     public boolean isInLava() {
+-        return !this.firstTick && this.fluidHeight.getDouble(FluidTags.LAVA) > 0.0;
++        return !this.firstTick && canvas$getLavaFluidHeight() > 0.0; // Canvas - optimize fluid height
+     }
+ 
+     public void moveRelative(float amount, Vec3 relative) {
+@@ -2284,8 +2391,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     }
+ 
+     public void push(Entity entity) {
++        if (!entity.noPhysics && !this.noPhysics) { // Leaf - collision physics check before vehicle check
+         if (!this.isPassengerOfSameVehicle(entity)) {
+-            if (!entity.noPhysics && !this.noPhysics) {
+                 if (this.level.paperConfig().collisions.onlyPlayersCollide && !(entity instanceof ServerPlayer || this instanceof ServerPlayer)) return; // Paper - Collision option for requiring a player participant
+                 double d = entity.getX() - this.getX();
+                 double d1 = entity.getZ() - this.getZ();
+@@ -3449,6 +3556,15 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         return this.calculateViewVector(this.getXRot(), this.getYRot());
+     }
+ 
++    // Canvas start - region threading
++    public Vec3 canvas$getLookAngleThreadSafe() {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            return this.getLookAngle();
++        }
++        return this.calculateViewVector(this.canvas$threadSafeXRot, this.canvas$threadSafeYRot);
++    }
++
++    // Canvas end - region threading
+     public Vec3 getHeadLookAngle() {
+         return this.calculateViewVector(this.getXRot(), this.getYHeadRot());
+     }
+@@ -3791,6 +3907,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     }
+ 
+     protected static void sendBubbleColumnParticles(Level level, BlockPos pos) {
++        if (io.canvasmc.canvas.Config.INSTANCE.particles.disableBubbleColumnParticles) return; // Canvas - particles config
+         if (level instanceof ServerLevel serverLevel) {
+             for (int i = 0; i < 2; i++) {
+                 serverLevel.sendParticles(
+@@ -4567,7 +4684,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     public boolean endPortalLogicAsync(BlockPos portalPos) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+ 
+-        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? Level.OVERWORLD : Level.END);
++        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey() : Level.END); // Canvas - default respawn dimension config
+         if (destination == null) {
+             // wat
+             return false;
+@@ -4579,7 +4696,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     public boolean netherPortalLogicAsync(BlockPos portalPos) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+ 
+-        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? Level.OVERWORLD : Level.NETHER);
++        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey() : Level.NETHER); // Canvas - default respawn dimension config
+         if (destination == null) {
+             // wat
+             return false;
+@@ -4875,6 +4992,14 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             node.root = node.root.transformForAsyncTeleport(destination, null, null, null, null);
+             // set portal cooldown
+             node.root.setPortalCooldown();
++            // Canvas start - region threading
++            if (io.canvasmc.canvas.Config.INSTANCE.displayWorldLoadScreenForPortaling && node.root instanceof ServerPlayer player) {
++                player.connection.send(new net.minecraft.network.protocol.game.ClientboundRespawnPacket(
++                    player.createCommonSpawnInfo(destination),
++                    net.minecraft.network.protocol.game.ClientboundRespawnPacket.KEEP_ALL_DATA
++                ));
++            }
++            // Canvas end - region threading
+         }
+ 
+         // ensure the region is always ticking in case of a shutdown
+@@ -5180,7 +5305,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+ 
+     public boolean canTeleport(Level fromLevel, Level toLevel) {
+         if (!this.isAlive() || !this.valid) return false; // Paper - Fix item duplication and teleport issues
+-        if (fromLevel.dimension() == Level.END && toLevel.dimension() == Level.OVERWORLD) {
++        if (fromLevel.dimension() == Level.END && toLevel.dimension() == io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()) { // Canvas - default respawn dimension config
+             for (Entity entity : this.getPassengers()) {
+                 if (entity instanceof ServerPlayer serverPlayer && !serverPlayer.seenCredits) {
+                     return false;
+@@ -5708,9 +5833,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+ 
+     // Paper start - optimise collisions
+     public boolean updateFluidHeightAndDoFluidPushing(final TagKey<Fluid> fluid, final double flowScale) {
+-        if (this.touchingUnloadedChunk()) {
+-            return false;
+-        }
++        // Canvas - optimize fluid pushing
+ 
+         final AABB boundingBox = this.getBoundingBox().deflate(1.0E-3);
+ 
+@@ -5742,6 +5865,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+ 
+         final net.minecraft.world.level.chunk.ChunkSource chunkSource = world.getChunkSource();
+ 
++        int heightIndex = canvas$getFluidHeightIndex(fluid); // Canvas - optimize fluid height
+         final int chunkLenX = maxChunkX - minChunkX + 1;
+         // chunk index = (x - minX) + (maxX-minX+1)*(z - minZ)
+         //             = x + (maxX-minX+1)*z - (minX + (maxX-minX+1)*minZ)
+@@ -5752,14 +5876,28 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+         // init chunks
+         for (int currChunkZ = minChunkZ; currChunkZ <= maxChunkZ; ++currChunkZ) {
+             for (int currChunkX = minChunkX; currChunkX <= maxChunkX; ++currChunkX) {
+-                sections[currChunkX + chunkLenX*currChunkZ + chunkOffset] = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false).getSections();
++                // Canvas start - optimize fluid pushing
++                final net.minecraft.world.level.chunk.ChunkAccess chunk = chunkSource.getChunk(currChunkX, currChunkZ, net.minecraft.world.level.chunk.status.ChunkStatus.FULL, false);
++                if (chunk == null) continue;
++                sections[currChunkX + chunkLenX*currChunkZ + chunkOffset] = chunk.getSections();
++                // Canvas end - optimize fluid pushing
+             }
+         }
+ 
+         for (int currX = minBlockX; currX <= maxBlockX; ++currX) {
+             for (int currY = minBlockY; currY <= maxBlockY; ++currY) {
+                 for (int currZ = minBlockZ; currZ <= maxBlockZ; ++currZ) {
+-                    final FluidState fluidState = sections[(currX >> 4) + chunkLenX*(currZ >> 4) + chunkOffset][(currY >> 4) - minSection]
++                    // Canvas start - optimize fluid pushing
++                    final net.minecraft.world.level.chunk.LevelChunkSection[] section = sections[(currX >> 4) + chunkLenX * (currZ >> 4) + chunkOffset];
++                    if (section == null) continue;
++                    final net.minecraft.world.level.chunk.LevelChunkSection levelChunkSection = section[(currY >> 4) - minSection];
++                    if (
++                        levelChunkSection.hasOnlyAir()
++                        || (fluid == FluidTags.WATER && levelChunkSection.canvas$waterCount == 0 && levelChunkSection.canvas$bubbleCount <= 0)
++                        || (fluid == FluidTags.LAVA && levelChunkSection.canvas$lavaCount == 0)
++                    ) continue;
++                    final FluidState fluidState = levelChunkSection
++                    // Canvas end - optimize fluid pushing
+                         .states.get((currX & 15) | ((currZ & 15) << 4) | ((currY & 15) << 8)).getFluidState();
+ 
+                     if (fluidState.isEmpty() || !fluidState.is(fluid)) {
+@@ -5801,7 +5939,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             }
+         }
+ 
+-        this.fluidHeight.put(fluid, maxHeightDiff);
++        this.canvas$fluidHeightArray[heightIndex] = maxHeightDiff; // Canvas - optimize fluid height
+ 
+         if (pushVector == Vec3.ZERO) {
+             return inFluid;
+@@ -5837,7 +5975,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+     }
+ 
+     public double getFluidHeight(TagKey<Fluid> fluidTag) {
+-        return this.fluidHeight.getDouble(fluidTag);
++        return this.canvas$fluidHeightArray[canvas$getFluidHeightIndex(fluidTag)]; // Canvas - optimize fluid height
+     }
+ 
+     public double getFluidJumpThreshold() {
+@@ -6103,6 +6241,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + yRot + ", discarding.");
+         } else {
+             this.yRot = yRot;
++            this.canvas$threadSafeYRot = yRot; // Canvas - region threading
+         }
+     }
+ 
+@@ -6115,6 +6254,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + xRot + ", discarding.");
+         } else {
+             this.xRot = Math.clamp(xRot % 360.0F, -90.0F, 90.0F);
++            this.canvas$threadSafeXRot = this.xRot; // Canvas - region threading
+         }
+     }
+ 

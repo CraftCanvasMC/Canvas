@@ -1,0 +1,346 @@
+From fb2fa76bcfb03ba2831bd257c68fc51821e86ead Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index ff077f93af60d9edd5cb500f0dedbd2886646655..a136d9a08db2a64d8b2e653483db44ad994da8c6 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -183,7 +183,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     private static final int FREE_FALL_EVENTS_PER_ELYTRA_BREAK = 2;
+     public static final float BASE_JUMP_POWER = 0.42F;
+     protected static final float DEFAULT_KNOCKBACK = 0.4F;
+-    protected static final int INVULNERABLE_DURATION = 20;
++    protected static final int INVULNERABLE_DURATION = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
+     private static final double MAX_LINE_OF_SIGHT_TEST_RANGE = 128.0;
+     protected static final int LIVING_ENTITY_FLAG_IS_USING = 1;
+     protected static final int LIVING_ENTITY_FLAG_OFF_HAND = 2;
+@@ -282,6 +282,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     public List<DefaultDrop> drops = new java.util.ArrayList<>(); // Paper - Restore vanilla drops behavior
+     public final org.bukkit.craftbukkit.attribute.CraftAttributeMap craftAttributes;
+     public boolean collides = true;
++    public boolean canvas$fromSpawner = false; // Canvas - spawner configs
+     public Set<UUID> collidableExemptions = new java.util.HashSet<>();
+     public boolean bukkitPickUpLoot;
+     public org.bukkit.craftbukkit.entity.CraftLivingEntity getBukkitLivingEntity() { return (org.bukkit.craftbukkit.entity.CraftLivingEntity) super.getBukkitEntity(); } // Paper
+@@ -399,7 +400,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         if (this.level() instanceof ServerLevel serverLevel && onGround && this.fallDistance > 0.0) {
+             this.onChangedBlock(serverLevel, pos);
+             double d = Math.max(0, Mth.floor(this.calculateFallPower(this.fallDistance)));
+-            if (d > 0.0 && !state.isAir()) {
++            if (d > 0.0 && !(state.isAir() || (io.canvasmc.canvas.Config.INSTANCE.fixes.mc30391 && (this instanceof net.minecraft.world.entity.animal.chicken.Chicken || this instanceof net.minecraft.world.entity.monster.Blaze || this instanceof WitherBoss)))) { // Canvas - MC-30391
+                 double x = this.getX();
+                 double y1 = this.getY();
+                 double z = this.getZ();
+@@ -415,11 +416,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 double d1 = Math.min(0.2F + d / 15.0, 2.5);
+                 int i = (int)(150.0 * d1);
+                 // CraftBukkit start - visibility api
++                if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableFallParticles) { // Canvas - particles config
+                 if (this instanceof ServerPlayer) {
+                     serverLevel.sendParticlesSource((ServerPlayer) this, new BlockParticleOption(ParticleTypes.BLOCK, state), false, false, x, y1, z, i, 0.0, 0.0, 0.0, 0.15F);
+                 } else {
+                     serverLevel.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, state), x, y1, z, i, 0.0, 0.0, 0.0, 0.15F);
+                 }
++                } // Canvas - particles config
+                 // CraftBukkit end
+             }
+         }
+@@ -456,7 +459,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         super.baseTick();
+         if (this.isAlive() && this.level() instanceof ServerLevel serverLevel1) {
+             boolean flag = this instanceof Player;
+-            if (this.isInWall()) {
++            if (shouldCheckForSuffocation() && this.isInWall()) { // Pufferfish - optimize suffocation
+                 this.hurtServer(serverLevel1, this.damageSources().inWall(), 1.0F);
+             } else if (flag && !serverLevel1.getWorldBorder().isWithinBounds(this.getBoundingBox())) {
+                 double d = serverLevel1.getWorldBorder().getDistanceToBorder(this) + serverLevel1.getWorldBorder().getSafeZone();
+@@ -468,7 +471,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 }
+             }
+ 
+-            if (this.isEyeInFluid(FluidTags.WATER)
++            if (this.canvas$isEyeInWater() // Canvas - optimize fluidOnEyes
+                 && !serverLevel1.getBlockState(BlockPos.containing(this.getX(), this.getEyeY(), this.getZ())).is(Blocks.BUBBLE_COLUMN)) {
+                 boolean flag1 = !this.canBreatheUnderwater()
+                     && !MobEffectUtil.hasWaterBreathing(this)
+@@ -535,6 +538,19 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         this.yRotO = this.getYRot();
+         this.xRotO = this.getXRot();
+     }
++    // Pufferfish start - optimize suffocation
++
++    public boolean couldPossiblyBeHurt(float amount) {
++        if ((float) this.invulnerableTime > (float) this.invulnerableDuration / 2.0F && amount <= this.lastHurt) {
++            return false;
++        }
++        return true;
++    }
++
++    public boolean shouldCheckForSuffocation() {
++        return !io.canvasmc.canvas.Config.INSTANCE.enableSuffocationOptimization || (tickCount % 10 == 0 && couldPossiblyBeHurt(1.0F));
++    }
++    // Pufferfish end
+ 
+     protected boolean shouldTakeDrowningDamage() {
+         return this.getAirSupply() <= -20;
+@@ -559,9 +575,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     }
+ 
+     protected void tryAddFrost() {
+-        if (!this.getBlockStateOnLegacy().isAir()) {
++        if (true) { // Canvas - check frozen ticks before landing block
+             int ticksFrozen = this.getTicksFrozen();
+-            if (ticksFrozen > 0) {
++            if (ticksFrozen > 0 && !this.getBlockStateOnLegacy().isAir()) { // Canvas - check frozen ticks before landing block
+                 AttributeInstance attribute = this.getAttribute(Attributes.MOVEMENT_SPEED);
+                 if (attribute == null) {
+                     return;
+@@ -601,6 +617,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     public boolean broadcastedDeath = false; // Folia - region threading
+     protected void tickDeath() {
+         this.deathTime++;
++        if (io.canvasmc.canvas.Config.INSTANCE.combat.removeRedDeathAnimation) this.deathTime = 20; // Canvas - remove red death animation
+         if (this.deathTime >= 20 && !this.level().isClientSide() && !this.isRemoved()) {
+             this.level().broadcastEntityEvent(this, EntityEvent.POOF); this.broadcastedDeath = true; // Folia - region threading - death has been broadcasted
+             if (!(this instanceof ServerPlayer)) this.remove(Entity.RemovalReason.KILLED, org.bukkit.event.entity.EntityRemoveEvent.Cause.DEATH); // CraftBukkit - add Bukkit remove cause // Folia - region threading - don't remove, we want the tick scheduler to be running
+@@ -817,6 +834,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         if (this.locatorBarIcon.hasData()) {
+             output.store("locator_bar_icon", Waypoint.Icon.CODEC, this.locatorBarIcon);
+         }
++        output.store("from_spawner", Codec.BOOL, this.canvas$fromSpawner); // Canvas - spawner configs
+     }
+ 
+     // Paper start - Extend dropItem API
+@@ -930,6 +948,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         this.lastHurtByMobTimestamp = input.getIntOr("ticks_since_last_hurt_by_mob", 0) + this.tickCount;
+         this.equipment.setAll(input.read("equipment", EntityEquipment.CODEC).orElseGet(EntityEquipment::new));
+         this.locatorBarIcon = input.read("locator_bar_icon", Waypoint.Icon.CODEC).orElseGet(Waypoint.Icon::new);
++        this.canvas$fromSpawner = input.read("from_spawner", Codec.BOOL).orElse(this.canvas$fromSpawner); // Canvas - spawner configs
+     }
+ 
+     @Override
+@@ -1002,7 +1021,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             }
+ 
+             List<ParticleOptions> list = this.entityData.get(DATA_EFFECT_PARTICLES);
+-            if (!list.isEmpty()) {
++            if (!list.isEmpty() && !io.canvasmc.canvas.Config.INSTANCE.particles.disableEffectParticles) { // Canvas - particles config
+                 boolean flag = this.entityData.get(DATA_EFFECT_AMBIENCE_ID);
+                 int i = this.isInvisible() ? 15 : 4;
+                 int i1 = flag ? 5 : 1;
+@@ -1032,14 +1051,18 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     }
+ 
+     private void updateSynchronizedMobEffectParticles() {
+-        List<ParticleOptions> list = this.activeEffects
+-            .values()
+-            .stream()
+-            .filter(MobEffectInstance::isVisible)
+-            .map(MobEffectInstance::getParticleOptions)
+-            .toList();
++        // Canvas start - remove streams
++        List<ParticleOptions> list = new java.util.ArrayList<>();
++        final Collection<MobEffectInstance> effectsValues = this.activeEffects.values(); // Canvas - optimized collection
++
++        for (MobEffectInstance effect : effectsValues) { // Canvas - optimized collection
++            if (effect.isVisible()) {
++                list.add(effect.getParticleOptions());
++            }
++        }
++        // Canvas end - remove streams
+         this.entityData.set(DATA_EFFECT_PARTICLES, list);
+-        this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(this.activeEffects.values()));
++        this.entityData.set(DATA_EFFECT_AMBIENCE_ID, areAllEffectsAmbient(effectsValues)); // Canvas - optimized collection
+     }
+ 
+     private void updateGlowingStatus() {
+@@ -1481,7 +1504,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             }
+ 
+             boolean flag1 = true;
+-            if (this.invulnerableTime > (float) this.invulnerableDuration / 2.0F && !damageSource.is(DamageTypeTags.BYPASSES_COOLDOWN)) { // CraftBukkit - restore use of maxNoDamageTicks
++            if (this.invulnerableTime > 0.0F && !damageSource.is(DamageTypeTags.BYPASSES_COOLDOWN)) { // CraftBukkit - restore use of maxNoDamageTicks // Canvas - combat configs
+                 if (amount <= this.lastHurt) {
+                     return false;
+                 }
+@@ -1510,10 +1533,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 }
+                 if (this instanceof ServerPlayer && event.getDamage() == 0 && originAmount == 0) return false; // Paper - revert to vanilla damage - players are not affected by damage that is 0 - skip damage if the vanilla damage is 0 and was not modified by plugins in the event.
+                 this.lastHurt = amount;
+-                this.invulnerableTime = this.invulnerableDuration; // CraftBukkit - restore use of maxNoDamageTicks
++                this.invulnerableTime = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // CraftBukkit - restore use of maxNoDamageTicks // Canvas - combat configs
+                 // this.actuallyHurt(level, damageSource, amount);
+                 // CraftBukkit end
+-                this.hurtDuration = 10;
++                this.hurtDuration = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
+                 this.hurtTime = this.hurtDuration;
+             }
+ 
+@@ -1903,6 +1926,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                     }
+                 }
+                 // Paper end
++                if (damageSource.is(DamageTypes.WITHER_SKULL)) this.canvas$Folia388Patch$isDyingFromWitherRose = true; // Canvas - fix Folia#388
+                     this.createWitherRose(killCredit);
+                 }
+ 
+@@ -1916,10 +1940,11 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         }
+     }
+ 
++    protected boolean canvas$Folia388Patch$isDyingFromWitherRose = false; // Canvas - fix Folia#388
+     protected void createWitherRose(@Nullable LivingEntity entitySource) {
+         if (this.level() instanceof ServerLevel serverLevel) {
+             boolean var6 = false;
+-            if (this.dead && entitySource instanceof WitherBoss) { // Paper
++            if (this.dead && (entitySource instanceof WitherBoss || this.canvas$Folia388Patch$isDyingFromWitherRose)) { // Paper // Canvas - fix Folia#388
+                 if (serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
+                     BlockPos blockPos = this.blockPosition();
+                     BlockState blockState = Blocks.WITHER_ROSE.defaultBlockState();
+@@ -2222,7 +2247,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+ 
+     @Override
+     public boolean isAlive() {
+-        return !this.isRemoved() && this.getHealth() > 0.0F && !this.dead; // Paper - Check this.dead
++        return !this.dead && !this.isRemoved() && this.getHealth() > 0.0F; // Paper - Check this.dead // Canvas - cheapest check first
+     }
+ 
+     public boolean isLookingAtMe(LivingEntity entity, double tolerance, boolean scaleByDistance, boolean visual, double... yValues) {
+@@ -2298,7 +2323,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+ 
+     @Override
+     public void animateHurt(float yaw) {
+-        this.hurtDuration = 10;
++        this.hurtDuration = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
+         this.hurtTime = this.hurtDuration;
+     }
+ 
+@@ -2659,7 +2684,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     public void handleDamageEvent(DamageSource damageSource) {
+         this.walkAnimation.setSpeed(1.5F);
+         this.invulnerableTime = this.invulnerableDuration; // Paper - configurable invulnerable duration
+-        this.hurtDuration = 10;
++        this.hurtDuration = io.canvasmc.canvas.Config.INSTANCE.combat.invulnerabilityTicks; // Canvas - combat configs
+         this.hurtTime = this.hurtDuration;
+         SoundEvent hurtSound = this.getHurtSound(damageSource);
+         if (hurtSound != null) {
+@@ -2726,7 +2751,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 this.swapHandItems();
+                 break;
+             case 60:
+-                this.makePoofParticles();
++                if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableDeathParticles) this.makePoofParticles(); // Canvas - particles config
+                 break;
+             case 65:
+                 this.breakItem(this.getItemBySlot(EquipmentSlot.BODY));
+@@ -2791,6 +2816,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     }
+ 
+     protected void updateSwingTime() {
++        if (!this.swinging && this.swingTime == 0) return; // Canvas - skip unnecessary calculations if player is not flying or swing
+         int currentSwingDuration = this.getCurrentSwingDuration();
+         if (this.swinging) {
+             this.swingTime++;
+@@ -3123,7 +3149,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             f2 *= 0.5F;
+         }
+ 
+-        if (f2 > 0.0F) {
++        if (f2 > 0.0F && (!io.canvasmc.canvas.Config.INSTANCE.fixes.mc136249 || autoSpinAttackTicks == 0)) { // Canvas - MC-136249
+             f += (0.54600006F - f) * f2;
+             f1 += (this.getSpeed() - f1) * f2;
+         }
+@@ -3147,7 +3173,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     private void travelInLava(Vec3 travelVector, double gravity, boolean isFalling, double previousY) {
+         this.moveRelative(0.02F, travelVector);
+         this.move(MoverType.SELF, this.getDeltaMovement());
+-        if (this.getFluidHeight(FluidTags.LAVA) <= this.getFluidJumpThreshold()) {
++        if (canvas$getLavaFluidHeight() <= this.getFluidJumpThreshold()) { // Canvas - optimize fluid height
+             this.setDeltaMovement(this.getDeltaMovement().multiply(0.5, 0.8F, 0.5));
+             Vec3 fluidFallingAdjustedMovement = this.getFluidFallingAdjustedMovement(gravity, isFalling, this.getDeltaMovement());
+             this.setDeltaMovement(fluidFallingAdjustedMovement);
+@@ -3672,9 +3698,9 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         if (this.jumping && this.isAffectedByFluids()) {
+             double fluidHeight;
+             if (this.isInLava()) {
+-                fluidHeight = this.getFluidHeight(FluidTags.LAVA);
++                fluidHeight = canvas$getLavaFluidHeight(); // Canvas - optimize fluid height
+             } else {
+-                fluidHeight = this.getFluidHeight(FluidTags.WATER);
++                fluidHeight = canvas$getWaterFluidHeight(); // Canvas - optimize fluid height
+             }
+ 
+             boolean flag = this.isInWater() && fluidHeight > 0.0;
+@@ -3738,7 +3764,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             this.checkAutoSpinAttack(boundingBox, this.getBoundingBox());
+         }
+ 
+-        this.pushEntities();
++        if (io.canvasmc.canvas.Config.INSTANCE.entityCollisionMode.allEntitiesCanBePushed()) this.pushEntities(); // Canvas - entity collision mode config
+         // Paper start - Add EntityMoveEvent
+         if (((ServerLevel) this.level()).getCurrentWorldData().hasEntityMoveEvent && !(this instanceof Player)) { // Folia - region threading
+             if (this.xo != this.getX() || this.yo != this.getY() || this.zo != this.getZ() || this.yRotO != this.getYRot() || this.xRotO != this.getXRot()) {
+@@ -3774,6 +3800,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     protected void updateFallFlying() {
+         this.checkFallDistanceAccumulation();
+         if (!this.level().isClientSide()) {
++            if (!this.isFallFlying() && this.fallFlyTicks == 0) return; // Canvas - skip unnecessary calculations if player is not flying
+             if (!this.canGlide()) {
+                 if (this.getSharedFlag(Entity.FLAG_FALL_FLYING) && !CraftEventFactory.callToggleGlideEvent(this, false).isCancelled()) // CraftBukkit
+                 this.setSharedFlag(Entity.FLAG_FALL_FLYING, false);
+@@ -3815,6 +3842,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     }
+ 
+     protected void pushEntities() {
++        // Canvas start - only players push config
++        io.canvasmc.canvas.world.entity.EntityCollisionMode collisionMode = io.canvasmc.canvas.Config.INSTANCE.entityCollisionMode;
++        if (collisionMode.noCollisions()) {
++            return;
++        }
++        // Canvas end - only players push config
+         // Paper start - don't run getEntities if we're not going to use its result
+         if (!this.isPushable()) {
+             return;
+@@ -3830,7 +3863,11 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             return;
+         }
+         // Paper end - don't run getEntities if we're not going to use its result
+-        List<Entity> pushableEntities = this.level().getPushableEntities(this, this.getBoundingBox());
++        // Canvas start - only players push config
++        List<? extends Entity> pushableEntities = collisionMode.onlyPlayersPushable() ?
++            this.level().canvas$getIntersectingPlayers(this, this.getBoundingBox(), EntitySelector.pushableBy(this))
++            : this.level().getPushableEntities(this, this.getBoundingBox());
++        // Canvas end - only players push config
+         if (!pushableEntities.isEmpty()) {
+             if (this.level() instanceof ServerLevel serverLevel) {
+                 // Paper - don't run getEntities if we're not going to use its result; moved up
+@@ -4003,6 +4040,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+ 
+     @Override
+     public boolean isCollidable(boolean ignoreClimbing) {
++        if (this.canvas$fromSpawner && io.canvasmc.canvas.Config.INSTANCE.spawner.noCollisions) return false; // Canvas - spawner configs
+         return this.isAlive() && !this.isSpectator() && (ignoreClimbing || !this.onClimbable()) && this.collides; // CraftBukkit
+         // Paper end - Climbing should not bypass cramming gamerule
+     }
+@@ -4120,6 +4158,18 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                 );
+             }
+ 
++            // Canvas start - item entity spread config
++            if (this.isDeadOrDying()) {
++                float halfedRandom = this.random.nextFloat() * 0.5F;
++                float piRandom = this.random.nextFloat() * (float) (Math.PI * 2);
++                double factor = io.canvasmc.canvas.Config.INSTANCE.itemEntitySpreadFactor;
++                itemEntity.setDeltaMovement(
++                    (-Mth.sin(piRandom) * halfedRandom) * factor,
++                    0.2F * factor,
++                    (Mth.cos(piRandom) * halfedRandom) * factor
++                );
++            }
++            // Canvas end - item entity spread config
+             return itemEntity;
+         }
+     }
