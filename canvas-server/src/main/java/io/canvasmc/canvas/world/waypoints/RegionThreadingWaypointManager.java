@@ -64,6 +64,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     public RegionThreadingWaypointManager(ServerLevel world) {
+        super(world);
         this.world = world;
     }
 
