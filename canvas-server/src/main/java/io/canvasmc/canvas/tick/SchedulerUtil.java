@@ -203,7 +203,7 @@ public class SchedulerUtil {
             AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
             if (!threadRunner.isLinkedTo(from.tickHandle)) return;
             ChunkPos center = ((RegionScheduleHandlePinner.RegionPinner) RegionProfiler.STATE.get().handlePinner()).getCenter();
-            tryTransferPinningState(from.tickHandle, into.get(center.longKey).getData().tickHandle);
+            tryTransferPinningState(from.tickHandle, into.get(center.longKey()).getData().tickHandle);
         }
 
         // both destroy and inactive only happen on split and merge
