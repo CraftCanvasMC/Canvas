@@ -13,10 +13,9 @@ import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.Json5SerializerImpl;
+import io.canvasmc.canvas.util.Util;
 import io.canvasmc.canvas.util.version.ApiClient;
 import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
-import io.canvasmc.canvas.world.RegionizedTpsBar;
-import io.canvasmc.canvas.world.entity.EntityCollisionMode;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedServer;
@@ -35,7 +34,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.util.Util;
 import net.minecraft.world.level.Level;
 import org.bukkit.Bukkit;
 import org.jetbrains.annotations.Unmodifiable;
@@ -44,12 +42,20 @@ import org.jspecify.annotations.NonNull;
 @Configuration("canvas-server")
 public class Config {
     public static boolean ENABLE_FASTER_RANDOM = true;
+    public static final String DEFAULT_TPSBAR_FORMAT =
+        "<gradient:blue:aqua><b>TPS:</b></gradient> <tps>  <dark_gray>-</dark_gray>  " +
+            "<gradient:blue:aqua><b>MSPT:</b></gradient> <mspt>  <dark_gray>-</dark_gray>  " +
+            "<gradient:blue:aqua><b>Util:</b></gradient> <util>  <dark_gray>-</dark_gray>  " +
+            "<gradient:blue:aqua><b>Players:</b></gradient> <players>";
+
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
+
     // Note: this field should never be used during POST, use 'context.configuration()' instead
     public static Config INSTANCE;
+
     public static ApiClient.BuildStatus ACTIVE_BUILD_CHANNEL = ApiClient.BuildStatus.UNKNOWN;
     public static final Consumer<String> GLOBAL_BROADCAST = (msg) -> {
-        Component component = RegionizedTpsBar.gradient("[CanvasMC] ",
+        Component component = Util.gradient("[CanvasMC] ",
             s -> s.decorate(TextDecoration.BOLD),
             TextColor.color(0x357CEF), TextColor.color(0xF21AF4));
 
@@ -105,7 +111,7 @@ public class Config {
         GLOBAL_BROADCAST.accept("Instantiating Canvas configuration");
         long startNanos = System.nanoTime();
         INSTANCE = ConfigurationManager.register(Config.class, Config::buildGlobal).getConfig();
-        GLOBAL_BROADCAST.accept("Finished Canvas config init in " + TimeUnit.MILLISECONDS.convert(Util.getNanos() - startNanos, TimeUnit.NANOSECONDS) + "ms");
+        GLOBAL_BROADCAST.accept("Finished Canvas config init in " + TimeUnit.MILLISECONDS.convert(System.nanoTime() - startNanos, TimeUnit.NANOSECONDS) + "ms");
     }
 
     private static @NonNull @Unmodifiable ConfigSerializer<Config> buildGlobal(Configuration config, Class<Config> configClass) {
@@ -365,6 +371,47 @@ public class Config {
     })
     public EntityCollisionMode entityCollisionMode = EntityCollisionMode.VANILLA;
 
+    public enum EntityCollisionMode {
+        VANILLA,
+        ONLY_PUSHABLE_PLAYERS_LARGE,
+        ONLY_PUSHABLE_PLAYERS_SMALL,
+        NO_COLLISIONS;
+
+        private static final EntityCollisionMode[] VALUES = values();
+        private final int id;
+
+        EntityCollisionMode() {
+            this.id = ordinal();
+        }
+
+        public static EntityCollisionMode fromOrdinal(int ordinal) {
+            if (ordinal < 0 || ordinal >= VALUES.length) {
+                return VANILLA;
+            }
+            return VALUES[ordinal];
+        }
+
+        public int getId() {
+            return this.id;
+        }
+
+        public boolean onlyPlayersPushable() {
+            return id == ONLY_PUSHABLE_PLAYERS_LARGE.id || id == ONLY_PUSHABLE_PLAYERS_SMALL.id;
+        }
+
+        public boolean allEntitiesCanBePushed() {
+            return id == VANILLA.id;
+        }
+
+        public boolean noCollisions() {
+            return id == NO_COLLISIONS.id;
+        }
+
+        public boolean isLargePushRange() {
+            return id == ONLY_PUSHABLE_PLAYERS_LARGE.id;
+        }
+    }
+
     // TODO - check these on minecraft updates
     public Fixes fixes = new Fixes();
 
@@ -513,7 +560,7 @@ public class Config {
         "MiniMessage-formatted line for the TPS bar. Placeholders: <tps>, <mspt>, <util>, <players>.",
         "Legacy tokens %tps%, %mspt%, %util%, %players% are also accepted and auto-converted."
     })
-    public String tpsBarFormat = RegionizedTpsBar.DEFAULT_FORMAT;
+    public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
 
     @Comment(value = {
         "The default respawn dimension for the server.",

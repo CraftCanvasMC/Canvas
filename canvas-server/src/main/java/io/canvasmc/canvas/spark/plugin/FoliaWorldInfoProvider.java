@@ -57,7 +57,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
                 // schedule to region we were profiling at
                 RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                    world, target.x, target.z, () -> {
+                    world, target.x(), target.z(), () -> {
                         // we are scheduled to the region here, fetch localized information
                         RegionizedWorldData localWorldData = world.getCurrentWorldData();
 
@@ -68,7 +68,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
                         // we only use block ticking chunks, matches with what spark does for global polling
                         for (final LevelChunk tickingChunk : localWorldData.getTickingChunks()) {
-                            tileEntities += tickingChunk.canvas$getAllBlockEntities().length;
+                            tileEntities += tickingChunk.getBlockEntitiesCount();
                         }
 
                         result.complete(new CountsResult(players, entities, tileEntities, chunks));
@@ -115,7 +115,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
                 final CompletableFuture<List<FoliaChunkInfo>> result = new CompletableFuture<>();
 
                 RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                    world, target.x, target.z, () -> {
+                    world, target.x(), target.z(), () -> {
                         List<FoliaChunkInfo> chunks = new ArrayList<>();
                         RegionizedWorldData worldData = world.getCurrentWorldData();
                         for (final LevelChunk nms : worldData.getChunks()) {

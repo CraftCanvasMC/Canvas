@@ -5,7 +5,7 @@ Subject: [PATCH] Implement Teleport Portal and Respawn Events
 
 
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index 7acb991569736370877af94f21baa36167ccaec0..678b452eff0c312edffd0d8f52eb70f8fcea2cc9 100644
+index 7d92db1240eb7273d3c532b02eefb07c66c8fff6..9fe9e73ce327ac135f796f3af7c375e49e158313 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
 @@ -1754,14 +1754,29 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
@@ -105,7 +105,7 @@ index 7acb991569736370877af94f21baa36167ccaec0..678b452eff0c312edffd0d8f52eb70f8
                      respawnPosAngle[0] = spawnPos; // Canvas - region threading
  
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index d4190d4309c6e35cbad700d9bf87e5c5403f9321..8b76b992c1bbdd5bdafb595b11e8b92735117919 100644
+index d4190d4309c6e35cbad700d9bf87e5c5403f9321..514093dc52472a5f3c6024c75d2e651041b11b72 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -4371,29 +4371,28 @@ public abstract class Entity
@@ -288,7 +288,7 @@ index d4190d4309c6e35cbad700d9bf87e5c5403f9321..8b76b992c1bbdd5bdafb595b11e8b927
  
          return true;
      }
-@@ -4695,35 +4784,68 @@ public abstract class Entity
+@@ -4695,35 +4784,46 @@ public abstract class Entity
          }
      }
  
@@ -302,13 +302,13 @@ index d4190d4309c6e35cbad700d9bf87e5c5403f9321..8b76b992c1bbdd5bdafb595b11e8b927
 +        } catch (TeleportValidationException e) {
 +            return false;
 +        }
-+    }
-+
-+    public void canvas$ensureCanPortalAsync(ServerLevel to, boolean considerPassengers) throws TeleportValidationException {
-+        this.canvas$ensureCanPortalAsync(to, considerPassengers, false);
      }
  
 -    protected boolean canPortalAsync(ServerLevel to, boolean considerPassengers, boolean skipPassengerCheck) {
++    public void canvas$ensureCanPortalAsync(ServerLevel to, boolean considerPassengers) throws TeleportValidationException {
++        this.canvas$ensureCanPortalAsync(to, considerPassengers, false);
++    }
++
 +    protected void canvas$ensureCanPortalAsync(ServerLevel to, boolean considerPassengers, boolean skipPassengerCheck) throws TeleportValidationException {
 +        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
          if (considerPassengers) {
@@ -324,29 +324,8 @@ index d4190d4309c6e35cbad700d9bf87e5c5403f9321..8b76b992c1bbdd5bdafb595b11e8b927
          }
          this.getBukkitEntity(); // force bukkit entity to be created before TPing
          if (!this.canTeleportAsync()) {
-             return false;
-+        } // else | we passed first go
-+        // TODO - all portal events go here
-+        // fire portal events
-+        ServerLevel originWorld = (ServerLevel) this.level();
-+        boolean shouldCallEvents =
-+            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
-+            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
-+            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
-+        if (shouldCallEvents) {
-+            io.canvasmc.canvas.event.EntityPortalAsyncEvent portalAsyncEvent = new io.canvasmc.canvas.event.EntityPortalAsyncEvent(
-+                this.getBukkitEntity(), originWorld.getWorld(), destination.getWorld(),
-+                switch (type) {
-+                    case END -> org.bukkit.PortalType.ENDER;
-+                    case NETHER -> org.bukkit.PortalType.NETHER;
-+                }
-+            );
-+            if (!portalAsyncEvent.callEvent()) {
-+                return false;
-+            }
-+            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
-+            // if a plugin did a stupid, kill
-+            canvas$ensureCanPortalAsync(destination, takePassengers);
+-            return false;
++            throw new TeleportValidationException("Entity not able to teleport async. Is the entity removed or in a bed?");
          }
          if (considerPassengers) {
              for (Entity entity : this.passengers) {
@@ -367,25 +346,51 @@ index d4190d4309c6e35cbad700d9bf87e5c5403f9321..8b76b992c1bbdd5bdafb595b11e8b927
  
      protected void prePortalLogic(ServerLevel origin, ServerLevel destination, PortalType type) {
  
-@@ -4731,10 +4853,14 @@ public abstract class Entity
+@@ -4731,10 +4831,41 @@ public abstract class Entity
  
      protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
                                      PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
 -        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
 -        if (!this.canPortalAsync(destination, takePassengers)) {
--            return false;
 +        // Canvas start - region threading
 +        try {
 +            canvas$ensureCanPortalAsync(destination, takePassengers);
 +        } catch (TeleportValidationException ignored) {
-+            throw new TeleportValidationException("Entity not able to teleport async. Is the entity removed or in a bed?");
+             return false;
++        } // else | we passed first go
++
++        // TODO - all portal events go here
++        // fire portal events
++        ServerLevel originWorld = (ServerLevel) this.level();
++
++        boolean shouldCallEvents =
++            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
++            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++        if (shouldCallEvents) {
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent portalAsyncEvent = new io.canvasmc.canvas.event.EntityPortalAsyncEvent(
++                this.getBukkitEntity(), originWorld.getWorld(), destination.getWorld(),
++                switch (type) {
++                    case END -> org.bukkit.PortalType.ENDER;
++                    case NETHER -> org.bukkit.PortalType.NETHER;
++                }
++            );
++
++            if (!portalAsyncEvent.callEvent()) {
++                return false;
++            }
++
++            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
++
++            // if a plugin did a stupid, kill
++            canvas$ensureCanPortalAsync(destination, takePassengers);
          }
 +        final ServerLevel finalDestination = destination;
 +        // Canvas end - region threading
  
          Vec3 initialPosition = this.position();
          ChunkPos initialPositionChunk = new ChunkPos(
-@@ -4746,7 +4872,7 @@ public abstract class Entity
+@@ -4746,7 +4877,7 @@ public abstract class Entity
          // first, remove entity/passengers from world
          EntityTreeNode passengerTree = this.detachPassengers();
          List<EntityTreeNode> fullPassengerTree = passengerTree.getFullTree();
@@ -394,7 +399,7 @@ index d4190d4309c6e35cbad700d9bf87e5c5403f9321..8b76b992c1bbdd5bdafb595b11e8b927
  
          for (EntityTreeNode node : fullPassengerTree) {
              node.root.preChangeDimension();
-@@ -4793,7 +4919,7 @@ public abstract class Entity
+@@ -4793,7 +4924,7 @@ public abstract class Entity
  
              // place
              passengerTree.root.placeInAsync(
@@ -403,7 +408,7 @@ index d4190d4309c6e35cbad700d9bf87e5c5403f9321..8b76b992c1bbdd5bdafb595b11e8b927
                  passengerTree,
                  (Entity teleported) -> {
                      if (info.postTeleportTransition() != null) {
-@@ -4803,6 +4929,17 @@ public abstract class Entity
+@@ -4803,6 +4934,17 @@ public abstract class Entity
                      if (teleportComplete != null) {
                          teleportComplete.accept(teleported);
                      }

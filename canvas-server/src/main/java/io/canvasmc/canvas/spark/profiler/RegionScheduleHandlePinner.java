@@ -205,8 +205,8 @@ public interface RegionScheduleHandlePinner {
             final long[] curr = gatherChunksToProfile();
 
             final ChunkPos center = getCenter();
-            final int chunkX = center.x;
-            final int chunkZ = center.z;
+            final int chunkX = center.x();
+            final int chunkZ = center.z();
 
             // Note: this should be loaded already, however we run this safe version just to be sure
             world.canvas$loadOrRunAtChunksAsync(
