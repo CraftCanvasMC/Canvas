@@ -1,18 +1,20 @@
 package io.canvasmc.canvas.world.chunk;
 
 import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
+import ca.spottedleaf.concurrentutil.executor.QueueExecutorRunnable;
 import ca.spottedleaf.concurrentutil.executor.queue.PrioritisedTaskQueue;
 import ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool;
-import ca.spottedleaf.concurrentutil.executor.thread.PrioritisedQueueExecutorThread;
 import ca.spottedleaf.concurrentutil.list.COWArrayList;
+import ca.spottedleaf.concurrentutil.util.LazyRunnable;
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -20,16 +22,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * This is based off {@link BalancedPrioritisedThreadPool} from ConcurrentUtil by SpottedLeaf.
- * This code has been modified from its original form to remove max parallelism and rework the
- * constructor and such for CanvasMC.
+ * This is based off {@link BalancedPrioritisedThreadPool} from ConcurrentUtil by SpottedLeaf. This code has been
+ * modified from its original form to remove max parallelism and rework the constructor and such for CanvasMC.
  *
  * @author dueris modifier
  * @author spottedleaf original author
  */
 public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
-
-    public static final long DEFAULT_GROUP_TIME_SLICE = (long)(15.0e6); // 15ms
 
     private final Logger LOGGER;
 
@@ -39,7 +38,11 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
     private boolean shutdown;
 
-    public BalancedChunkSystem(final long groupTimeSliceNS, final int workerThreadCount, final ThreadBuilder threadInitializer, final String name) {
+    private static int compareGroup(final BalancedChunkSystem.@NonNull OrderedStreamGroup g1, final BalancedChunkSystem.@NonNull OrderedStreamGroup g2) {
+        return TimeUtil.compareTimes(g1.lastRetrieved, g2.lastRetrieved);
+    }
+
+    public BalancedChunkSystem(final long groupTimeSliceNS, final int workerThreadCount, final ThreadFactory threadInitializer, final String name) {
         super(groupTimeSliceNS, threadInitializer);
         LOGGER = LoggerFactory.getLogger("TheChunkSystem/" + name);
         LOGGER.info("Initialized new LS ChunkSystem '{}' with {} allocated threads", name, workerThreadCount);
@@ -89,7 +92,10 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
     /**
      * Waits until all threads in this pool have shutdown, or until the specified time has passed.
-     * @param msToWait Maximum time to wait.
+     *
+     * @param msToWait
+     *     Maximum time to wait.
+     *
      * @return {@code false} if the maximum time passed, {@code true} otherwise.
      */
     public boolean join(final long msToWait) {
@@ -102,29 +108,44 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
     /**
      * Waits until all threads in this pool have shutdown, or until the specified time has passed.
-     * @param msToWait Maximum time to wait.
+     *
+     * @param msToWait
+     *     Maximum time to wait.
+     *
      * @return {@code false} if the maximum time passed, {@code true} otherwise.
-     * @throws InterruptedException If this thread is interrupted.
+     *
+     * @throws InterruptedException
+     *     If this thread is interrupted.
      */
     public boolean joinInterruptable(final long msToWait) throws InterruptedException {
         return this.join(msToWait, true);
     }
 
     private boolean join(final long msToWait, final boolean interruptable) throws InterruptedException {
-        final long nsToWait = msToWait * (1000 * 1000);
+        synchronized (this) {
+            if (!this.shutdown) {
+                throw new IllegalStateException("Attempting to join on non-shutdown pool");
+            }
+        }
+
+        final long nsToWait = TimeUnit.MILLISECONDS.toNanos(msToWait);
         final long start = System.nanoTime();
         final long deadline = start + nsToWait;
         boolean interrupted = false;
         try {
-            for (final WorkerThread thread : this.aliveThreads.getArray()) {
-                while (thread.isAlive()) {
-                    final long current = System.nanoTime();
-                    if (current - deadline >= 0L && msToWait > 0L) {
-                        return false;
-                    }
-
+            for (final BalancedChunkSystem.WorkerThread thread : this.aliveThreads.getArray()) {
+                while (thread.thread.isAlive()) {
                     try {
-                        thread.join(msToWait <= 0L ? 0L : Math.max(1L, (deadline - current) / (1000 * 1000)));
+                        if (msToWait > 0L) {
+                            final long current = System.nanoTime();
+                            if (current - deadline >= 0L) {
+                                return false;
+                            }
+                            thread.thread.join(Duration.ofNanos(deadline - current));
+                        }
+                        else {
+                            thread.thread.join();
+                        }
                     } catch (final InterruptedException ex) {
                         if (interruptable) {
                             throw ex;
@@ -143,10 +164,11 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
     }
 
     /**
-     * Shuts down this thread pool, optionally waiting for all tasks to be executed.
-     * This function will invoke {@link PrioritisedExecutor#shutdown()} on all created executors on this
-     * thread pool.
-     * @param wait Whether to wait for tasks to be executed
+     * Shuts down this thread pool, optionally waiting for all tasks to be executed. This function will invoke
+     * {@link PrioritisedExecutor#shutdown()} on all created executors on this thread pool.
+     *
+     * @param wait
+     *     Whether to wait for tasks to be executed
      */
     public void shutdown(final boolean wait) {
         synchronized (this) {
@@ -180,7 +202,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                 return;
             }
 
-            final WorkerThread[] currentThreads = this.threads.getArray();
+            final BalancedChunkSystem.WorkerThread[] currentThreads = this.threads.getArray();
             if (threads == currentThreads.length) {
                 // no adjustment needed
                 return;
@@ -189,26 +211,28 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             if (threads < currentThreads.length) {
                 // we need to trim threads
                 for (int i = 0, difference = currentThreads.length - threads; i < difference; ++i) {
-                    final WorkerThread remove = currentThreads[currentThreads.length - i - 1];
+                    final BalancedChunkSystem.WorkerThread remove = currentThreads[currentThreads.length - i - 1];
 
                     remove.halt(false);
                     this.threads.remove(remove);
                 }
-            } else {
+            }
+            else {
                 // we need to add threads
                 for (int i = 0, difference = threads - currentThreads.length; i < difference; ++i) {
-                    final WorkerThread thread = new WorkerThread();
+                    final LazyRunnable run = new LazyRunnable();
+                    final BalancedChunkSystem.WorkerThread thread = new BalancedChunkSystem.WorkerThread(this.threadFactory.newThread(run));
 
-                    this.threadModifier.accept(thread);
+                    run.setRunnable(thread);
                     this.aliveThreads.add(thread);
                     this.threads.add(thread);
 
-                    thread.start();
+                    thread.thread.start();
                 }
             }
         }
 
-        for (final WorkerThread thread : this.threads.getArray()) {
+        for (final BalancedChunkSystem.WorkerThread thread : this.threads.getArray()) {
             thread.notifyTasks();
         }
     }
@@ -229,10 +253,6 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
             return ret;
         }
-    }
-
-    private static int compareGroup(final BalancedChunkSystem.@NonNull OrderedStreamGroup g1, final BalancedChunkSystem.@NonNull OrderedStreamGroup g2) {
-        return TimeUtil.compareTimes(g1.lastRetrieved, g2.lastRetrieved);
     }
 
     private @NonNull List<BalancedChunkSystem.OrderedStreamGroup> findEligibleGroups() {
@@ -306,7 +326,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
 
         public boolean executeTask() {
-            for (;;) {
+            for (; ; ) {
                 final PrioritisedExecutor.PrioritisedTask task = this.peekTask();
                 if (task == null) {
                     return false;
@@ -327,14 +347,15 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
                 // handle race condition where first entry is executed as we peek it
                 // note: entry.getPriorityState() == null implies queue.peekFirst() != entry
-                while ((first = queue.peekFirst()) != null && (state = first.getPriorityState()) == null);
+                while ((first = queue.peekFirst()) != null && (state = first.getPriorityState()) == null) ;
 
                 if (first != null) {
                     if (highestPriority == null || state.compareTo(highestPriority) < 0) {
                         highestTask = first;
                         highestPriority = state;
                     }
-                } else if (queue.isShutdown() && queue.hasNoScheduledTasks()) {
+                }
+                else if (queue.isShutdown() && queue.hasNoScheduledTasks()) {
                     // remove empty shutdown queues
                     this.queues.remove(wrapper);
                 }
@@ -360,15 +381,16 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         public final class Queue implements PrioritisedExecutor {
 
             private final PrioritisedTaskQueue wrapped;
-            private volatile boolean halt;
             private final AtomicLong executors = new AtomicLong();
+            private volatile boolean halt;
 
             public Queue(final AtomicLong subOrderGenerator) {
                 this.wrapped = new PrioritisedTaskQueue(subOrderGenerator);
             }
 
             /**
-             * Removes this queue from the thread pool without shutting the queue down or waiting for queued tasks to be executed
+             * Removes this queue from the thread pool without shutting the queue down or waiting for queued tasks to be
+             * executed
              */
             public void halt() {
                 this.halt = true;
@@ -382,7 +404,8 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             public boolean isActive() {
                 if (this.halt) {
                     return this.executors.get() > 0L;
-                } else {
+                }
+                else {
                     if (!this.isShutdown()) {
                         return true;
                     }
@@ -567,10 +590,10 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    private final class WorkerThread extends PrioritisedQueueExecutorThread {
+    private final class WorkerThread extends QueueExecutorRunnable {
 
-        public WorkerThread() {
-            super(null);
+        public WorkerThread(final Thread thread) {
+            super(thread, null);
         }
 
         @Override
@@ -582,7 +605,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         protected boolean pollTasks() {
             boolean ret = false;
 
-            for (;;) {
+            for (; ; ) {
                 if (this.halted) {
                     break;
                 }
@@ -603,21 +626,13 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                         }
                         ret = true;
                     } catch (final Throwable throwable) {
-                        LOGGER.error("Exception thrown from thread '" + this.getName(), throwable);
+                        LOGGER.error("Exception thrown from thread '" + this.thread.getName(), throwable);
                     }
                 } while (System.nanoTime() - deadline <= 0L);
             }
 
 
             return ret;
-        }
-    }
-
-    public interface ThreadBuilder extends Consumer<Thread> {
-        AtomicInteger id = new AtomicInteger();
-
-        default int getAndIncrementId() {
-            return id.getAndIncrement();
         }
     }
 }
