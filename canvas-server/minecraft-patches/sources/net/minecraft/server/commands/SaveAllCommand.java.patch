@@ -1,37 +1,35 @@
-From fb2fa76bcfb03ba2831bd257c68fc51821e86ead Mon Sep 17 00:00:00 2001
+From efd01c19db3c7c15bbcfbce19f8b9fbd0df85db2 Mon Sep 17 00:00:00 2001
 From: File <noreply+automated@papermc.io>
-Date: Sun, 20 Apr 1997 15:37:42 +0200
+Date: Sun, 20 Apr 1997 06:37:42 -0700
 Subject: [PATCH] canvas File Patches
 
 
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index e37b71402179c73146ff67babc228ccfb996f8f4..f16e36cdf0ae4f7f2f61c7716770709bdf889058 100644
+index bc6d01996dde0870f6ebbda14176352777938a0c..1049925e6bc9dadc268129123b9f41b690d76e38 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -21,14 +21,41 @@ public class SaveAllCommand {
-     }
- 
-     private static int saveAll(CommandSourceStack source, boolean flush) throws CommandSyntaxException {
-+        // Canvas start - fix commands with region threading
+@@ -23,12 +23,40 @@ public class SaveAllCommand {
+     private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
--        boolean flag = server.saveEverything(true, flush, true);
--        if (!flag) {
+-        boolean success = server.saveEverything(true, flush, true);
+-        if (!success) {
 -            throw ERROR_FAILED.create();
 -        } else {
 -            source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
 -            return 1;
-+        final java.util.concurrent.atomic.AtomicInteger rc = new java.util.concurrent.atomic.AtomicInteger();
-+        final java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger();
++        // Canvas start - region threading
++        final java.util.concurrent.atomic.AtomicInteger regionCount = new java.util.concurrent.atomic.AtomicInteger();
++        final java.util.concurrent.atomic.AtomicInteger totalCount = new java.util.concurrent.atomic.AtomicInteger();
 +        Runnable callback = () -> {
-+            if (rc.decrementAndGet() == 0 || count.get() == 0) {
++            if (regionCount.decrementAndGet() == 0 || totalCount.get() == 0) {
 +                source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
 +            }
 +        };
 +        for (final net.minecraft.server.level.ServerLevel world : server.getAllLevels()) {
 +            world.regioniser.computeForAllRegions((region) -> {
-+                rc.getAndIncrement();
-+                count.getAndIncrement();
++                regionCount.getAndIncrement();
++                totalCount.getAndIncrement();
 +                region.getData().canvas$saveAllTicket.propagate(
 +                    new io.canvasmc.canvas.util.ticket.SaveAllTicket(callback, (ex) -> {
 +                        source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
@@ -40,7 +38,8 @@ index e37b71402179c73146ff67babc228ccfb996f8f4..f16e36cdf0ae4f7f2f61c7716770709b
 +                );
 +            });
          }
-+        // Canvas start - region threading
++
++        // pearl save rewrite
 +        MinecraftServer.getServer().pearls.save((result) -> {
 +            if (result) {
 +                source.sendSuccess(() -> Component.literal("Saved pearl data"), true);
@@ -48,11 +47,11 @@ index e37b71402179c73146ff67babc228ccfb996f8f4..f16e36cdf0ae4f7f2f61c7716770709b
 +                source.sendFailure(Component.literal("Failed to save pearl data, check console for details"));
 +            }
 +        });
-+        // Canvas end - region threading
++
 +        // if no regions loaded, run callback
-+        source.sendSuccess(() -> Component.literal("Saving " + count.get() + " regions"), true);
-+        if (count.get() == 0) callback.run();
++        source.sendSuccess(() -> Component.literal("Saving " + totalCount.get() + " regions"), true);
++        if (totalCount.get() == 0) callback.run();
 +        return 1;
-+        // Canvas end - fix commands with region threading
++        // Canvas end - region threading
      }
  }
