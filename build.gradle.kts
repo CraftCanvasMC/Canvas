@@ -113,6 +113,9 @@ subprojects {
         }
     }
 }
+dependencies {
+    jstClasspath(projects.canvasApi)
+}
 
 // patching scripts
 tasks.register("fixupMinecraftFilePatches") {
