@@ -12,6 +12,7 @@ val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
 paperweight {
     filterPatches = false
+    gitFilePatches = false
     upstreams.folia {
         ref = providers.gradleProperty("foliaCommit")
 
