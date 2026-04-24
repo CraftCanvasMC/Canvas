@@ -4,7 +4,7 @@ set -euo pipefail
 echo "=== Applying all patches ==="
 ./gradlew applyAllPatches --quiet
 
-echo "=== Enabling git file patches ==="
+echo "=== Enabling Git file patches ==="
 BUILD_FILES=(
   "build.gradle.kts"
   "canvas-server/build.gradle.kts"
@@ -19,16 +19,20 @@ for file in "${BUILD_FILES[@]}"; do
   sed -i 's/gitFilePatches *= *false/gitFilePatches = true/' "$file"
 done
 
-echo "=== Rebuilding single file patches ==="
+echo "=== Rebuilding single-file patches ==="
 ./gradlew rebuildFoliaSingleFilePatches --quiet
 
 echo "=== Rebuilding file patches as Git patches ==="
 ./gradlew rebuildAllServerFilePatches --quiet
 ./gradlew rebuildPaperApiFilePatches --quiet
 
-echo "=== Moving Minecraft source patches to sources_unapplied ==="
+echo "=== Moving file patches to _unapplied ==="
 dirs=(
   "canvas-server/minecraft-patches/sources canvas-server/minecraft-patches/sources_unapplied"
+  "canvas-server/paper-patches/files canvas-server/paper-patches/files_unapplied"
+  "canvas-server/folia-patches/files canvas-server/folia-patches/files_unapplied"
+  "canvas-api/paper-patches/files canvas-api/paper-patches/files_unapplied"
+  "canvas-api/folia-patches/files canvas-api/folia-patches/files_unapplied"
 )
 
 for dir in "${dirs[@]}"; do
@@ -43,6 +47,6 @@ for dir in "${dirs[@]}"; do
 done
 
 echo "=== REMINDER: ==="
-echo "=== Run the following tasks during update to apply patches and move failed ones ==="
+echo "After moving patches back to their directories during update, run the following tasks to apply them and move failed ones:"
 echo "  ./gradlew applyOrMovePaperServerFilePatches"
 echo "  ./gradlew applyOrMovePaperApiFilePatches"
