@@ -1,0 +1,253 @@
+From 566bd10dc5d91480e58a5345fdfc0ebbb9138662 Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 06:37:42 -0700
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index a7bd41a73911cd7176a0594b06e77ab9ff07ba5d..b11fd77853d7cfa3a086776a5037b5796853a1fc 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -275,6 +275,10 @@ public abstract class Entity
+     private Vec3 deltaMovement = Vec3.ZERO;
+     private float yRot;
+     private float xRot;
++    // Canvas start - region threading
++    private volatile float canvas$threadSafeYRot;
++    private volatile float canvas$threadSafeXRot;
++    // Canvas end - region threading
+     public float yRotO;
+     public float xRotO;
+     private AABB bb = INITIAL_AABB;
+@@ -910,7 +914,7 @@ public abstract class Entity
+         }
+ 
+         //if (this instanceof ServerPlayer) this.handlePortal(); // CraftBukkit - Moved up to postTick // Folia - region threading - ONLY allow in postTick()
+-        if (this.canSpawnSprintParticle()) {
++        if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableSprintParticles && this.canSpawnSprintParticle()) { // Canvas - particles config
+             this.spawnSprintParticle();
+         }
+ 
+@@ -945,7 +949,16 @@ public abstract class Entity
+ 
+         this.checkBelowWorld();
+         if (!this.level().isClientSide()) {
++            // Canvas start - hide flames on entities with fire resistance or invis
++            if (this instanceof net.minecraft.world.entity.LivingEntity livingEntity) {
++                this.setSharedFlagOnFire(this.remainingFireTicks > 0 &&
++                    (!io.canvasmc.canvas.Config.INSTANCE.networking.hideFlamesOnEntitiesWithFireResistance || !livingEntity.hasEffect(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE)) &&
++                    (!io.canvasmc.canvas.Config.INSTANCE.networking.hideFlamesOnEntitiesWithInvisibility || !livingEntity.isInvisible())
++                );
++            } else {
++            // Canvas end - hide flames on entities with fire resistance or invis
+             this.setSharedFlagOnFire(this.remainingFireTicks > 0);
++            } // Canvas - hide flames on entities with fire resistance or invis
+         }
+ 
+         this.firstTick = false;
+@@ -1148,6 +1161,17 @@ public abstract class Entity
+         final Vec3 originalMovement = delta; // Paper - Expose pre-collision velocity
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread("Cannot move an entity off-main");
+         if (this.noPhysics) {
++            // Canvas start - safely abort tick when very large movement crosses region ownership
++            Vec3 vec32 = this.position();
++            Vec3 vec33 = vec32.add(delta);
++            if (delta.lengthSqr() >= (30.0D * 30.0D)
++                && !Double.isNaN(vec33.x) && !Double.isNaN(vec33.y) && !Double.isNaN(vec33.z)
++                && !this.isVehicle()
++                && !this.isPassenger()
++                && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), vec32, delta, 0)) {
++                throw new io.canvasmc.canvas.world.entity.EntityMoveOutOfRegionException(this, type, delta);
++            }
++            // Canvas end - safely abort tick when very large movement crosses region ownership
+             this.setPos(this.getX() + delta.x, this.getY() + delta.y, this.getZ() + delta.z);
+             this.horizontalCollision = false;
+             this.verticalCollision = false;
+@@ -1196,6 +1220,18 @@ public abstract class Entity
+ 
+                 Vec3 pos = this.position();
+                 Vec3 newPosition = pos.add(movement);
++                // Canvas start - safely abort tick when very large movement crosses region ownership
++                // This is after collide(movement) so we evaluate resolved displacement, not raw input.
++                // Moonrise collision lookups treat out-of-region/unloaded chunks as blocking, so this point avoids
++                // applying a large cross-region setPos while preserving normal collision resolution first.
++                if (movement.lengthSqr() >= (30.0D * 30.0D)
++                    && !Double.isNaN(newPosition.x) && !Double.isNaN(newPosition.y) && !Double.isNaN(newPosition.z)
++                    && !this.isVehicle()
++                    && !this.isPassenger()
++                    && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), pos, movement, 0)) {
++                    throw new io.canvasmc.canvas.world.entity.EntityMoveOutOfRegionException(this, moverType, movement);
++                }
++                // Canvas end - safely abort tick when very large movement crosses region ownership
+                 this.addMovementThisTick(new Entity.Movement(pos, newPosition, delta));
+                 this.setPos(newPosition);
+             }
+@@ -1745,6 +1781,11 @@ public abstract class Entity
+         boolean debugEntityBlockIntersections = this.level instanceof ServerLevel serverLevel
+             && serverLevel.getServer().debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.ENTITY_BLOCK_INTERSECTIONS);
+         AtomicInteger iterations = new AtomicInteger();
++        // Canvas start - optimize checkInsideBlocks
++        // use element array for lambdas
++        final net.minecraft.world.level.chunk.ChunkAccess[] cachedChunk = new  net.minecraft.world.level.chunk.ChunkAccess[] { null };
++        final long[] lastChunkPos = { Long.MIN_VALUE };
++        // Canvas end - optimize checkInsideBlocks
+         BlockGetter.forEachBlockIntersectedBetween(
+             from,
+             to,
+@@ -1755,13 +1796,25 @@ public abstract class Entity
+                 } else if (iteration >= maxMovementIterations) {
+                     return false;
+                 } else {
+-                    // Folia start - region threading
+-                    if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(Entity.this.level, blockIntersection, 16)) {
+-                        return false;
+-                    }
+-                    // Folia end - region threading
++                    // Canvas start - optimize checkInsideBlocks
++                    // remove thread check here, as if the chunk is loaded, and we are NEXT TO IT, then it
++                    // should always be inside the current region
+                     iterations.set(iteration);
+-                    BlockState state = this.level().getBlockState(blockIntersection);
++                    final int chunkX = blockIntersection.getX() >> 4;
++                    final int chunkZ = blockIntersection.getZ() >> 4;
++                    final long chunkLongPos = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
++                    if (lastChunkPos[0] != chunkLongPos) {
++                        // update cache, this is a different chunk than previous
++                        lastChunkPos[0] = chunkLongPos;
++                        cachedChunk[0] = this.level.getChunkIfLoaded(chunkX, chunkZ);
++                    }
++                    net.minecraft.world.level.chunk.ChunkAccess chunk = cachedChunk[0];
++                    if (chunk == null) {
++                        // return as if it were air
++                        return true;
++                    }
++                    BlockState state = chunk.getBlockState(blockIntersection);
++                    // Canvas end - optimize checkInsideBlocks
+                     if (state.isAir()) {
+                         if (debugEntityBlockIntersections) {
+                             this.debugBlockIntersection((ServerLevel)this.level(), blockIntersection.immutable(), false, false);
+@@ -1772,7 +1825,7 @@ public abstract class Entity
+                         VoxelShape intersectShape = state.getEntityInsideCollisionShape(this.level(), blockIntersection, this);
+                         boolean insideBlock = intersectShape == Shapes.block()
+                             || this.collidedWithShapeMovingFrom(from, to, intersectShape.move(new Vec3(blockIntersection)).toAabbs());
+-                        boolean insideFluid = this.collidedWithFluid(state.getFluidState(), blockIntersection, from, to);
++                        boolean insideFluid = (state.tagFlag & io.canvasmc.canvas.world.block.BlockTags.FLUID) != 0 && this.collidedWithFluid(state.getFluidState(), blockIntersection, from, to); // Canvas - optimize checkInsideBlocks
+                         if ((insideBlock || insideFluid) && visitedBlocks.add(blockIntersection.asLong())) {
+                             if (insideBlock) {
+                                 try {
+@@ -1824,6 +1877,7 @@ public abstract class Entity
+     }
+ 
+     public boolean collidedWithFluid(final FluidState fluidState, final BlockPos blockPos, final Vec3 from, final Vec3 to) {
++        if (fluid.isEmpty()) return false; // Canvas - optimize checkInsideBlocks
+         AABB fluidAABB = fluidState.getAABB(this.level(), blockPos);
+         return fluidAABB != null && this.collidedWithShapeMovingFrom(from, to, List.of(fluidAABB));
+     }
+@@ -2110,6 +2164,7 @@ public abstract class Entity
+ 
+         float yt = Mth.floor(this.getY());
+ 
++        if (!io.canvasmc.canvas.Config.INSTANCE.particles.disableWaterSplashParticles) { // Canvas - particles config
+         for (int i = 0; i < 1.0F + this.dimensions.width() * 20.0F; i++) {
+             double xo = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+             double zo = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+@@ -2124,6 +2179,7 @@ public abstract class Entity
+             double zo = (this.random.nextDouble() * 2.0 - 1.0) * this.dimensions.width();
+             this.level().addParticle(ParticleTypes.SPLASH, this.getX() + xo, yt + 1.0F, this.getZ() + zo, movement.x, movement.y, movement.z);
+         }
++        } // Canvas - particles config
+ 
+         this.gameEvent(GameEvent.SPLASH);
+     }
+@@ -2304,8 +2360,8 @@ public abstract class Entity
+     }
+ 
+     public void push(final Entity entity) {
++        if (!entity.noPhysics && !this.noPhysics) { // Leaf - collision physics check before vehicle check
+         if (!this.isPassengerOfSameVehicle(entity)) {
+-            if (!entity.noPhysics && !this.noPhysics) {
+                 if (this.level.paperConfig().collisions.onlyPlayersCollide && !(entity instanceof ServerPlayer || this instanceof ServerPlayer)) return; // Paper - Collision option for requiring a player participant
+                 double xa = entity.getX() - this.getX();
+                 double za = entity.getZ() - this.getZ();
+@@ -3475,6 +3531,15 @@ public abstract class Entity
+         return this.calculateViewVector(this.getXRot(), this.getYRot());
+     }
+ 
++    // Canvas start - region threading
++    public Vec3 canvas$getLookAngleThreadSafe() {
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            return this.getLookAngle();
++        }
++        return this.calculateViewVector(this.canvas$threadSafeXRot, this.canvas$threadSafeYRot);
++    }
++
++    // Canvas end - region threading
+     public Vec3 getHeadLookAngle() {
+         return this.calculateViewVector(this.getXRot(), this.getYHeadRot());
+     }
+@@ -3819,6 +3884,7 @@ public abstract class Entity
+     }
+ 
+     protected static void sendBubbleColumnParticles(final Level level, final BlockPos pos) {
++        if (io.canvasmc.canvas.Config.INSTANCE.particles.disableBubbleColumnParticles) return; // Canvas - particles config
+         if (level instanceof ServerLevel serverLevel) {
+             RandomSource random = level.getRandom();
+ 
+@@ -4589,7 +4655,7 @@ public abstract class Entity
+     public boolean endPortalLogicAsync(BlockPos portalPos) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+ 
+-        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? Level.OVERWORLD : Level.END);
++        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END ? io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey() : Level.END); // Canvas - default respawn dimension config
+         if (destination == null) {
+             // wat
+             return false;
+@@ -4601,7 +4667,7 @@ public abstract class Entity
+     public boolean netherPortalLogicAsync(BlockPos portalPos) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+ 
+-        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? Level.OVERWORLD : Level.NETHER);
++        ServerLevel destination = this.level().getServer().getLevel(this.level().getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER ? io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey() : Level.NETHER); // Canvas - default respawn dimension config
+         if (destination == null) {
+             // wat
+             return false;
+@@ -4902,6 +4968,14 @@ public abstract class Entity
+             node.root = node.root.transformForAsyncTeleport(destination, null, null, null, null);
+             // set portal cooldown
+             node.root.setPortalCooldown();
++            // Canvas start - region threading
++            if (io.canvasmc.canvas.Config.INSTANCE.displayWorldLoadScreenForPortaling && node.root instanceof ServerPlayer player) {
++                player.connection.send(new net.minecraft.network.protocol.game.ClientboundRespawnPacket(
++                    player.createCommonSpawnInfo(destination),
++                    net.minecraft.network.protocol.game.ClientboundRespawnPacket.KEEP_ALL_DATA
++                ));
++            }
++            // Canvas end - region threading
+         }
+ 
+         // ensure the region is always ticking in case of a shutdown
+@@ -5204,7 +5278,7 @@ public abstract class Entity
+ 
+     public boolean canTeleport(final Level from, final Level to) {
+         if (!this.isAlive() || !this.valid) return false; // Paper - Fix item duplication and teleport issues
+-        if (from.dimension() == Level.END && to.dimension() == Level.OVERWORLD) {
++        if (from.dimension() == Level.END && to.dimension() == io.canvasmc.canvas.Config.INSTANCE.fetchRespawnDimensionKey()) { // Canvas - default respawn dimension config
+             for (Entity passenger : this.getPassengers()) {
+                 if (passenger instanceof ServerPlayer player && !player.seenCredits) {
+                     return false;
+@@ -6041,6 +6115,7 @@ public abstract class Entity
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + yRot + ", discarding.");
+         } else {
+             this.yRot = yRot;
++            this.canvas$threadSafeYRot = yRot; // Canvas - region threading
+         }
+     }
+ 
+@@ -6053,6 +6128,7 @@ public abstract class Entity
+             Util.logAndPauseIfInIde("Invalid entity rotation: " + xRot + ", discarding.");
+         } else {
+             this.xRot = Math.clamp(xRot % 360.0F, -90.0F, 90.0F);
++            this.canvas$threadSafeXRot = this.xRot; // Canvas - region threading
+         }
+     }
+ 
