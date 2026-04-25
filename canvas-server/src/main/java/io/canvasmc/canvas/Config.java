@@ -74,8 +74,8 @@ public class Config {
 
     private static void installSecureSeed(Config config) {
         SecureSeedProtection settings = config.secureSeedProtection;
-        if (settings.mode == SecureSeedProtection.Mode.V1) {
-            // Reload from V2 -> V1 is allowed; downstream warns on the swap.
+        if (!settings.enabled) {
+            // Reload from enabled -> disabled is allowed; downstream warns on the swap.
             SecureSeed.install(null);
             return;
         }
@@ -85,13 +85,13 @@ public class Config {
         // operator can detect world drift.
         if (SecureSeed.saltFromHex(settings.salt) == null) {
             if (SecureSeed.active() != null && SecureSeed.active().mode() == SecureSeed.Mode.V2) {
-                LOGGER.warn("Secure-seed salt is missing from config but a V2 seed is already active; "
+                LOGGER.warn("Secure-seed salt is missing from config but a secure seed is already active; "
                     + "keeping the active seed and rewriting the salt to disk to avoid world drift.");
                 settings.salt = SecureSeed.saltToHex(SecureSeed.active().saltCopy());
             }
             else {
                 settings.salt = SecureSeed.saltToHex(SecureSeed.generateSalt());
-                LOGGER.info("Generated secure-seed salt for V2 mode, persisting to config "
+                LOGGER.info("Generated secure-seed salt, persisting to config "
                     + "(this happens once; do not edit the salt afterwards)");
             }
         }
@@ -111,7 +111,7 @@ public class Config {
     }
 
     /**
-     * Activates V2 secure seed protection using the supplied world seed and
+     * Activates secure seed protection using the supplied world seed and
      * the salt currently persisted in the config. Idempotent: identical
      * inputs replace nothing, mismatched inputs swap the active seed and
      * log a warning.
@@ -121,13 +121,13 @@ public class Config {
             return;
         }
         SecureSeedProtection settings = INSTANCE.secureSeedProtection;
-        if (settings.mode == SecureSeedProtection.Mode.V1) {
+        if (!settings.enabled) {
             SecureSeed.install(null);
             return;
         }
         byte[] salt = SecureSeed.saltFromHex(settings.salt);
         if (salt == null) {
-            LOGGER.warn("Secure seed protection is in V2 mode but no salt is configured; falling back to V1");
+            LOGGER.warn("Secure seed protection is enabled but no salt is configured; falling back to vanilla seed handling");
             SecureSeed.install(null);
             return;
         }
@@ -139,7 +139,7 @@ public class Config {
             return; // already installed with these exact inputs
         }
         SecureSeed.install(SecureSeed.of(SecureSeed.Mode.V2, worldSeed, salt));
-        LOGGER.info("Secure seed protection (V2) is active for world seed {}", worldSeed);
+        LOGGER.info("Secure seed protection is active for world seed {}", worldSeed);
     }
 
     static {
@@ -849,25 +849,24 @@ public class Config {
 
     public static class SecureSeedProtection {
         @Comment({
-            "Secure world generation (Foldenor patch port).",
+            "Master switch for secure world generation (Foldenor patch port).",
             "",
-            "Replaces the predictable noise-based seed pipeline with a cryptographic",
-            "PRF/KDF (BLAKE3). When enabled, the original 64-bit world seed is mixed",
-            "with a per-server salt and expanded into a 1024-bit master key, making",
-            "the seed unrecoverable from observed terrain.",
+            "When false (default), Canvas uses vanilla seed handling: world seeds",
+            "remain reversible from observed terrain. When true, the 64-bit world",
+            "seed is mixed with a per-server salt and expanded into a 1024-bit",
+            "master key via BLAKE3, and per-coordinate randomness is derived as",
+            "a BLAKE3 keyed hash. The original seed cannot be recovered from",
+            "generated chunks.",
             "",
-            "Modes:",
-            " - V1 - vanilla / legacy behavior. Reversible. Default for parity.",
-            " - V2 - secure mode. Recommended for servers that rely on hidden seeds.",
-            "",
-            "Switching modes after a world has generated will produce a different",
+            "Recommended for servers that rely on hidden or private seeds.",
+            "Toggling this after a world has generated will produce a different",
             "world for newly generated chunks. Existing chunks are unaffected."
         })
-        public Mode mode = Mode.V1;
+        public boolean enabled = false;
 
         @Comment({
-            "32-byte salt encoded as hex. Mixed into the master key under V2 so",
-            "the same world seed produces a different master across servers.",
+            "32-byte salt encoded as hex. Mixed into the master key when enabled,",
+            "so the same world seed produces a different master across servers.",
             "",
             "Leave blank to auto-generate on first launch. Once written, do not",
             "change this value or your world will regenerate inconsistently."
@@ -875,15 +874,11 @@ public class Config {
         public String salt = "";
 
         @Comment({
-            "When enabled, V2 dimensions derive independent subkeys, so observing",
-            "the overworld leaks nothing about randomness used in the nether or",
+            "When true, dimensions derive independent subkeys so observing the",
+            "overworld leaks nothing about randomness used in the nether or",
             "the end. Disable only if you need cross-dimension seed parity for",
             "tooling reasons."
         })
         public boolean perDimensionSubkeys = true;
-
-        public enum Mode {
-            V1, V2
-        }
     }
 }
