@@ -1,35 +1,11 @@
 --- a/net/minecraft/world/level/material/FlowingFluid.java
 +++ b/net/minecraft/world/level/material/FlowingFluid.java
-@@ -341,25 +_,53 @@
+@@ -341,31 +_,124 @@
      protected int getSlopeDistance(
          final LevelReader level, final BlockPos pos, final int pass, final Direction from, final BlockState state, final FlowingFluid.SpreadContext context
      ) {
-+        it.unimi.dsi.fastutil.longs.LongSet visited = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheVisited;
-+        SlopeDistanceNodeDeque queue = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheQueue;
-+        visited.clear();
-+        queue.clear();
-+
-+        for (Direction directionx : Direction.Plane.HORIZONTAL) {
-+            if (directionx == from) continue;
-+
-+            BlockPos testPos = pos.relative(directionx);
-+            BlockState testState = context.getBlockStateIfLoaded(testPos); // Paper - Prevent chunk loading from fluid flowing
-+            if (testState == null) continue; // Paper - Prevent chunk loading from fluid flowing
-+
-+            // Check if the fluid can actually pass through to this first neighbor before adding
-+            FluidState testFluidState = testState.getFluidState();
-+            if (!this.canPassThrough(level, this.getFlowing(), pos, state, directionx, testPos, testState, testFluidState)) {
-+                continue;
-+            }
-+            long visitKey = encodeSlopeNode(testPos, directionx.getOpposite());
-+            if (visited.add(visitKey)) {
-+                queue.add(new FlowingFluid.SlopeDistanceNode(testPos, pass, directionx.getOpposite(), testState));
-+            }
-+        }
-+
-+        int slopeFindDistance = this.getSlopeFindDistance(level);
-         int lowest = 1000;
- 
+-        int lowest = 1000;
+-
 -        for (Direction direction : Direction.Plane.HORIZONTAL) {
 -            if (direction != from) {
 -                BlockPos testPos = pos.relative(direction);
@@ -47,42 +23,74 @@
 -                            lowest = v;
 -                        }
 -                    }
+-                }
+-            }
+-        }
+-
+-        return lowest;
+-    }
++        // Leaf start - optimize fluid spread
++        it.unimi.dsi.fastutil.longs.LongSet visited = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheVisited;
++        SlopeDistanceNodeDeque queue = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheQueue;
++        visited.clear();
++        queue.clear();
++
++        for (Direction dir : Direction.Plane.HORIZONTAL) {
++            if (dir == from) continue;
++
++            BlockPos neighborPos = pos.relative(dir); // immutable
++            BlockState neighborState = context.getBlockStateIfLoaded(neighborPos);
++            if (neighborState == null) continue;
++
++            // Check if the fluid can actually pass through to this first neighbor before adding
++            FluidState neighborFluidState = neighborState.getFluidState();
++            if (!this.canPassThrough(level, this.getFlowing(), pos, state, dir, neighborPos, neighborState, neighborFluidState)) {
++                continue;
++            }
++            long visitKey = encodeSlopeNode(neighborPos, dir.getOpposite());
++            if (visited.add(visitKey)) {
++                queue.add(new FlowingFluid.SlopeDistanceNode(neighborPos, pass, dir.getOpposite(), neighborState));
++            }
++        }
++
++        int slopeFindDistance = this.getSlopeFindDistance(level);
++        int minDistance = 1000;
++
 +        // Process the queue
 +        while (!queue.isEmpty()) {
 +            FlowingFluid.SlopeDistanceNode current = queue.poll();
 +            if (context.isHole(current.pos)) {
-+                return current.pass;
++                return current.depth;
 +            }
-+            if (current.pass >= slopeFindDistance) continue;
 +
-+            for (Direction directionx : Direction.Plane.HORIZONTAL) {
-+                if (directionx == current.from) continue;
-+                BlockPos testNextPos = current.pos.relative(directionx);
-+                BlockState testNextState = context.getBlockStateIfLoaded(testNextPos); // Paper - Prevent chunk loading from fluid flowing
-+                if (testNextState == null) continue;
++            if (current.depth >= slopeFindDistance) continue;
 +
-+                FluidState testNextFluidState = testNextState.getFluidState();
-+                if (!this.canPassThrough(level, this.getFlowing(), current.pos, current.state, directionx, testNextPos, testNextState, testNextFluidState)) {
++            for (Direction dir : Direction.Plane.HORIZONTAL) {
++                if (dir == current.excludedDir) continue;
++
++                BlockPos nextPos = current.pos.relative(dir); // immutable
++                BlockState nextState = context.getBlockStateIfLoaded(nextPos);
++                if (nextState == null) continue;
++
++                FluidState nextFluidState = nextState.getFluidState();
++                if (!this.canPassThrough(level, this.getFlowing(), current.pos, current.state, dir, nextPos, nextState, nextFluidState)) {
 +                    continue;
 +                }
-+                long visitKey = encodeSlopeNode(testNextPos, directionx.getOpposite());
-+                if (visited.add(visitKey)) {
-+                    queue.add(new FlowingFluid.SlopeDistanceNode(testNextPos, current.pass + 1, directionx.getOpposite(), testNextState));
-                 }
-             }
-         }
-@@ -370,8 +_,68 @@
-     public boolean isWaterHole(
-         final BlockGetter level, final BlockPos topPos, final BlockState topState, final BlockPos bottomPos, final BlockState bottomState
-     ) {
--        return canPassThroughWall(Direction.DOWN, level, topPos, topState, bottomPos, bottomState)
--            && (bottomState.getFluidState().getType().isSame(this) || canHoldFluid(level, bottomPos, bottomState, this.getFlowing()));
-+        return (bottomState.getFluidState().getType().isSame(this) || canHoldFluid(level, bottomPos, bottomState, this.getFlowing()))
-+            && canPassThroughWall(Direction.DOWN, level, topPos, topState, bottomPos, bottomState); // Canvas - cheaper checks first
-+    }
 +
-+    private static long encodeSlopeNode(final BlockPos pos, final Direction from) {
-+        return ((long) pos.getX() & 0xFFFFFFFFL) << 32 | ((long) pos.getZ() & 0xFFFFFFFFL) << 4 | (from.ordinal() & 0x0F);
++                long visitKey = encodeSlopeNode(nextPos, dir.getOpposite());
++                if (visited.add(visitKey)) {
++                    queue.add(new FlowingFluid.SlopeDistanceNode(nextPos, current.depth + 1, dir.getOpposite(), nextState));
++                }
++            }
++        }
++
++        return minDistance;
++        // Leaf end - optimize fluid spread
++    }
++    // Leaf start - optimize fluid spread
++
++    private static long encodeSlopeNode(BlockPos pos, Direction excludedDir) {
++        return ((long) pos.getX() & 0xFFFFFFFFL) << 32 | ((long) pos.getZ() & 0xFFFFFFFFL) << 4 | (excludedDir.ordinal() & 0x0F);
 +    }
 +
 +    public static class SlopeDistanceNodeDeque {
@@ -137,19 +145,18 @@
 +        }
 +    }
 +
-+    private record SlopeDistanceNode(BlockPos pos, int pass, Direction from, BlockState state) {
-+        // Leaf end - optimize fluid spread
-     }
++    private record SlopeDistanceNode(BlockPos pos, int depth, Direction excludedDir, BlockState state) {}
++    // Leaf end - optimize fluid spread
  
-     public boolean canPassThrough(
-@@ -384,8 +_,8 @@
+     public boolean isWaterHole(
+         final BlockGetter level, final BlockPos topPos, final BlockState topState, final BlockPos bottomPos, final BlockState bottomState
+@@ -384,8 +_,7 @@
          final BlockState testState,
          final FluidState testFluidState
      ) {
 -        return this.canMaybePassThrough(level, sourcePos, sourceState, direction, testPos, testState, testFluidState)
 -            && canHoldSpecificFluid(level, testPos, testState, fluid);
-+        return canHoldSpecificFluid(level, testPos, testState, fluid)
-+            && this.canMaybePassThrough(level, sourcePos, sourceState, direction, testPos, testState, testFluidState); // Canvas - cheaper checks first
++        return canHoldSpecificFluid(level, testPos, testState, fluid) && this.canMaybePassThrough(level, sourcePos, sourceState, direction, testPos, testState, testFluidState); // Canvas - cheaper checks first
      }
  
      public boolean canMaybePassThrough(
