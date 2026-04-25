@@ -32,7 +32,7 @@ public record SleepUntilTimeBlockEntityTickInvoker(BlockEntity sleepingBlockEnti
     @Override
     public @NotNull String getType() {
         //noinspection ConstantConditions
-        return BlockEntityType.getKey(this.sleepingBlockEntity.getType()).toString();
+        return this.sleepingBlockEntity.typeHolder().getRegisteredName();
     }
 
     @Override
