@@ -1,18 +1,18 @@
-From fb2fa76bcfb03ba2831bd257c68fc51821e86ead Mon Sep 17 00:00:00 2001
+From 400a26b77b55ac5095fe4c99f70e24489a3947c7 Mon Sep 17 00:00:00 2001
 From: File <noreply+automated@papermc.io>
-Date: Sun, 20 Apr 1997 15:37:42 +0200
+Date: Sun, 20 Apr 1997 06:37:42 -0700
 Subject: [PATCH] canvas File Patches
 
 
 diff --git a/net/minecraft/server/commands/SpreadPlayersCommand.java b/net/minecraft/server/commands/SpreadPlayersCommand.java
-index d96b5f4ea264b7c3bf20bf7fc253566fdf830fc8..87f73a05897c6cb881d47444c12ae9b8ca294118 100644
+index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..fb479596586b59c51a5d51c0ef8713b8eb651e9c 100644
 --- a/net/minecraft/server/commands/SpreadPlayersCommand.java
 +++ b/net/minecraft/server/commands/SpreadPlayersCommand.java
 @@ -32,6 +32,45 @@ import net.minecraft.world.phys.Vec2;
  import net.minecraft.world.scores.Team;
  
  public class SpreadPlayersCommand {
-+    // Canvas start - fix commands with region threading
++    // Canvas start - region threading
 +    private static final RegionThreadingExecutor EXECUTOR = new RegionThreadingExecutor();
 +    static {
 +        EXECUTOR.start();
@@ -50,17 +50,17 @@ index d96b5f4ea264b7c3bf20bf7fc253566fdf830fc8..87f73a05897c6cb881d47444c12ae9b8
 +            }
 +        }
 +    }
-+    // Canvas end - fix commands with region threading
++    // Canvas end - region threading
      private static final int MAX_ITERATION_COUNT = 10000;
      private static final Dynamic4CommandExceptionType ERROR_FAILED_TO_SPREAD_TEAMS = new Dynamic4CommandExceptionType(
-         (teamCount, x, z, suggestedSpread) -> Component.translatableEscape("commands.spreadplayers.failed.teams", teamCount, x, z, suggestedSpread)
-@@ -112,24 +151,178 @@ public class SpreadPlayersCommand {
-             double d1 = center.y - maxRange;
-             double d2 = center.x + maxRange;
-             double d3 = center.y + maxRange;
+         (count, x, z, recommended) -> Component.translatableEscape("commands.spreadplayers.failed.teams", count, x, z, recommended)
+@@ -118,24 +157,178 @@ public class SpreadPlayersCommand {
+             double minZ = center.y - maxRange;
+             double maxX = center.x + maxRange;
+             double maxZ = center.y + maxRange;
 -            SpreadPlayersCommand.Position[] positions = createInitialPositions(
--                randomSource, respectTeams ? getNumberOfTeams(targets) : targets.size(), d, d1, d2, d3
-+            // Canvas start - fix commands with region threading
+-                random, respectTeams ? getNumberOfTeams(entities) : entities.size(), minX, minZ, maxX, maxZ
++            // Canvas start - region threading
 +            EXECUTOR.queue(() -> {
 +                RandomSource fasterRandom = io.canvasmc.canvas.Config.ENABLE_FASTER_RANDOM ?
 +                    new io.canvasmc.canvas.util.FasterRandomSource(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed()) :
@@ -69,32 +69,32 @@ index d96b5f4ea264b7c3bf20bf7fc253566fdf830fc8..87f73a05897c6cb881d47444c12ae9b8
 +                //      actually be quite an expensive method, so we use an optimized
 +                //      random source too to try and help out
 +                SpreadPlayersCommand.Position[] positions = createInitialPositions(
-+                    fasterRandom, targets.size(), d, d1, d2, d3
++                    fasterRandom, entities.size(), minX, minZ, maxX, maxZ
 +                );
 +                try {
-+                    canvas$spreadRegionThreading(center, spreadDistance, level, fasterRandom, d, d1, d2, d3, maxHeight, positions);
++                    canvas$spreadRegionThreading(center, spreadDistance, level, fasterRandom, minX, minZ, maxX, maxZ, maxHeight, positions);
 +                } catch (CommandSyntaxException ex) {
 +                    source.sendFailure(Component.literal(ex.getMessage()));
 +                } catch (Throwable t) {
 +                    net.minecraft.server.MinecraftServer.LOGGER.error("An error occurred while spreading players asynchronously", t);
 +                }
-+                double d4 = canvas$teleportEntities(targets, level, positions, maxHeight, respectTeams);
++                double distance = canvas$teleportEntities(entities, level, positions, maxHeight, respectTeams);
 +                source.sendSuccess(
 +                    () -> Component.translatable(
 +                        "commands.spreadplayers.success." + (respectTeams ? "teams" : "entities"),
 +                        positions.length,
 +                        center.x,
 +                        center.y,
-+                        String.format(Locale.ROOT, "%.2f", d4)
++                        String.format(Locale.ROOT, "%.2f", distance)
 +                    ),
 +                    true
 +                );
 +            });
-+            return targets.size(); // original is 'positions.length'
-+            // Canvas end - fix commands with region threading
++            return entities.size(); // original is 'positions.length'
++            // Canvas end - region threading
 +        }
 +    }
-+    // Canvas start - fix commands with region threading
++    // Canvas start - region threading
 +
 +    private static void canvas$spreadRegionThreading(
 +        Vec2 center,
@@ -157,12 +157,12 @@ index d96b5f4ea264b7c3bf20bf7fc253566fdf830fc8..87f73a05897c6cb881d47444c12ae9b8
 +                java.util.List<java.util.concurrent.CompletableFuture<Void>> futures = new java.util.ArrayList<>(piles.length);
 +                java.util.concurrent.atomic.AtomicBoolean invalidPositionFound = new java.util.concurrent.atomic.AtomicBoolean(false);
 +                for (SpreadPlayersCommand.Position pileToCheck : piles) {
-+                    net.minecraft.world.level.ChunkPos chunkPos = new net.minecraft.world.level.ChunkPos(
++                    final net.minecraft.world.level.ChunkPos chunkPos = net.minecraft.world.level.ChunkPos.containing(
 +                        BlockPos.containing(pileToCheck.x, 0.0, pileToCheck.z)
 +                    );
 +                    final java.util.concurrent.CompletableFuture<Void> future = new java.util.concurrent.CompletableFuture<>();
 +                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(
-+                        world, chunkPos.x, chunkPos.z, () -> {
++                        world, chunkPos.x(), chunkPos.z(), () -> {
 +                            if (!pileToCheck.isSafe(world, maxY)) {
 +                                pileToCheck.randomize(random, minX, minZ, maxX, maxZ);
 +                                invalidPositionFound.set(true);
@@ -186,15 +186,15 @@ index d96b5f4ea264b7c3bf20bf7fc253566fdf830fc8..87f73a05897c6cb881d47444c12ae9b8
 +                piles.length, center.x, center.y,
 +                String.format(Locale.ROOT, "%.2f", closestDistance)
              );
--            spreadPositions(center, spreadDistance, level, randomSource, d, d1, d2, d3, maxHeight, positions, respectTeams);
--            double d4 = setPlayerPositions(targets, level, positions, maxHeight, respectTeams);
+-            spreadPositions(center, spreadDistance, level, random, minX, minZ, maxX, maxZ, maxHeight, positions, respectTeams);
+-            double distance = setPlayerPositions(entities, level, positions, maxHeight, respectTeams);
 -            source.sendSuccess(
 -                () -> Component.translatable(
 -                    "commands.spreadplayers.success." + (respectTeams ? "teams" : "entities"),
 -                    positions.length,
 -                    center.x,
 -                    center.y,
--                    String.format(Locale.ROOT, "%.2f", d4)
+-                    String.format(Locale.ROOT, "%.2f", distance)
 -                ),
 -                true
 +        }
@@ -243,7 +243,7 @@ index d96b5f4ea264b7c3bf20bf7fc253566fdf830fc8..87f73a05897c6cb881d47444c12ae9b8
 +
 +        return entities.size() < 2 ? 0.0 : totalMinDistance / entities.size();
      }
-+    // Canvas end - fix commands with region threading
++    // Canvas end - region threading
  
-     private static int getNumberOfTeams(Collection<? extends Entity> entities) {
-         Set<Team> set = Sets.newHashSet();
+     private static int getNumberOfTeams(final Collection<? extends Entity> players) {
+         Set<Team> teams = Sets.newHashSet();
