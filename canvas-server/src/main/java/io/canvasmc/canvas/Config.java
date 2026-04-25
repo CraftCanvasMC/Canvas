@@ -75,13 +75,25 @@ public class Config {
     private static void installSecureSeed(Config config) {
         SecureSeedProtection settings = config.secureSeedProtection;
         if (settings.mode == SecureSeedProtection.Mode.V1) {
+            // Reload from V2 -> V1 is allowed; downstream warns on the swap.
             SecureSeed.install(null);
             return;
         }
 
+        // Salt persistence: never regenerate after first write. If the user
+        // clears the field by mistake we re-seed once and log loudly so the
+        // operator can detect world drift.
         if (SecureSeed.saltFromHex(settings.salt) == null) {
-            settings.salt = SecureSeed.saltToHex(SecureSeed.generateSalt());
-            LOGGER.info("Generated secure-seed salt for V2 mode, persisting to config");
+            if (SecureSeed.active() != null && SecureSeed.active().mode() == SecureSeed.Mode.V2) {
+                LOGGER.warn("Secure-seed salt is missing from config but a V2 seed is already active; "
+                    + "keeping the active seed and rewriting the salt to disk to avoid world drift.");
+                settings.salt = SecureSeed.saltToHex(SecureSeed.active().saltCopy());
+            }
+            else {
+                settings.salt = SecureSeed.saltToHex(SecureSeed.generateSalt());
+                LOGGER.info("Generated secure-seed salt for V2 mode, persisting to config "
+                    + "(this happens once; do not edit the salt afterwards)");
+            }
         }
 
         // Activate immediately if the server is far enough along to expose its
@@ -100,8 +112,9 @@ public class Config {
 
     /**
      * Activates V2 secure seed protection using the supplied world seed and
-     * the salt currently persisted in the config. Safe to call multiple times;
-     * later calls overwrite the active seed (e.g. after a config reload).
+     * the salt currently persisted in the config. Idempotent: identical
+     * inputs replace nothing, mismatched inputs swap the active seed and
+     * log a warning.
      */
     public static void activateSecureSeed(long worldSeed) {
         if (INSTANCE == null) {
@@ -117,6 +130,13 @@ public class Config {
             LOGGER.warn("Secure seed protection is in V2 mode but no salt is configured; falling back to V1");
             SecureSeed.install(null);
             return;
+        }
+        SecureSeed existing = SecureSeed.active();
+        if (existing != null
+            && existing.mode() == SecureSeed.Mode.V2
+            && existing.worldSeed() == worldSeed
+            && java.util.Arrays.equals(existing.saltCopy(), salt)) {
+            return; // already installed with these exact inputs
         }
         SecureSeed.install(SecureSeed.of(SecureSeed.Mode.V2, worldSeed, salt));
         LOGGER.info("Secure seed protection (V2) is active for world seed {}", worldSeed);

@@ -64,41 +64,63 @@ public final class Blake3 {
         g(state, 3, 4, 9, 14, m[14], m[15]);
     }
 
-    private static int[] permute(int[] m) {
-        int[] permuted = new int[16];
+    private static void permuteInto(int[] dst, int[] src) {
         for (int i = 0; i < 16; i++) {
-            permuted[i] = m[MSG_PERMUTATION[i]];
+            dst[i] = src[MSG_PERMUTATION[i]];
         }
-        return permuted;
+    }
+
+    /**
+     * Compresses {@code blockWords} into the supplied chaining value and writes
+     * the 16-word output into {@code stateOut}. Caller-owned scratch buffers
+     * ({@code stateOut}, {@code blockA}, {@code blockB}) are reused across
+     * calls so the hot path is allocation-free. {@code blockA} on entry must
+     * already contain the message words.
+     */
+    private static void compressInto(int[] chainingValue, int[] blockA, int[] blockB,
+                                     long counter, int blockLen, int flags, int[] stateOut) {
+        stateOut[0] = chainingValue[0];
+        stateOut[1] = chainingValue[1];
+        stateOut[2] = chainingValue[2];
+        stateOut[3] = chainingValue[3];
+        stateOut[4] = chainingValue[4];
+        stateOut[5] = chainingValue[5];
+        stateOut[6] = chainingValue[6];
+        stateOut[7] = chainingValue[7];
+        stateOut[8] = IV[0];
+        stateOut[9] = IV[1];
+        stateOut[10] = IV[2];
+        stateOut[11] = IV[3];
+        stateOut[12] = (int) counter;
+        stateOut[13] = (int) (counter >> 32);
+        stateOut[14] = blockLen;
+        stateOut[15] = flags;
+
+        round(stateOut, blockA);
+        permuteInto(blockB, blockA);
+        round(stateOut, blockB);
+        permuteInto(blockA, blockB);
+        round(stateOut, blockA);
+        permuteInto(blockB, blockA);
+        round(stateOut, blockB);
+        permuteInto(blockA, blockB);
+        round(stateOut, blockA);
+        permuteInto(blockB, blockA);
+        round(stateOut, blockB);
+        permuteInto(blockA, blockB);
+        round(stateOut, blockA);
+
+        for (int i = 0; i < 8; i++) {
+            stateOut[i] ^= stateOut[i + 8];
+            stateOut[i + 8] ^= chainingValue[i];
+        }
     }
 
     private static int[] compress(int[] chainingValue, int[] blockWords, long counter, int blockLen, int flags) {
-        int[] state = {
-            chainingValue[0], chainingValue[1], chainingValue[2], chainingValue[3],
-            chainingValue[4], chainingValue[5], chainingValue[6], chainingValue[7],
-            IV[0], IV[1], IV[2], IV[3],
-            (int) counter, (int) (counter >> 32), blockLen, flags
-        };
-        int[] block = blockWords.clone();
-
-        round(state, block);
-        block = permute(block);
-        round(state, block);
-        block = permute(block);
-        round(state, block);
-        block = permute(block);
-        round(state, block);
-        block = permute(block);
-        round(state, block);
-        block = permute(block);
-        round(state, block);
-        block = permute(block);
-        round(state, block);
-
-        for (int i = 0; i < 8; i++) {
-            state[i] ^= state[i + 8];
-            state[i + 8] ^= chainingValue[i];
-        }
+        int[] state = new int[16];
+        int[] blockA = blockWords.clone();
+        int[] blockB = new int[16];
+        compressInto(chainingValue, blockA, blockB, counter, blockLen, flags, state);
         return state;
     }
 
@@ -330,10 +352,185 @@ public final class Blake3 {
     }
 
     public static byte[] hash(byte[] input, int outputLen) {
+        if (input == null) {
+            throw new IllegalArgumentException("input must not be null");
+        }
+        if (outputLen < 0) {
+            throw new IllegalArgumentException("outputLen must be non-negative");
+        }
         return newHasher().update(input).finish(outputLen);
     }
 
     public static byte[] keyedHash(byte[] key, byte[] input, int outputLen) {
+        if (key == null || key.length != KEY_LEN) {
+            throw new IllegalArgumentException("key must be " + KEY_LEN + " bytes");
+        }
+        if (input == null) {
+            throw new IllegalArgumentException("input must not be null");
+        }
+        if (outputLen < 0) {
+            throw new IllegalArgumentException("outputLen must be non-negative");
+        }
         return newKeyedHasher(key).update(input).finish(outputLen);
+    }
+
+    /**
+     * Allocation-free PRF API for the world-generation hot path.
+     *
+     * <p>All entry points read a pre-extracted 8-word key, pack the supplied
+     * coordinate/counter bytes into thread-local scratch space, and run a
+     * single BLAKE3 compression with {@code KEYED_HASH | CHUNK_START |
+     * CHUNK_END | ROOT}. This is bit-for-bit identical to
+     * {@link #keyedHash(byte[], byte[], int)} for inputs that fit in a single
+     * block (up to {@value #BLOCK_LEN} bytes), but skips the {@code Hasher}
+     * and {@code ChunkState} bookkeeping plus all heap allocations along the
+     * way.
+     */
+    public static final class Prf {
+
+        private static final int FAST_FLAGS = KEYED_HASH | CHUNK_START | CHUNK_END | ROOT;
+
+        private static final ThreadLocal<int[]> STATE = ThreadLocal.withInitial(() -> new int[16]);
+        private static final ThreadLocal<int[]> BLOCK_A = ThreadLocal.withInitial(() -> new int[16]);
+        private static final ThreadLocal<int[]> BLOCK_B = ThreadLocal.withInitial(() -> new int[16]);
+
+        private Prf() {
+        }
+
+        /**
+         * Extracts the 8 little-endian key words from a 32-byte secret key.
+         * The returned array is owned by the caller and can be cached
+         * indefinitely; do not pass it across boundaries that mutate it.
+         */
+        public static int[] keyWords(byte[] key32) {
+            if (key32 == null || key32.length != KEY_LEN) {
+                throw new IllegalArgumentException("key must be " + KEY_LEN + " bytes");
+            }
+            return wordsFromKey(key32, 0);
+        }
+
+        /**
+         * PRF over (x, y, z) — 12 bytes input, returns the first 8 bytes of
+         * the BLAKE3 keyed hash as a {@code long}.
+         */
+        public static long positional(int[] keyWords, int x, int y, int z) {
+            int[] state = STATE.get();
+            int[] blockA = BLOCK_A.get();
+            int[] blockB = BLOCK_B.get();
+            zero(blockA);
+            blockA[0] = x;
+            blockA[1] = y;
+            blockA[2] = z;
+            compressInto(keyWords, blockA, blockB, 0L, 12, FAST_FLAGS, state);
+            return ((long) state[0] & 0xffffffffL) | (((long) state[1] & 0xffffffffL) << 32);
+        }
+
+        /**
+         * PRF over (x, y, z, counter) — 20 bytes input, returns 8 bytes.
+         */
+        public static long positional(int[] keyWords, int x, int y, int z, long counter) {
+            int[] state = STATE.get();
+            int[] blockA = BLOCK_A.get();
+            int[] blockB = BLOCK_B.get();
+            zero(blockA);
+            blockA[0] = x;
+            blockA[1] = y;
+            blockA[2] = z;
+            blockA[3] = (int) counter;
+            blockA[4] = (int) (counter >>> 32);
+            compressInto(keyWords, blockA, blockB, 0L, 20, FAST_FLAGS, state);
+            return ((long) state[0] & 0xffffffffL) | (((long) state[1] & 0xffffffffL) << 32);
+        }
+
+        /**
+         * PRF over (x, y, z) returning 16 bytes: low 64 bits in {@code outLoHi[0]},
+         * high 64 bits in {@code outLoHi[1]}.
+         */
+        public static void positional2L(int[] keyWords, int x, int y, int z, long[] outLoHi) {
+            if (outLoHi == null || outLoHi.length < 2) {
+                throw new IllegalArgumentException("outLoHi must have length >= 2");
+            }
+            int[] state = STATE.get();
+            int[] blockA = BLOCK_A.get();
+            int[] blockB = BLOCK_B.get();
+            zero(blockA);
+            blockA[0] = x;
+            blockA[1] = y;
+            blockA[2] = z;
+            compressInto(keyWords, blockA, blockB, 0L, 12, FAST_FLAGS, state);
+            outLoHi[0] = ((long) state[0] & 0xffffffffL) | (((long) state[1] & 0xffffffffL) << 32);
+            outLoHi[1] = ((long) state[2] & 0xffffffffL) | (((long) state[3] & 0xffffffffL) << 32);
+        }
+
+        /**
+         * PRF over a single 64-bit input. 8 bytes in, 8 bytes out.
+         */
+        public static long mixLong(int[] keyWords, long input) {
+            int[] state = STATE.get();
+            int[] blockA = BLOCK_A.get();
+            int[] blockB = BLOCK_B.get();
+            zero(blockA);
+            blockA[0] = (int) input;
+            blockA[1] = (int) (input >>> 32);
+            compressInto(keyWords, blockA, blockB, 0L, 8, FAST_FLAGS, state);
+            return ((long) state[0] & 0xffffffffL) | (((long) state[1] & 0xffffffffL) << 32);
+        }
+
+        /**
+         * PRF over (lo, hi). 16 bytes in, 16 bytes out written to outLoHi.
+         */
+        public static void mix2L(int[] keyWords, long lo, long hi, long[] outLoHi) {
+            if (outLoHi == null || outLoHi.length < 2) {
+                throw new IllegalArgumentException("outLoHi must have length >= 2");
+            }
+            int[] state = STATE.get();
+            int[] blockA = BLOCK_A.get();
+            int[] blockB = BLOCK_B.get();
+            zero(blockA);
+            blockA[0] = (int) lo;
+            blockA[1] = (int) (lo >>> 32);
+            blockA[2] = (int) hi;
+            blockA[3] = (int) (hi >>> 32);
+            compressInto(keyWords, blockA, blockB, 0L, 16, FAST_FLAGS, state);
+            outLoHi[0] = ((long) state[0] & 0xffffffffL) | (((long) state[1] & 0xffffffffL) << 32);
+            outLoHi[1] = ((long) state[2] & 0xffffffffL) | (((long) state[3] & 0xffffffffL) << 32);
+        }
+
+        /**
+         * PRF over arbitrary bytes that fit in a single block. For longer
+         * inputs, use the streaming {@link Hasher} API instead.
+         *
+         * @return first 8 bytes of the keyed hash as a {@code long}
+         */
+        public static long bytes(int[] keyWords, byte[] input, int offset, int length) {
+            if (input == null) {
+                throw new IllegalArgumentException("input must not be null");
+            }
+            if (offset < 0 || length < 0 || offset + length > input.length) {
+                throw new IllegalArgumentException("offset/length out of bounds");
+            }
+            if (length > BLOCK_LEN) {
+                throw new IllegalArgumentException("Prf.bytes only supports inputs <= " + BLOCK_LEN
+                    + " bytes; use Blake3.keyedHash for longer inputs");
+            }
+            int[] state = STATE.get();
+            int[] blockA = BLOCK_A.get();
+            int[] blockB = BLOCK_B.get();
+            zero(blockA);
+            // Pack bytes into the 16-word block, little-endian.
+            for (int i = 0; i < length; i++) {
+                int wordIdx = i >>> 2;
+                int byteShift = (i & 3) << 3;
+                blockA[wordIdx] |= (input[offset + i] & 0xff) << byteShift;
+            }
+            compressInto(keyWords, blockA, blockB, 0L, length, FAST_FLAGS, state);
+            return ((long) state[0] & 0xffffffffL) | (((long) state[1] & 0xffffffffL) << 32);
+        }
+
+        private static void zero(int[] block) {
+            for (int i = 0; i < 16; i++) {
+                block[i] = 0;
+            }
+        }
     }
 }
