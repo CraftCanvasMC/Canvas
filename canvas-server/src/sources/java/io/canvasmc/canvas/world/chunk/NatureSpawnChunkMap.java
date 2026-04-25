@@ -71,7 +71,7 @@ public class NatureSpawnChunkMap {
         else if (range < 0) {
             return;
         }
-        this.centersByRadius[range].add(player.chunkPosition().longKey);
+        this.centersByRadius[range].add(player.chunkPosition().longKey());
     }
 
     public void build() {
@@ -87,7 +87,7 @@ public class NatureSpawnChunkMap {
             return;
         }
         long[] centersRaw = list.elements();
-        long cachedKey = ChunkPos.asLong(ChunkPos.getX(centersRaw[0]) >> REGION_SHIFT, ChunkPos.getZ(centersRaw[0]) >> REGION_SHIFT);
+        long cachedKey = ChunkPos.pack(ChunkPos.getX(centersRaw[0]) >> REGION_SHIFT, ChunkPos.getZ(centersRaw[0]) >> REGION_SHIFT);
         long cachedVal = this.regionBitSets.get(cachedKey);
         long[] offsets = TABLE_BFS[index];
         for (int i = 0; i < centersSize; i++) {
@@ -103,7 +103,7 @@ public class NatureSpawnChunkMap {
 
                 int regionX = chunkX >> REGION_SHIFT;
                 int regionZ = chunkZ >> REGION_SHIFT;
-                long regionKey = ChunkPos.asLong(regionX, regionZ);
+                long regionKey = ChunkPos.pack(regionX, regionZ);
 
                 int localX = chunkX & REGION_MASK;
                 int localZ = chunkZ & REGION_MASK;
@@ -157,7 +157,7 @@ public class NatureSpawnChunkMap {
     public boolean contains(int chunkX, int chunkZ) {
         int regionX = chunkX >> REGION_SHIFT;
         int regionZ = chunkZ >> REGION_SHIFT;
-        long bitset = this.regionBitSets.get(ChunkPos.asLong(regionX, regionZ));
+        long bitset = this.regionBitSets.get(ChunkPos.pack(regionX, regionZ));
         return bitset != 0 && (bitset & (1L << (((chunkZ & REGION_MASK) << REGION_SHIFT) | (chunkX & REGION_MASK)))) != 0L;
     }
 }
