@@ -17,6 +17,7 @@ import io.canvasmc.canvas.util.version.ApiClient;
 import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
 import io.canvasmc.canvas.world.RegionizedTpsBar;
 import io.canvasmc.canvas.world.entity.EntityCollisionMode;
+import io.canvasmc.canvas.world.levelgen.SecureSeed;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedServer;
@@ -71,6 +72,56 @@ public class Config {
         return Bukkit.getServer() != null;
     }
 
+    private static void installSecureSeed(Config config) {
+        SecureSeedProtection settings = config.secureSeedProtection;
+        if (settings.mode == SecureSeedProtection.Mode.V1) {
+            SecureSeed.install(null);
+            return;
+        }
+
+        if (SecureSeed.saltFromHex(settings.salt) == null) {
+            settings.salt = SecureSeed.saltToHex(SecureSeed.generateSalt());
+            LOGGER.info("Generated secure-seed salt for V2 mode, persisting to config");
+        }
+
+        // Activate immediately if the server is far enough along to expose its
+        // seed; otherwise the world bootstrap will call activateSecureSeed once
+        // the level data is loaded.
+        if (MinecraftServer.getServer() != null) {
+            try {
+                long worldSeed = MinecraftServer.getServer().getWorldData().worldGenOptions().seed();
+                activateSecureSeed(worldSeed);
+            } catch (Throwable ignored) {
+                // server not yet at a state where world data is available;
+                // activateSecureSeed will be invoked later from the world bootstrap.
+            }
+        }
+    }
+
+    /**
+     * Activates V2 secure seed protection using the supplied world seed and
+     * the salt currently persisted in the config. Safe to call multiple times;
+     * later calls overwrite the active seed (e.g. after a config reload).
+     */
+    public static void activateSecureSeed(long worldSeed) {
+        if (INSTANCE == null) {
+            return;
+        }
+        SecureSeedProtection settings = INSTANCE.secureSeedProtection;
+        if (settings.mode == SecureSeedProtection.Mode.V1) {
+            SecureSeed.install(null);
+            return;
+        }
+        byte[] salt = SecureSeed.saltFromHex(settings.salt);
+        if (salt == null) {
+            LOGGER.warn("Secure seed protection is in V2 mode but no salt is configured; falling back to V1");
+            SecureSeed.install(null);
+            return;
+        }
+        SecureSeed.install(SecureSeed.of(SecureSeed.Mode.V2, worldSeed, salt));
+        LOGGER.info("Secure seed protection (V2) is active for world seed {}", worldSeed);
+    }
+
     static {
         reload();
         // preload parallel search radius iteration early
@@ -121,6 +172,8 @@ public class Config {
             .constructor(Config::new)
             .post(context -> {
                 GLOBAL_BROADCAST.accept("Running post validation consumer");
+
+                installSecureSeed(context.configuration());
 
                 if (isServerAccessible()) {
                     for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
@@ -771,4 +824,46 @@ public class Config {
         "empty void. With this option enabled, Canvas will make the client display this screen which can be more visually appealing"
     })
     public boolean displayWorldLoadScreenForPortaling = true;
+
+    public SecureSeedProtection secureSeedProtection = new SecureSeedProtection();
+
+    public static class SecureSeedProtection {
+        @Comment({
+            "Secure world generation (Foldenor patch port).",
+            "",
+            "Replaces the predictable noise-based seed pipeline with a cryptographic",
+            "PRF/KDF (BLAKE3). When enabled, the original 64-bit world seed is mixed",
+            "with a per-server salt and expanded into a 1024-bit master key, making",
+            "the seed unrecoverable from observed terrain.",
+            "",
+            "Modes:",
+            " - V1 - vanilla / legacy behavior. Reversible. Default for parity.",
+            " - V2 - secure mode. Recommended for servers that rely on hidden seeds.",
+            "",
+            "Switching modes after a world has generated will produce a different",
+            "world for newly generated chunks. Existing chunks are unaffected."
+        })
+        public Mode mode = Mode.V1;
+
+        @Comment({
+            "32-byte salt encoded as hex. Mixed into the master key under V2 so",
+            "the same world seed produces a different master across servers.",
+            "",
+            "Leave blank to auto-generate on first launch. Once written, do not",
+            "change this value or your world will regenerate inconsistently."
+        })
+        public String salt = "";
+
+        @Comment({
+            "When enabled, V2 dimensions derive independent subkeys, so observing",
+            "the overworld leaks nothing about randomness used in the nether or",
+            "the end. Disable only if you need cross-dimension seed parity for",
+            "tooling reasons."
+        })
+        public boolean perDimensionSubkeys = true;
+
+        public enum Mode {
+            V1, V2
+        }
+    }
 }
