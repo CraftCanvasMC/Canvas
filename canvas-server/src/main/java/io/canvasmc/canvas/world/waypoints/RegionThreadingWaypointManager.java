@@ -78,8 +78,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         if (!waypoints.contains(waypoint)) waypoints.add(waypoint);
 
         for (ServerPlayer player : players) {
-            player.canvas$scheduleToOrRun(() -> {
-                createConnection(player, waypoint);
+            player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                createConnection(entityPlayer, waypoint);
             });
         }
     }
@@ -98,8 +98,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
                 continue;
             }
 
-            player.canvas$scheduleToOrRun(() -> {
-                updateWaypoint(waypoint, player);
+            player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                updateWaypoint(waypoint, entityPlayer);
             });
         }
     }
@@ -122,8 +122,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void untrackWaypoint(@NonNull WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
-            player.canvas$scheduleToOrRun(() -> {
-                disconnectWaypoint(waypoint, player);
+            player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                disconnectWaypoint(waypoint, entityPlayer);
             });
         }
 
@@ -157,13 +157,13 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     // Note: this should be called on the 'player'
     public void updatePlayer(@NonNull ServerPlayer player) {
         if (isLocatorBarDisabled()) return;
-        player.canvas$scheduleToOrRun(() -> {
+        player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
             final Object2ObjectMap<WaypointTransmitter, WaypointTransmitter.Connection> map = player.canvas$activeWaypoints;
             final CallbackHolder[] callbackHolders = new CallbackHolder[map.size()];
 
             int idx = 0;
             for (Map.Entry<WaypointTransmitter, WaypointTransmitter.Connection> entry : map.object2ObjectEntrySet()) {
-                CallbackHolder callbackHolder = updateConnection(player, entry.getKey(), entry.getValue());
+                CallbackHolder callbackHolder = updateConnection(entityPlayer, entry.getKey(), entry.getValue());
                 if (callbackHolder != null) {
                     callbackHolders[idx] = callbackHolder;
                     idx++;
@@ -177,7 +177,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
             for (WaypointTransmitter waypoint : waypoints) {
                 if (!map.containsKey(waypoint)) {
-                    createConnection(player, waypoint);
+                    createConnection(entityPlayer, waypoint);
                 }
             }
         });
@@ -195,8 +195,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void breakAllConnections() {
         for (ServerPlayer player : players) {
-            player.canvas$scheduleToOrRun(() -> {
-                breakConnection(player);
+            player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                breakConnection(entityPlayer);
             });
         }
     }
@@ -204,8 +204,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     @Override
     public void remakeConnections(@NonNull WaypointTransmitter waypoint) {
         for (ServerPlayer player : players) {
-            player.canvas$scheduleToOrRun(() -> {
-                createConnection(player, waypoint);
+            player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                createConnection(entityPlayer, waypoint);
             });
         }
     }

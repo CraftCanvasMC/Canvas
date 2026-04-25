@@ -32,9 +32,9 @@ public final class ScheduledHandleTickState {
     }
 
     public static void sendStateToAllPlayers() {
-        for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().players) {
-            player.canvas$scheduleToOrRun(() -> {
-                player.level().getCurrentWorldData().regionData.getRegionSchedulingHandle().getTickManager().sendStateToPlayer(player);
+        for (final ServerPlayer serverPlayer : MinecraftServer.getServer().getPlayerList().players) {
+            serverPlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                entityPlayer.level().getCurrentWorldData().regionData.getRegionSchedulingHandle().getTickManager().sendStateToPlayer(entityPlayer);
             });
         }
     }
