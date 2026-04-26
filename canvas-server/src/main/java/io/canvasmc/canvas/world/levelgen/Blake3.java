@@ -497,6 +497,30 @@ public final class Blake3 {
         }
 
         /**
+         * PRF over the worldgen-crypto tuple {@code (x, z, salt, extraSeed)}
+         * — 24 bytes in, 16 bytes out (the two longs that seed
+         * Xoroshiro128++).
+         */
+        public static void worldgenCoord(int[] keyWords, int x, int z, long salt, long extraSeed, long[] outLoHi) {
+            if (outLoHi == null || outLoHi.length < 2) {
+                throw new IllegalArgumentException("outLoHi must have length >= 2");
+            }
+            int[] state = STATE.get();
+            int[] blockA = BLOCK_A.get();
+            int[] blockB = BLOCK_B.get();
+            zero(blockA);
+            blockA[0] = x;
+            blockA[1] = z;
+            blockA[2] = (int) salt;
+            blockA[3] = (int) (salt >>> 32);
+            blockA[4] = (int) extraSeed;
+            blockA[5] = (int) (extraSeed >>> 32);
+            compressInto(keyWords, blockA, blockB, 0L, 24, FAST_FLAGS, state);
+            outLoHi[0] = ((long) state[0] & 0xffffffffL) | (((long) state[1] & 0xffffffffL) << 32);
+            outLoHi[1] = ((long) state[2] & 0xffffffffL) | (((long) state[3] & 0xffffffffL) << 32);
+        }
+
+        /**
          * PRF over arbitrary bytes that fit in a single block. For longer
          * inputs, use the streaming {@link Hasher} API instead.
          *

@@ -17,6 +17,8 @@ import io.canvasmc.canvas.util.version.ApiClient;
 import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
 import io.canvasmc.canvas.world.RegionizedTpsBar;
 import io.canvasmc.canvas.world.entity.EntityCollisionMode;
+import io.canvasmc.canvas.world.levelgen.Globals;
+import io.canvasmc.canvas.world.levelgen.HashingV2;
 import io.canvasmc.canvas.world.levelgen.SecureSeed;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.adventure.PaperAdventure;
@@ -111,20 +113,45 @@ public class Config {
     }
 
     /**
-     * Activates secure seed protection using the supplied world seed and
-     * the salt currently persisted in the config. Idempotent: identical
-     * inputs replace nothing, mismatched inputs swap the active seed and
-     * log a warning.
+     * V1-compatibility entry point: activates secure seed protection from
+     * just the 64-bit world seed, falling back to the legacy salt-based
+     * derivation. V2 callers should pass the 1024-bit feature seed via
+     * {@link #activateSecureSeed(long, long[])} instead.
      */
     public static void activateSecureSeed(long worldSeed) {
+        activateSecureSeed(worldSeed, null);
+    }
+
+    /**
+     * Activates secure seed protection using the supplied world seed and
+     * (when V2 is configured) the 1024-bit feature seed loaded from
+     * level.dat. Idempotent: identical inputs replace nothing, mismatched
+     * inputs swap the active seed and log a warning.
+     */
+    public static void activateSecureSeed(long worldSeed, long[] featureSeed) {
         if (INSTANCE == null) {
             return;
         }
         SecureSeedProtection settings = INSTANCE.secureSeedProtection;
         if (!settings.enabled) {
             SecureSeed.install(null);
+            Globals.setupGlobals(null);
             return;
         }
+        if (settings.version >= 2) {
+            // V2: 1024-bit feature seed via Globals. Falls back to deriving
+            // the feature seed from the world seed if no explicit one is set.
+            long[] resolved = HashingV2.isValid(featureSeed)
+                ? featureSeed
+                : HashingV2.expandLevelSeedTo1024Bits(worldSeed);
+            Globals.setupGlobals(resolved);
+            // Keep V1 SecureSeed unloaded so callers don't accidentally use both.
+            SecureSeed.install(null);
+            LOGGER.info("Secure seed protection (V2) is active for world seed {}", worldSeed);
+            return;
+        }
+        // V1: legacy salt-based path.
+        Globals.setupGlobals(null);
         byte[] salt = SecureSeed.saltFromHex(settings.salt);
         if (salt == null) {
             LOGGER.warn("Secure seed protection is enabled but no salt is configured; falling back to vanilla seed handling");
@@ -136,10 +163,10 @@ public class Config {
             && existing.mode() == SecureSeed.Mode.V2
             && existing.worldSeed() == worldSeed
             && java.util.Arrays.equals(existing.saltCopy(), salt)) {
-            return; // already installed with these exact inputs
+            return;
         }
         SecureSeed.install(SecureSeed.of(SecureSeed.Mode.V2, worldSeed, salt));
-        LOGGER.info("Secure seed protection is active for world seed {}", worldSeed);
+        LOGGER.info("Secure seed protection (V1) is active for world seed {}", worldSeed);
     }
 
     static {
@@ -849,14 +876,15 @@ public class Config {
 
     public static class SecureSeedProtection {
         @Comment({
-            "Master switch for secure world generation (Foldenor patch port).",
+            "Master switch for secure world generation (Foldenor / Luminol /",
+            "Matter patch port).",
             "",
             "When false (default), Canvas uses vanilla seed handling: world seeds",
-            "remain reversible from observed terrain. When true, the 64-bit world",
-            "seed is mixed with a per-server salt and expanded into a 1024-bit",
-            "master key via BLAKE3, and per-coordinate randomness is derived as",
-            "a BLAKE3 keyed hash. The original seed cannot be recovered from",
-            "generated chunks.",
+            "remain reversible from observed terrain. When true, world generation",
+            "switches to a BLAKE3-based pipeline keyed on a 1024-bit feature seed",
+            "that is independent of the displayed 64-bit world seed. Per-coordinate",
+            "randomness is derived as a BLAKE3 keyed hash, so the original seed",
+            "cannot be recovered from generated chunks.",
             "",
             "Recommended for servers that rely on hidden or private seeds.",
             "Toggling this after a world has generated will produce a different",
@@ -865,8 +893,19 @@ public class Config {
         public boolean enabled = false;
 
         @Comment({
-            "32-byte salt encoded as hex. Mixed into the master key when enabled,",
-            "so the same world seed produces a different master across servers.",
+            "Secure seed implementation version.",
+            " - 1: legacy. Reuses the 64-bit world seed mixed with a 32-byte salt,",
+            "      expanded via BLAKE3 KDF. Compatible with older saves.",
+            " - 2: recommended. Uses an independent 1024-bit feature seed stored",
+            "      in level.dat / server.properties as feature-level-seed.",
+            "      Per-terrain components (base, aquifer, ore, climate, surface,",
+            "      end-islands) get cryptographically isolated subkeys."
+        })
+        public int version = 2;
+
+        @Comment({
+            "32-byte salt encoded as hex. Used in V1 mode to mix with the 64-bit",
+            "world seed. In V2 mode this is unused (the feature seed is the secret).",
             "",
             "Leave blank to auto-generate on first launch. Once written, do not",
             "change this value or your world will regenerate inconsistently."
