@@ -448,12 +448,6 @@ public class Config {
         public boolean mc245394 = false;
 
         @Comment({
-            "Fixes MC-231743 - https://bugs.mojang.com/browse/MC/issues/MC-231743",
-            "minecraft.used:minecraft.POTTABLE_PLANT doesn't increase when placing plants into flower pots"
-        })
-        public boolean mc231743 = false;
-
-        @Comment({
             "Fixes MC-227337 - https://bugs.mojang.com/browse/MC/issues/MC-227337",
             "When a shulker bullet hits an entity, the explodes sound is not played and particles are not produced"
         })
