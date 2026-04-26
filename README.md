@@ -48,7 +48,7 @@ of optimizations and performance features for large scale servers.
 
 ```bash
 ./gradlew applyAllPatches # Applies all patches to construct the Canvas source
-./gradlew createPaperClipJar # Creates the publication jar used by our Jenkins CI
+./gradlew createPaperclipJar # Creates the paperclip jar
 ./gradlew runDevServer # Starts a development server locally
 ```
 
