@@ -420,7 +420,7 @@ public class Config {
             "Fixes MC-298464 - https://bugs.mojang.com/browse/MC/issues/MC-298464",
             "Memory leak in hoglin farm due to CHANGED_DIMENSION entity removal"
         })
-        public boolean mc298464 = false; // TODO - fixed by Mojang, remove.
+        public boolean mc298464 = false;
 
         @Comment({
             "Fixes MC-223153 - https://bugs.mojang.com/browse/MC/issues/MC-223153",
@@ -432,7 +432,6 @@ public class Config {
             "Fixes MC-200418 - https://bugs.mojang.com/browse/MC/issues/MC-200418",
             "Cured baby zombie villagers stay as jockey variant"
         })
-        // track this, was reopened in 1.21.11-pre2
         public boolean mc200418 = false;
 
         @Comment({
