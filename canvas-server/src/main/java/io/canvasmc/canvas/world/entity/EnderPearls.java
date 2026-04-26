@@ -37,6 +37,7 @@ import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.level.storage.TagValueOutput;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NullMarked;
@@ -45,7 +46,7 @@ import org.jspecify.annotations.Nullable;
 @NullMarked
 public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
     private static final AtomicLong LAST_AUTOSAVE = new AtomicLong(System.nanoTime());
-    public static final Path SAVE_PATH = Paths.get("pearls.dat");
+    public static final String SAVE_NAME = "canvas/pearls.dat";
     public static final Codec<Pearl> PEARL_CODEC = CompoundTag.CODEC.comapFlatMap(
         (Function<CompoundTag, DataResult<Pearl>>) compoundTag -> DataResult.success(new Pearl(compoundTag)), pearl -> pearl.serialized
     );
@@ -57,14 +58,15 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         ).apply(instance, EnderPearls::new)
     );
 
-    public EnderPearls(Map<UUID, List<Pearl>> pearls) {
+    public EnderPearls(final Map<UUID, List<Pearl>> pearls) {
         this.pearls = new ConcurrentHashMap<>(pearls);
     }
 
-    public static EnderPearls read() {
-        if (Config.INSTANCE.restoreVanillaEnderPearlBehavior && Files.exists(SAVE_PATH)) {
+    public static EnderPearls read(final Path worldSavePath) {
+        final Path resolved = worldSavePath.resolve(SAVE_NAME);
+        if (Config.INSTANCE.restoreVanillaEnderPearlBehavior && Files.exists(resolved)) {
             try {
-                CompoundTag tag = Objects.requireNonNull(NbtIo.readCompressed(SAVE_PATH, NbtAccounter.unlimitedHeap()), "NBT cannot be null")
+                CompoundTag tag = Objects.requireNonNull(NbtIo.readCompressed(resolved, NbtAccounter.unlimitedHeap()), "NBT cannot be null")
                     .asCompound().orElseThrow(UnknownError::new);
                 return CODEC.decode(NbtOps.INSTANCE, tag).getOrThrow().getFirst();
             } catch (Throwable e) {
@@ -78,8 +80,11 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
         Util.ioPool().execute(() -> {
             try {
+                // create directories first or else we fail to save
+                Path resolved = MinecraftServer.getServer().storageSource.getLevelPath(LevelResource.DATA).resolve(SAVE_NAME);
+                Files.createDirectories(resolved.getParent());
                 Tag tag = CODEC.encodeStart(NbtOps.INSTANCE, this).getOrThrow();
-                NbtIo.writeCompressed((CompoundTag) tag, SAVE_PATH);
+                NbtIo.writeCompressed((CompoundTag) tag, resolved);
                 future.complete(true);
             } catch (Throwable thrown) {
                 future.completeExceptionally(thrown);
