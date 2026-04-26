@@ -35,13 +35,13 @@ of optimizations and performance features for large scale servers.
 ### Downloading & Running
 
 1. Download the latest server JAR from the **Downloads** page on [canvasmc.io](https://canvasmc.io/downloads/canvas).  
-2. Launch using Java (Java 21+ required) with your preferred arguments and configuration.
+2. Launch using Java (Java 25+ required) with your preferred arguments and configuration.
 
 ### Building from Source
 
 **Requirements:**
 
-- Java 21
+- Java 25
 - Git (configured with name/email)
 
 **Common build commands:**

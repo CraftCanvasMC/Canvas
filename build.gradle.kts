@@ -113,9 +113,12 @@ subprojects {
         }
     }
 }
+
+/* TODO - make this not fail on clean clones
 dependencies {
     jstClasspath(projects.canvasApi)
 }
+*/
 
 // patching scripts
 tasks.register("fixupMinecraftFilePatches") {
