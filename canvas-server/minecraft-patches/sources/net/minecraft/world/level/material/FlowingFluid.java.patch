@@ -1,12 +1,25 @@
 --- a/net/minecraft/world/level/material/FlowingFluid.java
 +++ b/net/minecraft/world/level/material/FlowingFluid.java
+@@ -9,7 +_,6 @@
+ import java.util.Map;
+ import java.util.Objects;
+ import java.util.Map.Entry;
+-import net.minecraft.SharedConstants;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
+ import net.minecraft.server.level.ServerLevel;
 @@ -341,31 +_,124 @@
      protected int getSlopeDistance(
          final LevelReader level, final BlockPos pos, final int pass, final Direction from, final BlockState state, final FlowingFluid.SpreadContext context
      ) {
 -        int lowest = 1000;
--
--        for (Direction direction : Direction.Plane.HORIZONTAL) {
++        // Leaf start - optimize fluid spread
++        it.unimi.dsi.fastutil.longs.LongSet visited = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheVisited;
++        SlopeDistanceNodeDeque queue = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheQueue;
++        visited.clear();
++        queue.clear();
+ 
+         for (Direction direction : Direction.Plane.HORIZONTAL) {
 -            if (direction != from) {
 -                BlockPos testPos = pos.relative(direction);
 -                BlockState testState = context.getBlockStateIfLoaded(testPos); // Paper - Prevent chunk loading from fluid flowing
@@ -23,74 +36,62 @@
 -                            lowest = v;
 -                        }
 -                    }
--                }
--            }
--        }
--
--        return lowest;
--    }
-+        // Leaf start - optimize fluid spread
-+        it.unimi.dsi.fastutil.longs.LongSet visited = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheVisited;
-+        SlopeDistanceNodeDeque queue = ((ServerLevel) level).getCurrentWorldData().slopeDistanceCacheQueue;
-+        visited.clear();
-+        queue.clear();
++            if (direction == from) continue;
 +
-+        for (Direction dir : Direction.Plane.HORIZONTAL) {
-+            if (dir == from) continue;
-+
-+            BlockPos neighborPos = pos.relative(dir); // immutable
-+            BlockState neighborState = context.getBlockStateIfLoaded(neighborPos);
-+            if (neighborState == null) continue;
++            BlockPos testPos = pos.relative(direction); // immutable
++            BlockState testState = context.getBlockStateIfLoaded(testPos); // Paper - Prevent chunk loading from fluid flowing
++            if (testState == null) continue; // Paper - Prevent chunk loading from fluid flowing
 +
 +            // Check if the fluid can actually pass through to this first neighbor before adding
-+            FluidState neighborFluidState = neighborState.getFluidState();
-+            if (!this.canPassThrough(level, this.getFlowing(), pos, state, dir, neighborPos, neighborState, neighborFluidState)) {
++            FluidState testFluidState = testState.getFluidState();
++            if (!this.canPassThrough(level, this.getFlowing(), pos, state, direction, testPos, testState, testFluidState)) {
 +                continue;
 +            }
-+            long visitKey = encodeSlopeNode(neighborPos, dir.getOpposite());
++            long visitKey = encodeSlopeNode(testPos, direction.getOpposite());
 +            if (visited.add(visitKey)) {
-+                queue.add(new FlowingFluid.SlopeDistanceNode(neighborPos, pass, dir.getOpposite(), neighborState));
++                queue.add(new FlowingFluid.SlopeDistanceNode(testPos, pass, direction.getOpposite(), testState));
 +            }
 +        }
 +
 +        int slopeFindDistance = this.getSlopeFindDistance(level);
-+        int minDistance = 1000;
++        int lowest = 1000;
 +
 +        // Process the queue
 +        while (!queue.isEmpty()) {
 +            FlowingFluid.SlopeDistanceNode current = queue.poll();
 +            if (context.isHole(current.pos)) {
-+                return current.depth;
++                return current.pass;
 +            }
 +
-+            if (current.depth >= slopeFindDistance) continue;
++            if (current.pass >= slopeFindDistance) continue;
 +
-+            for (Direction dir : Direction.Plane.HORIZONTAL) {
-+                if (dir == current.excludedDir) continue;
++            for (Direction direction : Direction.Plane.HORIZONTAL) {
++                if (direction == current.from) continue;
 +
-+                BlockPos nextPos = current.pos.relative(dir); // immutable
-+                BlockState nextState = context.getBlockStateIfLoaded(nextPos);
-+                if (nextState == null) continue;
++                BlockPos nextTestPos = current.pos.relative(direction); // immutable
++                BlockState nextTestState = context.getBlockStateIfLoaded(nextTestPos); // Paper - Prevent chunk loading from fluid flowing
++                if (nextTestState == null) continue; // Paper - Prevent chunk loading from fluid flowing
 +
-+                FluidState nextFluidState = nextState.getFluidState();
-+                if (!this.canPassThrough(level, this.getFlowing(), current.pos, current.state, dir, nextPos, nextState, nextFluidState)) {
++                FluidState nextTestFluidState = nextTestState.getFluidState();
++                if (!this.canPassThrough(level, this.getFlowing(), current.pos, current.state, direction, nextTestPos, nextTestState, nextTestFluidState)) {
 +                    continue;
 +                }
 +
-+                long visitKey = encodeSlopeNode(nextPos, dir.getOpposite());
++                long visitKey = encodeSlopeNode(nextTestPos, direction.getOpposite());
 +                if (visited.add(visitKey)) {
-+                    queue.add(new FlowingFluid.SlopeDistanceNode(nextPos, current.depth + 1, dir.getOpposite(), nextState));
-+                }
-+            }
-+        }
-+
-+        return minDistance;
++                    queue.add(new FlowingFluid.SlopeDistanceNode(nextTestPos, current.pass + 1, direction.getOpposite(), nextTestState));
+                 }
+             }
+         }
+ 
+         return lowest;
+-    }
 +        // Leaf end - optimize fluid spread
 +    }
 +    // Leaf start - optimize fluid spread
 +
-+    private static long encodeSlopeNode(BlockPos pos, Direction excludedDir) {
-+        return ((long) pos.getX() & 0xFFFFFFFFL) << 32 | ((long) pos.getZ() & 0xFFFFFFFFL) << 4 | (excludedDir.ordinal() & 0x0F);
++    private static long encodeSlopeNode(final BlockPos pos, final Direction from) {
++        return ((long) pos.getX() & 0xFFFFFFFFL) << 32 | ((long) pos.getZ() & 0xFFFFFFFFL) << 4 | (from.ordinal() & 0x0F);
 +    }
 +
 +    public static class SlopeDistanceNodeDeque {
@@ -145,7 +146,7 @@
 +        }
 +    }
 +
-+    private record SlopeDistanceNode(BlockPos pos, int depth, Direction excludedDir, BlockState state) {}
++    private record SlopeDistanceNode(BlockPos pos, int pass, Direction from, BlockState state) {}
 +    // Leaf end - optimize fluid spread
  
      public boolean isWaterHole(
