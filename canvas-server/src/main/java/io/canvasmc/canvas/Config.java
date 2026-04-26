@@ -514,12 +514,6 @@ public class Config {
         public boolean mc136249 = false;
 
         @Comment({
-            "Fixes MC-258859 - https://bugs.mojang.com/browse/MC/issues/MC-258859",
-            "Steep surface rule condition only works on the north and east faces of slopes"
-        })
-        public boolean mc258859 = false;
-
-        @Comment({
             "In Vanilla, pearls can be duplicated during shutdown because pearls are saved to its owning player data",
             "and in the chunk data. Meaning, when the chunk is loaded, it loads that pearl, and when the player is loaded",
             "it loads the pearl in the player data.",
