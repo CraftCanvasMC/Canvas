@@ -1,6 +1,5 @@
 package io.canvasmc.canvas.configuration;
 
-import io.canvasmc.canvas.configuration.markers.Comment;
 import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -8,7 +7,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import joptsimple.internal.Strings;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -25,15 +23,16 @@ import org.yaml.snakeyaml.nodes.ScalarNode;
 public record Token(
     @Nullable Token parent, @NonNull List<Token> children, @NonNull String name, @Nullable String comment
 ) {
-    @Contract("_, _, _ -> new")
+
+    @Contract("_, _, _, _ -> new")
     private static @NonNull Token compile(
         final @NonNull Field field,
         final @Nullable Token parent,
-        final @NonNull Class<?> classInsideOf
+        final @NonNull Class<? extends Part> classInsideOf,
+        final @NonNull Map<String, String> stylesOfParent
     ) {
-        String comment = field.isAnnotationPresent(Comment.class)
-            ? Strings.join(field.getAnnotation(Comment.class).value(), "\n")
-            : null;
+        // look up comment by field name from the parent class's styles map
+        String comment = stylesOfParent.get(field.getName());
 
         if (comment != null) {
             comment = comment.replace("\n", " ").replace("\r", " ").trim();
@@ -47,9 +46,12 @@ public record Token(
 
         Class<?> fieldType = field.getType();
 
-        // check if class type is nested
+        // check if the field type is a nested Part subclass
         for (Class<?> nested : classInsideOf.getDeclaredClasses()) {
-            if (nested.equals(fieldType)) {
+            if (nested.equals(fieldType) && Part.class.isAssignableFrom(nested)) {
+                @SuppressWarnings("unchecked")
+                Class<? extends Part> nestedPart = (Class<? extends Part>) nested;
+                Map<String, String> nestedStyles = Part.harvest(nestedPart);
 
                 // build children based on this
                 for (Field nestedField : nested.getDeclaredFields()) {
@@ -60,7 +62,7 @@ public record Token(
                         continue;
                     }
 
-                    Token child = compile(nestedField, token, nested);
+                    Token child = compile(nestedField, token, nestedPart, nestedStyles);
                     children.add(child);
                 }
 
@@ -145,6 +147,14 @@ public record Token(
 
     // note: this is a linked list ordered by class field order
     public static @NonNull List<Token> buildTree(final @NonNull Class<?> clazz) {
+        if (!Part.class.isAssignableFrom(clazz)) {
+            throw new IllegalArgumentException("Config class " + clazz.getName() + " must extend Part");
+        }
+
+        @SuppressWarnings("unchecked")
+        Class<? extends Part> partClass = (Class<? extends Part>) clazz;
+        Map<String, String> styles = Part.harvest(partClass);
+
         List<Token> tokens = new LinkedList<>();
 
         for (final Field declaredField : clazz.getDeclaredFields()) {
@@ -156,7 +166,7 @@ public record Token(
                 continue;
             }
 
-            tokens.add(compile(declaredField, null, clazz));
+            tokens.add(compile(declaredField, null, partClass, styles));
         }
 
         return tokens;

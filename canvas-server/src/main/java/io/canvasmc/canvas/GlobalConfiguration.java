@@ -1,8 +1,8 @@
 package io.canvasmc.canvas;
 
 import io.canvasmc.canvas.configuration.ConfigurationProvider;
+import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
-import io.canvasmc.canvas.configuration.markers.Comment;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.version.ApiClient;
@@ -24,7 +24,7 @@ import net.minecraft.server.players.PlayerList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class GlobalConfiguration {
+public class GlobalConfiguration extends Part {
 
     private static final Path CONFIG_PATH = Path.of("config/canvas-server.yml").toAbsolutePath().normalize();
     private static final String BROADCAST_PERMISSION = "canvas.broadcasting.reciever";
@@ -179,57 +179,33 @@ public class GlobalConfiguration {
     }
 
     public Scheduler regionScheduler = new Scheduler();
-    public static class Scheduler {
+    public static class Scheduler extends Part {
 
-        @Comment("Configurations for the AFFINITY scheduler provided by Canvas. For these options to take effect, change the 'threaded-regions.scheduler' option in 'paper-global.yml' to 'AFFINITY'")
         public AffinityScheduler affinityScheduler = new AffinityScheduler();
-        public static class AffinityScheduler {
-
-            @Comment({
-                "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
-                "before allowing other threads to steal it for execution.",
-                "Note: A smaller value reduces task deadline delays but increases potential task stealing between threads"
-            })
+        public static class AffinityScheduler extends Part {
             public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
-
-            @Comment({
-                "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
-                "Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done.",
-                "Default: 0.1ms"
-            })
             public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
-
-            @Comment({
-                "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
-                "to improve performance. If this is enabled, and the task misses its deadline by 'stealThresholdMillis', it can",
-                "be taken by another tick thread to be run."
-            })
             public boolean enableWorkStealing = true;
-
-            @Comment({
-                "Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick"
-            })
             public boolean enableMidTickTasks = true;
-
-            @Comment("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
             public List<String> tickRegionAffinity = new ArrayList<>();
-
-            @Comment("Enables pinning threads of the AFFINITY region scheduler to cpu cores")
             public boolean enableAffinitySchedulerCpuAffinity = false;
-
+            {
+                defineStyle("stealThresholdMillis", "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task before allowing other threads to steal it for execution. Note: A smaller value reduces task deadline delays but increases potential task stealing between threads");
+                defineStyle("runTasksBufferMillis", "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks. Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done. Default: 0.1ms");
+                defineStyle("enableWorkStealing", "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread to improve performance. If this is enabled, and the task misses its deadline by 'stealThresholdMillis', it can be taken by another tick thread to be run.");
+                defineStyle("enableMidTickTasks", "Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick");
+                defineStyle("tickRegionAffinity", "Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores");
+                defineStyle("enableAffinitySchedulerCpuAffinity", "Enables pinning threads of the AFFINITY region scheduler to cpu cores");
+            }
         }
 
-        @Comment({
-            "Amount of time between the end and next start of a region tick where the server will log a",
-            "warning that the scheduler is overloaded. Can help catch if you need to allocate more threads",
-            "or help identify deadline missing issues"
-        })
         public long overloadedLogMillis = 5_000L;
-
-        @Comment({
-            "The default tick rate for the scheduler. Vanilla is 20, the game will run faster or slower depending on how you adjust this value",
-            "Note this should really only be used for debugging purposes and for custom environments that require this change"
-        })
         public float defaultTickRate = 20.0F;
+
+        {
+            defineStyle("affinityScheduler", "Configurations for the AFFINITY scheduler provided by Canvas. For these options to take effect, change the 'threaded-regions.scheduler' option in 'paper-global.yml' to 'AFFINITY'");
+            defineStyle("overloadedLogMillis", "Amount of time between the end and next start of a region tick where the server will log a warning that the scheduler is overloaded. Can help catch if you need to allocate more threads or help identify deadline missing issues");
+            defineStyle("defaultTickRate", "The default tick rate for the scheduler. Vanilla is 20, the game will run faster or slower depending on how you adjust this value. Note this should really only be used for debugging purposes and for custom environments that require this change");
+        }
     }
 }

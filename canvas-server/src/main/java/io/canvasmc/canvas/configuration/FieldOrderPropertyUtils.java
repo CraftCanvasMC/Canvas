@@ -21,7 +21,7 @@ import org.yaml.snakeyaml.introspector.PropertyUtils;
 public class FieldOrderPropertyUtils extends PropertyUtils {
 
     public FieldOrderPropertyUtils() {
-        setBeanAccess(BeanAccess.FIELD);
+        setBeanAccess(BeanAccess.DEFAULT);
     }
 
     static String toKebabCase(final String camel) {
