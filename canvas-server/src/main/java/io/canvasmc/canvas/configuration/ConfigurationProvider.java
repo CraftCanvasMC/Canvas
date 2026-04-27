@@ -58,11 +58,11 @@ public class ConfigurationProvider {
 
         Representer representer = new Representer(DUMPER_OPTIONS);
         representer.setPropertyUtils(propertyUtils);
-        representer.getPropertyUtils().setBeanAccess(BeanAccess.DEFAULT);
+        representer.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
 
         Constructor constructor = new Constructor(LOADER_OPTIONS);
         constructor.setPropertyUtils(propertyUtils);
-        constructor.getPropertyUtils().setBeanAccess(BeanAccess.DEFAULT);
+        constructor.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
 
         YAML = new Yaml(
             constructor,

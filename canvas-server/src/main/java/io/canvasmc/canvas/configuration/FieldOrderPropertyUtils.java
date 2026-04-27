@@ -21,7 +21,7 @@ import org.yaml.snakeyaml.introspector.PropertyUtils;
 public class FieldOrderPropertyUtils extends PropertyUtils {
 
     public FieldOrderPropertyUtils() {
-        setBeanAccess(BeanAccess.DEFAULT);
+        setBeanAccess(BeanAccess.FIELD);
     }
 
     static String toKebabCase(final String camel) {
@@ -79,17 +79,26 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
         // getDeclaredFields returns fields in declaration order per the JVM spec
         // we walk the hierarchy too so nested/inherited fields sort correctly
 
+        // filter out any fields declared in Part itself
+        Set<String> partFields = Arrays.stream(Part.class.getDeclaredFields())
+            .map(Field::getName)
+            .collect(Collectors.toSet());
+
         List<String> declarationOrder = new ArrayList<>();
         Class<?> current = type;
         while (current != null && current != Object.class) {
             Arrays.stream(current.getDeclaredFields())
                 .filter(f -> !f.accessFlags().contains(AccessFlag.STATIC))
                 .map(Field::getName)
+                .filter(name -> !partFields.contains(name))
                 .forEach(declarationOrder::add);
             current = current.getSuperclass();
         }
 
         return properties.stream()
+            .filter(p -> !partFields.contains(
+                p instanceof KebabCaseProperty kcp ? fromKebabCase(kcp.getName()) : p.getName()
+            ))
             .sorted((a, b) -> {
                 // names are still camelCase at this point, KebabCaseProperty
                 // wraps them after sorting, so sort on the original name
