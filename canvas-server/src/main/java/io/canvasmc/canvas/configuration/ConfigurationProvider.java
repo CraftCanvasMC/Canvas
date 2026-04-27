@@ -88,7 +88,7 @@ public class ConfigurationProvider {
         representation.setTag(Tag.MAP);
 
         try {
-            write(pathAbsolute, representation, header, false);
+            write(pathAbsolute, representation, header, false, commentCharLim);
         } catch (IOException ioe) {
             throw new RuntimeException("Couldn't save config", ioe);
         }
@@ -104,13 +104,13 @@ public class ConfigurationProvider {
     }
 
     private static void write(
-        final @NonNull Path pathAbsolute, final Node representation, final @Nullable String header, final boolean alreadyExisted
+        final @NonNull Path pathAbsolute, final Node representation, final @Nullable String header, final boolean alreadyExisted, final int charLimit
     ) throws IOException {
         // only write the header on first creation, because if the file already existed,
         // the user may have edited or removed it intentionally, so we never touch it
         if (!alreadyExisted && header != null) {
             String stripped = header.replace("\n", " ").replace("\r", " ").trim();
-            List<CommentLine> lines = new ArrayList<>(Token.buildCommentLines(stripped, Integer.MAX_VALUE));
+            List<CommentLine> lines = new ArrayList<>(Token.buildCommentLines(stripped, charLimit));
             // add blank line so that it's kinda separated from the other comments
             lines.add(new CommentLine(null, null, "", CommentType.BLANK_LINE));
             representation.setBlockComments(lines);
@@ -208,7 +208,7 @@ public class ConfigurationProvider {
             fileRepresentation.setTag(Tag.MAP);
 
             try {
-                write(pathAbsolute, fileRepresentation, header, true);
+                write(pathAbsolute, fileRepresentation, header, true, commentCharLim);
             } catch (IOException ioe) {
                 throw new RuntimeException("Couldn't save config", ioe);
             }
