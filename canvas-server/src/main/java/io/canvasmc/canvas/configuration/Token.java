@@ -60,7 +60,7 @@ public record Token(
                         continue;
                     }
 
-                    Token child = compile(nestedField, token, classInsideOf);
+                    Token child = compile(nestedField, token, nested);
                     children.add(child);
                 }
 
