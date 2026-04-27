@@ -3,7 +3,9 @@ package io.canvasmc.canvas.configuration.test;
 import com.mojang.logging.LogUtils;
 import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Resolver;
+import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.configuration.markers.Comment;
+import io.canvasmc.canvas.configuration.markers.NumberRange;
 import java.nio.file.Path;
 import org.slf4j.Logger;
 
@@ -14,6 +16,7 @@ public class Main {
     public String test = "aaa";
     @Comment("sdfsdfsdfs!")
     public boolean a = false;
+    @NumberRange(NumberRange.Type.GREATER_THAN_0)
     public int num = 31;
     @Comment("Tessdfsdfsdfting sdfsd sdfjhsd s fdsdfs q  d d d dd d g g g g g g g g g g g g g g g g g gdjsdl kfjskd f sdfsldfkjsd sddd!")
     public String tessssst = "aaaaa";
@@ -38,6 +41,7 @@ public class Main {
 
                 @Override
                 public void onFinishLoad(final Main instance) {
+                    Validator.validateObject(instance);
                     LOGGER.info("{}{}", instance.test, instance.vbdfhd.aas);
                 }
             },
@@ -52,6 +56,7 @@ public class Main {
             new Resolver<>() {
                 @Override
                 public void onFinishLoad(final Main instance) {
+                    Validator.validateObject(instance);
                     LOGGER.info("{}{}", instance.test, instance.vbdfhd.aas);
                 }
             },

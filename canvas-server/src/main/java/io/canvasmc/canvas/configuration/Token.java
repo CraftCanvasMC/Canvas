@@ -148,7 +148,7 @@ public record Token(
         List<Token> tokens = new LinkedList<>();
 
         for (final Field declaredField : clazz.getDeclaredFields()) {
-            // skip any non-public or static or final fields
+            // skip any non-public or final fields
             if (
                 !declaredField.accessFlags().contains(AccessFlag.PUBLIC) ||
                     declaredField.accessFlags().contains(AccessFlag.FINAL)
