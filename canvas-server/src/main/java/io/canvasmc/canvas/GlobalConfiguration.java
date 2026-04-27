@@ -87,13 +87,32 @@ public class GlobalConfiguration extends Part {
                     }));
                 }
             },
-            String.join(" ",
-                "This is the server-wide configuration file provided by CanvasMC. This config holds options that",
-                "are set across the entire server, and cannot be overridden per-world. You are free to modify, add, or",
-                "remove comments as you please. You may refresh this configuration using the '/canvas reload` command at runtime.",
-                "All option defaults are for Vanilla compatibility, not performance. If you have questions about certain options",
-                "please reach out in our discord, https://canvasmc.io/discord"
-            )
+            Style.create()
+                .literal("Global Configuration for CanvasMC").endLine()
+                .blank()
+                .wordWrap(
+                    "This is the server-wide configuration file provided by CanvasMC. This config holds options",
+                    "that are set across the entire server, and cannot be overridden per-world. You are free to modify,",
+                    "add, or remove comments as you please."
+                ).endLine()
+                .blank()
+                .wordWrap(
+                    "You may refresh this configuration at runtime using the \"/canvas reload\" command, however",
+                    "it is not recommended to do this during production, as this can cause issues like unexpected crashes",
+                    "or unintended behavior."
+                ).endLine()
+                .blank()
+                .wordWrap(
+                    "All defaults for the options provided in this configuration are configured for upstream",
+                    "compatibility over performance. You must do some manual configuration to get some of the performance",
+                    "benefits Canvas provides."
+                ).endLine()
+                .blank()
+                .wordWrap(
+                    "If you have questions about certain configuration options please reach out in our discord"
+                ).endLine()
+                .literal("https://canvasmc.io/discord")
+                .compile(60)
         );
     }
 

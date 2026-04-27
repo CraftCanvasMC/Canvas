@@ -77,7 +77,7 @@ public class ConfigurationProvider {
         final int commentCharLim,
         final @Nullable Resolver<C> resolver,
         final C defaultObj,
-        final @Nullable String header
+        final @Nullable String[] header
     ) {
         LOGGER.info("{} doesn't exist, using flood fill", pathAbsolute.getFileName());
 
@@ -88,7 +88,7 @@ public class ConfigurationProvider {
         representation.setTag(Tag.MAP);
 
         try {
-            write(pathAbsolute, representation, header, false, commentCharLim);
+            write(pathAbsolute, representation, header, false);
         } catch (IOException ioe) {
             throw new RuntimeException("Couldn't save config", ioe);
         }
@@ -104,13 +104,19 @@ public class ConfigurationProvider {
     }
 
     private static void write(
-        final @NonNull Path pathAbsolute, final Node representation, final @Nullable String header, final boolean alreadyExisted, final int charLimit
+        final @NonNull Path pathAbsolute, final Node representation, final @Nullable String[] header, final boolean alreadyExisted
     ) throws IOException {
         // only write the header on first creation, because if the file already existed,
         // the user may have edited or removed it intentionally, so we never touch it
         if (!alreadyExisted && header != null) {
-            String stripped = header.replace("\n", " ").replace("\r", " ").trim();
-            List<CommentLine> lines = new ArrayList<>(Token.buildCommentLines(stripped, charLimit));
+            // the header is special, it can define its own lines and its own formatting
+            List<CommentLine> lines = new ArrayList<>();
+            for (final String str : header) {
+                if (str == null) throw new IllegalArgumentException("Line in header must not be null. If you want a blank line, use an empty string");
+                // we specifically do not let the token system format this, we trust the
+                // header is formatted literally and to the extent the user wants
+                lines.add(Token.toCommentLine(str));
+            }
             // add blank line so that it's kinda separated from the other comments
             lines.add(new CommentLine(null, null, "", CommentType.BLANK_LINE));
             representation.setBlockComments(lines);
@@ -168,7 +174,7 @@ public class ConfigurationProvider {
         final @NonNull Supplier<C> defaultSupplier,
         final int commentCharLim,
         final Resolver<C> resolver,
-        final @Nullable String header
+        final @Nullable String[] header
     ) {
         final C defaultObj = defaultSupplier.get();
 
@@ -208,7 +214,7 @@ public class ConfigurationProvider {
             fileRepresentation.setTag(Tag.MAP);
 
             try {
-                write(pathAbsolute, fileRepresentation, header, true, commentCharLim);
+                write(pathAbsolute, fileRepresentation, header, true);
             } catch (IOException ioe) {
                 throw new RuntimeException("Couldn't save config", ioe);
             }

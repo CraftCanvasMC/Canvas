@@ -94,7 +94,7 @@ public record Token(
         }
     }
 
-    private static @NonNull CommentLine toCommentLine(final @NonNull String text) {
+    static @NonNull CommentLine toCommentLine(final @NonNull String text) {
         return new CommentLine(null, null, text.isEmpty() ? "" : " " + text, CommentType.BLOCK);
     }
 
