@@ -4,7 +4,7 @@ import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 import ca.spottedleaf.concurrentutil.util.TimeUtil;
-import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.util.CpuInfoReport;
 import io.canvasmc.canvas.util.collection.FastHeapPriorityQueue;
 import java.lang.invoke.VarHandle;
@@ -106,7 +106,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                 affinitySet = new BitSet();
             }
             else {
-                affinitySet = getAffinity(Config.INSTANCE.scheduler.tickRegionAffinity);
+                affinitySet = getAffinity(GlobalConfiguration.getInstance().regionScheduler.affinityScheduler.tickRegionAffinity);
             }
         }
         else affinitySet = new BitSet();

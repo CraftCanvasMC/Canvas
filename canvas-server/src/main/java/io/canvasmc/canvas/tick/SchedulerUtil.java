@@ -5,7 +5,7 @@ import ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool;
 import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
 import ca.spottedleaf.concurrentutil.scheduler.StealingScheduledThreadPool;
 import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
-import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
 import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
@@ -78,12 +78,16 @@ public class SchedulerUtil {
                 return scheduler;
             }
             case AFFINITY: {
-                long runBufferNanos = (long) (Config.INSTANCE.scheduler.runTasksBufferMillis * 1_000_000L);
-                long stealThresh = Config.INSTANCE.scheduler.stealThresholdMillis * 1_000_000L;
-                boolean enableStealing = Config.INSTANCE.scheduler.enableWorkStealing;
-                boolean enableAffinity = Config.INSTANCE.scheduler.enableAffinitySchedulerCpuAffinity;
-                boolean enableIntermediateTasks = Config.INSTANCE.scheduler.enableMidTickTasks;
+                final GlobalConfiguration.Scheduler.AffinityScheduler affinityConfig = GlobalConfiguration.getInstance().regionScheduler.affinityScheduler;
+
+                long runBufferNanos = (long) (affinityConfig.runTasksBufferMillis * 1_000_000L);
+                long stealThresh = affinityConfig.stealThresholdMillis * 1_000_000L;
+                boolean enableStealing = affinityConfig.enableWorkStealing;
+                boolean enableAffinity = affinityConfig.enableAffinitySchedulerCpuAffinity;
+                boolean enableIntermediateTasks = affinityConfig.enableMidTickTasks;
+
                 HANDLER = new AffinityHandler();
+
                 return new AffinitySchedulerThreadPool(
                     initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler, enableStealing, enableAffinity, enableIntermediateTasks, (thrown) -> {
                     TickRegionScheduler.LOGGER.error("Uncaught exception in scheduler internals", thrown);

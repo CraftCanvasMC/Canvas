@@ -11,7 +11,6 @@ import io.canvasmc.canvas.configuration.validator.numeric.PositiveNumericValueVa
 import io.canvasmc.canvas.configuration.validator.numeric.RangeValidator;
 import io.canvasmc.canvas.configuration.writer.Comment;
 import io.canvasmc.canvas.simd.SIMDDetection;
-import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.Json5SerializerImpl;
 import io.canvasmc.canvas.util.Util;
 import io.canvasmc.canvas.util.version.ApiClient;
@@ -163,55 +162,6 @@ public class Config {
     }
 
     /* START CONFIGURATION */
-
-    public Scheduler scheduler = new Scheduler();
-
-    public static class Scheduler {
-        @Comment({
-            "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
-            "before allowing other threads to steal it for execution.",
-            "Note: A smaller value reduces task deadline delays but increases potential task stealing between threads"
-        })
-        public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
-
-        @Comment({
-            "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
-            "Ensures runTick() can start on time, at the deadline. Higher = safer, lower = more work done.",
-            "Default: 0.1ms"
-        })
-        public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
-
-        @Comment({
-            "Amount of time between the end and next start of a region tick where the server will log a",
-            "warning that the scheduler is overloaded. Can help catch if you need to allocate more threads",
-            "or help identify deadline missing issues"
-        })
-        public long overloadedLogMillis = 5_000L;
-
-        @Comment("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
-        public List<String> tickRegionAffinity = new ArrayList<>();
-
-        @Comment("Enables pinning threads of the AFFINITY region scheduler to cpu cores")
-        public boolean enableAffinitySchedulerCpuAffinity = false;
-
-        @Comment({
-            "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
-            "to improve performance. If this is enabled, and the task misses its deadline by 'stealThresholdMillis', it can",
-            "be taken by another tick thread to be run."
-        })
-        public boolean enableWorkStealing = false;
-
-        @Comment({
-            "Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick"
-        })
-        public boolean enableMidTickTasks = false;
-
-        @Comment({
-            "The default tick rate for the scheduler. Vanilla is 20, the game will run faster or slower depending on how you adjust this value",
-            "Note this should really only be used for debugging purposes and for custom environments that require this change"
-        })
-        public float defaultTickRate = 20.0F;
-    }
 
     public Chunks chunks = new Chunks();
 

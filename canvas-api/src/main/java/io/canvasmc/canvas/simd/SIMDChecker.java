@@ -3,12 +3,11 @@ package io.canvasmc.canvas.simd;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;
 import jdk.incubator.vector.VectorSpecies;
-import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
-import org.jetbrains.annotations.ApiStatus;
+import org.slf4j.Logger;
 
 public class SIMDChecker {
 
-    public static boolean canEnable(ComponentLogger logger) {
+    public static boolean canEnable(Logger logger) {
         try {
             if (SIMDDetection.getJavaVersion() < 17) {
                 return false;

@@ -1,14 +1,13 @@
 package io.canvasmc.canvas.simd;
 
-import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
-import org.jetbrains.annotations.ApiStatus;
+import org.slf4j.Logger;
 
 public class SIMDDetection {
 
     public static boolean isEnabled = false;
     public static boolean testRun = false;
 
-    public static boolean canEnable(ComponentLogger logger) {
+    public static boolean canEnable(Logger logger) {
         try {
             return SIMDChecker.canEnable(logger);
         } catch (NoClassDefFoundError | Exception ignored) {
