@@ -78,7 +78,7 @@ public record Token(
     ) {
         Map<String, Token> tokenByName = new LinkedHashMap<>();
         for (Token token : tokens) {
-            tokenByName.put(token.name(), token);
+            tokenByName.put(FieldOrderPropertyUtils.toKebabCase(token.name()), token);
         }
 
         for (NodeTuple tuple : mappingNode.getValue()) {

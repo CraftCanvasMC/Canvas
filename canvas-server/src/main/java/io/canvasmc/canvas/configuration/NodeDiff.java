@@ -34,7 +34,7 @@ public class NodeDiff {
         // index tokens by name for comment lookup
         Map<String, Token> tokenByName = new LinkedHashMap<>();
         for (Token token : tokens) {
-            tokenByName.put(token.name(), token);
+            tokenByName.put(FieldOrderPropertyUtils.toKebabCase(token.name()), token);
         }
 
         // in obj, not file, so we mark for add
@@ -122,7 +122,7 @@ public class NodeDiff {
     ) {
         Map<String, Token> tokenByName = new LinkedHashMap<>();
         for (Token token : tokens) {
-            tokenByName.put(token.name(), token);
+            tokenByName.put(FieldOrderPropertyUtils.toKebabCase(token.name()), token);
         }
 
         for (NodeTuple tuple : mapping.getValue()) {
