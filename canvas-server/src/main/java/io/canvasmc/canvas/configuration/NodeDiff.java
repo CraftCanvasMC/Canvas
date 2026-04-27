@@ -44,10 +44,10 @@ public class NodeDiff {
 
             Token token = tokenByName.get(key);
             List<Token> childTokens = token != null ? token.children() : List.of();
-            String comment = token != null ? token.comment() : null;
+            Style style = token != null ? token.style() : null;
 
             if (!fileKeys.containsKey(key)) {
-                out.add(new Change(Type.ADD, fqn, entry.getValue(), fileMapping, comment, childTokens));
+                out.add(new Change(Type.ADD, fqn, entry.getValue(), fileMapping, style, childTokens));
             }
             else {
                 Node fileValue = fileKeys.get(key).getValueNode();
@@ -62,7 +62,7 @@ public class NodeDiff {
                         // file has the key but not as a mapping, treat entire section as replaced
                         // remove the old scalar/null entry and add the full object subtree
                         out.add(new Change(Type.REMOVE, fqn, null, fileMapping, null, childTokens));
-                        out.add(new Change(Type.ADD, fqn, entry.getValue(), fileMapping, comment, childTokens));
+                        out.add(new Change(Type.ADD, fqn, entry.getValue(), fileMapping, style, childTokens));
                     }
                 }
             }
@@ -93,8 +93,8 @@ public class NodeDiff {
                 }
 
                 // inject comment on the key node itself
-                if (change.comment() != null && tuple.getKeyNode() instanceof ScalarNode keyNode) {
-                    keyNode.setBlockComments(Token.buildCommentLines(change.comment(), commentCharLim));
+                if (change.style() != null && tuple.getKeyNode() instanceof ScalarNode keyNode) {
+                    keyNode.setBlockComments(Token.compileStyle(change.style(), commentCharLim));
                 }
 
                 // recursively inject comments into any nested mapping children
@@ -131,8 +131,8 @@ public class NodeDiff {
             Token token = tokenByName.get(keyNode.getValue());
             if (token == null) continue;
 
-            if (token.comment() != null) {
-                keyNode.setBlockComments(Token.buildCommentLines(token.comment(), commentCharLim));
+            if (token.style() != null) {
+                keyNode.setBlockComments(Token.compileStyle(token.style(), commentCharLim));
             }
 
             // recurse if this child is itself a nested mapping too
@@ -235,7 +235,7 @@ public class NodeDiff {
         @NonNull String fullyQualifiedName,
         @Nullable NodeTuple objectTuple,
         @NonNull MappingNode fileParent,
-        @Nullable String comment,
+        @Nullable Style style,
         @Nullable List<Token> childTokens
     ) {}
 }

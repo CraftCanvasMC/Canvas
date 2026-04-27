@@ -18,10 +18,8 @@ import org.yaml.snakeyaml.nodes.NodeTuple;
 import org.yaml.snakeyaml.nodes.ScalarNode;
 
 // note: if parent is null, it is in root
-//       also, comments should be stripped of `\n` chars before being passed
-//       here. the serializer will line up words and such on its own
 public record Token(
-    @Nullable Token parent, @NonNull List<Token> children, @NonNull String name, @Nullable String comment
+    @Nullable Token parent, @NonNull List<Token> children, @NonNull String name, @Nullable Style style
 ) {
 
     @Contract("_, _, _, _ -> new")
@@ -29,20 +27,14 @@ public record Token(
         final @NonNull Field field,
         final @Nullable Token parent,
         final @NonNull Class<? extends Part> classInsideOf,
-        final @NonNull Map<String, String> stylesOfParent
+        final @NonNull Map<String, Style> stylesOfParent
     ) {
-        // look up comment by field name from the parent class's styles map
-        String comment = stylesOfParent.get(field.getName());
-
-        if (comment != null) {
-            comment = comment.replace("\n", " ").replace("\r", " ").trim();
-        }
-
+        Style style = stylesOfParent.get(field.getName());
         String name = field.getName();
 
         List<Token> children = new LinkedList<>();
 
-        Token token = new Token(parent, children, name, comment);
+        Token token = new Token(parent, children, name, style);
 
         Class<?> fieldType = field.getType();
 
@@ -51,7 +43,7 @@ public record Token(
             if (nested.equals(fieldType) && Part.class.isAssignableFrom(nested)) {
                 @SuppressWarnings("unchecked")
                 Class<? extends Part> nestedPart = (Class<? extends Part>) nested;
-                Map<String, String> nestedStyles = Part.harvest(nestedPart);
+                Map<String, Style> nestedStyles = Part.harvest(nestedPart);
 
                 // build children based on this
                 for (Field nestedField : nested.getDeclaredFields()) {
@@ -90,9 +82,9 @@ public record Token(
             Token token = tokenByName.get(key);
             if (token == null) continue;
 
-            // inject comment onto this key node if one exists
-            if (token.comment() != null) {
-                keyNode.setBlockComments(buildCommentLines(token.comment(), commentCharLim));
+            // inject style comment onto this key node if one exists
+            if (token.style() != null) {
+                keyNode.setBlockComments(compileStyle(token.style(), commentCharLim));
             }
 
             // recurse into nested mappings if this token has children
@@ -103,45 +95,61 @@ public record Token(
     }
 
     private static @NonNull CommentLine toCommentLine(final @NonNull String text) {
-        return new CommentLine(null, null, " " + text, CommentType.BLOCK);
+        return new CommentLine(null, null, text.isEmpty() ? "" : " " + text, CommentType.BLOCK);
     }
 
-    static @NonNull List<CommentLine> buildCommentLines(
-        final @NonNull String rawComment,
-        final int charLim
+    // wraps a single block of text into comment lines
+    private static void appendWordWrapped(
+        final @NonNull String text,
+        final int charLim,
+        final @NonNull List<CommentLine> out
     ) {
-        List<CommentLine> lines = new ArrayList<>();
-        String[] words = rawComment.split("\\s+");
-
+        String[] words = text.split("\\s+");
         StringBuilder currentLine = new StringBuilder();
 
         for (String word : words) {
             if (word.isEmpty()) continue;
 
-            boolean lineHasContent = !currentLine.isEmpty();
-
-            // would adding this word exceed the limit?
-            int projectedLength = lineHasContent
+            boolean hasContent = !currentLine.isEmpty();
+            int projected = hasContent
                 ? currentLine.length() + 1 + word.length()
                 : word.length();
 
-            if (lineHasContent && projectedLength > charLim) {
-                // flush current line, start a new one
-                lines.add(toCommentLine(currentLine.toString()));
+            if (hasContent && projected > charLim) {
+                out.add(toCommentLine(currentLine.toString()));
                 currentLine.setLength(0);
                 currentLine.append(word);
             }
             else {
-                if (lineHasContent) currentLine.append(' ');
+                if (hasContent) currentLine.append(' ');
                 currentLine.append(word);
             }
         }
 
         // flush the last line
         if (!currentLine.isEmpty()) {
-            lines.add(toCommentLine(currentLine.toString()));
+            out.add(toCommentLine(currentLine.toString()));
         }
+    }
 
+    static @NonNull List<CommentLine> compileStyle(
+        final @NonNull Style style,
+        final int charLim
+    ) {
+        List<CommentLine> lines = new ArrayList<>();
+        for (String line : style.compile(charLim)) {
+            lines.add(toCommentLine(line));
+        }
+        return lines;
+    }
+
+    // kept for ConfigurationProvider header usage
+    static @NonNull List<CommentLine> buildCommentLines(
+        final @NonNull String rawComment,
+        final int charLim
+    ) {
+        List<CommentLine> lines = new ArrayList<>();
+        appendWordWrapped(rawComment, charLim, lines);
         return lines;
     }
 
@@ -153,7 +161,7 @@ public record Token(
 
         @SuppressWarnings("unchecked")
         Class<? extends Part> partClass = (Class<? extends Part>) clazz;
-        Map<String, String> styles = Part.harvest(partClass);
+        Map<String, Style> styles = Part.harvest(partClass);
 
         List<Token> tokens = new LinkedList<>();
 
