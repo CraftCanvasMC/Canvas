@@ -166,8 +166,6 @@ public class Config {
     public Chunks chunks = new Chunks();
 
     public static class Chunks {
-        @Comment("Use euclidean distance squared for chunk task ordering. Makes the world load in what appears a circle rather than a diamond")
-        public boolean useEuclideanDistanceSquared = true;
 
         @RangeValidator.Range(from = 1, to = 10, inclusive = true)
         @Comment("The thread priority for Canvas' rewritten chunk system executor")
