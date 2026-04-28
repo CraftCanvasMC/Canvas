@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.NonNull;
 import org.yaml.snakeyaml.error.YAMLException;
 import org.yaml.snakeyaml.introspector.BeanAccess;
+import org.yaml.snakeyaml.introspector.FieldProperty;
 import org.yaml.snakeyaml.introspector.GenericProperty;
 import org.yaml.snakeyaml.introspector.Property;
 import org.yaml.snakeyaml.introspector.PropertyUtils;
@@ -96,6 +97,27 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
         }
 
         return properties.stream()
+            .filter(p -> {
+                // the initial filter should filter anything final
+                if (p instanceof FieldProperty fieldProperty) {
+                    try {
+                        Field fieldToGetTheFieldObjectOfTheFieldProperty = FieldProperty.class.getDeclaredField("field");
+                        fieldToGetTheFieldObjectOfTheFieldProperty.setAccessible(true);
+                        Field field = (Field) fieldToGetTheFieldObjectOfTheFieldProperty.get(fieldProperty);
+
+                        // fields with final modifiers should be ignored from the configurations
+                        if (field.accessFlags().contains(AccessFlag.FINAL)) {
+                            return false;
+                        }
+                    } catch (NoSuchFieldException nsfe) {
+                        throw new RuntimeException("field field not found? Where the field field go?", nsfe);
+                    } catch (IllegalAccessException iae) {
+                        throw new RuntimeException("Illegal access to field :(", iae);
+                    }
+                }
+                // the field shouldn't be final, or not field property! yippeee :)
+                return true;
+            })
             .filter(p -> !partFields.contains(
                 p instanceof KebabCaseProperty kcp ? fromKebabCase(kcp.getName()) : p.getName()
             ))
