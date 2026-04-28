@@ -111,6 +111,8 @@ public class WorldConfig extends Part {
                     LOGGER.info("Loaded Canvas config patch for world {}", dimension.identifier());
 
                     result[0] = instance;
+
+                    instance.onLoad();
                 }
             },
             Style.create()
@@ -140,5 +142,8 @@ public class WorldConfig extends Part {
             throw new IllegalStateException("This configuration is not tied to any world");
         }
         return world;
+    }
+
+    private void onLoad() {
     }
 }
