@@ -4,6 +4,8 @@ import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
+import io.canvasmc.canvas.configuration.Validator;
+import io.canvasmc.canvas.configuration.markers.NumberRange;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.version.ApiClient;
@@ -12,8 +14,6 @@ import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.random.RandomGeneratorFactory;
 import net.minecraft.ChatFormatting;
@@ -118,6 +118,9 @@ public class GlobalConfiguration extends Part {
 
     private static void postLoad(final GlobalConfiguration configuration) {
         INSTANCE = configuration;
+
+        // validate the configuration so users don't end up doing a stupid
+        Validator.validateObject(configuration);
 
         if (TickRegions.started) {
 
@@ -226,9 +229,6 @@ public class GlobalConfiguration extends Part {
         }
 
         public AffinityScheduler affinityScheduler = new AffinityScheduler();
-        public long overloadedLogMillis = 5_000L;
-        public float defaultTickRate = 20.0F;
-
         public static class AffinityScheduler extends Part {
 
             {
@@ -270,12 +270,20 @@ public class GlobalConfiguration extends Part {
                 );
             }
 
+            @NumberRange(NumberRange.Type.GREATER_THAN_OR_EQUAL_TO_0)
             public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
+            @NumberRange(NumberRange.Type.GREATER_THAN_OR_EQUAL_TO_0)
             public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
             public boolean enableWorkStealing = true;
             public boolean enableMidTickTasks = true;
-            public List<String> tickRegionAffinity = new ArrayList<>();
+            @NumberRange(NumberRange.Type.GREATER_THAN_OR_EQUAL_TO_0)
+            public int[] tickRegionAffinity = new int[0];
             public boolean enableAffinitySchedulerCpuAffinity = false;
         }
+
+        @NumberRange(NumberRange.Type.GREATER_THAN_0)
+        public long overloadedLogMillis = 5_000L;
+        @NumberRange(NumberRange.Type.GREATER_THAN_0)
+        public float defaultTickRate = 20.0F;
     }
 }

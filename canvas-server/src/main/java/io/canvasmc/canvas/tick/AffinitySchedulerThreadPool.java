@@ -10,6 +10,7 @@ import io.canvasmc.canvas.util.collection.FastHeapPriorityQueue;
 import java.lang.invoke.VarHandle;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.List;
@@ -128,22 +129,14 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         this.runners = runners;
     }
 
-    private @NonNull BitSet getAffinity(@NonNull List<String> affinity) {
-        if (affinity.isEmpty()) {
+    private @NonNull BitSet getAffinity(int @NonNull [] affinity) {
+        if (affinity.length == 0) {
             LOGGER.warn("No affinity set configured, backing off, logging CPU topology:\n{}", CpuInfoReport.compileOutput());
             return new BitSet();
         }
         int maxAvailable = Runtime.getRuntime().availableProcessors();
-        BitSet affinitySet = new BitSet(affinity.size());
-        affinity.stream()
-            .mapToInt(str -> {
-                try {
-                    return Integer.parseInt(str);
-                } catch (NumberFormatException ignored) {
-                    LOGGER.error("Unable to parse cpu id {} to a valid number, falling back to 0.", str);
-                    return -1;
-                }
-            })
+        BitSet affinitySet = new BitSet(affinity.length);
+        Arrays.stream(affinity)
             .distinct()
             .filter(cpuId -> {
                 // don't log parse error cpus
