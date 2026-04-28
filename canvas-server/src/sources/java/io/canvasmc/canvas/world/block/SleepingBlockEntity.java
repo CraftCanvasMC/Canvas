@@ -5,16 +5,17 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
+import org.jspecify.annotations.Nullable;
 
 public interface SleepingBlockEntity {
 
     LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper();
 
-    void lithium$setTickWrapper(LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper);
+    void lithium$setTickWrapper(LevelChunk.@Nullable RebindableTickingBlockEntityWrapper tickWrapper);
 
     TickingBlockEntity lithium$getSleepingTicker();
 
-    void lithium$setSleepingTicker(TickingBlockEntity sleepingTicker);
+    void lithium$setSleepingTicker(@Nullable TickingBlockEntity sleepingTicker);
 
     default void onChange() {}
 
