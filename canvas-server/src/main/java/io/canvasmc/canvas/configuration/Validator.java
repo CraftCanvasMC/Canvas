@@ -3,6 +3,7 @@ package io.canvasmc.canvas.configuration;
 import io.canvasmc.canvas.configuration.markers.ValidationType;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AccessFlag;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import org.jspecify.annotations.NonNull;
 
@@ -43,11 +44,31 @@ public class Validator {
         for (final Annotation declaredAnnotation : declaredField.getDeclaredAnnotations()) {
             if (declaredAnnotation.annotationType().isAnnotationPresent(ValidationType.class)) {
                 // this is a validating annotation
-                ValidationType validationType = declaredAnnotation.annotationType().getAnnotation(ValidationType.class);
-                Class<? extends FieldValidator> fieldValidatorClass = validationType.value();
-                fieldValidatorClass.newInstance().validate(
-                    declaredField.getName(), declaredField.get(obj), declaredAnnotation
-                );
+                final ValidationType validationType = declaredAnnotation.annotationType().getAnnotation(ValidationType.class);
+                final Class<? extends FieldValidator> fieldValidatorClass = validationType.value();
+
+                // we need to test if this is an array type or if this is a generic type
+
+                if (fieldType.isArray()) {
+                    // run it as an array
+                    final Object arrayObj = declaredField.get(obj);
+                    if (arrayObj != null) {
+                        final int length = Array.getLength(arrayObj);
+                        for (int i = 0; i < length; i++) {
+                            // the reason we do it like this is that if we try and cast the array to an Object[]
+                            // we get a class cast exception which nobody likes
+                            fieldValidatorClass.newInstance().validate(
+                                declaredField.getName() + "[" + i + "]", Array.get(arrayObj, i), declaredAnnotation
+                            );
+                        }
+                    }
+                }
+                else {
+                    // not an array, just get the declared field value and pass it through the validator
+                    fieldValidatorClass.newInstance().validate(
+                        declaredField.getName(), declaredField.get(obj), declaredAnnotation
+                    );
+                }
             }
         }
     }
