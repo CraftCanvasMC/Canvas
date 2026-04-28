@@ -5,7 +5,6 @@ import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
-import io.canvasmc.canvas.configuration.markers.NumberRange;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.version.ApiClient;
@@ -205,85 +204,75 @@ public class GlobalConfiguration extends Part {
     public static class Scheduler extends Part {
 
         {
-            defineStyle("affinityScheduler", Style.create()
-                .wordWrap(
+            option("affinityScheduler")
+                .docs(
                     "Configurations for the AFFINITY scheduler provided by Canvas. For these options to take effect,",
                     "change the 'threaded-regions.scheduler' option in 'paper-global.yml' to 'AFFINITY'"
-                ).endLine()
-            );
+                );
 
-            defineStyle("overloadedLogMillis", Style.create()
-                .wordWrap(
+            option("overloadedLogMillis")
+                .docs(
                     "Amount of time between the end and next start of a region tick where the server will log a",
                     "warning that the scheduler is overloaded. Can help catch if you need to allocate more threads",
                     "or help identify deadline missing issues"
-                ).endLine()
-            );
+                ).greaterThan(0.0F);
 
-            defineStyle("defaultTickRate", Style.create()
-                .wordWrap(
+            option("defaultTickRate")
+                .docs(
                     "The default tick rate for the scheduler. Vanilla is 20, the game will run faster or slower depending on how you adjust this value.",
                     "Note this should really only be used for debugging purposes and for custom environments that require this change"
-                ).endLine()
-            );
+                ).greaterThan(0.0F);
         }
 
         public AffinityScheduler affinityScheduler = new AffinityScheduler();
         public static class AffinityScheduler extends Part {
 
             {
-                defineStyle("stealThresholdMillis", Style.create()
-                    .wordWrap(
-                        "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
-                        "before allowing other threads to steal it for execution."
-                    ).endLine()
-                    .literal("Note: A smaller value reduces task deadline delays but increases potential task stealing between threads")
-                );
+                option("stealThresholdMillis")
+                    .docs(
+                        Style.wrap(
+                            "The maximum amount of time, in milliseconds, a thread will delay the execution of a scheduled task",
+                            "before allowing other threads to steal it for execution."
+                        )
+                        .blank()
+                        .literal("Note: A smaller value reduces task deadline delays but increases potential task stealing between threads")
+                    ).greaterThanOrEqualTo(0.0F);
 
-                defineStyle("runTasksBufferMillis", Style.create()
-                    .wordWrap(
-                        "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
-                        "Ensures runTick() can start on time, at the deadline."
-                    ).endLine()
-                    .literal("Higher = safer, lower = more work done.").endLine()
-                    .literal("Default: 0.1ms")
-                );
+                option("runTasksBufferMillis")
+                    .docs(
+                        Style.wrap(
+                            "Buffer time (in milliseconds) before tick deadline to stop executing intermediate tasks.",
+                            "Ensures runTick() can start on time, at the deadline."
+                        )
+                        .blank()
+                        .literal("Default: 0.1ms, Higher is safer, lower means more work is done")
+                    ).greaterThanOrEqualTo(0.0F);
 
-                defineStyle("enableWorkStealing", Style.create()
-                    .wordWrap(
+                option("enableWorkStealing")
+                    .docs(
                         "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
                         "to improve performance. If this is enabled, and the task misses its deadline by 'stealThresholdMillis', it can",
                         "be taken by another tick thread to be run."
-                    ).endLine()
-                );
+                    );
 
-                defineStyle("enableMidTickTasks", Style.create()
-                    .wordWrap("Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick").endLine()
-                );
+                option("enableMidTickTasks").docs("Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick");
 
-                defineStyle("tickRegionAffinity", Style.create()
-                    .wordWrap("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores").endLine()
-                );
+                option("tickRegionAffinity")
+                    .docs("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
+                    .greaterThanOrEqualTo(0.0F);
 
-                defineStyle("enableAffinitySchedulerCpuAffinity", Style.create()
-                    .wordWrap("Enables pinning threads of the AFFINITY region scheduler to cpu cores").endLine()
-                );
+                option("enableAffinitySchedulerCpuAffinity").docs("Enables pinning threads of the AFFINITY region scheduler to cpu cores");
             }
 
-            @NumberRange(NumberRange.Type.GREATER_THAN_OR_EQUAL_TO_0)
             public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
-            @NumberRange(NumberRange.Type.GREATER_THAN_OR_EQUAL_TO_0)
             public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
             public boolean enableWorkStealing = true;
             public boolean enableMidTickTasks = true;
-            @NumberRange(NumberRange.Type.GREATER_THAN_OR_EQUAL_TO_0)
             public int[] tickRegionAffinity = new int[0];
             public boolean enableAffinitySchedulerCpuAffinity = false;
         }
 
-        @NumberRange(NumberRange.Type.GREATER_THAN_0)
         public long overloadedLogMillis = 5_000L;
-        @NumberRange(NumberRange.Type.GREATER_THAN_0)
         public float defaultTickRate = 20.0F;
     }
 }

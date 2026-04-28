@@ -18,6 +18,10 @@ public class Style {
         return new Style();
     }
 
+    public static Style wrap(final String... wrap) {
+        return create().wordWrap(wrap).endLine();
+    }
+
     public Style literal(String text) {
         instructions.add(new Literal(text));
         return this;

@@ -1,18 +1,20 @@
 package io.canvasmc.canvas.configuration;
 
-import io.canvasmc.canvas.configuration.markers.ValidationType;
-import java.lang.annotation.Annotation;
 import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.util.Map;
 import org.jspecify.annotations.NonNull;
 
 public class Validator {
 
     @SuppressWarnings("unchecked")
     private static void validateField(
-        final @NonNull Field declaredField, final @NonNull Class<?> classInsideOf, final @NonNull Object obj
-    ) throws IllegalAccessException, InstantiationException {
+        final @NonNull Field declaredField,
+        final @NonNull Class<?> classInsideOf,
+        final @NonNull Object obj,
+        final @NonNull Map<String, Part.OptionDefinition> partDefinitions
+    ) throws IllegalAccessException {
         // skip any non-public or final fields
         if (
             !declaredField.accessFlags().contains(AccessFlag.PUBLIC) ||
@@ -21,67 +23,78 @@ public class Validator {
             return;
         }
 
-        // now we check the field if it has annotations and it's children if it's an inner class
-
         Class<?> fieldType = declaredField.getType();
 
-        // check if class type is nested
+        // recurse into nested classes that extend Part
         for (Class<?> nested : classInsideOf.getDeclaredClasses()) {
-            if (nested.equals(fieldType)) {
-
+            if (nested.equals(fieldType) && Part.class.isAssignableFrom(nested)) {
                 Object nestedObj = declaredField.get(obj);
+                if (nestedObj == null) break;
 
-                // check nested fields
+                Map<String, Part.OptionDefinition> nestedPartDefs =
+                    Part.harvest((Class<? extends Part>) nested);
+
                 for (Field nestedField : nested.getDeclaredFields()) {
-                    validateField(nestedField, nested, nestedObj);
+                    validateField(nestedField, nested, nestedObj, nestedPartDefs);
                 }
 
                 break;
             }
         }
 
-        // all nested are validated, check annotations in field
-        for (final Annotation declaredAnnotation : declaredField.getDeclaredAnnotations()) {
-            if (declaredAnnotation.annotationType().isAnnotationPresent(ValidationType.class)) {
-                // this is a validating annotation
-                final ValidationType validationType = declaredAnnotation.annotationType().getAnnotation(ValidationType.class);
-                final Class<? extends FieldValidator> fieldValidatorClass = validationType.value();
+        // run Part-based validators for this field
+        final Part.OptionDefinition definition = partDefinitions.get(declaredField.getName());
+        if (definition.validations.isEmpty()) return;
 
-                // we need to test if this is an array type or if this is a generic type
+        if (fieldType.isArray()) {
+            final Object arrayObj = declaredField.get(obj);
+            if (arrayObj != null) {
+                final int length = Array.getLength(arrayObj);
+                for (int i = 0; i < length; i++) {
+                    runPartValidations(definition, declaredField.getName() + "[" + i + "]", Array.get(arrayObj, i));
+                }
+            }
+        }
+        else {
+            runPartValidations(definition, declaredField.getName(), declaredField.get(obj));
+        }
+    }
 
-                if (fieldType.isArray()) {
-                    // run it as an array
-                    final Object arrayObj = declaredField.get(obj);
-                    if (arrayObj != null) {
-                        final int length = Array.getLength(arrayObj);
-                        for (int i = 0; i < length; i++) {
-                            // the reason we do it like this is that if we try and cast the array to an Object[]
-                            // we get a class cast exception which nobody likes
-                            fieldValidatorClass.newInstance().validate(
-                                declaredField.getName() + "[" + i + "]", Array.get(arrayObj, i), declaredAnnotation
-                            );
-                        }
-                    }
-                }
-                else {
-                    // not an array, just get the declared field value and pass it through the validator
-                    fieldValidatorClass.newInstance().validate(
-                        declaredField.getName(), declaredField.get(obj), declaredAnnotation
-                    );
-                }
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void runPartValidations(
+        final Part.@NonNull OptionDefinition definition,
+        final @NonNull String fieldName,
+        final Object value
+    ) {
+        for (final Part.Validation validation : definition.validations) {
+            try {
+                validation.validate(value);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                    "Validation failed for field '" + fieldName + "': " + e.getMessage(), e
+                );
             }
         }
     }
 
+    @SuppressWarnings("unchecked")
     public static void validateObject(final @NonNull Object obj) {
         Class<?> oClazz = obj.getClass();
+
+        if (!Part.class.isAssignableFrom(oClazz)) {
+            throw new IllegalArgumentException(
+                "Object of class '" + oClazz.getName() + "' does not extend Part"
+            );
+        }
+
+        Map<String, Part.OptionDefinition> partDefinitions =
+            Part.harvest((Class<? extends Part>) oClazz);
+
         for (final Field declaredField : oClazz.getDeclaredFields()) {
             try {
-                validateField(declaredField, oClazz, obj);
+                validateField(declaredField, oClazz, obj, partDefinitions);
             } catch (IllegalAccessException iae) {
-                throw new RuntimeException("Unable to access field", iae);
-            } catch (InstantiationException ie) {
-                throw new RuntimeException("Unable to instantiate class", ie);
+                throw new RuntimeException("Unable to access field '" + declaredField.getName() + "'", iae);
             }
         }
     }

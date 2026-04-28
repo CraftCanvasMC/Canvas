@@ -27,14 +27,14 @@ public record Token(
         final @NonNull Field field,
         final @Nullable Token parent,
         final @NonNull Class<? extends Part> classInsideOf,
-        final @NonNull Map<String, Style> stylesOfParent
+        final @NonNull Map<String, Part.OptionDefinition> stylesOfParent
     ) {
-        Style style = stylesOfParent.get(field.getName());
+        Part.OptionDefinition definition = stylesOfParent.get(field.getName());
         String name = field.getName();
 
         List<Token> children = new LinkedList<>();
 
-        Token token = new Token(parent, children, name, style);
+        Token token = new Token(parent, children, name, definition.commentStyle());
 
         Class<?> fieldType = field.getType();
 
@@ -43,7 +43,7 @@ public record Token(
             if (nested.equals(fieldType) && Part.class.isAssignableFrom(nested)) {
                 @SuppressWarnings("unchecked")
                 Class<? extends Part> nestedPart = (Class<? extends Part>) nested;
-                Map<String, Style> nestedStyles = Part.harvest(nestedPart);
+                Map<String, Part.OptionDefinition> nestedStyles = Part.harvest(nestedPart);
 
                 // build children based on this
                 for (Field nestedField : nested.getDeclaredFields()) {
@@ -94,10 +94,6 @@ public record Token(
         }
     }
 
-    static @NonNull CommentLine toCommentLine(final @NonNull String text) {
-        return new CommentLine(null, null, text.isEmpty() ? "" : " " + text, CommentType.BLOCK);
-    }
-
     // wraps a single block of text into comment lines
     private static void appendWordWrapped(
         final @NonNull String text,
@@ -132,6 +128,10 @@ public record Token(
         }
     }
 
+    static @NonNull CommentLine toCommentLine(final @NonNull String text) {
+        return new CommentLine(null, null, text.isEmpty() ? "" : " " + text, CommentType.BLOCK);
+    }
+
     static @NonNull List<CommentLine> compileStyle(
         final @NonNull Style style,
         final int charLim
@@ -161,7 +161,7 @@ public record Token(
 
         @SuppressWarnings("unchecked")
         Class<? extends Part> partClass = (Class<? extends Part>) clazz;
-        Map<String, Style> styles = Part.harvest(partClass);
+        Map<String, Part.OptionDefinition> styles = Part.harvest(partClass);
 
         List<Token> tokens = new LinkedList<>();
 
