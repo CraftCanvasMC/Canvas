@@ -238,7 +238,7 @@ public class ConfigurationProvider {
         final @NonNull Supplier<C> defaultSupplier,
         final int commentCharLim,
         final Resolver<C> resolver,
-        final String header
+        final String[] header
     ) {
         // parse both files, create a diff, find what the patch overrides,
         // apply to the base, return modified version
@@ -264,9 +264,8 @@ public class ConfigurationProvider {
                 Files.createDirectories(patchAbsolute.getParent());
                 try (FileWriter fw = new FileWriter(patchAbsolute.toFile())) {
                     // strip and write to the file
-                    String stripped = header.replace("\n", " ").replace("\r", " ").trim();
-                    for (CommentLine line : Token.buildCommentLines(stripped, commentCharLim)) {
-                        fw.write("#" + line.getValue() + "\n");
+                    for (final String str : header) {
+                        fw.write("# " + str + "\n");
                     }
                     fw.write("\n");
                 }
