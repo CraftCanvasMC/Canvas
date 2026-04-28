@@ -12,7 +12,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
+import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -23,6 +25,7 @@ import org.yaml.snakeyaml.comments.CommentLine;
 import org.yaml.snakeyaml.comments.CommentType;
 import org.yaml.snakeyaml.constructor.Constructor;
 import org.yaml.snakeyaml.introspector.BeanAccess;
+import org.yaml.snakeyaml.introspector.Property;
 import org.yaml.snakeyaml.nodes.MappingNode;
 import org.yaml.snakeyaml.nodes.Node;
 import org.yaml.snakeyaml.nodes.NodeTuple;
@@ -56,7 +59,47 @@ public class ConfigurationProvider {
         // we also define a custom property utils so the order of the fields is
         // defined by the declaration order of the fields in the class
 
-        Representer representer = new Representer(DUMPER_OPTIONS);
+        Representer representer = new Representer(DUMPER_OPTIONS) {
+            private boolean representingKey = false;
+
+            @Contract("_, _, _ -> new")
+            @Override
+            protected @NonNull MappingNode representMapping(Tag tag, @NonNull Map<?, ?> mapping, DumperOptions.FlowStyle flowStyle) {
+                // temporarily wrap representData so we can toggle the flag
+                List<NodeTuple> tuples = new ArrayList<>();
+                for (Map.Entry<?, ?> entry : mapping.entrySet()) {
+                    representingKey = true;
+                    Node keyNode = representData(entry.getKey());
+                    representingKey = false;
+                    Node valueNode = representData(entry.getValue());
+                    tuples.add(new NodeTuple(keyNode, valueNode));
+                }
+                return new MappingNode(tag, tuples, flowStyle);
+            }
+
+            @Contract("_, _ -> new")
+            @Override
+            protected @NonNull MappingNode representJavaBean(@NonNull Set<Property> properties, Object javaBean) {
+                List<NodeTuple> tuples = new ArrayList<>();
+                for (Property property : properties) {
+                    representingKey = true;
+                    Node keyNode = representData(property.getName());
+                    representingKey = false;
+                    Node valueNode = representData(property.get(javaBean));
+                    tuples.add(new NodeTuple(keyNode, valueNode));
+                }
+                Tag tag = getTag(javaBean.getClass(), Tag.MAP);
+                return new MappingNode(tag, tuples, DUMPER_OPTIONS.getDefaultFlowStyle());
+            }
+
+            @Override
+            protected Node representScalar(Tag tag, String value, DumperOptions.ScalarStyle style) {
+                if (!representingKey && tag.equals(Tag.STR)) {
+                    style = DumperOptions.ScalarStyle.DOUBLE_QUOTED;
+                }
+                return super.representScalar(tag, value, style);
+            }
+        };
         representer.setPropertyUtils(propertyUtils);
         representer.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
 
@@ -112,7 +155,8 @@ public class ConfigurationProvider {
             // the header is special, it can define its own lines and its own formatting
             List<CommentLine> lines = new ArrayList<>();
             for (final String str : header) {
-                if (str == null) throw new IllegalArgumentException("Line in header must not be null. If you want a blank line, use an empty string");
+                if (str == null)
+                    throw new IllegalArgumentException("Line in header must not be null. If you want a blank line, use an empty string");
                 // we specifically do not let the token system format this, we trust the
                 // header is formatted literally and to the extent the user wants
                 lines.add(Token.toCommentLine(str));
