@@ -1,4 +1,144 @@
 package io.canvasmc.canvas;
 
-public class WorldConfig {
+import io.canvasmc.canvas.configuration.ConfigurationProvider;
+import io.canvasmc.canvas.configuration.Part;
+import io.canvasmc.canvas.configuration.Resolver;
+import io.canvasmc.canvas.configuration.Style;
+import io.canvasmc.canvas.configuration.Validator;
+import java.nio.file.Path;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
+import org.jspecify.annotations.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class WorldConfig extends Part {
+
+    // note that Canvas core utilities and loggers and such should go in the global configuration class, as this one
+    // doesn't entirely seem that appropriate for that sort of stuff
+
+    // we have a logger internally here for world-config related things, and should not be used globally. the global
+    // config class should be the logger publicly used
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("CanvasWorlds");
+
+    private static final Path BASE_FILE = Path.of("config/canvas-worlds.yml").toAbsolutePath().normalize();
+
+    // for the default configuration, we do need a solid configuration for this or else the patchable
+    // variant will fail to load, so we load this in the static block
+    static {
+        ConfigurationProvider.buildSolidConfiguration(
+            BASE_FILE,
+            WorldConfig::new,
+            GlobalConfiguration.CHAR_LIM,
+            new Resolver<>() {
+                @Override
+                public void onDiffAdd(final String fullyQualifiedName) {
+                    LOGGER.info("Added new world configuration option, '{}'", fullyQualifiedName);
+                }
+
+                @Override
+                public void onDiffRemove(final String fullyQualifiedName) {
+                    LOGGER.warn("World configuration option '{}' no longer exists and is now removed.", fullyQualifiedName);
+                }
+
+                @Override
+                public void onFinishLoad(final WorldConfig instance) {
+
+                    // validate the configuration so users don't end up doing a stupid
+                    Validator.validateObject(instance);
+
+                    // note that we do not do anything else on post load for the default
+                    // configuration file, only patchable instances
+
+                }
+            },
+            Style.create()
+                .literal("Worlds default configuration file for CanvasMC").endLine()
+                .blank()
+                .wordWrap(
+                    "This is the defaults for the per-world configuration file for CanvasMC.",
+                    "Each option can be overridden by the patch variant in each world folder. You are",
+                    "free to modify, add, or remove comments as you please."
+                ).endLine()
+                .blank()
+                .wordWrap(
+                    "You may refresh this configuration at runtime using the \"/canvas reload\" command, however",
+                    "it is not recommended to do this during production, as this can cause issues like unexpected crashes",
+                    "or unintended behavior."
+                ).endLine()
+                .blank()
+                .wordWrap(
+                    "All defaults for the options provided in this configuration are configured for upstream",
+                    "compatibility over performance. You must do some manual configuration to get some of the performance",
+                    "benefits Canvas provides."
+                ).endLine()
+                .blank()
+                .wordWrap(
+                    "If you have questions about certain configuration options please reach out in our discord"
+                ).endLine()
+                .literal("https://canvasmc.io/discord")
+                .compile(60)
+        );
+    }
+
+    private final ServerLevel world;
+
+    public WorldConfig() {
+        this(null);
+    }
+
+    public WorldConfig(final ServerLevel world) {
+        this.world = world;
+    }
+
+    public static WorldConfig buildForWorld(final @NonNull ServerLevel world, final ResourceKey<Level> dimension) {
+
+        // we build it as a patch here, and from here we can set the world properly
+        final WorldConfig[] result = new WorldConfig[1];
+
+        ConfigurationProvider.buildPatchableConfiguration(
+            MinecraftServer.getServer().storageSource.getDimensionPath(dimension)
+                .resolve("canvas-patch.yml"),
+            BASE_FILE,
+            () -> new WorldConfig(world),
+            GlobalConfiguration.CHAR_LIM,
+            new Resolver<>() {
+                @Override
+                public void onFinishLoad(final WorldConfig instance) {
+                    LOGGER.info("Loaded Canvas config patch for world {}", dimension.identifier());
+
+                    result[0] = instance;
+                }
+            },
+            Style.create()
+                .literal("Patch configuration file for world " + dimension.identifier()).endLine()
+                .blank()
+                .wordWrap(
+                    "This configuration file can be used to override the values in the default configuration",
+                    "for worlds defined in \"/config/canvas-worlds.yml\""
+                ).endLine()
+                .blank()
+                .wordWrap(
+                    "To override values in this, just copy the same option path to override the value. Think of",
+                    "the values you place in here for each option as a replacement for the default one for this world specifically"
+                )
+                .compile(60)
+        );
+
+        return result[0];
+    }
+
+    public boolean isTiedToWorld() {
+        return world == null;
+    }
+
+    public ServerLevel getWorld() {
+        if (!isTiedToWorld()) {
+            throw new IllegalStateException("This configuration is not tied to any world");
+        }
+        return world;
+    }
 }
