@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.configuration;
 
 import io.canvasmc.canvas.configuration.validation.NumberComparison;
+import io.canvasmc.canvas.configuration.validation.StringValidation;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -90,6 +91,18 @@ public class Part {
 
         public OptionDefinition between(float min, float max) {
             return validation(new NumberComparison(NumberComparison.Type.BETWEEN, min, max));
+        }
+
+        public OptionDefinition greedyString() {
+            return validation(new StringValidation(StringValidation.StringType.GREEDY_PHRASE));
+        }
+
+        public OptionDefinition identifier() {
+            return validation(new StringValidation(StringValidation.StringType.IDENTIFIER));
+        }
+
+        public OptionDefinition word() {
+            return validation(new StringValidation(StringValidation.StringType.SINGLE_WORD));
         }
 
         public OptionDefinition validation(Validation<?> validation) {

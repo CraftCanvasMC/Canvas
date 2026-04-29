@@ -69,9 +69,9 @@ public class Validator {
         for (final Part.Validation validation : definition.validations) {
             try {
                 validation.validate(value);
-            } catch (Exception e) {
+            } catch (Throwable thrown) {
                 throw new RuntimeException(
-                    "Validation failed for field '" + fieldName + "': " + e.getMessage(), e
+                    "Validation failed for field '" + fieldName + "': " + thrown.getMessage(), thrown
                 );
             }
         }
