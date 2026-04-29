@@ -2,7 +2,7 @@ package io.canvasmc.canvas.configuration;
 
 import io.canvasmc.canvas.configuration.validation.NumberComparison;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
-import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -48,7 +48,7 @@ public class Part {
     }
 
     public static class OptionDefinition {
-        protected final List<Validation<?>> validations = new ArrayList<>();
+        protected final List<Validation<?>> validations = new LinkedList<>();
         private Style style;
 
         public @Nullable Style commentStyle() {
