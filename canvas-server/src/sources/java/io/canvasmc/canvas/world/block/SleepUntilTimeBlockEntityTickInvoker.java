@@ -2,7 +2,6 @@ package io.canvasmc.canvas.world.block;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import org.jetbrains.annotations.NotNull;
 

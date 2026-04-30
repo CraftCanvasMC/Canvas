@@ -10,7 +10,6 @@ import io.papermc.paper.threadedregions.TickRegionScheduler;
 import it.unimi.dsi.fastutil.booleans.BooleanConsumer;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
