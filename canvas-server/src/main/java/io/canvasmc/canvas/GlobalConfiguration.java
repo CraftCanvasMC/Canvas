@@ -53,12 +53,12 @@ public class GlobalConfiguration extends Part {
             new Resolver<>() {
                 @Override
                 public void onDiffAdd(final String fullyQualifiedName) {
-                    LOGGER.info("Added new server-wide configuration option, '{}'", fullyQualifiedName);
+                    LOGGER.info("Added new server-wide configuration option: \"{}\"", fullyQualifiedName);
                 }
 
                 @Override
                 public void onDiffRemove(final String fullyQualifiedName) {
-                    LOGGER.warn("Server-wide configuration option '{}' no longer exists and is now removed.", fullyQualifiedName);
+                    LOGGER.warn("Server-wide configuration option \"{}\" no longer exists and is now removed.", fullyQualifiedName);
                 }
 
                 @Override
