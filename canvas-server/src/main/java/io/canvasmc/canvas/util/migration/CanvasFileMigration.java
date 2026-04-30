@@ -57,9 +57,7 @@ public class CanvasFileMigration {
     }
 
     private enum Types {
-        PEARLS(new PearlsMigration()),
-        // TODO - configs
-        ;
+        PEARLS(new PearlsMigration());
 
         private final Migration migration;
 

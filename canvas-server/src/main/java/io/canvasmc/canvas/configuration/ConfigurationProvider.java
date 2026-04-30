@@ -115,7 +115,7 @@ public class ConfigurationProvider {
         );
     }
 
-    private static <C> void floodFill(
+    private static <C extends Part> void floodFill(
         final @NonNull Path pathAbsolute,
         final int commentCharLim,
         final @Nullable Resolver<C> resolver,
@@ -140,13 +140,19 @@ public class ConfigurationProvider {
         if (resolver != null) {
             // resolver CAN be null, the only time this happens is when the
             // caller wants to handle this themsleves
-            resolver.onFinishLoad(defaultObj);
+            resolver.onFinishLoad(injectNode(defaultObj, representation));
         }
 
         // we don't have to do anything about trying to patch this, no file was present, return
     }
 
-    private static void write(
+    @Contract("_, _ -> param1")
+    private static <C extends Part> @NonNull C injectNode(final @NonNull C defaultObj, final Node node) {
+        defaultObj.node.setValue(node);
+        return defaultObj;
+    }
+
+    protected static void write(
         final @NonNull Path pathAbsolute, final Node representation, final @Nullable String[] header, final boolean alreadyExisted
     ) throws IOException {
         // only write the header on first creation, because if the file already existed,
@@ -213,7 +219,7 @@ public class ConfigurationProvider {
         }
     }
 
-    public static <C> void buildSolidConfiguration(
+    public static <C extends Part> void buildSolidConfiguration(
         final Path pathAbsolute,
         final @NonNull Supplier<C> defaultSupplier,
         final int commentCharLim,
@@ -270,17 +276,16 @@ public class ConfigurationProvider {
             C userMade = (C) YAML.loadAs(new FileReader(pathAbsolute.toFile()), defaultObj.getClass());
 
             // finished load, call resolver and return
-            resolver.onFinishLoad(userMade);
+            resolver.onFinishLoad(injectNode(userMade, fileRepresentation));
         } catch (FileNotFoundException e) {
             throw new IllegalStateException("File wasn't found?", e);
         }
     }
 
-    public static <C> void buildPatchableConfiguration(
+    public static <C extends Part> void buildPatchableConfiguration(
         final Path patchAbsolute,
         final Path baseAbsolute,
         final @NonNull Supplier<C> defaultSupplier,
-        final int commentCharLim,
         final Resolver<C> resolver,
         final String[] header
     ) {
@@ -356,7 +361,7 @@ public class ConfigurationProvider {
             //noinspection unchecked
             C merged = (C) YAML.loadAs(new StringReader(sw.toString()), defaultSupplier.get().getClass());
 
-            resolver.onFinishLoad(merged);
+            resolver.onFinishLoad(injectNode(merged, baseNode));
         } catch (FileNotFoundException fnfe) {
             throw new RuntimeException("Unable to find patch file", fnfe);
         }

@@ -16,6 +16,13 @@ import org.slf4j.LoggerFactory;
 
 public class WorldConfig extends Part {
 
+    // configuration constants
+    public static final String DEFAULT_TPSBAR_FORMAT =
+        "<gradient:blue:aqua><b>TPS:</b></gradient> <tps>  <dark_gray>-</dark_gray>  " +
+            "<gradient:blue:aqua><b>MSPT:</b></gradient> <mspt>  <dark_gray>-</dark_gray>  " +
+            "<gradient:blue:aqua><b>Util:</b></gradient> <util>  <dark_gray>-</dark_gray>  " +
+            "<gradient:blue:aqua><b>Players:</b></gradient> <players>";
+
     // note that Canvas core utilities and loggers and such should go in the global configuration class, as this one
     // doesn't entirely seem that appropriate for that sort of stuff
 
@@ -28,10 +35,19 @@ public class WorldConfig extends Part {
 
     // for the default configuration, we do need a solid configuration for this or else the patchable
     // variant will fail to load, so we load this in the static block
+
     static {
+        //noinspection ResultOfMethodCallIgnored
+        GlobalConfiguration.getInstance(); // preload global
+
+        reload();
+    }
+
+    public static void reload() {
         ConfigurationProvider.buildSolidConfiguration(
             BASE_FILE,
             WorldConfig::new,
+            // by calling this constant we also load the global config first
             GlobalConfiguration.CHAR_LIM,
             new Resolver<>() {
                 @Override
@@ -104,7 +120,6 @@ public class WorldConfig extends Part {
                 .resolve("canvas-patch.yml"),
             BASE_FILE,
             () -> new WorldConfig(world),
-            GlobalConfiguration.CHAR_LIM,
             new Resolver<>() {
                 @Override
                 public void onFinishLoad(final WorldConfig instance) {
@@ -146,4 +161,21 @@ public class WorldConfig extends Part {
 
     private void onLoad() {
     }
+
+    {
+        option("enableTpsBar")
+            .docs(
+                "Enables a regionized TPS-Bar implementation for Canvas.",
+                "To enable the tps-bar, use the \"/tpsbar\" command"
+            );
+        option("tpsBarFormat")
+            .docs(
+                "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
+                "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
+            ).greedyString();
+    }
+
+    public boolean enableTpsBar = true;
+    public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
+
 }

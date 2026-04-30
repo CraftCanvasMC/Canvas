@@ -41,6 +41,10 @@ public class GlobalConfiguration extends Part {
     private static ApiClient.BuildStatus BUILD_STATUS;
 
     static {
+        reload();
+    }
+
+    public static void reload() {
         ConfigurationProvider.buildSolidConfiguration(
             CONFIG_PATH,
             GlobalConfiguration::new,
@@ -58,6 +62,7 @@ public class GlobalConfiguration extends Part {
 
                 @Override
                 public void onFinishLoad(final GlobalConfiguration instance) {
+
                     postLoad(instance);
 
                     CompletableFuture.supplyAsync(() -> {

@@ -41,11 +41,6 @@ import org.jspecify.annotations.NonNull;
 @Configuration("canvas-server")
 public class Config {
     public static boolean ENABLE_FASTER_RANDOM = true;
-    public static final String DEFAULT_TPSBAR_FORMAT =
-        "<gradient:blue:aqua><b>TPS:</b></gradient> <tps>  <dark_gray>-</dark_gray>  " +
-            "<gradient:blue:aqua><b>MSPT:</b></gradient> <mspt>  <dark_gray>-</dark_gray>  " +
-            "<gradient:blue:aqua><b>Util:</b></gradient> <util>  <dark_gray>-</dark_gray>  " +
-            "<gradient:blue:aqua><b>Players:</b></gradient> <players>";
 
     public static final ComponentLogger LOGGER = ComponentLogger.logger("Canvas");
 
@@ -483,19 +478,6 @@ public class Config {
         "will be no \"ghost orbs\", and all xp merging is as efficient as possible"
     })
     public boolean fastOrbs = false;
-
-    @Comment({
-        "Enables a regionized TPS-Bar implementation for Canvas",
-        "This function is per-player, with this as a global setting to disable it",
-        "To enable the tps-bar per-player, use the '/tpsbar' command"
-    })
-    public boolean enableTpsBar = true;
-
-    @Comment({
-        "MiniMessage-formatted line for the TPS bar. Placeholders: <tps>, <mspt>, <util>, <players>.",
-        "Legacy tokens %tps%, %mspt%, %util%, %players% are also accepted and auto-converted."
-    })
-    public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
 
     @Comment(value = {
         "The default respawn dimension for the server.",

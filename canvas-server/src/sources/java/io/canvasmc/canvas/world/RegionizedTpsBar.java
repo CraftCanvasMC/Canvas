@@ -4,22 +4,18 @@ import ca.spottedleaf.moonrise.common.time.TickData;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.WorldConfig;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
-import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
@@ -27,10 +23,8 @@ import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
-import org.jspecify.annotations.Nullable;
 
 import static io.papermc.paper.threadedregions.commands.CommandUtil.SPRINTING_COLOR;
-import static net.kyori.adventure.text.Component.text;
 
 public class RegionizedTpsBar {
     private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
@@ -40,12 +34,10 @@ public class RegionizedTpsBar {
     private static final ThreadLocal<DecimalFormat> INT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0"));
     private static final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
     private final RegionizedWorldData worldData;
-    private final boolean canTick;
     private long nextTick = System.nanoTime();
 
-    public RegionizedTpsBar(RegionizedWorldData worldData) {
+    public RegionizedTpsBar(final @NonNull RegionizedWorldData worldData) {
         this.worldData = worldData;
-        this.canTick = Config.INSTANCE.enableTpsBar;
     }
 
     public RegionizedWorldData getWorldData() {
@@ -53,7 +45,7 @@ public class RegionizedTpsBar {
     }
 
     public void tick() {
-        if (this.canTick && this.nextTick <= System.nanoTime()) { // use system nano time, more reliable with runtime tick rate changes
+        if (worldData.world.canvasConfig().enableTpsBar && this.nextTick <= System.nanoTime()) { // use system nano time, more reliable with runtime tick rate changes
             // update tps maps
             long startTime = System.nanoTime();
             TickData.TickReportData tickReportData = this.worldData.regionData.getRegionSchedulingHandle().getTickReport5s(System.nanoTime());
@@ -75,7 +67,7 @@ public class RegionizedTpsBar {
     }
 
     private @NonNull Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
-        final String raw = Config.INSTANCE.tpsBarFormat;
+        final String raw = worldData.world.canvasConfig().tpsBarFormat;
         final String effectiveRaw = (raw == null || raw.isBlank()) ? "" : raw;
         FormatEntry entry = cachedFormat.get();
         if (entry == null || !effectiveRaw.equals(entry.raw())) {
@@ -225,7 +217,7 @@ public class RegionizedTpsBar {
         }
 
         static @NonNull FormatEntry compile(final @NonNull String effectiveRaw) {
-            final String normalized = effectiveRaw.isEmpty() ? Config.DEFAULT_TPSBAR_FORMAT : normalize(effectiveRaw);
+            final String normalized = effectiveRaw.isEmpty() ? WorldConfig.DEFAULT_TPSBAR_FORMAT : normalize(effectiveRaw);
             return new FormatEntry(effectiveRaw, buildSegments(normalized));
         }
 
@@ -287,11 +279,6 @@ public class RegionizedTpsBar {
                 )
                 .apply(instance, Entry::new)
         );
-
-        @Override
-        public boolean enabled() {
-            return Config.INSTANCE.enableTpsBar && enabled;
-        }
     }
 
 }
