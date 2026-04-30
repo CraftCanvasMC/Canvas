@@ -6,6 +6,7 @@ import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import java.nio.file.Path;
+import io.papermc.paper.threadedregions.TickRegions;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -98,6 +99,17 @@ public class WorldConfig extends Part {
                 .literal("https://canvasmc.io/discord")
                 .compile(60)
         );
+
+        // on reload, if the server started, we need to swap out the configs
+        if (TickRegions.started) {
+            for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
+
+                // this will swap the config with the new patchable variant
+                // it mimics the startup process of the patchable configs
+
+                world.reloadCanvasConfig();
+            }
+        }
     }
 
     private final ServerLevel world;

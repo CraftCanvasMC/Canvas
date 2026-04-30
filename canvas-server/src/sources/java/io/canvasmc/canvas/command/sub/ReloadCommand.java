@@ -1,11 +1,9 @@
 package io.canvasmc.canvas.command.sub;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.GlobalConfiguration;
+import io.canvasmc.canvas.WorldConfig;
 import io.canvasmc.canvas.command.Command;
-import io.canvasmc.canvas.configuration.jankson.Jankson;
-import io.canvasmc.canvas.configuration.jankson.JsonObject;
-import io.canvasmc.canvas.configuration.writer.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
@@ -40,14 +38,10 @@ public class ReloadCommand implements Command {
                 Component.literal("This command is unsupported. If you encounter issues, please run /stop")
                     .withColor(CommonColors.RED)
             );
-            final Config old = Config.INSTANCE;
-            Config.reload();
-            final Config newConfig = Config.INSTANCE;
-            Jankson jankson = Jankson.builder().build();
-            JsonObject oldObj = (JsonObject) jankson.toJson(old);
-            JsonObject newObj = (JsonObject) jankson.toJson(newConfig);
-            Util.Diff diff = Util.diffWithValues(oldObj, newObj);
-            Config.GLOBAL_BROADCAST.accept("Applied " + diff.changed().size() + " changes");
+            long start = System.nanoTime();
+            GlobalConfiguration.reload();
+            WorldConfig.reload();
+            GlobalConfiguration.broadcast("Reloaded all Canvas solid and patch configurations in " + String.format("%.2f", ((System.nanoTime() - start) / 1e+6)) + "ms", GlobalConfiguration.INFO);
             return 1;
         });
     }

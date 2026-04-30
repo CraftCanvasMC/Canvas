@@ -45,6 +45,7 @@ public class GlobalConfiguration extends Part {
     }
 
     public static void reload() {
+        LOGGER.info("Loading Canvas server configuration");
         ConfigurationProvider.buildSolidConfiguration(
             CONFIG_PATH,
             GlobalConfiguration::new,

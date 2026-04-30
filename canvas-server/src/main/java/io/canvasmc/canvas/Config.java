@@ -47,7 +47,6 @@ public class Config {
     // Note: this field should never be used during POST, use 'context.configuration()' instead
     public static Config INSTANCE;
 
-    public static ApiClient.BuildStatus ACTIVE_BUILD_CHANNEL = ApiClient.BuildStatus.UNKNOWN;
     public static final Consumer<String> GLOBAL_BROADCAST = (msg) -> {
         Component component = Util.gradient("[CanvasMC] ",
             s -> s.decorate(TextDecoration.BOLD),
@@ -76,29 +75,6 @@ public class Config {
         // preload parallel search radius iteration early
         //noinspection ResultOfMethodCallIgnored
         ParallelSearchRadiusIteration.getSearchIteration(MoonriseConstants.MAX_VIEW_DISTANCE);
-        CompletableFuture.supplyAsync(() -> {
-            ApiClient.BuildStatus buildStatus = ApiClient.BuildStatus.UNKNOWN;
-            ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
-            int buildNum = buildInfo.buildNumber().orElse(-1);
-            if (buildNum == -1) {
-                buildStatus = ApiClient.BuildStatus.LOCAL;
-            }
-            else {
-                try {
-                    buildStatus = CanvasVersionFetcher.CLIENT.getBuild(buildNum).buildStatus();
-                } catch (Throwable ignored) {
-                }
-            }
-            return buildStatus;
-        }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
-            ACTIVE_BUILD_CHANNEL = buildStatus;
-            switch (buildStatus) {
-                case UNKNOWN -> GLOBAL_BROADCAST.accept("Running unknown build channel, proceed with caution");
-                case EXPERIMENTAL -> GLOBAL_BROADCAST.accept("Running a beta build, there may be bugs, proceed with caution!");
-                case LOCAL ->
-                    GLOBAL_BROADCAST.accept("You are running a development version of Canvas, which may not be production-ready, be very careful!");
-            }
-        }));
     }
 
     public static void reload() {
