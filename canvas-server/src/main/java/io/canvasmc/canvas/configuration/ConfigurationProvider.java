@@ -99,6 +99,14 @@ public class ConfigurationProvider {
                 }
                 return super.representScalar(tag, value, style);
             }
+
+            @Override
+            protected Tag getTag(@NonNull Class<?> clazz, Tag defaultTag) {
+                if (clazz.isEnum()) {
+                    return Tag.STR;
+                }
+                return super.getTag(clazz, defaultTag);
+            }
         };
         representer.setPropertyUtils(propertyUtils);
         representer.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
