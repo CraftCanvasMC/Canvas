@@ -84,7 +84,7 @@ subprojects {
 
     extensions.configure<PublishingExtension> {
         repositories {
-            maven("https://maven.canvasmc.io/snapshots") {
+            maven("https://maven.canvasmc.io/releases") {
                 name = "canvasmc"
                 credentials {
                     username = providers.environmentVariable("PUBLISH_USER").orNull
@@ -114,14 +114,7 @@ subprojects {
     }
 }
 
-/* TODO - make this not fail on clean clones
-dependencies {
-    jstClasspath(projects.canvasApi)
-}
-*/
-
 // patching scripts
 tasks.register("fixupMinecraftFilePatches") {
     dependsOn(":canvas-server:fixupMinecraftSourcePatches")
 }
-
