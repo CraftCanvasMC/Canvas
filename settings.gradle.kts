@@ -6,7 +6,7 @@ pluginManagement {
         gradlePluginPortal()
         maven {
             name = "canvasmc"
-            url = uri("https://maven.canvasmc.io/releases")
+            url = uri("https://maven.canvasmc.io/public")
         }
     }
 }

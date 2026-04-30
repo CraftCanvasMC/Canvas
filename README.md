@@ -49,7 +49,7 @@ of optimizations and performance features for large scale servers.
 ```bash
 ./gradlew applyAllPatches # Applies all patches to construct the Canvas source
 ./gradlew createPaperclipJar # Creates the paperclip jar
-./gradlew runDevServer # Starts a development server locally
+./gradlew runDev # Starts a development server locally
 ```
 
 ## Documentation & Resources
