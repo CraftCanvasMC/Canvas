@@ -152,33 +152,6 @@ public class ConfigurationProvider {
         return defaultObj;
     }
 
-    protected static void write(
-        final @NonNull Path pathAbsolute, final Node representation, final @Nullable String[] header, final boolean alreadyExisted
-    ) throws IOException {
-        // only write the header on first creation, because if the file already existed,
-        // the user may have edited or removed it intentionally, so we never touch it
-        if (!alreadyExisted && header != null) {
-            // the header is special, it can define its own lines and its own formatting
-            List<CommentLine> lines = new ArrayList<>();
-            for (final String str : header) {
-                if (str == null)
-                    throw new IllegalArgumentException("Line in header must not be null. If you want a blank line, use an empty string");
-                // we specifically do not let the token system format this, we trust the
-                // header is formatted literally and to the extent the user wants
-                lines.add(Token.toCommentLine(str));
-            }
-            // add blank line so that it's kinda separated from the other comments
-            lines.add(new CommentLine(null, null, "", CommentType.BLANK_LINE));
-            representation.setBlockComments(lines);
-        }
-
-        // now that we wrote the header, write to file
-        Files.createDirectories(pathAbsolute.getParent());
-        try (FileWriter fw = new FileWriter(pathAbsolute.toFile())) {
-            YAML.serialize(representation, fw);
-        }
-    }
-
     private static void mergeNodes(
         final @NonNull MappingNode baseMapping,
         final @NonNull MappingNode patchMapping,
@@ -216,6 +189,33 @@ public class ConfigurationProvider {
 
                 LOGGER.debug("Patch applied override for '{}'", fqn);
             }
+        }
+    }
+
+    protected static void write(
+        final @NonNull Path pathAbsolute, final Node representation, final @Nullable String[] header, final boolean alreadyExisted
+    ) throws IOException {
+        // only write the header on first creation, because if the file already existed,
+        // the user may have edited or removed it intentionally, so we never touch it
+        if (!alreadyExisted && header != null) {
+            // the header is special, it can define its own lines and its own formatting
+            List<CommentLine> lines = new ArrayList<>();
+            for (final String str : header) {
+                if (str == null)
+                    throw new IllegalArgumentException("Line in header must not be null. If you want a blank line, use an empty string");
+                // we specifically do not let the token system format this, we trust the
+                // header is formatted literally and to the extent the user wants
+                lines.add(Token.toCommentLine(str));
+            }
+            // add blank line so that it's kinda separated from the other comments
+            lines.add(new CommentLine(null, null, "", CommentType.BLANK_LINE));
+            representation.setBlockComments(lines);
+        }
+
+        // now that we wrote the header, write to file
+        Files.createDirectories(pathAbsolute.getParent());
+        try (FileWriter fw = new FileWriter(pathAbsolute.toFile())) {
+            YAML.serialize(representation, fw);
         }
     }
 

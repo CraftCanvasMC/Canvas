@@ -24,10 +24,6 @@ public class Part {
         definitions.defaultReturnValue(new OptionDefinition());
     }
 
-    public Node getYamlNode() {
-        return node.valueSafe();
-    }
-
     static Map<String, OptionDefinition> harvest(Class<? extends Part> clazz) {
         try {
             return clazz.getDeclaredConstructor().newInstance().definitions;
@@ -35,6 +31,10 @@ public class Part {
             throw new RuntimeException("Could not instantiate Part subclass " + clazz.getName()
                 + " — ensure it has a public no-arg constructor", e);
         }
+    }
+
+    public Node getYamlNode() {
+        return node.valueSafe();
     }
 
     public OptionDefinition option(String target) {
