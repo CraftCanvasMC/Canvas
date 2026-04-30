@@ -54,13 +54,12 @@ rootDir.listFiles()
 
 gradle.lifecycle.beforeProject {
     val mcVersion = providers.gradleProperty("mcVersion").get().trim()
-    // val canvasChannel = providers.gradleProperty("channel").get().trim() - revisit when we rework the website API
+    val canvasChannel = providers.gradleProperty("channel").get().trim()
     val canvasBuildNumber = providers.environmentVariable("BUILD_NUMBER").orNull?.trim()?.toInt()
     val versionString = if (canvasBuildNumber == null) {
         "$mcVersion.local-SNAPSHOT"
     } else {
-        // "$mcVersion.build.$canvasBuildNumber-${canvasChannel.lowercase()}"
-        "$mcVersion.build.$canvasBuildNumber"
+        "$mcVersion.build.$canvasBuildNumber-${canvasChannel.lowercase()}"
     }
     version = versionString
 }
