@@ -16,7 +16,8 @@ import org.slf4j.LoggerFactory;
 
 public class WorldConfig extends Part {
 
-    // configuration constants
+    // all constants for configurations go here
+
     public static final String DEFAULT_TPSBAR_FORMAT =
         "<gradient:blue:aqua><b>TPS:</b></gradient> <tps>  <dark_gray>-</dark_gray>  " +
             "<gradient:blue:aqua><b>MSPT:</b></gradient> <mspt>  <dark_gray>-</dark_gray>  " +
@@ -47,7 +48,6 @@ public class WorldConfig extends Part {
         ConfigurationProvider.buildSolidConfiguration(
             BASE_FILE,
             WorldConfig::new,
-            // by calling this constant we also load the global config first
             GlobalConfiguration.CHAR_LIM,
             new Resolver<>() {
                 @Override
@@ -67,7 +67,7 @@ public class WorldConfig extends Part {
                     Validator.validateObject(instance);
 
                     // note that we do not do anything else on post load for the default
-                    // configuration file, only patchable instances
+                    // configuration file, only patchable instances need post load
 
                 }
             },
@@ -160,6 +160,11 @@ public class WorldConfig extends Part {
     }
 
     private void onLoad() {
+
+        // validate the object here too, because some users may do
+        // something stupid in the patch variant
+
+        Validator.validateObject(this);
     }
 
     {
@@ -177,5 +182,4 @@ public class WorldConfig extends Part {
 
     public boolean enableTpsBar = true;
     public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
-
 }
