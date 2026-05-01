@@ -42,14 +42,14 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
      * keeps nearby players synced up. The ideal value probably depends on your server’s density and how forgiving you
      * want the update delay to be.
      */
-    private static final double SCALE = Config.INSTANCE.waypointUpdateScale;
+    private final double scale;
 
     private final MultiThreadedQueue<WaypointTransmitter> waypoints = new MultiThreadedQueue<>();
     private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
     private final ServerLevel world;
 
-    private static boolean shouldScheduleBasedOnDistance(@NonNull ServerPlayer origin, ServerPlayer target) {
-        final double scaled = origin.distanceTo(target) / SCALE;
+    private boolean shouldScheduleBasedOnDistance(@NonNull ServerPlayer origin, ServerPlayer target) {
+        final double scaled = origin.distanceTo(target) / scale;
         return origin.random.nextDouble() < (1.0 / (1.0 + (scaled * scaled)));
     }
 
@@ -66,6 +66,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     public RegionThreadingWaypointManager(ServerLevel world) {
         super(world);
         this.world = world;
+        this.scale = world.canvasConfig().waypointUpdateScale;
     }
 
     public boolean isLocatorBarDisabled() {

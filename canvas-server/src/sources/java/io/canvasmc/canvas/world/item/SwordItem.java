@@ -51,7 +51,7 @@ public class SwordItem extends Item {
                 } else {
                     // Canvas start - implement sword blocking
                     // we already know this is a sword, so we just apply the component for block attacks on this
-                    if (Config.INSTANCE.combat.imitateSwordBlocking) {
+                    if (level.canvasConfig().combat.imitateSwordBlocking) {
                         // this doesn't have block attacks. add it.
                         itemInHand.set(DataComponents.BLOCKS_ATTACKS, BLOCKS_ATTACKS);
                         player.inventoryMenu.broadcastChanges();
@@ -69,7 +69,7 @@ public class SwordItem extends Item {
 
     @Override
     public boolean releaseUsing(final ItemStack stack, final Level level, final LivingEntity entity, final int timeLeft) {
-        if (Config.INSTANCE.combat.imitateSwordBlocking && entity instanceof Player player && player.canvas$isTemporarilyBlocking) {
+        if (level.canvasConfig().combat.imitateSwordBlocking && entity instanceof Player player && player.canvas$isTemporarilyBlocking) {
             stack.remove(DataComponents.BLOCKS_ATTACKS);
             player.canvas$isTemporarilyBlocking = false;
         }
