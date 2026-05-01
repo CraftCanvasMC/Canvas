@@ -5,6 +5,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.util.Codecs;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import it.unimi.dsi.fastutil.booleans.BooleanConsumer;
@@ -63,7 +64,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
 
     public static EnderPearls read(final Path worldSavePath) {
         final Path resolved = worldSavePath.resolve(SAVE_NAME);
-        if (Config.INSTANCE.restoreVanillaEnderPearlBehavior && Files.exists(resolved)) {
+        if (GlobalConfiguration.getInstance().restoreVanillaEnderPearlBehavior && Files.exists(resolved)) {
             try {
                 CompoundTag tag = Objects.requireNonNull(NbtIo.readCompressed(resolved, NbtAccounter.unlimitedHeap()), "NBT cannot be null")
                     .asCompound().orElseThrow(UnknownError::new);

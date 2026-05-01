@@ -446,4 +446,18 @@ public class GlobalConfiguration extends Part {
         public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
     }
 
+    {
+        option("serverModName").docs("The server mod name displayed in server listings and client info");
+        option("restoreVanillaEnderPearlBehavior").docs("Restores and fixes Vanilla Ender Pearl behavior, broken by Folia");
+        option("displayWorldLoadScreenForPortaling")
+            .docs(
+                "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
+                "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
+            );
+    }
+
+    public String serverModName = ServerBuildInfo.buildInfo().brandName();
+    public boolean restoreVanillaEnderPearlBehavior = false;
+    public boolean displayWorldLoadScreenForPortaling = true;
+
 }
