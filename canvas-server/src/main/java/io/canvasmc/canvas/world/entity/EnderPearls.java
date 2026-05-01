@@ -4,7 +4,6 @@ import ca.spottedleaf.concurrentutil.util.Priority;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.util.Codecs;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
@@ -92,7 +91,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         });
         return future.handle((result, thrown) -> {
             if (result == null || !result) {
-                Config.LOGGER.warn("Could not save to pearls.dat", thrown);
+                GlobalConfiguration.LOGGER.warn("Could not save to pearls.dat", thrown);
             }
             if (callback != null) callback.accept(thrown == null);
             return result;
@@ -111,7 +110,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
 
     public void addPearl(final UUID uuid, final ThrownEnderpearl thrownEnderpearl) {
         if (thrownEnderpearl.isRemoved()) {
-            Config.LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason(), new Throwable());
+            GlobalConfiguration.LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason(), new Throwable());
             return;
         }
         List<Pearl> pearls = pearls().computeIfAbsent(uuid, (ignored) -> new CopyOnWriteArrayList<>());
@@ -153,7 +152,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
         public static Pearl of(ThrownEnderpearl pearl) {
             final CompoundTag tag;
             try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
-                () -> "pearl-serialize", Config.LOGGER
+                () -> "pearl-serialize", GlobalConfiguration.LOGGER
             )) {
                 final TagValueOutput tagValueOutput = TagValueOutput.createWithContext(
                     problemReporter,
@@ -173,7 +172,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
             final CompoundTag data = serialized.getCompound("data").orElseThrow();
             final ServerLevel world = MinecraftServer.getServer().getLevel(serialized.read("world", Level.RESOURCE_KEY_CODEC).orElseThrow());
             if (world == null) {
-                Config.LOGGER.error("World ({}) did not exist, skipping pearl spawn", serialized.getString("world"));
+                GlobalConfiguration.LOGGER.error("World ({}) did not exist, skipping pearl spawn", serialized.getString("world"));
                 return;
             }
             Entity entity = EntityType.loadEntityRecursive(data, world, EntitySpawnReason.LOAD, EntityProcessor.NOP);
@@ -181,11 +180,11 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 world.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
                     world.addFreshEntityWithPassengers(entity);
                     ServerPlayer.placeEnderPearlTicket(world, entity.chunkPosition());
-                    Config.LOGGER.debug("Spawned saved pearl in world ({})", world.dimension().identifier());
+                    GlobalConfiguration.LOGGER.debug("Spawned saved pearl in world ({})", world.dimension().identifier());
                 });
             }
             else {
-                Config.LOGGER.warn("Failed to spawn player ender pearl in world ({}), skipping", world.dimension().identifier().toDebugFileName());
+                GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in world ({}), skipping", world.dimension().identifier().toDebugFileName());
             }
         }
 
