@@ -7,9 +7,12 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.yaml.snakeyaml.nodes.Node;
 
@@ -17,6 +20,7 @@ public class Part {
 
     // whenever the reference is null, the yaml is empty
     final CanonicalReference<Node> node = new CanonicalReference<>();
+    final CanonicalReference<Function<String, @Nullable OptionDefinition>> processor = new CanonicalReference<>();
     // we don't need or care about this being linked tbh
     final Object2ObjectOpenHashMap<String, OptionDefinition> definitions = new Object2ObjectOpenHashMap<>();
     {
@@ -24,17 +28,36 @@ public class Part {
         definitions.defaultReturnValue(new OptionDefinition());
     }
 
-    static Map<String, OptionDefinition> harvest(Class<? extends Part> clazz) {
+    static @NonNull Map<String, OptionDefinition> harvest(Class<? extends Part> clazz) {
         try {
-            return clazz.getDeclaredConstructor().newInstance().definitions;
-        } catch (Exception e) {
-            throw new RuntimeException("Could not instantiate Part subclass " + clazz.getName()
-                + " — ensure it has a public no-arg constructor", e);
+
+            Part temp = clazz.getDeclaredConstructor().newInstance();
+            Function<String, @Nullable OptionDefinition> resolver = temp.processor.valueSafe();
+
+            Map<String, OptionDefinition> result = new HashMap<>();
+
+            for (final Map.Entry<String, OptionDefinition> entry : temp.definitions.entrySet()) {
+                final String key = entry.getKey();
+                final OptionDefinition value = resolver == null ? entry.getValue() : resolver.apply(key);
+                result.put(
+                    key,
+                    // the resolver can return null, so we should ensure to fill with a non-null value
+                    value == null ? entry.getValue() : value
+                );
+            }
+
+            return result;
+        } catch (Throwable thrown) {
+            throw new RuntimeException("Could not instantiate Part subclass " + clazz.getName() + ", ensure it has a public no-arg constructor", thrown);
         }
     }
 
     public Node getYamlNode() {
         return node.valueSafe();
+    }
+
+    public void stream(final Function<String, @Nullable OptionDefinition> processor) {
+        this.processor.setValue(processor);
     }
 
     public OptionDefinition option(String target) {
