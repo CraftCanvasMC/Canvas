@@ -353,4 +353,47 @@ public class GlobalConfiguration extends Part {
             public boolean enable = false;
         }
     }
+
+    // TODO - check these on minecraft updates
+    public UpstreamFixes vanillaFixes = new UpstreamFixes();
+    public static class UpstreamFixes extends Part {
+
+        {
+            // should we do these specific or do we try and do better with this?
+            // stream((fieldName) -> {
+            //     if (fieldName.startsWith("mc")) {
+            //         // this is a specific minecraft fix
+            //         return new OptionDefinition()
+            //             .docs(
+            //                 Style.create().literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
+            //             );
+            //     }
+            //     return null;
+            // });
+            option("pearlDuplication")
+                .docs(
+                    "There is a Vanilla bug where in-flight pearls are duplicated at shutdown. This fixes that when",
+                    "the option \"restoreVanillaEnderPearlBehavior\" is enabled alongside this."
+                );
+        }
+
+        public boolean mc298464 = false;
+        public boolean mc223153 = false;
+        public boolean mc200418 = false;
+        public boolean mc94054 = false;
+        public boolean mc245394 = false;
+        public boolean mc227337 = false;
+        public boolean mc221257 = false;
+        public boolean mc206922 = false;
+        public boolean mc155509 = false;
+        public boolean mc132878 = false;
+        public boolean mc121706 = false;
+        public boolean mc119754 = false;
+        public boolean mc100991 = false;
+        public boolean mc30391 = false;
+        public boolean mc183990 = false;
+        public boolean mc136249 = false;
+        public boolean pearlDuplication = false;
+    }
+
 }

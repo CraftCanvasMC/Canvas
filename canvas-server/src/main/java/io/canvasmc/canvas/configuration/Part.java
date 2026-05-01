@@ -5,9 +5,9 @@ import io.canvasmc.canvas.configuration.validation.StringValidation;
 import io.canvasmc.canvas.util.CanonicalReference;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -22,10 +22,10 @@ public class Part {
     final CanonicalReference<Node> node = new CanonicalReference<>();
     final CanonicalReference<Function<String, @Nullable OptionDefinition>> processor = new CanonicalReference<>();
     // we don't need or care about this being linked tbh
-    final Object2ObjectOpenHashMap<String, OptionDefinition> definitions = new Object2ObjectOpenHashMap<>();
+    final Object2ObjectOpenHashMap<String, OptionDefinition> definitionOverrides = new Object2ObjectOpenHashMap<>();
     {
         // set the default return value to a blank definition
-        definitions.defaultReturnValue(new OptionDefinition());
+        definitionOverrides.defaultReturnValue(new OptionDefinition());
     }
 
     static @NonNull Map<String, OptionDefinition> harvest(Class<? extends Part> clazz) {
@@ -34,15 +34,16 @@ public class Part {
             Part temp = clazz.getDeclaredConstructor().newInstance();
             Function<String, @Nullable OptionDefinition> resolver = temp.processor.valueSafe();
 
-            Map<String, OptionDefinition> result = new HashMap<>();
+            Object2ObjectOpenHashMap<String, OptionDefinition> result = new Object2ObjectOpenHashMap<>();
+            result.defaultReturnValue(new OptionDefinition());
 
-            for (final Map.Entry<String, OptionDefinition> entry : temp.definitions.entrySet()) {
-                final String key = entry.getKey();
-                final OptionDefinition value = resolver == null ? entry.getValue() : resolver.apply(key);
+            for (final Field field : clazz.getDeclaredFields()) {
+                final String key = field.getName();
+                final OptionDefinition value = resolver == null ? temp.definitionOverrides.get(key) : resolver.apply(key);
                 result.put(
                     key,
                     // the resolver can return null, so we should ensure to fill with a non-null value
-                    value == null ? entry.getValue() : value
+                    value == null ? temp.definitionOverrides.get(key) : value
                 );
             }
 
@@ -73,7 +74,7 @@ public class Part {
         final OptionDefinition def = new OptionDefinition();
 
         // make sure we propagate in definitions
-        definitions.put(target, def);
+        definitionOverrides.put(target, def);
 
         return def;
     }
