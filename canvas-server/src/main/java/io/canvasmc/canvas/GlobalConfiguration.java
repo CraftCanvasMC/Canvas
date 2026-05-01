@@ -475,5 +475,5 @@ public class GlobalConfiguration extends Part {
                 )
             ).between(0, 2);
     }
-    public int  extraThreadChecksLevel = 1;
+    public int extraThreadChecksLevel = 1;
 }
