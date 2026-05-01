@@ -308,11 +308,11 @@ public class GlobalConfiguration extends Part {
                         "Depending on the algorithm chosen, this can help reduce stutter and improve performance",
                         "when generating chunks"
                     ).defineEnum(FluidPostProcessingMode.class, (mode) -> {
-                         return switch (mode) {
-                             case VANILLA -> "Normal post processing algorithm, everything is processed";
-                             case DISABLED -> "Disables fluid post processing entirely";
-                             case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
-                         };
+                        return switch (mode) {
+                            case VANILLA -> "Normal post processing algorithm, everything is processed";
+                            case DISABLED -> "Disables fluid post processing entirely";
+                            case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
+                        };
                     })
                 );
 
@@ -334,7 +334,7 @@ public class GlobalConfiguration extends Part {
         public enum FluidPostProcessingMode {
             VANILLA,
             DISABLED,
-            FILTERED;
+            FILTERED
         }
 
         public boolean makeFluidPostProcessScheduledTick = false;
