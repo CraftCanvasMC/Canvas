@@ -134,51 +134,6 @@ public class Config {
 
     /* START CONFIGURATION */
 
-    public Networking networking = new Networking();
-
-    public static class Networking {
-        @Comment({
-            "The ClientboundSetEntityMotionPacket can often cause high network (Netty) usage and consumes (on larger production servers)",
-            "up to 60% of your network usage. Filtering should have no side effects visually on the client. If you find any, report to Canvas"
-        })
-        public boolean filterClientboundSetEntityMotionPacket = false;
-
-        @Comment("Filters entity movement packets to reduce the amount of useless move packets sent")
-        public boolean reduceUselessMovePackets = false;
-
-        @Comment("When enabled, hides flames on entities with fire resistance")
-        public boolean hideFlamesOnEntitiesWithFireResistance = false;
-
-        @Comment("When enabled, hides flames on entities with invisibility")
-        public boolean hideFlamesOnEntitiesWithInvisibility = false;
-
-        @Comment({
-            "Optimizes player information packet sending by splitting players",
-            "into buckets to be sent to spread out the list tick"
-        })
-        public boolean optimizePlayerListTicking = false;
-
-        @PositiveNumericValueValidator.PositiveNumericValue
-        @Comment("The interval in ticks for how often the server will tick the playerlist buckets")
-        public int playerInfoSendInterval = 600;
-
-        @Comment("This option makes protocol switching asynchronous, reducing global region blocking and improving login and configuration performance.")
-        public boolean asyncProtocolSwitch = false;
-
-        @Comment("The maximum bytes that can be sent by the server in a single packet to a player before kicking them")
-        public int maximumPacketBytes = 8388608;
-
-        @Comment({
-        	"Paper implements an overflow fallback for container contents packets to the client, splitting the load into individual packets",
-        	"for each individual slot to prevent kicking the player for large containers. By enabling this, the server wont split the packet, and will",
-        	"kick the player if they attempt to open a container with the set contents packet larger than the max packet byte size"
-        })
-        public boolean disablePaperPacketOverflowContainerFix = false;
-
-        @Comment("The disconnet reason sent to the client when the server attempted to send a packet that was too large")
-        public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
-    }
-
     @Comment("Check if a cactus can survive before growing. Heavily optimizes cacti farms")
     public boolean cactusCheckSurvivalBeforeGrowth = false;
 

@@ -194,4 +194,10 @@ public class WorldConfig extends Part {
 
     public boolean enableTpsBar = true;
     public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
+
+    public Visuals visuals = new Visuals();
+    public static class Visuals extends Part {
+        public boolean hideFlamesOnEntitiesWithFireResistance = false;
+        public boolean hideFlamesOnEntitiesWithInvisibility = false;
+    }
 }

@@ -262,7 +262,6 @@ public class GlobalConfiguration extends Part {
                     );
 
                 option("enableMidTickTasks").docs("Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick");
-
                 option("tickRegionAffinity")
                     .docs("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
                     .greaterThanOrEqualTo(0.0F);
@@ -308,7 +307,7 @@ public class GlobalConfiguration extends Part {
                     "Enabling this turns fluid post processing into a scheduled tick, which hopefully",
                     "helps to mitigate MSPT spiking issues during chunk generation"
                 );
-            option("endBiomeCacheSize").greaterThan(0);
+            option("endBiomeCacheSize").greaterThan(0.0F);
             option("structureOptimizations").docs(
                 "These options are ported from the mod StructureLayoutOptimizer, https://modrinth.com/mod/structure-layout-optimizer",
                 "which optimizes the generation of Jigsaw Structures and NBT pieces"
@@ -394,6 +393,57 @@ public class GlobalConfiguration extends Part {
         public boolean mc183990 = false;
         public boolean mc136249 = false;
         public boolean pearlDuplication = false;
+    }
+
+    public Networking networking = new Networking();
+    public static class Networking extends Part {
+
+        {
+            option("filterVelocityPacket")
+                .docs(
+                    "The ClientboundSetEntityMotionPacket, also known as the entity velocity packet, can often",
+                    "consume major amounts of network usage, often being up to 60% on large production servers",
+                    "This option filters the unnecessary packets sent, while still maintaining Vanilla visual effects"
+                );
+            option("filterMovePackets").docs("Filters useless move packets that dont need to be sent");
+
+            option("alternativePlayerListTick").docs("Splits players into buckets to be spread evenly across the playerlist tick");
+            option("playerInfoSendInterval")
+                .docs(
+                    "If alternative playerlist tick is enabled, this is the interval in ticks for how often",
+                    "each bucket will be ticked"
+                ).greaterThan(0.0F);
+            option("asyncProtocolSwitch")
+                .docs(
+                    "This makes protocol switching asynchronous during login, which reduces global region blocking",
+                    "and can improve login and configuration phase performance during player join"
+                );
+
+            option("maximumPacketBytes")
+                .docs(
+                    "The maximum bytes that can be sent by the server in a single packet to a player before kicking them"
+                ).greaterThan(0.0F);
+            option("disablePaperPacketOverflowContainerFix")
+                .docs(
+                    "This disables Papers overflow fallback for large container packets being sent to the client. This means",
+                    "that if the container data is too large, it will kick the player if they attempt to open a container",
+                    "with contents larger than the max packet byte size"
+                );
+            option("packetTooLargeDisconnectReason")
+                .docs(
+                    "The disconnect reason sent to the client when the server attempted to send a packet that",
+                    "exceeded the max packet size"
+                );
+        }
+
+        public boolean filterVelocityPacket = false;
+        public boolean filterMovePackets = false;
+        public boolean alternativePlayerListTick = false;
+        public int playerInfoSendInterval = 600;
+        public boolean asyncProtocolSwitch = false;
+        public int maximumPacketBytes = 8388608;
+        public boolean disablePaperPacketOverflowContainerFix = false;
+        public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
     }
 
 }
