@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.Config;
+import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.command.Command;
 import io.canvasmc.canvas.world.PerWorldDistanceConfig;
 import java.util.Locale;
@@ -91,7 +92,7 @@ public class WorldDistanceCommand implements Command {
                                 case SIMULATION -> world.getChunkSource().setSimulationDistance(updated);
                             }
 
-                            Config.GLOBAL_BROADCAST.accept("Set " + type.name.toLowerCase() + " distance of world '" + world.getWorld().getName() + "' to " + distance);
+                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of world '" + world.getWorld().getName() + "' to " + distance, GlobalConfiguration.INFO);
                             return distance;
                         })
                     )
