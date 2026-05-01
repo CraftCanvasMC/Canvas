@@ -1,7 +1,7 @@
 package io.canvasmc.canvas.util;
 
-import org.jspecify.annotations.Nullable;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 public class CanonicalReference<T> {
     private T v;

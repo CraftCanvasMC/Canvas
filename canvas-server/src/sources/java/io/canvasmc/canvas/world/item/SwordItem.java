@@ -1,6 +1,5 @@
 package io.canvasmc.canvas.world.item;
 
-import io.canvasmc.canvas.Config;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.component.DataComponents;

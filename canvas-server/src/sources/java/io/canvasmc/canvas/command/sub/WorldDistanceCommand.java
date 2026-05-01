@@ -4,7 +4,6 @@ import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.command.Command;
 import io.canvasmc.canvas.world.PerWorldDistanceConfig;

@@ -2,7 +2,6 @@ package io.canvasmc.canvas.world.waypoints;
 
 import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 import ca.spottedleaf.moonrise.common.util.TickThread;
-import io.canvasmc.canvas.Config;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import java.util.HashSet;
 import java.util.Map;
