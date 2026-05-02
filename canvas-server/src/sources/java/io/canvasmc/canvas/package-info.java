@@ -1,4 +1,5 @@
 /**
- * This package is specifically for <b>source</b> file related classes
+ * This source dir is specifically for classes related to <b>source</b> patches.
+ * All other classes belong to the `main` source dir.
  */
 package io.canvasmc.canvas;
