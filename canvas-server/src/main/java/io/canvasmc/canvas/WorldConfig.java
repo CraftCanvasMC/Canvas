@@ -120,16 +120,6 @@ public class WorldConfig extends Part {
         }
     }
 
-    private final ServerLevel world;
-
-    public WorldConfig() {
-        this(null);
-    }
-
-    public WorldConfig(final ServerLevel world) {
-        this.world = world;
-    }
-
     public static WorldConfig buildForWorld(final @NonNull ServerLevel world, final ResourceKey<Level> dimension) {
 
         // we build it as a patch here, and from here we can set the world properly
@@ -139,7 +129,7 @@ public class WorldConfig extends Part {
             MinecraftServer.getServer().storageSource.getDimensionPath(dimension)
                 .resolve("canvas-patch.yml"),
             BASE_FILE,
-            () -> new WorldConfig(world),
+            WorldConfig::new,
             new Resolver<>() {
                 @Override
                 public void onFinishLoad(final WorldConfig instance) {
@@ -147,7 +137,7 @@ public class WorldConfig extends Part {
 
                     result[0] = instance;
 
-                    instance.onLoad();
+                    instance.onLoad(world);
                 }
             },
             Style.create()
@@ -168,18 +158,7 @@ public class WorldConfig extends Part {
         return result[0];
     }
 
-    public boolean isTiedToWorld() {
-        return world == null;
-    }
-
-    public ServerLevel getWorld() {
-        if (!isTiedToWorld()) {
-            throw new IllegalStateException("This configuration is not tied to any world");
-        }
-        return world;
-    }
-
-    private void onLoad() {
+    private void onLoad(final @NonNull ServerLevel world) {
 
         // validate the object here too, because some users may do
         // something stupid in the patch variant
@@ -194,7 +173,7 @@ public class WorldConfig extends Part {
             .toList().toArray(new EntityType<?>[0]);
 
         if (entityTypes.length > 0) {
-            LOGGER.info("Set {} projectile types to load chunks in {}", entityTypes.length, getWorld().dimension().identifier().toDebugFileName());
+            LOGGER.info("Set {} projectile types to load chunks in {}", entityTypes.length, world.dimension().identifier().toDebugFileName());
         }
 
         // set the predicate now
