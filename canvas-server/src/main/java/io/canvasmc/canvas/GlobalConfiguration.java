@@ -532,20 +532,21 @@ public class GlobalConfiguration extends Part {
         public boolean disableChatVerificationOrder = false;
     }
 
-    // a specific section for this?
     {
         option("extraThreadChecksLevel")
-            .docs(Style.wrap(
-                    "Canvas adds extra thread checks to the Spigot/Paper API. This config controls how severe these thread checks are",
-                    "The options are:",
-                    " - 0: All thread checks that don't pass won't log or throw, it goes silent. Not recommended ever",
-                    " - 1: All thread checks that don't pass will log a warning in console, and proceed with the operation. It's",
-                    "      recommended to contact the developers of the plugin causing the unsafe access when you see said warnings",
-                    " - 2: All thread checks that don't pass will throw an exception, potentially crashing the server. This is",
-                    "      the safest option for trying to prevent corrupt states or prevent unsafe accesses, however not recommended",
-                    "      for runtime production without thoroughly testing plugins in a private server first"
+            .docs(
+                Style.wrap(
+                    "Canvas adds extra thread checks to the Spigot/Paper API. This config controls how severe these thread checks are"
                 )
-            ).between(0, 2);
+                .wordWrap(" - 0: All extra thread checks are ignored").endLine()
+                .wordWrap(" - 1: All extra thread checks log a warning, but don't throw").endLine()
+                .wordWrap(" - 2: All extra thread checks throw as if like normal checks").endLine()
+                .wordWrap(
+                    "It is recommended that if you see a stacktrace or crash, to check with the relevant plugin authors,",
+                    "or check with CanvasMC if you need help identifying which plugin, or you want them to help out with a fix"
+                )
+            ).between(0.0F, 2.0F);
     }
+
     public int extraThreadChecksLevel = 1;
 }
