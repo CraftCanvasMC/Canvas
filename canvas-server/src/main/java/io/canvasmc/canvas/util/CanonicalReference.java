@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.util;
 
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 public class CanonicalReference<T> {
@@ -13,9 +14,9 @@ public class CanonicalReference<T> {
         this.v = val;
     }
 
-    public void setValue(final T value) {
+    public T setValue(final T value) {
         if (this.v != null) throw new IllegalStateException("Value already set");
-        this.v = value;
+        return this.v = value;
     }
 
     public T value() {
@@ -25,5 +26,13 @@ public class CanonicalReference<T> {
 
     public @Nullable T valueSafe() {
         return v;
+    }
+
+    public T getOrSet(Supplier<T> empty) {
+        return valueSafe() == null ? setValue(empty.get()) : valueSafe();
+    }
+
+    public boolean isSet() {
+        return valueSafe() != null;
     }
 }

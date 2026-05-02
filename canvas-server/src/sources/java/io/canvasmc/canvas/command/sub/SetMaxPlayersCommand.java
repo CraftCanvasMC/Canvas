@@ -3,7 +3,6 @@ package io.canvasmc.canvas.command.sub;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import io.canvasmc.canvas.Config;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.command.Command;
 import net.minecraft.commands.CommandSourceStack;

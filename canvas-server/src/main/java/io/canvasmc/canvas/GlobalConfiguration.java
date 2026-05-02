@@ -1,5 +1,6 @@
 package io.canvasmc.canvas;
 
+import ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom;
 import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
@@ -7,6 +8,7 @@ import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
+import io.canvasmc.canvas.util.FasterRandomSource;
 import io.canvasmc.canvas.util.version.ApiClient;
 import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
@@ -16,11 +18,18 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.random.RandomGeneratorFactory;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.RandomSupport;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +48,7 @@ public class GlobalConfiguration extends Part {
 
     private static GlobalConfiguration INSTANCE;
     private static ApiClient.BuildStatus BUILD_STATUS;
+    private static boolean ENABLE_FASTER_RANDOM = true;
 
     static {
         reload();
@@ -148,7 +158,7 @@ public class GlobalConfiguration extends Part {
                 RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
             } catch (Throwable throwable) {
                 broadcast("Canvas' faster random impl is not supported by your VM, falling back to legacy random", WARN);
-                Config.ENABLE_FASTER_RANDOM = false;
+                ENABLE_FASTER_RANDOM = false;
             }
 
             // SIMD actions
@@ -178,6 +188,10 @@ public class GlobalConfiguration extends Part {
 
     public static ApiClient.BuildStatus getBuildStatus() {
         return BUILD_STATUS;
+    }
+
+    public static @NonNull RandomSource createFastRandom() {
+        return ENABLE_FASTER_RANDOM ? new FasterRandomSource(RandomSupport.generateUniqueSeed()) : new SimpleThreadUnsafeRandom(RandomSupport.generateUniqueSeed());
     }
 
     public static void broadcast(String msg, int severity) {
@@ -294,11 +308,11 @@ public class GlobalConfiguration extends Part {
                         "Depending on the algorithm chosen, this can help reduce stutter and improve performance",
                         "when generating chunks"
                     ).defineEnum(FluidPostProcessingMode.class, (mode) -> {
-                         return switch (mode) {
-                             case VANILLA -> "Normal post processing algorithm, everything is processed";
-                             case DISABLED -> "Disables fluid post processing entirely";
-                             case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
-                         };
+                        return switch (mode) {
+                            case VANILLA -> "Normal post processing algorithm, everything is processed";
+                            case DISABLED -> "Disables fluid post processing entirely";
+                            case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
+                        };
                     })
                 );
 
@@ -320,7 +334,7 @@ public class GlobalConfiguration extends Part {
         public enum FluidPostProcessingMode {
             VANILLA,
             DISABLED,
-            FILTERED;
+            FILTERED
         }
 
         public boolean makeFluidPostProcessScheduledTick = false;
@@ -447,18 +461,76 @@ public class GlobalConfiguration extends Part {
     }
 
     {
-        option("serverModName").docs("The server mod name displayed in server listings and client info");
+        option("serverModName").docs("The server mod name displayed in server listings and client info").word();
         option("restoreVanillaEnderPearlBehavior").docs("Restores and fixes Vanilla Ender Pearl behavior, broken by Folia");
+
         option("displayWorldLoadScreenForPortaling")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
+        option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
+        option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
+
+        option("defaultRespawnDimensionKey")
+            .docs(
+                "The default respawn dimension for the server. This can assist servers needing to change this to a",
+                "different world due to setup reasoning, like needing to send players to the \"spawn\" world or something.",
+                "This also applies to the end portal and nether portal, in replacement of the overworld, meaning the",
+                "target dimension for entities going from the nether for example will be sent here"
+            ).identifier(); // TODO - object mapping?
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
     public boolean restoreVanillaEnderPearlBehavior = false;
     public boolean displayWorldLoadScreenForPortaling = true;
+    public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
+    public boolean tileEntitySnapshotCreation = false;
+    public String defaultRespawnDimensionKey = "minecraft:overworld";
+
+    public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
+        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
+    }
+
+    public PurpurContainers purpurContainers = new PurpurContainers();
+    public static class PurpurContainers extends Part {
+
+        {
+            option("barrelRows").docs("The amount of rows for the barrel block").between(1, 6);
+            option("enderChestSixRows").docs("Whether to use 6 rows for the player ender chest, rather than the normal 3");
+            option("enderChestPermissionRows")
+                .docs(
+                    Style.wrap("Whether to use a permission based system for defining the size of ender chests per player")
+                        .literal("Valid permissions").endLine()
+                        .literal(" - purpur.enderchest.rows.six").endLine()
+                        .literal(" - purpur.enderchest.rows.five").endLine()
+                        .literal(" - purpur.enderchest.rows.four").endLine()
+                        .literal(" - purpur.enderchest.rows.three").endLine()
+                        .literal(" - purpur.enderchest.rows.two").endLine()
+                        .literal(" - purpur.enderchest.rows.one").endLine()
+                );
+        }
+
+        public int barrelRows = 3;
+        public boolean enderChestSixRows = false;
+        public boolean enderChestPermissionRows = false;
+    }
+
+    public boolean blacklistNonPlayerEntitiesFromEnteringNetherPortals = false;
+    public boolean blacklistNonPlayerEntitiesFromEnteringEndPortals = false;
+    public boolean blacklistNonPlayerEntitiesFromEnteringGatewayPortals = false;
+
+    public Chat chat = new Chat();
+    public static class Chat extends Part {
+
+        {
+            option("disableChatReporting").docs("Disables Minecraft chat signing to prevent player chat reporting");
+            option("disableChatVerificationOrder").docs("Disables Minecraft chat verification ordering");
+        }
+
+        public boolean disableChatReporting = false;
+        public boolean disableChatVerificationOrder = false;
+    }
 
     // a specific section for this?
     {

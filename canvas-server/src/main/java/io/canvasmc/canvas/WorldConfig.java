@@ -5,11 +5,19 @@ import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
-import java.nio.file.Path;
+import io.canvasmc.canvas.util.CanonicalReference;
 import io.papermc.paper.threadedregions.TickRegions;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Predicate;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
@@ -112,16 +120,6 @@ public class WorldConfig extends Part {
         }
     }
 
-    private final ServerLevel world;
-
-    public WorldConfig() {
-        this(null);
-    }
-
-    public WorldConfig(final ServerLevel world) {
-        this.world = world;
-    }
-
     public static WorldConfig buildForWorld(final @NonNull ServerLevel world, final ResourceKey<Level> dimension) {
 
         // we build it as a patch here, and from here we can set the world properly
@@ -131,7 +129,7 @@ public class WorldConfig extends Part {
             MinecraftServer.getServer().storageSource.getDimensionPath(dimension)
                 .resolve("canvas-patch.yml"),
             BASE_FILE,
-            () -> new WorldConfig(world),
+            WorldConfig::new,
             new Resolver<>() {
                 @Override
                 public void onFinishLoad(final WorldConfig instance) {
@@ -139,7 +137,7 @@ public class WorldConfig extends Part {
 
                     result[0] = instance;
 
-                    instance.onLoad();
+                    instance.onLoad(world);
                 }
             },
             Style.create()
@@ -160,23 +158,33 @@ public class WorldConfig extends Part {
         return result[0];
     }
 
-    public boolean isTiedToWorld() {
-        return world == null;
-    }
-
-    public ServerLevel getWorld() {
-        if (!isTiedToWorld()) {
-            throw new IllegalStateException("This configuration is not tied to any world");
-        }
-        return world;
-    }
-
-    private void onLoad() {
+    private void onLoad(final @NonNull ServerLevel world) {
 
         // validate the object here too, because some users may do
         // something stupid in the patch variant
 
         Validator.validateObject(this);
+
+        // basically we just need to parse the loadChunks strings into identifiers
+        // and then from there we can access all entity types and use that as the predicate
+        final EntityType<?>[] entityTypes = entities.projectiles.loadChunks.stream()
+            .map(Identifier::parse)
+            .map(BuiltInRegistries.ENTITY_TYPE::getValue)
+            .toList().toArray(new EntityType<?>[0]);
+
+        if (entityTypes.length > 0) {
+            LOGGER.info("Set {} projectile types to load chunks in {}", entityTypes.length, world.dimension().identifier().toDebugFileName());
+        }
+
+        // set the predicate now
+        entities.projectiles.compiledPredicate.setValue((projectile) -> {
+            // this is an immutable array, so realistically this is fine?
+            for (final EntityType<?> entityType : entityTypes) {
+                if (projectile.is(entityType)) return true;
+            }
+            // if nothing matched, it doesn't have an override
+            return false;
+        });
     }
 
     {
@@ -197,7 +205,271 @@ public class WorldConfig extends Part {
 
     public Visuals visuals = new Visuals();
     public static class Visuals extends Part {
+
+        {
+            option("particles")
+                .docs(
+                    "All options unless explicitly specified otherwise are unnecessary packets",
+                    "sent to the client and can be safely disabled without Vanilla deviation"
+                );
+        }
+
         public boolean hideFlamesOnEntitiesWithFireResistance = false;
         public boolean hideFlamesOnEntitiesWithInvisibility = false;
+
+        public Particles particles = new Particles();
+        public static class Particles extends Part {
+
+            {
+                option("disableFallParticles").docs("Note that when enabled this option breaks Vanilla visual compatibility");
+                option("disableNewCombatParticles").docs("Note that when enabled this option breaks Vanilla visual compatibility");
+            }
+
+            public boolean disableSprintParticles = false;
+            public boolean disableFallParticles = false;
+            public boolean disableDeathParticles = false;
+            public boolean disableEffectParticles = false;
+            public boolean disableWaterSplashParticles = false;
+            public boolean disableBubbleColumnParticles = false;
+            public boolean disableNewCombatParticles = false;
+        }
     }
+
+    {
+        option("chainEndCrystalExplosions").docs("When enabled, this chains end crystal explosions instead of executing them all in 1 tick");
+        option("disableSnowLightChecks").docs("Disables snow light checks, so snow layers never melt");
+        option("disableGrassLightChecks").docs("Disables grass light checks, so grass always spreads despite being in darkness");
+    }
+
+    public boolean chainEndCrystalExplosions = false;
+    public boolean disableSnowLightChecks = false;
+    public boolean disableGrassLightChecks = false;
+
+    public Farming farming = new Farming();
+    public static class Farming extends Part {
+
+        {
+            option("disableFarmlandTrampling").docs("Makes falling on farmland not turn it back to dirt");
+            option("cropsIgnoreLightCheck").docs("Makes crops ignore sunlight requirements when planting");
+        }
+
+        public boolean farmlandAlwaysMoist = false;
+        public boolean disableLeafDecay = false;
+        public boolean cropsIgnoreLightCheck = false;
+        public boolean disableFarmlandTrampling = false;
+    }
+
+    public Entities entities = new Entities();
+    public static class Entities extends Part {
+
+        {
+            option("fastOrbs")
+                .docs(
+                    "Removes the XP pickup delay and uses a faster merging system. Can be very useful for",
+                    "heavy XP farms. This changes how orbs are merged, allowing 1 orb to contain an infinite",
+                    "amount of merged experience and then be collected instantly, much faster than the Vanilla",
+                    "equivalent. This also fixes \"ghost orbs\", since instead of increasing the count, this",
+                    "increases the value of the orb"
+                );
+            option("itemEntityVelocityOnDeathFactor")
+                .docs(
+                    "A multiplied value for the velocity of item entities dropped on death. The smaller the value,",
+                    "the less it spreads out. The larger the value, the more it spreads out"
+                ).greaterThanOrEqualTo(0.0F);
+
+            option("entityCollisionMode")
+                .docs(
+                    Style.wrap("The entity collision mode for the server")
+                        .defineEnum(EntityCollisionMode.class, (mode) -> {
+                            return switch (mode) {
+                                case VANILLA -> "Default, all entities have collisions";
+                                case ONLY_PUSHABLE_PLAYERS_SMALL ->
+                                    "Only players are pushable by entities, searching in a small radius";
+                                case ONLY_PUSHABLE_PLAYERS_LARGE ->
+                                    "Only players are pushable by entities, searching in the normal radius";
+                                case NO_COLLISIONS -> "Disables entity collisions entirely";
+                            };
+                        })
+                );
+        }
+
+        public boolean fastOrbs = false;
+        public boolean itemEntitiesImmuneToExplosions = false;
+        public boolean itemEntitiesImmuneToLightning = false;
+        public double itemEntityVelocityOnDeathFactor = 1.0D;
+
+        public EntityCollisionMode entityCollisionMode = EntityCollisionMode.VANILLA;
+        public enum EntityCollisionMode {
+            VANILLA,
+            ONLY_PUSHABLE_PLAYERS_LARGE,
+            ONLY_PUSHABLE_PLAYERS_SMALL,
+            NO_COLLISIONS;
+
+            private static final EntityCollisionMode[] VALUES = values();
+            private final int id;
+
+            EntityCollisionMode() {
+                this.id = ordinal();
+            }
+
+            public static EntityCollisionMode fromOrdinal(int ordinal) {
+                if (ordinal < 0 || ordinal >= VALUES.length) {
+                    return VANILLA;
+                }
+                return VALUES[ordinal];
+            }
+
+            public int getId() {
+                return this.id;
+            }
+
+            public boolean onlyPlayersPushable() {
+                return id == ONLY_PUSHABLE_PLAYERS_LARGE.id || id == ONLY_PUSHABLE_PLAYERS_SMALL.id;
+            }
+
+            public boolean allEntitiesCanBePushed() {
+                return id == VANILLA.id;
+            }
+
+            public boolean noCollisions() {
+                return id == NO_COLLISIONS.id;
+            }
+
+            public boolean isLargePushRange() {
+                return id == ONLY_PUSHABLE_PLAYERS_LARGE.id;
+            }
+        }
+
+        public Projectiles projectiles = new Projectiles();
+        public static class Projectiles extends Part {
+
+            {
+                option("loadChunks").docs("Specify which projectiles should load chunks when moving. Only works when thrown by players");
+                option("crossRegionRedirectableProjectileDeflection")
+                    .docs(
+                        Style.wrap(
+                            "Restores Vanilla redirect behavior for arrow hits on redirectable projectiles",
+                            "like wind charges and fireballs across region threads."
+                        )
+                        .blank()
+                        .wordWrap(
+                            "It is recommended to set \"max-arrow-despawn-invulnerability: disabled\"",
+                            "in paper-world-defaults.yml to prevent arrows from despawning"
+                        )
+                    );
+            }
+
+            public int maxProjectileChunkLoadsPerTick = 10;
+            public int maxProjectileChunkLoadsPerProjectileBeforeRemoval = 10;
+            public List<String> loadChunks = new ArrayList<>();
+            public boolean crossRegionRedirectableProjectileDeflection = false;
+
+            private final CanonicalReference<Predicate<Projectile>> compiledPredicate = new CanonicalReference<>();
+
+            public Predicate<Projectile> getDoesProjectileLoadChunksOverridePredicate() {
+                return compiledPredicate.value();
+            }
+        }
+
+        {
+            option("skeletonAimAccuracy").docs("Defines the inaccuracy of skeleton bow shots. 14 is Vanilla, higher is more inaccurate and lower is more accurate");
+        }
+
+        public double skeletonAimAccuracy = 14.0D;
+    }
+
+    public Combat combat = new Combat();
+    public static class Combat extends Part {
+
+        {
+            option("restoreOldAttackDelayMechanics").docs("Restores 1.8 attack delay mechanics");
+            option("imitateSwordBlocking").docs("Restores 1.8 sword blocking mechanics. Might not work for <1.21.4 clients");
+        }
+
+        public boolean restoreOldAttackDelayMechanics = false;
+        public boolean imitateSwordBlocking = false;
+
+        public Mace mace = new Mace();
+        public static class Mace extends Part {
+
+            {
+                option("ignoreFallDistance").docs("Removes the fall distance amplifier from maces");
+                option("fallDistanceLimit").docs("The limit before fall distance scaling stops working for mace damage bonuses");
+            }
+
+            public boolean ignoreFallDistance = false;
+            public double fallDistanceLimit = -1.0D;
+        }
+
+        {
+            // TODO - can we restore this? the issue with this is that plugins can change this, and entities
+            //        can change worlds, which complicates this logic
+            // option("invulnerabilityTicks")
+            //     .docs(
+            //         "When an entity is damaged, it has 10 ticks of \"invulnerability time\" until it can be",
+            //         "damaged next. This configuration lets you control the amount of invulnerability time",
+            //         "that is applied to the entity. 0 meaning invulnerability isn't applied"
+            //     ).greaterThan(0.0F);
+            option("criticalHitMultiplier").docs("Configures the damage modifier per critical hit");
+            option("removeRedDeathAnimation").docs("Removes the red death animation seen on entities when killed");
+            option("useLegacyBlastProtection").docs("Restores the blast protection logic from before 1.21");
+        }
+
+        public boolean disableSweepingEdge = false;
+        public boolean disableNetheriteKnockbackResistance = false;
+        public boolean disableCritsWhileSprinting = false;
+        // public int invulnerabilityTicks = 10;
+        public boolean allowFishingRodsToPullEntities = true;
+        public float criticalHitMultiplier = 1.5F;
+        public boolean removeRedDeathAnimation = false;
+        public boolean useLegacyBlastProtection = false;
+        public boolean snowballCanKnockbackPlayers = false;
+        public boolean eggCanKnockbackPlayers = false;
+    }
+
+    public Spawner spawner = new Spawner();
+    public static class Spawner extends Part {
+
+        {
+            // option("minSpawnDelay").docs("The minimum delay between spawner spawns");
+            // option("maxSpawnDelay").docs("The maximum delay between spawner spawns");
+            // option("spawnCount").docs("The amount of entities a spawner spawns per cycle");
+            // option("maxNearbyEntities").docs("The maximum amount of nearby entities before the spawner stops ticking");
+            // option("requiredPlayerRange").docs("The required player range for spawners to activate");
+            // option("spawnRange").docs("The maximum position range for spawned entities");
+            option("disableMaxNearbyEntitiesCheck").docs("Disables the spawner max nearby entities check");
+            option("spawnedEntitiesHaveNoCollision").docs("Disables collisions for entities spawned by spawners");
+        }
+
+        // TODO - can we bring these back or find suitable replacements?
+        // public int minSpawnDelay = 200;
+        // public int maxSpawnDelay = 800;
+        // public int spawnCount = 4;
+        // public int maxNearbyEntities = 6;
+        // public int requiredPlayerRange = 16;
+        // public int spawnRange = 4;
+        public boolean disableMaxNearbyEntitiesCheck = false;
+        public boolean spawnedEntitiesHaveNoCollision = false;
+    }
+
+    {
+        option("waypointUpdateScale")
+            .docs(
+                "Controls how quickly Canvas' waypoints system falls off with distance between players.",
+                "You can read more about how this new system works and play around with this configuration",
+                "here: https://docs.canvasmc.io/canvas/info/waypoints/"
+            );
+        option("disableCriterionTrigger").docs("Disables all criterion triggers. Advancements will not work!");
+        option("cactusCheckSurvivalBeforeGrowth").docs("Check if a cactus can survive before growing. Heavily optimizes cacti farms");
+        option("enableSuffocationOptimization")
+            .docs(
+                "Optimizes the suffocation check by selectively skipping the check in a way that still appears Vanilla"
+            );
+    }
+
+    public double waypointUpdateScale = 4000.0D;
+    public boolean disableCriterionTrigger = false;
+    public boolean cactusCheckSurvivalBeforeGrowth = false;
+    public boolean enableSuffocationOptimization = false;
+
 }
