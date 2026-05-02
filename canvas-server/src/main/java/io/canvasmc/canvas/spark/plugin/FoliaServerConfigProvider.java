@@ -47,7 +47,7 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
             .put("bukkit.yml", YamlConfigParser.INSTANCE)
             .put("spigot.yml", YamlConfigParser.INSTANCE)
             .put("paper.yml", YamlConfigParser.INSTANCE)
-            .put("config/canvas-server.json5", Json5YamlParser.INSTANCE)
+            .put("canvas/", CanvasSplitParser.INSTANCE)
             .put("paper/", SplitYamlConfigParser.INSTANCE)
             .put("purpur.yml", YamlConfigParser.INSTANCE)
             .put("pufferfish.yml", YamlConfigParser.INSTANCE);
@@ -131,6 +131,45 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
 
         public Map<String, Object> parse(BufferedReader reader) throws IOException {
             return GSON.fromJson(reader, Map.class);
+        }
+    }
+
+    private static class CanvasSplitParser extends YamlConfigParser {
+        public static final CanvasSplitParser INSTANCE = new CanvasSplitParser();
+
+        private static @NonNull Map<String, Path> getNestedFiles(@NonNull Path configDir) {
+            Map<String, Path> files = new LinkedHashMap<>();
+            files.put("canvas-server.yml", configDir.resolve("canvas-server.yml"));
+            files.put("world-defaults.yml", configDir.resolve("canvas-worlds.yml"));
+            for (World world : Bukkit.getWorlds()) {
+                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve("canvas-patch.yml"));
+            }
+            return files;
+        }
+
+        @Override
+        public @Nullable JsonElement load(@NonNull String group, ExcludedConfigFilter filter) throws IOException {
+            Path configDir = Paths.get("config");
+            if (!Files.exists(configDir)) {
+                return null;
+            }
+
+            JsonObject root = new JsonObject();
+
+            for (Map.Entry<String, Path> entry : getNestedFiles(configDir).entrySet()) {
+                String fileName = entry.getKey();
+                Path path = entry.getValue();
+
+                Map<String, Object> values = this.parse(path);
+                if (values == null) {
+                    continue;
+                }
+
+                // apply the filter individually to each nested file
+                root.add(fileName, filter.apply(GSON.toJsonTree(values)));
+            }
+
+            return root;
         }
     }
 
