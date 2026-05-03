@@ -233,6 +233,13 @@ public class WorldConfig extends Part {
             public boolean disableBubbleColumnParticles = false;
             public boolean disableNewCombatParticles = false;
         }
+
+        {
+            option("dontTrackPlayersInEntityTracking").docs("This makes players not able to see other players in this world when enabled");
+        }
+
+        // useful for AFK worlds
+        public boolean dontTrackPlayersInEntityTracking = false;
     }
 
     {
