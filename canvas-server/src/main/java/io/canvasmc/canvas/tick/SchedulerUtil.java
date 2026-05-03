@@ -78,7 +78,7 @@ public class SchedulerUtil {
                 return scheduler;
             }
             case AFFINITY: {
-                final GlobalConfiguration.Scheduler.AffinityScheduler affinityConfig = GlobalConfiguration.getInstance().regionScheduler.affinityScheduler;
+                final GlobalConfiguration.RegionScheduler.AffinityScheduler affinityConfig = GlobalConfiguration.getInstance().regionScheduler.affinityScheduler;
 
                 long runBufferNanos = (long) (affinityConfig.runTasksBufferMillis * 1_000_000L);
                 long stealThresh = affinityConfig.stealThresholdMillis * 1_000_000L;

@@ -220,8 +220,8 @@ public class GlobalConfiguration extends Part {
         }
     }
 
-    public Scheduler regionScheduler = new Scheduler();
-    public static class Scheduler extends Part {
+    public RegionScheduler regionScheduler = new RegionScheduler();
+    public static class RegionScheduler extends Part {
 
         {
             option("affinityScheduler")
