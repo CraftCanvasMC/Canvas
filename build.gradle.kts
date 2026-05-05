@@ -107,6 +107,9 @@ subprojects {
             main = project.findProperty("main")?.toString()?.replace("\"", "")
             authors = listOf("CanvasMC")
             foliaSupported = true
+            if (project.hasProperty("bootstrapper")) {
+                bootstrapper = project.findProperty("bootstrapper")?.toString()?.replace("\"", "")
+            }
         }
 
         tasks.processResources {
