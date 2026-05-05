@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Tue, 5 May 2026 11:13:21 -0700
+Subject: [PATCH] Purpur Alternative Keepalive
+
+
+diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+index 44631e882b6155b6660facc4b8a3b59cb4908bf4..749cdc6502f1048bc0cb61f911512c2d754372ea 100644
+--- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -39,10 +39,11 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+     public final Connection connection; // Paper
+     private final boolean transferred;
+     //private long keepAliveTime; // Paper - improve keepalives
+-    //private boolean keepAlivePending; // Paper - improve keepalives
++    private boolean keepAlivePending; // Paper - improve keepalives // Purpur - Alternative Keepalive Handling
+     //private long keepAliveChallenge; // Paper - improve keepalives
+     private long closedListenerTime;
+     private boolean closed = false;
++    private it.unimi.dsi.fastutil.longs.LongList keepAlives = new it.unimi.dsi.fastutil.longs.LongArrayList(); // Purpur - Alternative Keepalive Handling
+     private volatile int latency; // Paper - improve keepalives - make volatile
+     private final io.papermc.paper.util.KeepAlive keepAlive; // Paper - improve keepalives
+     public volatile boolean suspendFlushingOnServerThread = false;
+@@ -103,6 +104,18 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+         // Paper start - improve keepalives
+         long now = System.nanoTime();
+         io.papermc.paper.util.KeepAlive.PendingKeepAlive pending = this.keepAlive.pendingKeepAlives.peek();
++        // Purpur start - Alternative Keepalive Handling
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
++            if (this.keepAlivePending && !keepAlives.isEmpty() && keepAlives.contains(packet.getId())) {
++                int ping = (int) (Util.getMillis() - packet.getId());
++                int updatedLatency = (this.latency * 3 + ping) / 4;
++                this.latency = updatedLatency;
++                this.keepAlivePending = false;
++                keepAlives.clear(); // we got a valid response, lets roll with it and forget the rest
++            }
++            return;
++        } else
++        // Purpur end - Alternative Keepalive Handling
+         if (pending != null && pending.challengeId() == packet.getId()) {
+             this.keepAlive.pendingKeepAlives.remove(pending);
+ 
+@@ -255,6 +268,23 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+     public void keepConnectionAlive() {
+         long now = Util.getMillis();
+         // Paper start - improve keepalives
++        // Purpur start - Alternative Keepalive Handling
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.purpurAlternativeKeepalive) {
++            if (this.checkIfClosed(now)) {
++                long currTime = System.nanoTime();
++                if ((currTime - this.keepAlive.lastKeepAliveTx) >= java.util.concurrent.TimeUnit.SECONDS.toNanos(1L)) { // 1 second
++                    this.keepAlive.lastKeepAliveTx = currTime;
++                    if (this.keepAlivePending && keepAlives.size() * 1000L >= KEEPALIVE_LIMIT) {
++                        this.disconnect(TIMEOUT_DISCONNECTION_MESSAGE, io.papermc.paper.connection.DisconnectionReason.TIMEOUT);
++                    } else if (this.checkIfClosed(now)) {
++                        this.keepAlivePending = true;
++                        this.keepAlives.add(now); // currentTime is ID
++                        this.send(new ClientboundKeepAlivePacket(now));
++                    }
++                }
++            }
++        } else
++        // Purpur end - Alternative Keepalive Handling
+         if (this.checkIfClosed(now)) {
+             long currTime = System.nanoTime();
+ 
