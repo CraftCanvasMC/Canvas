@@ -27,8 +27,9 @@ public final class ScheduledHandleTickState {
     private long lastTickTimeEndNanos = UNSET;
 
     private boolean runsGameElements = true;
-    // Canvas start - cache overload threshold nanos to avoid per-tick config field chain + multiplication
-    private final long overloadedLogNanos;
+    // Canvas start - cache overload threshold nanos to avoid per-tick config field chain + multiplication;
+    //               volatile so GlobalConfiguration.reload() can safely update existing instances
+    private volatile long overloadedLogNanos;
     // Canvas end
 
     public ScheduledHandleTickState(TickRegionScheduler.RegionScheduleHandle scheduleHandle) {
@@ -37,6 +38,12 @@ public final class ScheduledHandleTickState {
         this.overloadedLogNanos = GlobalConfiguration.getInstance().regionScheduler.overloadedLogMillis * 1_000_000L;
         // Canvas end
     }
+
+    // Canvas start - allow config reload to push updated threshold to live instances
+    public void onConfigReload() {
+        this.overloadedLogNanos = GlobalConfiguration.getInstance().regionScheduler.overloadedLogMillis * 1_000_000L;
+    }
+    // Canvas end
 
     public static void sendStateToAllPlayers() {
         for (final ServerPlayer serverPlayer : MinecraftServer.getServer().getPlayerList().players) {

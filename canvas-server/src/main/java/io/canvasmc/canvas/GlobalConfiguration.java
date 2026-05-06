@@ -148,6 +148,15 @@ public class GlobalConfiguration extends Part {
                 // update all info with player, covers 1.8 combat config
                 playerList.sendAllPlayerInfo(player);
             }
+
+            // Canvas start - push updated overload threshold to all live ScheduledHandleTickState instances
+            io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData().getTickManager().onConfigReload();
+            for (final net.minecraft.server.level.ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
+                world.regioniser.computeForAllRegionsUnsynchronised(region ->
+                    region.getData().getRegionSchedulingHandle().getTickManager().onConfigReload()
+                );
+            }
+            // Canvas end
         }
         else {
 
