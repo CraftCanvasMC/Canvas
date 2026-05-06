@@ -458,6 +458,7 @@ public class GlobalConfiguration extends Part {
         public int maximumPacketBytes = 8388608;
         public boolean disablePaperPacketOverflowContainerFix = false;
         public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
+        public boolean purpurAlternativeKeepalive = false;
     }
 
     {
