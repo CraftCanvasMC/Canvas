@@ -27,9 +27,15 @@ public final class ScheduledHandleTickState {
     private long lastTickTimeEndNanos = UNSET;
 
     private boolean runsGameElements = true;
+    // Canvas start - cache overload threshold nanos to avoid per-tick config field chain + multiplication
+    private final long overloadedLogNanos;
+    // Canvas end
 
     public ScheduledHandleTickState(TickRegionScheduler.RegionScheduleHandle scheduleHandle) {
         this.scheduleHandle = scheduleHandle;
+        // Canvas start - cache overload threshold nanos to avoid per-tick config field chain + multiplication
+        this.overloadedLogNanos = GlobalConfiguration.getInstance().regionScheduler.overloadedLogMillis * 1_000_000L;
+        // Canvas end
     }
 
     public static void sendStateToAllPlayers() {
@@ -57,7 +63,7 @@ public final class ScheduledHandleTickState {
         processAllActions();
 
         // check if overloaded
-        if (lastTickTimeEndNanos != UNSET && lastTickTimeEndNanos + TickRegionScheduler.getTimeBetweenTicks() + (GlobalConfiguration.getInstance().regionScheduler.overloadedLogMillis * 1_000_000L) <= nanos) {
+        if (lastTickTimeEndNanos != UNSET && lastTickTimeEndNanos + TickRegionScheduler.getTimeBetweenTicks() + overloadedLogNanos <= nanos) { // Canvas - use cached overload threshold
             // missed deadline to be considered "overloaded"
             double seconds = (nanos - (lastTickTimeEndNanos + TickRegionScheduler.getTimeBetweenTicks())) / 1_000_000_000.0;
             String formatted = String.format("%.2f", seconds);

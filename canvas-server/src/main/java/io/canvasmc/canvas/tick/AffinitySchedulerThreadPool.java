@@ -63,6 +63,9 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     private final TickThreadRunner[] runners;
     private final Thread[] threads;
     private final BitSet idleThreads;
+    // Canvas start - O(1) runner lookup; the O(n) scan in getCurrentTickThreadRunner was proportional to thread count
+    private final ThreadLocal<TickThreadRunner> runnerLocal = new ThreadLocal<>();
+    // Canvas end
 
     private final FastHeapPriorityQueue<ScheduledState> globalQueue = new FastHeapPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
 
@@ -159,12 +162,12 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     }
 
     public @NonNull TickThreadRunner getCurrentTickThreadRunner() {
-        Thread curr = Thread.currentThread();
-        for (final TickThreadRunner runner : this.runners) {
-            if (runner.thread == curr) {
-                return runner;
-            }
+        // Canvas start - O(1) ThreadLocal lookup replaces O(n) scan over all runners
+        final TickThreadRunner local = runnerLocal.get();
+        if (local != null) {
+            return local;
         }
+        // Canvas end
         throw new IllegalStateException("Couldn't locate current tick thread runner");
     }
 
@@ -590,6 +593,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         @Override
         public void run() {
             this.thread = Thread.currentThread();
+            scheduler.runnerLocal.set(this); // Canvas - register runner for O(1) lookup
             if (affinity != -1) {
                 Affinity.setAffinity(affinity);
                 LOGGER.debug("{} bound to CPU {}", this, affinity);
