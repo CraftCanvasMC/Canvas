@@ -308,7 +308,7 @@ public class GlobalConfiguration extends Part {
 
         public long overloadedLogMillis = 5_000L;
         public float defaultTickRate = 20.0F;
-        public GuardSeverity guardSeverity = GuardSeverity.LOG;
+        public GuardSeverity guardSeverity = GuardSeverity.THROW;
 
         public enum GuardSeverity {
             SILENT,
