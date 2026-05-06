@@ -42,7 +42,7 @@ Canvas fixes numerous Folia bugs and crashes, delivering a reliable and performa
 ### Building from Source
 
 **Requirements:**
-- Java 25
+- Java 25+
 - Git (configured with name and email)
 
 ```bash
