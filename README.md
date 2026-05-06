@@ -1,93 +1,96 @@
-![title](./canvas_title.png)
+![Canvas MC](./canvas_title.png)
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)  
-[![GitHub stars](https://img.shields.io/github/stars/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
-[![GitHub forks](https://img.shields.io/github/forks/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)
+[![GitHub forks](https://img.shields.io/github/forks/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)
 
-CanvasMC is a high performance fork of Folia aiming to provide a stable and consistent region threading environment, alongside tons
-of optimizations and performance features for large scale servers.
+CanvasMC is a high-performance fork of Folia designed to provide a stable and consistent region-threaded environment, alongside extensive optimizations for large-scale servers.
 
 ---
+
 [![bStats Graph Data](https://bstats.org/signatures/server-implementation/Canvas.svg)](https://bstats.org/plugin/server-implementation/Canvas)
+
 ---
 
 ## Features & Highlights
 
 ### Alternative Scheduler
-- Canvas provides a scheduler written by the team called the `AFFINITY` scheduler, which contains configurable features that increase performance immensely.
+Canvas provides a custom scheduler called `AFFINITY`, written by the team, with configurable options that significantly improve performance.
 
 ### Optimized Chunk Generation
-- Canvas replaces a rewritten chunk system pool, providing further optimizations that help with scaling and single-threaded throughput
+Canvas replaces the default chunk system thread pool with a rewritten implementation, improving scaling and single-threaded throughput.
 
 ### Extensive Configuration
-- Fine-tune aspects of your server with fully documented configuration options and performance settings.
+Fine-tune your server with fully documented configuration options and performance settings.
 
 ### Proper Region Profiling
-- Canvas introduces a full Spark profiler that is fully compatible with region threading, replacing the limited Folia profiling engine.
+Canvas introduces full Spark profiler support compatible with region threading, replacing Folia's limited profiling engine.
 
-### Powerful and Optimized
-- By fixing **numerous** Folia bugs and crashes, Canvas delivers a high-performance, stable, and reliable experience.
+### Stable & High-Performance
+Canvas fixes numerous Folia bugs and crashes, delivering a reliable and performant server experience.
 
 ---
 
 ## Getting Started
 
-### Downloading & Running
+> **Requires Java 25+**
 
-1. Download the latest server JAR from the **Downloads** page on [canvasmc.io](https://canvasmc.io/downloads/canvas).  
-2. Launch using Java (Java 25+ required) with your preferred arguments and configuration.
+### Downloading & Running
+1. Download the latest server JAR from the [Downloads page](https://canvasmc.io/downloads/canvas).
+2. Launch with your preferred JVM arguments and configuration.
 
 ### Building from Source
 
 **Requirements:**
-
 - Java 25
-- Git (configured with name/email)
-
-**Common build commands:**
+- Git (configured with name and email)
 
 ```bash
-./gradlew applyAllPatches # Applies all patches to construct the Canvas source
-./gradlew createPaperclipJar # Creates the paperclip jar
-./gradlew runDev # Starts a development server locally
+./gradlew applyAllPatches   # Applies all patches to construct the Canvas source
+./gradlew createPaperclipJar # Creates the Paperclip JAR
+./gradlew runDev             # Starts a local development server
 ```
+
+---
 
 ## Documentation & Resources
 
-* **Official Documentation**: [https://docs.canvasmc.io](https://docs.canvasmc.io)
-* **Community & Support**: Join the Canvas [Discord](https://canvasmc.io/discord)
-* **Issue Tracker / Contributing**: Use this GitHub repo for reporting bugs, proposing features, and submitting pull requests
-* **Donations / Sponsorship**: Support development on [Ko-fi](https://ko-fi.com/dueris)
+| Resource | Link |
+|---|---|
+| Official Docs | [docs.canvasmc.io](https://docs.canvasmc.io) |
+| Community & Support | [Discord](https://canvasmc.io/discord) |
+| Issue Tracker | [GitHub Issues](https://github.com/CraftCanvasMC/Canvas/issues) |
+| Donations | [Ko-fi](https://ko-fi.com/dueris) |
 
 ---
 
 ## Contributing
 
-We welcome many forms of contributions:
+We welcome contributions in any form:
 
-* Code (bug fixes, features)
-* Documentation improvements
-* Testing & bug reporting
-* Community help & support
-* Donations to help support the developers
+- Bug fixes and new features
+- Documentation improvements
+- Testing and bug reports
+- Community support
 
-See the [Canvas Contributing Guide](https://docs.canvasmc.io/guides/developers/contributing/canvas/) for more detail.
+See the [Canvas Contributing Guide](https://docs.canvasmc.io/canvas/developers/contributing/canvas/) for details.
 
 ---
 
-## Compatibility & Notes
+## Compatibility
 
-* Canvas is a fork of **Folia** and is *not* a drop-in replacement for Purpur, Paper, or other non-Folia forks. It is intended primarily for environments already using Folia or Folia-based forks.
-* The project adheres strictly to Folia’s threading and safety rules and does *not* permit bypassing them.
+Canvas is a fork of **Folia** and is **not** a drop-in replacement for Paper, Purpur, or other non-Folia forks. It is intended for environments already running Folia or Folia-based servers.
+
+Canvas strictly adheres to Folia's threading and region safety rules — bypassing them is not supported.
 
 ---
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+Licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
 ---
 
-## Acknowledgments & Inspiration
+## Acknowledgments
 
-Canvas incorporates patches inspired by or derived from other high-performance projects (e.g. **Lithium**, **Leaf**), along with its own custom optimizations.
+Canvas incorporates patches inspired by or derived from [Lithium](https://github.com/CaffeineMC/lithium), [Leaf](https://github.com/Winds-Studio/Leaf), and other high-performance projects, alongside its own custom optimizations.
