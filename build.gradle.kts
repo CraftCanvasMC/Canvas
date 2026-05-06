@@ -97,8 +97,9 @@ subprojects {
     if (project.name.endsWith("-debug") || project.name.endsWith("-plugin")) {
         apply(plugin = "xyz.jpenilla.resource-factory-paper-convention")
         dependencies {
-            compileOnly(rootProject.projects.canvasServer)
-            compileOnly(rootProject.projects.canvasApi)
+            compileOnly(rootProject.projects.canvasServer) {
+                targetConfiguration = JavaPlugin.RUNTIME_ELEMENTS_CONFIGURATION_NAME
+            }
         }
         extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
             apiVersion.set(providers.gradleProperty("apiVersion"))
@@ -106,6 +107,9 @@ subprojects {
             main = project.findProperty("main")?.toString()?.replace("\"", "")
             authors = listOf("CanvasMC")
             foliaSupported = true
+            if (project.hasProperty("bootstrapper")) {
+                bootstrapper = project.findProperty("bootstrapper")?.toString()?.replace("\"", "")
+            }
         }
 
         tasks.processResources {
