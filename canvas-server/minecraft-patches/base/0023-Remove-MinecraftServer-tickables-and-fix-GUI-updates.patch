@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Wed, 6 May 2026 22:44:05 -0700
+Subject: [PATCH] Remove MinecraftServer tickables and fix GUI updates
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 55c380dd2a5ad4a849a6fa5e2a3172024884a8f5..bb3faee0b9c9c079d0f89fdd3ff0efecb70d6e9c 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -349,9 +349,11 @@ public final class RegionizedServer {
+         // player ping sample
+         // world global tick
+         // connection tick
++        // gui tick
+ 
+         // tick player ping sample
+         this.tickPlayerSample();
++        net.minecraft.server.gui.PlayerListComponent.tick(); // Canvas - region threading
+ 
+         // tick worlds
+         for (final ServerLevel world : this.worlds) {
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 68ec3a1bd2caa2de040bddf496d5803df622b18e..f3a4584c04ed05494da1df76fc1478c26af73996 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -209,7 +209,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public LevelStorageSource.LevelStorageAccess storageSource;
+     public final PlayerDataStorage playerDataStorage;
+     private final SavedDataStorage savedDataStorage;
+-    private final List<Runnable> tickables = Lists.newArrayList();
+     // Paper - per-level GameRules
+     private ServerConnectionListener connection;
+     // Paper - per world load listener - moved LevelLoadListener to ServerLevel
+@@ -1967,10 +1966,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             GameTestTicker.SINGLETON.tick();
+         }
+ 
+-        if (false) for (Runnable tickable : this.tickables) { // Folia - region threading - TODO WTF is this?
+-            tickable.run();
+-        }
+-
+         if (false) for (ServerPlayer player : this.playerList.getPlayers()) { // Folia - region threading
+             player.connection.chunkSender.sendNextChunks(player);
+             player.connection.resumeFlushing();
+@@ -2005,7 +2000,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public void addTickable(final Runnable tickable) {
+-        this.tickables.add(tickable);
++        throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+     }
+ 
+     protected void setId(final String serverId) {
+diff --git a/net/minecraft/server/gui/PlayerListComponent.java b/net/minecraft/server/gui/PlayerListComponent.java
+index 37c9f983ae89c497f44a1b7967d741abf909e0a0..0ea633984c8927a492aae945f2be6c47dabc7df5 100644
+--- a/net/minecraft/server/gui/PlayerListComponent.java
++++ b/net/minecraft/server/gui/PlayerListComponent.java
+@@ -10,18 +10,31 @@ public class PlayerListComponent extends JList<String> {
+ 
+     public PlayerListComponent(final MinecraftServer server) {
+         this.server = server;
+-        server.addTickable(this::tick);
++    // Canvas start - region threading
++        COMPONENT_REF.setValue(this);
+     }
+ 
+-    public void tick() {
+-        if (this.tickCount++ % 20 == 0) {
+-            Vector<String> players = new Vector<>();
++    private static final io.canvasmc.canvas.util.CanonicalReference<PlayerListComponent> COMPONENT_REF = new io.canvasmc.canvas.util.CanonicalReference<>();
++    private static int TICK = 0;
++    private static int LAST_SIZE = 0;
+ 
+-            for (int i = 0; i < this.server.getPlayerList().getPlayers().size(); i++) {
+-                players.add(this.server.getPlayerList().getPlayers().get(i).getGameProfile().name());
+-            }
++    public static void tick() {
++        // if the component ref isn't set, the gui was never enabled
++        if (!COMPONENT_REF.isSet() || (TICK++ % 20 != 0)) return;
+ 
+-            this.setListData(players);
++        final Vector<String> players = new java.util.Vector<>();
++
++        // if the size hasn't changed, why the fuck would we update this
++        final java.util.List<net.minecraft.server.level.ServerPlayer> playerList = net.minecraft.server.MinecraftServer.getServer().getPlayerList().players;
++        if (playerList.size() == LAST_SIZE) return;
++
++        for (final net.minecraft.server.level.ServerPlayer entityPlayer : playerList) {
++            players.add(entityPlayer.gameProfile.name());
+         }
++
++        LAST_SIZE = players.size();
++
++        COMPONENT_REF.value().setListData(players);
+     }
++    // Canvas end - region threading
+ }
