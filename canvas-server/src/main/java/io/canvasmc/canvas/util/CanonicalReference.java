@@ -3,6 +3,12 @@ package io.canvasmc.canvas.util;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * A reference that is only able to be set once, or else it will throw
+ *
+ * @param <T>
+ *     the type of object it is
+ */
 public class CanonicalReference<T> {
     private T v;
 

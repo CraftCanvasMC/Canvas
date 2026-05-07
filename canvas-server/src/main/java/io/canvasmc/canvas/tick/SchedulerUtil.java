@@ -22,9 +22,21 @@ import net.minecraft.util.Util;
 import net.minecraft.world.level.ChunkPos;
 import org.jspecify.annotations.NonNull;
 
+/**
+ * This defines utilities primarily surrounding the instantiation and configuration of the scheduler types, along with
+ * testing if the region specific profiler is supported. This also contains the callback logic for region profiler
+ * hooks
+ *
+ * @author dueris
+ */
 public class SchedulerUtil {
     private static SchedulerHandler HANDLER;
 
+    /**
+     * Gets the scheduler handle for region profiler hooks
+     *
+     * @return the handle
+     */
     public static SchedulerHandler getHandle() {
         if (HANDLER == null) {
             throw new IllegalStateException("Scheduler has not been initialized yet");
@@ -32,10 +44,20 @@ public class SchedulerUtil {
         return HANDLER;
     }
 
+    /**
+     * Gets if the server currently supports region profiling or not
+     *
+     * @return if the region profiler is supported
+     */
     public static boolean doesSupportRegionProfiler() {
         return doesSupportRegionProfiler(TickRegions.getScheduler().scheduler);
     }
 
+    /**
+     * Gets if the server currently supports region profiling or not with the provided scheduler
+     *
+     * @return if the region profiler is supported with the scheduler
+     */
     public static boolean doesSupportRegionProfiler(final Scheduler scheduler) {
         if (Boolean.getBoolean("Canvas.DisableRegionProfiler")) {
             return false;
@@ -47,6 +69,9 @@ public class SchedulerUtil {
         return false;
     }
 
+    /**
+     * Starts the scheduler for the server
+     */
     public static void startScheduler() {
         final Scheduler scheduler = TickRegions.getScheduler().scheduler;
         if (scheduler instanceof EDFSchedulerThreadPool edfSchedulerThreadPool) {
@@ -63,6 +88,20 @@ public class SchedulerUtil {
         else TickRegionScheduler.LOGGER.warn("Region profiling not supported in this environment");
     }
 
+    /**
+     * Decides the scheduler for instantiation of the scheduler handle
+     * <p>
+     * It is worth noting that once this method completes, the handle is set
+     *
+     * @param schedulerType
+     *     the configured scheduler type
+     * @param initialThreads
+     *     the amount of threads allocated
+     * @param threadFactory
+     *     the factory to construct threads for the scheduler
+     *
+     * @return the constructed scheduler
+     */
     public static @NonNull Scheduler decideScheduler(final TickRegionScheduler.@NonNull SchedulerType schedulerType, final int initialThreads, final ThreadFactory threadFactory) {
         switch (schedulerType) {
             case EDF: {
@@ -115,19 +154,85 @@ public class SchedulerUtil {
         }
     }
 
+    /**
+     * The scheduler handle for the server. This is for region profiler hooks to try and help with injection points
+     * <p>
+     * The only valid implementations of this are {@link io.canvasmc.canvas.tick.SchedulerUtil.NullHandler} and
+     * {@link io.canvasmc.canvas.tick.SchedulerUtil.AffinityHandler}. The null handler is for schedulers that do not
+     * support region profiling, the affinity handler is specifically for the
+     * {@link io.canvasmc.canvas.tick.AffinitySchedulerThreadPool affinity scheduler}, which does support region
+     * profiling
+     */
     public sealed interface SchedulerHandler permits NullHandler, AffinityHandler {
+        /**
+         * Gets if the server is actively running a region profiler. If the current scheduler doesn't support region
+         * profiling, this is always {@code false}
+         *
+         * @return {@code false} if not profiling currently, {@code true} otherwise
+         */
         boolean isRunningRegionProfiler();
 
+        /**
+         * Gets if the server is running a region profiler on the thread specifications provided.
+         *
+         * @param threadId
+         *     the thread id
+         * @param threadName
+         *     the name of the thread
+         *
+         * @return if the server is profiling on that thread
+         */
         boolean isRunningRegionProfilerOnThread(final long threadId, final String threadName);
 
+        /**
+         * Transfers the pinning state from one region to another, if a pinning state is present in the {@code from}
+         * region
+         *
+         * @param from
+         *     the region we are taking the state from
+         * @param to
+         *     the region we are moving the state to
+         */
         void tryTransferPinningState(TickRegionScheduler.@NonNull RegionScheduleHandle from, TickRegionScheduler.RegionScheduleHandle to);
 
+        /**
+         * Callback for two regions merging together
+         *
+         * @param from
+         *     the {@code from} region
+         * @param to
+         *     the region we are merging into
+         * @param world
+         *     the world associated with the two regions
+         */
         void onRegionMerge(TickRegions.TickRegionData from, TickRegions.TickRegionData to, ServerLevel world);
 
+        /**
+         * Callback for when a region splits into multiple regions
+         *
+         * @param from
+         *     the original region
+         * @param into
+         *     the region(s) being split into
+         * @param world
+         *     the world
+         */
         void onRegionSplit(TickRegions.TickRegionData from, Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, ServerLevel world);
 
+        /**
+         * Callback for when a region is destroyed
+         *
+         * @param region
+         *     the region being destroyed
+         */
         void onRegionDestroy(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region);
 
+        /**
+         * Callback for when a region is marked inactive
+         *
+         * @param region
+         *     the region now being marked as inactive
+         */
         void onRegionInactive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region);
     }
 
