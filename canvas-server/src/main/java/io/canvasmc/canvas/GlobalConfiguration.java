@@ -229,19 +229,6 @@ public class GlobalConfiguration extends Part {
                     "Configurations for the AFFINITY scheduler provided by Canvas. For these options to take effect,",
                     "change the 'threaded-regions.scheduler' option in 'paper-global.yml' to 'AFFINITY'"
                 );
-
-            option("overloadedLogMillis")
-                .docs(
-                    "Amount of time between the end and next start of a region tick where the server will log a",
-                    "warning that the scheduler is overloaded. Can help catch if you need to allocate more threads",
-                    "or help identify deadline missing issues"
-                ).greaterThan(0.0F);
-
-            option("defaultTickRate")
-                .docs(
-                    "The default tick rate for the scheduler. Vanilla is 20, the game will run faster or slower depending on how you adjust this value.",
-                    "Note this should really only be used for debugging purposes and for custom environments that require this change"
-                ).greaterThan(0.0F);
         }
 
         public AffinityScheduler affinityScheduler = new AffinityScheduler();
@@ -291,8 +278,43 @@ public class GlobalConfiguration extends Part {
             public boolean enableAffinitySchedulerCpuAffinity = false;
         }
 
+        {
+            option("overloadedLogMillis")
+                .docs(
+                    "Amount of time between the end and next start of a region tick where the server will log a",
+                    "warning that the scheduler is overloaded. Can help catch if you need to allocate more threads",
+                    "or help identify deadline missing issues"
+                ).greaterThan(0.0F);
+
+            option("defaultTickRate")
+                .docs(
+                    "The default tick rate for the scheduler. Vanilla is 20, the game will run faster or slower depending on how you adjust this value.",
+                    "Note this should really only be used for debugging purposes and for custom environments that require this change"
+                ).greaterThan(0.0F);
+
+            option("guardSeverity")
+                .docs(
+                    Style.wrap(
+                        "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
+                    ).defineEnum(GuardSeverity.class, (severity) -> {
+                        return switch (severity) {
+                            case LOG -> "Just logs a warning in console, but continues the operation";
+                            case THROW -> "Throws an exception, can crash the server. Good for ensuring correctness";
+                            case SILENT -> "Doesn't say anything or do anything";
+                        };
+                    })
+                );
+        }
+
         public long overloadedLogMillis = 5_000L;
         public float defaultTickRate = 20.0F;
+        public GuardSeverity guardSeverity = GuardSeverity.THROW;
+
+        public enum GuardSeverity {
+            SILENT,
+            LOG,
+            THROW
+        }
     }
 
     public ChunkSystem chunkSystem = new ChunkSystem();
