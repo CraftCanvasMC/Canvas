@@ -434,6 +434,7 @@ public class WorldConfig extends Part {
         public boolean eggCanKnockbackPlayers = false;
     }
 
+    // TODO - move this to "blocks" config
     public Spawner spawner = new Spawner();
     public static class Spawner extends Part {
 
