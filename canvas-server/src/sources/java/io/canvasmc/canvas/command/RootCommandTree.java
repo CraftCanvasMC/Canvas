@@ -5,7 +5,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.command.sub.RegionTickCommand;
 import io.canvasmc.canvas.command.sub.ReloadCommand;
 import io.canvasmc.canvas.command.sub.SetMaxPlayersCommand;
-import io.canvasmc.canvas.command.sub.TpsBarCommand;
+import io.canvasmc.canvas.command.sub.RegionBarCommand;
 import io.canvasmc.canvas.command.sub.WorldDistanceCommand;
 import java.lang.reflect.InvocationTargetException;
 import java.util.LinkedList;
@@ -37,7 +37,7 @@ public class RootCommandTree {
     static {
         INSTANCE = new RootCommandTree();
         INSTANCE.register(SetMaxPlayersCommand.class);
-        INSTANCE.register(TpsBarCommand.class);
+        INSTANCE.register(RegionBarCommand.class);
         INSTANCE.register(WorldDistanceCommand.class);
         INSTANCE.register(ReloadCommand.class);
         INSTANCE.register(RegionTickCommand.class);

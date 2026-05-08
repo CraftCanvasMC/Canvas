@@ -1,77 +1,80 @@
 package io.canvasmc.canvas.world;
 
 import ca.spottedleaf.moonrise.common.time.TickData;
-import com.mojang.serialization.Codec;
-import com.mojang.serialization.DataResult;
-import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.mojang.datafixers.util.Pair;
 import io.canvasmc.canvas.WorldConfig;
-import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.TextColor;
-import net.kyori.adventure.text.minimessage.MiniMessage;
-import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
-import org.bukkit.craftbukkit.entity.CraftPlayer;
-import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 
 import static io.papermc.paper.threadedregions.commands.CommandUtil.SPRINTING_COLOR;
 
-public class RegionizedTpsBar {
-    private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
+public class RegionizedTpsBar extends RegionResourceBar {
     private static final ThreadLocal<DecimalFormat> TPS_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
     private static final ThreadLocal<DecimalFormat> MSPT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.00"));
     private static final ThreadLocal<DecimalFormat> UTIL_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
     private static final ThreadLocal<DecimalFormat> INT_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0"));
-    private static final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
-    private final RegionizedWorldData worldData;
-    private long nextTick = System.nanoTime();
 
-    public RegionizedTpsBar(final @NonNull RegionizedWorldData worldData) {
-        this.worldData = worldData;
+    private static final String[] KEYS = {"tps", "mspt", "util", "players"};
+
+    // we have this as an instance field because formats can be per-world
+    private final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
+
+    public RegionizedTpsBar(final RegionizedWorldData worldData) {
+        super(worldData, () -> worldData.world.canvasConfig().regionBars.enableTpsBar);
     }
 
-    public RegionizedWorldData getWorldData() {
-        return worldData;
+    @Override
+    String getDefaultFormat() {
+        return WorldConfig.DEFAULT_TPSBAR_FORMAT;
     }
 
-    public void tick() {
-        if (worldData.world.canvasConfig().enableTpsBar && this.nextTick <= System.nanoTime()) { // use system nano time, more reliable with runtime tick rate changes
-            // update tps maps
-            long startTime = System.nanoTime();
-            TickData.TickReportData tickReportData = this.worldData.regionData.getRegionSchedulingHandle().getTickReport5s(System.nanoTime());
-            TickData.SegmentedAverage tpsAverage = tickReportData.tpsData();
-            TickData.SegmentedAverage msptAverage = tickReportData.timePerTickData();
-            final double util = tickReportData.utilisation() * 100;
-            final double tps = tpsAverage.segmentAll().average();
-            final double mspt = msptAverage.segmentAll().average() / 1.0E6;
-            final int players = this.worldData.getPlayerCount();
-            final boolean sprinting = this.worldData.regionData.getRegionSchedulingHandle().getTickManager().isSprinting();
-            final Component textComponent = buildComponent(tps, mspt, util, players, sprinting);
-            // update players
-            for (final ServerPlayer localPlayer : this.worldData.getLocalPlayers()) {
-                localPlayer.canvas$tpsBarDisplay.setDisplay(textComponent);
-                localPlayer.canvas$tpsBarDisplay.tick();
-            }
-            this.nextTick = startTime + 1_000_000_000;
+    @Override
+    String normalize(final @NonNull String input) {
+        return input
+            .replace("%tps%", "<tps>")
+            .replace("%mspt%", "<mspt>")
+            .replace("%util%", "<util>")
+            .replace("%players%", "<players>");
+    }
+
+    @Override
+    void updatePlayerDisplaysAndTick(final Pair<Component, Float> componentAndProgress) {
+        for (final ServerPlayer localPlayer : getWorldData().getLocalPlayers()) {
+            localPlayer.canvas$tpsBarDisplay.setDisplay(componentAndProgress.getFirst());
+            localPlayer.canvas$tpsBarDisplay.setProgress(componentAndProgress.getSecond());
+            localPlayer.canvas$tpsBarDisplay.tick();
         }
     }
 
-    private @NonNull Component buildComponent(final double tps, final double mspt, final double utilPercent, final int players, final boolean sprinting) {
-        final String raw = worldData.world.canvasConfig().tpsBarFormat;
+    @Override
+    String[] getKeys() {
+        return KEYS;
+    }
+
+    @NonNull Pair<Component, Float> buildComponent() {
+        final TickData.TickReportData tickReportData = getWorldData().regionData.getRegionSchedulingHandle().getTickReport5s(System.nanoTime());
+        final TickData.SegmentedAverage tpsAverage = tickReportData.tpsData();
+        final TickData.SegmentedAverage msptAverage = tickReportData.timePerTickData();
+
+        final double utilPercent = tickReportData.utilisation() * 100;
+        final double tps = tpsAverage.segmentAll().average();
+        final double mspt = msptAverage.segmentAll().average() / 1.0E6;
+        final int players = getWorldData().getPlayerCount();
+        final boolean sprinting = getWorldData().regionData.getRegionSchedulingHandle().getTickManager().isSprinting();
+        final String raw = getWorldData().world.canvasConfig().regionBars.tpsBarFormat;
         final String effectiveRaw = (raw == null || raw.isBlank()) ? "" : raw;
+
         FormatEntry entry = cachedFormat.get();
         if (entry == null || !effectiveRaw.equals(entry.raw())) {
-            entry = FormatEntry.compile(effectiveRaw);
+            entry = FormatEntry.compile(effectiveRaw, this);
             cachedFormat.set(entry);
         }
 
@@ -89,7 +92,8 @@ public class RegionizedTpsBar {
         for (final FormatEntry.Segment segment : entry.segments()) {
             if (segment instanceof FormatEntry.Segment.Static(Component component)) {
                 builder.append(component);
-            } else if (segment instanceof FormatEntry.Segment.Dynamic(String key)) {
+            }
+            else if (segment instanceof FormatEntry.Segment.Dynamic(String key)) {
                 builder.append(switch (key) {
                     case "tps" -> tpsComponent;
                     case "mspt" -> msptComponent;
@@ -99,186 +103,7 @@ public class RegionizedTpsBar {
                 });
             }
         }
-        return builder.build();
-    }
-
-    @Contract("_, _, _ -> new")
-    private @NonNull Component number(final double value, final @NonNull ThreadLocal<DecimalFormat> fmt, final TextColor color) {
-        return Component.text(fmt.get().format(value), color);
-    }
-
-    public enum Placement {
-        ACTION_BAR, BOSS_BAR;
-        public static final Codec<Placement> CODEC = Codec.STRING.comapFlatMap((string) -> DataResult.success(Placement.valueOf(string)), Enum::name);
-    }
-
-    public interface DisplayManager {
-        @Contract(value = "_ -> new", pure = true)
-        static @NonNull DisplayManager createNew(ServerPlayer entityPlayer) {
-            return new DisplayManager() {
-                private Component display = Component.text("Waiting for region update...");
-                public final BossBar tpsBar =
-                    BossBar.bossBar(
-                        this.display,
-                        0.0F,
-                        BossBar.Color.BLUE,
-                        BossBar.Overlay.PROGRESS
-                    );
-
-                private volatile boolean enabled = false;
-                private Placement placement = Placement.BOSS_BAR;
-                private boolean dirty = true; // force initial sync
-
-                @Override
-                public void tick() {
-                    // handle state changes if marked dirty
-                    if (dirty) {
-                        final CraftPlayer bukkitEntity = entityPlayer.getBukkitEntity();
-
-                        if (placement == Placement.BOSS_BAR) {
-                            if (enabled) {
-                                tpsBar.addViewer(bukkitEntity);
-                            }
-                            else {
-                                tpsBar.removeViewer(bukkitEntity);
-                            }
-                        }
-                        else {
-                            tpsBar.removeViewer(bukkitEntity);
-                        }
-
-                        dirty = false;
-                    }
-
-                    if (!enabled) {
-                        return;
-                    }
-
-                    switch (placement) {
-                        case BOSS_BAR -> tpsBar.name(display);
-                        case ACTION_BAR -> entityPlayer.connection.send(
-                            new ClientboundSetActionBarTextPacket(
-                                PaperAdventure.asVanillaNullToEmpty(display)
-                            )
-                        );
-                    }
-                }
-
-                @Override
-                public void setDisplay(final Component component) {
-                    this.display = component;
-                }
-
-                @Override
-                public void enable() {
-                    this.enabled = true;
-                    this.dirty = true;
-                }
-
-                @Override
-                public void disable() {
-                    this.enabled = false;
-                    this.dirty = true;
-                }
-
-                @Override
-                public void updateFromEntry(final Entry entry) {
-                    this.enabled = entry.enabled();
-                    this.placement = entry.placement();
-                    this.dirty = true;
-                }
-
-                @Override
-                public Entry serializeDisplay() {
-                    return new Entry(
-                        this.enabled, this.placement
-                    );
-                }
-            };
-        }
-
-        void tick();
-
-        void setDisplay(Component component);
-
-        void enable();
-
-        void disable();
-
-        void updateFromEntry(Entry entry);
-
-        Entry serializeDisplay();
-    }
-
-    record FormatEntry(String raw, List<Segment> segments) {
-        sealed interface Segment permits Segment.Static, Segment.Dynamic {
-            record Static(Component component) implements Segment {}
-            record Dynamic(String key) implements Segment {}
-        }
-
-        static @NonNull FormatEntry compile(final @NonNull String effectiveRaw) {
-            final String normalized = effectiveRaw.isEmpty() ? WorldConfig.DEFAULT_TPSBAR_FORMAT : normalize(effectiveRaw);
-            return new FormatEntry(effectiveRaw, buildSegments(normalized));
-        }
-
-        private static @NonNull String normalize(final @NonNull String input) {
-            return input
-                .replace("%tps%", "<tps>")
-                .replace("%mspt%", "<mspt>")
-                .replace("%util%", "<util>")
-                .replace("%players%", "<players>");
-        }
-
-        private static @NonNull List<Segment> buildSegments(final String normalized) {
-            final List<Segment> result = new ArrayList<>();
-            final String[] keys = {"tps", "mspt", "util", "players"};
-            String remaining = normalized;
-
-            while (!remaining.isEmpty()) {
-                int earliestIdx = Integer.MAX_VALUE;
-                String earliestKey = null;
-                for (final String key : keys) {
-                    final int idx = remaining.indexOf("<" + key + ">");
-                    if (idx >= 0 && idx < earliestIdx) {
-                        earliestIdx = idx;
-                        earliestKey = key;
-                    }
-                }
-
-                if (earliestKey == null) {
-                    result.add(parseStatic(remaining));
-                    break;
-                }
-
-                if (earliestIdx > 0) {
-                    result.add(parseStatic(remaining.substring(0, earliestIdx)));
-                }
-                result.add(new Segment.Dynamic(earliestKey));
-                remaining = remaining.substring(earliestIdx + earliestKey.length() + 2); // +2 for '<' and '>'
-            }
-
-            return result;
-        }
-
-        @Contract("_ -> new")
-        private static Segment.@NonNull Static parseStatic(final String text) {
-            try {
-                return new Segment.Static(MINI_MESSAGE.deserialize(text));
-            } catch (final Exception e) {
-                return new Segment.Static(Component.text(text));
-            }
-        }
-    }
-
-    public record Entry(boolean enabled, Placement placement) {
-        public static final Entry FALLBACK = new Entry(false, Placement.BOSS_BAR);
-        public static final Codec<Entry> CODEC = RecordCodecBuilder.create(
-            instance -> instance.group(
-                    Codec.BOOL.optionalFieldOf("enabled", false).forGetter(Entry::enabled),
-                    Placement.CODEC.optionalFieldOf("placement", Placement.BOSS_BAR).forGetter(Entry::placement)
-                )
-                .apply(instance, Entry::new)
-        );
+        return new Pair<>(builder.build(), (float) utilPercent / 100);
     }
 
 }

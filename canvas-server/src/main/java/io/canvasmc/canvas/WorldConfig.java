@@ -32,6 +32,8 @@ public class WorldConfig extends Part {
             "<gradient:blue:aqua><b>MSPT:</b></gradient> <mspt>  <dark_gray>-</dark_gray>  " +
             "<gradient:blue:aqua><b>Util:</b></gradient> <util>  <dark_gray>-</dark_gray>  " +
             "<gradient:blue:aqua><b>Players:</b></gradient> <players>";
+    public static final String DEFAULT_RAMBAR_FORMAT =
+        "<gradient:green:dark_green><b>RAM:</b></gradient> <used>/<xmx> <dark_gray>(</dark_gray><percent><dark_gray>%)</dark_gray>";
 
     // note that Canvas core utilities and loggers and such should go in the global configuration class, as this one
     // doesn't entirely seem that appropriate for that sort of stuff
@@ -188,20 +190,33 @@ public class WorldConfig extends Part {
     }
 
     {
-        option("enableTpsBar")
-            .docs(
-                "Enables a regionized TPS-Bar implementation for Canvas.",
-                "To enable the tps-bar, use the \"/tpsbar\" command"
-            );
-        option("tpsBarFormat")
-            .docs(
-                "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
-                "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
-            ).greedyString();
+        option("regionBars").docs("Region resource bars config. You can toggle these on players with the \"/regionbar\" command");
     }
 
-    public boolean enableTpsBar = true;
-    public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
+    public RegionBars regionBars = new RegionBars();
+    public static class RegionBars extends Part {
+
+        {
+            option("enableTpsBar").docs("Enables a regionized TPS-Bar implementation for Canvas.");
+            option("tpsBarFormat")
+                .docs(
+                    "MiniMessage-formatted line for the TPS bar. Placeholders are <tps>, <mspt>, <util>, and <players>.",
+                    "Legacy tokens(%tps%, %mspt%, %util%, %players%) are also accepted and auto-converted."
+                ).greedyString();
+            option("enableRamBar").docs("Enables a regionized RAM-Bar implementation for Canvas.");
+            option("ramBarFormat")
+                .docs(
+                    "MiniMessage-formatted line for the RAM bar. Placeholders are <used>, <xmx>, <percent>.",
+                    "Legacy tokens(%used%, %xmx%, %percent%) are also accepted and auto-converted."
+                ).greedyString();
+        }
+
+        public boolean enableTpsBar = true;
+        public String tpsBarFormat = DEFAULT_TPSBAR_FORMAT;
+
+        public boolean enableRamBar = true;
+        public String ramBarFormat = DEFAULT_RAMBAR_FORMAT;
+    }
 
     public Visuals visuals = new Visuals();
     public static class Visuals extends Part {
