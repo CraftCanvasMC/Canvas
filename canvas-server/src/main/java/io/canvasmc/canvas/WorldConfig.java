@@ -293,11 +293,6 @@ public class WorldConfig extends Part {
                     "equivalent. This also fixes \"ghost orbs\", since instead of increasing the count, this",
                     "increases the value of the orb"
                 );
-            option("itemEntityVelocityOnDeathFactor")
-                .docs(
-                    "A multiplied value for the velocity of item entities dropped on death. The smaller the value,",
-                    "the less it spreads out. The larger the value, the more it spreads out"
-                ).greaterThanOrEqualTo(0.0F);
 
             option("entityCollisionMode")
                 .docs(
@@ -316,9 +311,29 @@ public class WorldConfig extends Part {
         }
 
         public boolean fastOrbs = false;
-        public boolean itemEntitiesImmuneToExplosions = false;
-        public boolean itemEntitiesImmuneToLightning = false;
-        public double itemEntityVelocityOnDeathFactor = 1.0D;
+
+        public ItemEntities itemEntities = new ItemEntities();
+        public static class ItemEntities extends Part {
+
+            {
+                option("itemEntityVelocityOnDeathFactor")
+                    .docs(
+                        "A multiplied value for the velocity of item entities dropped on death. The smaller the value,",
+                        "the less it spreads out. The larger the value, the more it spreads out"
+                    ).greaterThanOrEqualTo(0.0F);
+                option("itemEntitiesWaitTwoSecondsForMergeCheckAlways")
+                    .docs(
+                        "Item entity merge checks during the tick are always intervaled by 2 seconds unless the item is moving,",
+                        "of which then this interval is 2 ticks. This forces the interval to always be 2 ticks, reducing the amount",
+                        "of times item entities check to merge"
+                    );
+            }
+
+            public boolean itemEntitiesImmuneToExplosions = false;
+            public boolean itemEntitiesImmuneToLightning = false;
+            public double itemEntityVelocityOnDeathFactor = 1.0D;
+            public boolean itemEntitiesWaitTwoSecondsForMergeCheckAlways = false;
+        }
 
         public EntityCollisionMode entityCollisionMode = EntityCollisionMode.VANILLA;
         public enum EntityCollisionMode {
