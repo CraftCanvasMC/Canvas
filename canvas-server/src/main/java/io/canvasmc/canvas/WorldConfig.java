@@ -383,14 +383,22 @@ public class WorldConfig extends Part {
             option("villagers")
                 .docs(
                     "Options regarding villagers. The options for reducing POI search ranges shrink the search radius(in blocks)",
-                    "from 48 to 16, which can help improve tick times with little to no noticeable Vanilla deviation"
+                    "from 48 to 16, which can help improve tick times with little Vanilla deviation, however this will prevent Villagers",
+                    "from acquiring POIs between 17-48 blocks away"
                 );
         }
 
         public double skeletonAimAccuracy = 14.0D;
 
         public Villagers villagers = new Villagers();
-        public static class Villagers {
+        public static class Villagers extends Part {
+
+            {
+                option("villagerAcquirePoiTasksLoadChunks")
+                    .docs("Whether the server should allow Villagers to load unloaded chunks for Villagers to locate POIs");
+            }
+
+            public boolean villagerAcquirePoiTasksLoadChunks = true;
             public boolean reduceJobSitePoiSearchRange = false;
             public boolean reduceHomePoiSearchRange = false;
             public boolean reduceMeetingPointPoiSearchRange = false;
