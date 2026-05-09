@@ -7,6 +7,7 @@ import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
+import io.canvasmc.canvas.simd.VectorizedChunkGeneration;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
 import io.canvasmc.canvas.util.version.ApiClient;
@@ -177,6 +178,20 @@ public class GlobalConfiguration extends Part {
                 LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
                 LOGGER.warn("Debug: Java: {}, test run: {}", System.getProperty("java.version"), SIMDDetection.testRun);
             }
+
+            VectorizedChunkGeneration.configureStartup(configuration.chunkSystem.simdChunkGeneration, SIMDDetection.isEnabled);
+            if (configuration.chunkSystem.simdChunkGeneration) {
+                if (VectorizedChunkGeneration.isEnabled()) {
+                    LOGGER.info("Chunk generation SIMD acceleration is enabled. Preferred vector width: {} bits.", VectorizedChunkGeneration.preferredVectorBitSize());
+                    if (VectorizedChunkGeneration.hasAvx3fCompatibleWidth()) {
+                        LOGGER.info("AVX3F-class vector width detected. AM5 platforms are a strong fit for this path.");
+                    } else {
+                        LOGGER.info("AM5 platforms are supported for SIMD chunk generation. AVX3F-class width was not detected on this runtime.");
+                    }
+                } else {
+                    LOGGER.warn("Chunk generation SIMD was requested but could not be enabled. Verify JVM Vector API flags and CPU support.");
+                }
+            }
         }
 
         broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
@@ -344,6 +359,13 @@ public class GlobalConfiguration extends Part {
                     "helps to mitigate MSPT spiking issues during chunk generation"
                 );
             option("endBiomeCacheSize").greaterThan(0.0F);
+            option("simdChunkGeneration")
+                .docs(
+                    "Enables SIMD-backed chunk generation math in worldgen hot loops.",
+                    "Startup-only setting: changes require a full restart and are ignored by /canvas reload.",
+                    "Java 25 compatible with the Vector API module flag: --add-modules=jdk.incubator.vector.",
+                    "AM5 platforms are supported. AVX3F-class vector width is recommended for best throughput."
+                );
             option("structureOptimizations").docs(
                 "These options are ported from the mod StructureLayoutOptimizer, https://modrinth.com/mod/structure-layout-optimizer",
                 "which optimizes the generation of Jigsaw Structures and NBT pieces"
@@ -363,6 +385,7 @@ public class GlobalConfiguration extends Part {
         public boolean optimizeAquifer = false;
         public boolean useEndBiomeCache = false;
         public int endBiomeCacheSize = 1024;
+        public boolean simdChunkGeneration = false;
         public boolean optimizeBeardifier = false;
         public boolean optimizeNoiseGeneration = false;
 
