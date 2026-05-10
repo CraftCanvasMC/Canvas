@@ -37,7 +37,7 @@ public final class VectorizedChunkGeneration {
     }
 
     public static boolean hasAvx3fCompatibleWidth() {
-        return I_SPEC.vectorBitSize() >= 512;
+        return I_SPEC.vectorBitSize() >= 256;
     }
 
     public static long squaredDistancePair(
