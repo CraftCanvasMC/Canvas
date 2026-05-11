@@ -50,6 +50,7 @@ public class GlobalConfiguration extends Part {
     private static GlobalConfiguration INSTANCE;
     private static ApiClient.BuildStatus BUILD_STATUS;
     private static boolean ENABLE_FASTER_RANDOM = true;
+    private static boolean SIMD_CHUNK_GENERATION_ENABLED = false;
 
     static {
         reload();
@@ -179,19 +180,7 @@ public class GlobalConfiguration extends Part {
                 LOGGER.warn("Debug: Java: {}, test run: {}", System.getProperty("java.version"), SIMDDetection.testRun);
             }
 
-            VectorizedChunkGeneration.configureStartup(configuration.chunkSystem.simdChunkGeneration, SIMDDetection.isEnabled);
-            if (configuration.chunkSystem.simdChunkGeneration) {
-                if (VectorizedChunkGeneration.isEnabled()) {
-                    LOGGER.info("Chunk generation SIMD acceleration is enabled. Preferred vector width: {} bits.", VectorizedChunkGeneration.preferredVectorBitSize());
-                    if (VectorizedChunkGeneration.hasAvx3fCompatibleWidth()) {
-                        LOGGER.info("AVX3F-class vector width detected. AM5 platforms are a strong fit for this path.");
-                    } else {
-                        LOGGER.info("AM5 platforms are supported for SIMD chunk generation. AVX3F-class width was not detected on this runtime.");
-                    }
-                } else {
-                    LOGGER.warn("Chunk generation SIMD was requested but could not be enabled. Verify JVM Vector API flags and CPU support.");
-                }
-            }
+            configureSimdChunkGeneration(configuration);
         }
 
         broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
@@ -203,6 +192,40 @@ public class GlobalConfiguration extends Part {
 
     public static ApiClient.BuildStatus getBuildStatus() {
         return BUILD_STATUS;
+    }
+
+    public static boolean isSimdChunkGenerationEnabled() {
+        return SIMD_CHUNK_GENERATION_ENABLED;
+    }
+
+    private static void configureSimdChunkGeneration(final GlobalConfiguration configuration) {
+        SIMD_CHUNK_GENERATION_ENABLED = false;
+        if (!configuration.chunkSystem.simdChunkGeneration) {
+            return;
+        }
+
+        try {
+            VectorizedChunkGeneration.configureStartup(true, SIMDDetection.isEnabled);
+            SIMD_CHUNK_GENERATION_ENABLED = VectorizedChunkGeneration.isEnabled();
+        } catch (final NoClassDefFoundError ex) {
+            LOGGER.warn("Chunk generation SIMD was requested but Vector API classes were unavailable at runtime.");
+            LOGGER.warn("Add \"--add-modules=jdk.incubator.vector\" to startup flags before \"-jar\".");
+            return;
+        } catch (final Throwable throwable) {
+            LOGGER.warn("Chunk generation SIMD was requested but failed to initialize: {}", throwable.toString());
+            return;
+        }
+
+        if (SIMD_CHUNK_GENERATION_ENABLED) {
+            LOGGER.info("Chunk generation SIMD acceleration is enabled. Preferred vector width: {} bits.", VectorizedChunkGeneration.preferredVectorBitSize());
+            if (VectorizedChunkGeneration.hasAvx3fCompatibleWidth()) {
+                LOGGER.info("AVX3F-class vector width detected. AM5 platforms are a strong fit for this path.");
+            } else {
+                LOGGER.info("AM5 platforms are supported for SIMD chunk generation. AVX3F-class width was not detected on this runtime.");
+            }
+        } else {
+            LOGGER.warn("Chunk generation SIMD was requested but could not be enabled. Verify JVM Vector API flags and CPU support.");
+        }
     }
 
     public static @NonNull RandomSource createFastRandom() {
