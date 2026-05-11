@@ -187,6 +187,10 @@ public class WorldConfig extends Part {
             // if nothing matched, it doesn't have an override
             return false;
         });
+
+        if (blocks.spawner.minSpawnDelay > blocks.spawner.maxSpawnDelay) {
+            throw new IllegalArgumentException("min-spawn-delay must be less than or equal to max spawn delay");
+        }
     }
 
     {
@@ -473,7 +477,6 @@ public class WorldConfig extends Part {
         }
 
         public boolean disableSweepingEdge = false;
-        public boolean disableNetheriteKnockbackResistance = false;
         public boolean disableCritsWhileSprinting = false;
         // public int invulnerabilityTicks = 10;
         public boolean allowFishingRodsToPullEntities = true;
@@ -484,30 +487,57 @@ public class WorldConfig extends Part {
         public boolean eggCanKnockbackPlayers = false;
     }
 
-    // TODO - move this to "blocks" config
-    public Spawner spawner = new Spawner();
-    public static class Spawner extends Part {
+    public Blocks blocks = new Blocks();
+    public static class Blocks extends Part {
 
         {
-            // option("minSpawnDelay").docs("The minimum delay between spawner spawns");
-            // option("maxSpawnDelay").docs("The maximum delay between spawner spawns");
-            // option("spawnCount").docs("The amount of entities a spawner spawns per cycle");
-            // option("maxNearbyEntities").docs("The maximum amount of nearby entities before the spawner stops ticking");
-            // option("requiredPlayerRange").docs("The required player range for spawners to activate");
-            // option("spawnRange").docs("The maximum position range for spawned entities");
-            option("disableMaxNearbyEntitiesCheck").docs("Disables the spawner max nearby entities check");
-            option("spawnedEntitiesHaveNoCollision").docs("Disables collisions for entities spawned by spawners");
+            option("spawner")
+                .docs(
+                    Style.create().wordWrap(
+                        "All integer options in this section of the configuration are only applied on creation of the spawner",
+                        "instances in question. This is due to plugins being able to modify these values too at runtime via Paper",
+                        "API. Any already generated spawners will not get this configuration applied, it will only apply to new ones"
+                    ).blank()
+                    .literal("The options in question are:")
+                    .wordWrap(
+                        "\"min-spawn-delay\", \"max-spawn-delay\", \"spawn-count\", \"max-nearby-entities\",",
+                        "\"required-player-range\", \"spawn-range\""
+                    )
+                );
         }
 
-        // TODO - can we bring these back or find suitable replacements?
-        // public int minSpawnDelay = 200;
-        // public int maxSpawnDelay = 800;
-        // public int spawnCount = 4;
-        // public int maxNearbyEntities = 6;
-        // public int requiredPlayerRange = 16;
-        // public int spawnRange = 4;
-        public boolean disableMaxNearbyEntitiesCheck = false;
-        public boolean spawnedEntitiesHaveNoCollision = false;
+        public boolean chestsCanOpenWithFullBlockAbove = false;
+        public boolean fullChiseledBookShelvesCountAsValidEnchantPowerSources = false;
+
+        public Spawner spawner = new Spawner();
+        public static class Spawner extends Part {
+
+            {
+                option("minSpawnDelay").docs("The minimum delay between spawner spawns")
+                    .greaterThanOrEqualTo(0.0F);
+                option("maxSpawnDelay").docs("The maximum delay between spawner spawns")
+                    .greaterThanOrEqualTo(0.0F);
+                option("spawnCount").docs("The amount of entities a spawner spawns per cycle")
+                    .greaterThanOrEqualTo(0.0F);
+                option("maxNearbyEntities").docs("The maximum amount of nearby entities before the spawner stops ticking")
+                    .greaterThanOrEqualTo(0.0F);
+                option("requiredPlayerRange").docs("The required player range for spawners to activate")
+                    .greaterThanOrEqualTo(0.0F);
+                option("spawnRange").docs("The maximum position range for spawned entities")
+                    .greaterThanOrEqualTo(0.0F);
+                option("disableMaxNearbyEntitiesCheck").docs("Disables the spawner max nearby entities check");
+                option("spawnedEntitiesHaveNoCollision").docs("Disables collisions for entities spawned by spawners");
+            }
+
+            public int minSpawnDelay = 200;
+            public int maxSpawnDelay = 800;
+            public int spawnCount = 4;
+            public int maxNearbyEntities = 6;
+            public int requiredPlayerRange = 16;
+            public int spawnRange = 4;
+            public boolean disableMaxNearbyEntitiesCheck = false;
+            public boolean spawnedEntitiesHaveNoCollision = false;
+        }
     }
 
     {
