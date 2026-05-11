@@ -187,6 +187,10 @@ public class WorldConfig extends Part {
             // if nothing matched, it doesn't have an override
             return false;
         });
+
+        if (blocks.spawner.minSpawnDelay > blocks.spawner.maxSpawnDelay) {
+            throw new IllegalArgumentException("min-spawn-delay must be less than or equal to max spawn delay");
+        }
     }
 
     {
@@ -493,12 +497,18 @@ public class WorldConfig extends Part {
         public static class Spawner extends Part {
 
             {
-                option("minSpawnDelay").docs("The minimum delay between spawner spawns");
-                option("maxSpawnDelay").docs("The maximum delay between spawner spawns");
-                option("spawnCount").docs("The amount of entities a spawner spawns per cycle");
-                option("maxNearbyEntities").docs("The maximum amount of nearby entities before the spawner stops ticking");
-                option("requiredPlayerRange").docs("The required player range for spawners to activate");
-                option("spawnRange").docs("The maximum position range for spawned entities");
+                option("minSpawnDelay").docs("The minimum delay between spawner spawns. This is only applied at spawner creation")
+                    .greaterThanOrEqualTo(0.0F);
+                option("maxSpawnDelay").docs("The maximum delay between spawner spawns. This is only applied at spawner creation")
+                    .greaterThanOrEqualTo(0.0F);
+                option("spawnCount").docs("The amount of entities a spawner spawns per cycle. This is only applied at spawner creation")
+                    .greaterThanOrEqualTo(0.0F);
+                option("maxNearbyEntities").docs("The maximum amount of nearby entities before the spawner stops ticking. This is only applied at spawner creation")
+                    .greaterThanOrEqualTo(0.0F);
+                option("requiredPlayerRange").docs("The required player range for spawners to activate. This is only applied at spawner creation")
+                    .greaterThanOrEqualTo(0.0F);
+                option("spawnRange").docs("The maximum position range for spawned entities. This is only applied at spawner creation")
+                    .greaterThanOrEqualTo(0.0F);
                 option("disableMaxNearbyEntitiesCheck").docs("Disables the spawner max nearby entities check");
                 option("spawnedEntitiesHaveNoCollision").docs("Disables collisions for entities spawned by spawners");
             }
