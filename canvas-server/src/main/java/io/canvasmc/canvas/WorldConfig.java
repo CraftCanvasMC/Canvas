@@ -490,6 +490,22 @@ public class WorldConfig extends Part {
     public Blocks blocks = new Blocks();
     public static class Blocks extends Part {
 
+        {
+            option("spawner")
+                .docs(
+                    Style.create().wordWrap(
+                        "All integer options in this section of the configuration are only applied on creation of the spawner",
+                        "instances in question. This is due to plugins being able to modify these values too at runtime via Paper",
+                        "API. Any already generated spawners will not get this configuration applied, it will only apply to new ones"
+                    ).blank()
+                    .literal("The options in question are:")
+                    .wordWrap(
+                        "\"min-spawn-delay\", \"max-spawn-delay\", \"spawn-count\", \"max-nearby-entities\",",
+                        "\"required-player-range\", \"spawn-range\""
+                    )
+                );
+        }
+
         public boolean chestsCanOpenWithFullBlockAbove = false;
         public boolean fullChiseledBookShelvesCountAsValidEnchantPowerSources = false;
 
@@ -497,17 +513,17 @@ public class WorldConfig extends Part {
         public static class Spawner extends Part {
 
             {
-                option("minSpawnDelay").docs("The minimum delay between spawner spawns. This is only applied at spawner creation")
+                option("minSpawnDelay").docs("The minimum delay between spawner spawns")
                     .greaterThanOrEqualTo(0.0F);
-                option("maxSpawnDelay").docs("The maximum delay between spawner spawns. This is only applied at spawner creation")
+                option("maxSpawnDelay").docs("The maximum delay between spawner spawns")
                     .greaterThanOrEqualTo(0.0F);
-                option("spawnCount").docs("The amount of entities a spawner spawns per cycle. This is only applied at spawner creation")
+                option("spawnCount").docs("The amount of entities a spawner spawns per cycle")
                     .greaterThanOrEqualTo(0.0F);
-                option("maxNearbyEntities").docs("The maximum amount of nearby entities before the spawner stops ticking. This is only applied at spawner creation")
+                option("maxNearbyEntities").docs("The maximum amount of nearby entities before the spawner stops ticking")
                     .greaterThanOrEqualTo(0.0F);
-                option("requiredPlayerRange").docs("The required player range for spawners to activate. This is only applied at spawner creation")
+                option("requiredPlayerRange").docs("The required player range for spawners to activate")
                     .greaterThanOrEqualTo(0.0F);
-                option("spawnRange").docs("The maximum position range for spawned entities. This is only applied at spawner creation")
+                option("spawnRange").docs("The maximum position range for spawned entities")
                     .greaterThanOrEqualTo(0.0F);
                 option("disableMaxNearbyEntitiesCheck").docs("Disables the spawner max nearby entities check");
                 option("spawnedEntitiesHaveNoCollision").docs("Disables collisions for entities spawned by spawners");
