@@ -501,7 +501,7 @@ public class GlobalConfiguration extends Part {
                 "different world due to setup reasoning, like needing to send players to the \"spawn\" world or something.",
                 "This also applies to the end portal and nether portal, in replacement of the overworld, meaning the",
                 "target dimension for entities going from the nether for example will be sent here"
-            ).identifier();
+            ).identifier(); // TODO - object mapping?
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
@@ -510,10 +510,6 @@ public class GlobalConfiguration extends Part {
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
     public boolean tileEntitySnapshotCreation = false;
     public String defaultRespawnDimensionKey = "minecraft:overworld";
-
-    static {
-        ConfigurationProvider.registerTypeMapper(Identifier.class, Identifier::parse);
-    }
 
     public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
         return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));

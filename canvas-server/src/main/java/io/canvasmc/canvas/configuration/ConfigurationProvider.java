@@ -10,15 +10,10 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.function.Supplier;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.Identifier;
-import net.minecraft.resources.ResourceKey;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -46,12 +41,6 @@ public class ConfigurationProvider {
     private static final DumperOptions DUMPER_OPTIONS;
     // note: if we want to preserve comments, we have to use compose() on file reads
     private static final Yaml YAML;
-
-    private static final Map<Class<?>, Function<String, Object>> TYPE_MAPPERS = new HashMap<>();
-
-    public static <T> void registerTypeMapper(Class<T> clazz, Function<String, T> mapper) {
-        TYPE_MAPPERS.put(clazz, (Function<String, Object>) mapper);
-    }
 
     static {
         LOADER_OPTIONS = new LoaderOptions();
@@ -113,7 +102,7 @@ public class ConfigurationProvider {
 
             @Override
             protected Tag getTag(@NonNull Class<?> clazz, Tag defaultTag) {
-                if (clazz.isEnum() || TYPE_MAPPERS.containsKey(clazz)) {
+                if (clazz.isEnum()) {
                     return Tag.STR;
                 }
                 return super.getTag(clazz, defaultTag);
@@ -122,21 +111,7 @@ public class ConfigurationProvider {
         representer.setPropertyUtils(propertyUtils);
         representer.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
 
-        Constructor constructor = new Constructor(LOADER_OPTIONS) {
-            {
-                this.yamlConstructors.put(Tag.STR, new ConstructScalar() {
-                    @Override
-                    public Object construct(org.yaml.snakeyaml.nodes.Node node) {
-                        String value = (String) super.construct(node);
-                        Function<String, Object> mapper = TYPE_MAPPERS.get(node.getType());
-                        if (mapper != null) {
-                            return mapper.apply(value);
-                        }
-                        return value;
-                    }
-                });
-            }
-        };
+        Constructor constructor = new Constructor(LOADER_OPTIONS);
         constructor.setPropertyUtils(propertyUtils);
         constructor.getPropertyUtils().setBeanAccess(BeanAccess.FIELD);
 
