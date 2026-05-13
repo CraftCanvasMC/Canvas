@@ -38,7 +38,7 @@ public class WorldConfig extends Part {
     // note that Canvas core utilities and loggers and such should go in the global configuration class, as this one
     // doesn't entirely seem that appropriate for that sort of stuff
 
-    // we have a logger internally here for world-config related things, and should not be used globally. the global
+    // we have a logger internally here for level-config related things, and should not be used globally. the global
     // config class should be the logger publicly used
 
     private static final Logger LOGGER = LoggerFactory.getLogger("CanvasWorlds");
@@ -63,7 +63,7 @@ public class WorldConfig extends Part {
             new Resolver<>() {
                 @Override
                 public void onDiffAdd(final String fullyQualifiedName) {
-                    LOGGER.info("Added new world configuration option, '{}'", fullyQualifiedName);
+                    LOGGER.info("Added new level configuration option, '{}'", fullyQualifiedName);
                 }
 
                 @Override
@@ -87,7 +87,7 @@ public class WorldConfig extends Part {
                 .blank()
                 .wordWrap(
                     "This is the defaults for the per-world configuration file for CanvasMC.",
-                    "Each option can be overridden by the patch variant in each world folder. You are",
+                    "Each option can be overridden by the patch variant in each dimension folder. You are",
                     "free to modify, add, or remove comments as you please."
                 ).endLine()
                 .blank()
@@ -112,19 +112,19 @@ public class WorldConfig extends Part {
 
         // on reload, if the server started, we need to swap out the configs
         if (TickRegions.started) {
-            for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
+            for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
 
                 // this will swap the config with the new patchable variant
                 // it mimics the startup process of the patchable configs
 
-                world.reloadCanvasConfig();
+                level.reloadCanvasConfig();
             }
         }
     }
 
-    public static WorldConfig buildForWorld(final @NonNull ServerLevel world, final ResourceKey<Level> dimension) {
+    public static WorldConfig buildForLevel(final @NonNull ServerLevel level, final ResourceKey<Level> dimension) {
 
-        // we build it as a patch here, and from here we can set the world properly
+        // we build it as a patch here, and from here we can set the level properly
         final WorldConfig[] result = new WorldConfig[1];
 
         ConfigurationProvider.buildPatchableConfiguration(
@@ -132,18 +132,15 @@ public class WorldConfig extends Part {
                 .resolve("canvas-patch.yml"),
             BASE_FILE,
             WorldConfig::new,
-            new Resolver<>() {
-                @Override
-                public void onFinishLoad(final WorldConfig instance) {
-                    LOGGER.info("Loaded Canvas config patch for world {}", dimension.identifier());
+            instance -> {
+                LOGGER.info("Loaded Canvas config patch for level {}", dimension.identifier());
 
-                    result[0] = instance;
+                result[0] = instance;
 
-                    instance.onLoad(world);
-                }
+                instance.onLoad(level);
             },
             Style.create()
-                .literal("Patch configuration file for world " + dimension.identifier()).endLine()
+                .literal("Patch configuration file for level " + dimension.identifier()).endLine()
                 .blank()
                 .wordWrap(
                     "This configuration file can be used to override the values in the default configuration",
@@ -152,7 +149,7 @@ public class WorldConfig extends Part {
                 .blank()
                 .wordWrap(
                     "To override values in this, just copy the same option path to override the value. Think of",
-                    "the values you place in here for each option as a replacement for the default one for this world specifically"
+                    "the values you place in here for each option as a replacement for the default one for this level specifically"
                 )
                 .compile(60)
         );
@@ -160,7 +157,7 @@ public class WorldConfig extends Part {
         return result[0];
     }
 
-    private void onLoad(final @NonNull ServerLevel world) {
+    private void onLoad(final @NonNull ServerLevel level) {
 
         // validate the object here too, because some users may do
         // something stupid in the patch variant
@@ -175,7 +172,7 @@ public class WorldConfig extends Part {
             .toList().toArray(new EntityType<?>[0]);
 
         if (entityTypes.length > 0) {
-            LOGGER.info("Set {} projectile types to load chunks in {}", entityTypes.length, world.dimension().identifier().toDebugFileName());
+            LOGGER.info("Set {} projectile types to load chunks in {}", entityTypes.length, level.dimension().identifier().toDebugFileName());
         }
 
         // set the predicate now
@@ -254,7 +251,7 @@ public class WorldConfig extends Part {
         }
 
         {
-            option("dontTrackPlayersInEntityTracking").docs("This makes players not able to see other players in this world when enabled");
+            option("dontTrackPlayersInEntityTracking").docs("This makes players not able to see other players in this level when enabled");
         }
 
         // useful for AFK worlds

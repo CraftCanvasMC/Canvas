@@ -65,7 +65,7 @@ public final class ScheduledHandleTickState {
                 TickRegionScheduler.LOGGER.warn("Global tick missed deadline by {}s! Is the scheduler overloaded?", formatted);
             }
             else if (scheduleHandle instanceof TickRegions.ConcreteRegionTickHandle regionTickHandle)
-                TickRegionScheduler.LOGGER.warn("Region surrounding {} in world '{}' missed deadline by {}s! Is the scheduler overloaded?",
+                TickRegionScheduler.LOGGER.warn("Region surrounding {} in level '{}' missed deadline by {}s! Is the scheduler overloaded?",
                     regionTickHandle.region.region.getCenterChunk(), regionTickHandle.region.world.dimension().identifier().getPath(), formatted);
         }
 

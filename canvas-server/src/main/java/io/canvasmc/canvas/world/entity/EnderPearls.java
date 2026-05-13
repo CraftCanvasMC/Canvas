@@ -137,7 +137,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
      * {
      *     "uuid": <the entity uuid>,
      *     "data": <the entity data, without the id>,
-     *     "world": <dimension>
+     *     "level": <dimension>
      * }
      * }</pre>
      *
@@ -160,7 +160,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 );
 
                 tagValueOutput.store("uuid", Codecs.UUID_CODEC, pearl.getUUID());
-                tagValueOutput.store("world", Level.RESOURCE_KEY_CODEC, pearl.level().dimension());
+                tagValueOutput.store("level", Level.RESOURCE_KEY_CODEC, pearl.level().dimension());
                 pearl.save(tagValueOutput.child("data"));
 
                 tag = tagValueOutput.buildResult();
@@ -170,21 +170,29 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
 
         public void spawn() {
             final CompoundTag data = serialized.getCompound("data").orElseThrow();
-            final ServerLevel world = MinecraftServer.getServer().getLevel(serialized.read("world", Level.RESOURCE_KEY_CODEC).orElseThrow());
-            if (world == null) {
-                GlobalConfiguration.LOGGER.error("World ({}) did not exist, skipping pearl spawn", serialized.getString("world"));
+            // migration of old world tag to new level tag
+            if (!serialized.contains("level") && serialized.contains("world")) {
+                serialized.read("world", Level.RESOURCE_KEY_CODEC).ifPresent(levelKey -> {
+                    serialized.put("level", Level.RESOURCE_KEY_CODEC.encodeStart(NbtOps.INSTANCE, levelKey).getOrThrow());
+                    serialized.remove("world");
+                });
+            }
+
+            final ServerLevel level = MinecraftServer.getServer().getLevel(serialized.read("level", Level.RESOURCE_KEY_CODEC).orElseThrow());
+            if (level == null) {
+                GlobalConfiguration.LOGGER.error("Level ({}) did not exist, skipping pearl spawn", serialized.getString("level"));
                 return;
             }
-            Entity entity = EntityType.loadEntityRecursive(data, world, EntitySpawnReason.LOAD, EntityProcessor.NOP);
+            Entity entity = EntityType.loadEntityRecursive(data, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
             if (entity != null) {
-                world.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
-                    world.addFreshEntityWithPassengers(entity);
-                    ServerPlayer.placeEnderPearlTicket(world, entity.chunkPosition());
-                    GlobalConfiguration.LOGGER.debug("Spawned saved pearl in world ({})", world.dimension().identifier());
+                level.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
+                    level.addFreshEntityWithPassengers(entity);
+                    ServerPlayer.placeEnderPearlTicket(level, entity.chunkPosition());
+                    GlobalConfiguration.LOGGER.debug("Spawned saved pearl in level ({})", level.dimension().identifier());
                 });
             }
             else {
-                GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in world ({}), skipping", world.dimension().identifier().toDebugFileName());
+                GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", level.dimension().identifier().toDebugFileName());
             }
         }
 

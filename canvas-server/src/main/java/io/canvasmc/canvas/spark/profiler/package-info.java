@@ -60,7 +60,7 @@
  * <h2>Region Logic</h2>
  *
  * <p>
- * Regions behave unpredictably due to player interaction with the world. Any server could do
+ * Regions behave unpredictably due to player interaction with the level. Any server could do
  * anything to the region being profiled. It may be loaded already, it may not be loaded
  * at all. So when pinning, we load the chunks in the area via the ticket
  * {@link net.minecraft.server.level.TicketType#REGION_PROFILING_HOLD canvas:region_profiler_hold}, which
