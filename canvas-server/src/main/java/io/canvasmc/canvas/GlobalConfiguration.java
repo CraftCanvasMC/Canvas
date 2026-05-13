@@ -509,7 +509,7 @@ public class GlobalConfiguration extends Part {
     public boolean displayWorldLoadScreenForPortaling = true;
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
     public boolean tileEntitySnapshotCreation = false;
-    public String defaultRespawnDimensionKey = "minecraft:overworld";
+    public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
 
     public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
         return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
