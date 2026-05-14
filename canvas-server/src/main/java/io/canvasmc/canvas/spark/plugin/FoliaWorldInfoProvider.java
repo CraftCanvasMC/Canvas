@@ -79,7 +79,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
                     // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
                     return result.get(5, TimeUnit.SECONDS);
                 } catch (InterruptedException | TimeoutException | ExecutionException e) {
-                    throw new RuntimeException("Couldn't fetch localized level data", e);
+                    throw new RuntimeException("Couldn't fetch localized world data", e);
                 }
             }
             else {
