@@ -4,7 +4,6 @@ import org.bukkit.World;
 import org.bukkit.event.Cancellable;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.world.WorldEvent;
-import org.jetbrains.annotations.NotNull;
 
 /**
  * Called when a world is being unloaded via
@@ -17,7 +16,7 @@ public class WorldUnloadAsyncEvent extends WorldEvent implements Cancellable {
 
     private boolean cancelled = false;
 
-    public WorldUnloadAsyncEvent(final @NotNull World world) {
+    public WorldUnloadAsyncEvent(final World world) {
         super(world);
     }
 
