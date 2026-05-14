@@ -26,7 +26,7 @@ public class CanvasFileMigration {
         }
     }
 
-    // note: this runs 1 time per world, so we can have per-world stuff migrated
+    // note: this runs 1 time per level, so we can have per-level stuff migrated
     public static void initMigration(
         final WorldMigrationContext migrationContext
     ) {

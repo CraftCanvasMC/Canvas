@@ -21,6 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
@@ -46,6 +47,7 @@ import org.jspecify.annotations.Nullable;
 public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
     private static final AtomicLong LAST_AUTOSAVE = new AtomicLong(System.nanoTime());
     public static final String SAVE_NAME = "canvas/pearls.dat";
+    private static final int CURRENT_DATA_VERSION = 2;
     public static final Codec<Pearl> PEARL_CODEC = CompoundTag.CODEC.comapFlatMap(
         (Function<CompoundTag, DataResult<Pearl>>) compoundTag -> DataResult.success(new Pearl(compoundTag)), pearl -> pearl.serialized
     );
@@ -67,6 +69,14 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
             try {
                 CompoundTag tag = Objects.requireNonNull(NbtIo.readCompressed(resolved, NbtAccounter.unlimitedHeap()), "NBT cannot be null")
                     .asCompound().orElseThrow(UnknownError::new);
+                // migration of world tag to level tag
+                final int version = tag.getIntOr("DataVersion", 1);
+                if (version < CURRENT_DATA_VERSION) {
+                    GlobalConfiguration.LOGGER.info("Migrating pearl data from version {} to {}", version, CURRENT_DATA_VERSION);
+                    Pearl.migratePearlData(tag);
+                } else if (version > CURRENT_DATA_VERSION) {
+                    throw new IllegalStateException("Unsupported pearl data version: " + version);
+                }
                 return CODEC.decode(NbtOps.INSTANCE, tag).getOrThrow().getFirst();
             } catch (Throwable e) {
                 throw new RuntimeException("Couldn't read pearl save data", e);
@@ -82,8 +92,11 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 // create directories first or else we fail to save
                 Path resolved = MinecraftServer.getServer().storageSource.getLevelPath(LevelResource.DATA).resolve(SAVE_NAME);
                 Files.createDirectories(resolved.getParent());
+                CompoundTag root = new CompoundTag();
+                root.putInt("DataVersion", CURRENT_DATA_VERSION);
                 Tag tag = CODEC.encodeStart(NbtOps.INSTANCE, this).getOrThrow();
-                NbtIo.writeCompressed((CompoundTag) tag, resolved);
+                root.merge((CompoundTag) tag);
+                NbtIo.writeCompressed(root, resolved);
                 future.complete(true);
             } catch (Throwable thrown) {
                 future.completeExceptionally(thrown);
@@ -137,7 +150,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
      * {
      *     "uuid": <the entity uuid>,
      *     "data": <the entity data, without the id>,
-     *     "world": <dimension>
+     *     "level": <dimension>
      * }
      * }</pre>
      *
@@ -160,7 +173,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 );
 
                 tagValueOutput.store("uuid", Codecs.UUID_CODEC, pearl.getUUID());
-                tagValueOutput.store("world", Level.RESOURCE_KEY_CODEC, pearl.level().dimension());
+                tagValueOutput.store("level", Level.RESOURCE_KEY_CODEC, pearl.level().dimension());
                 pearl.save(tagValueOutput.child("data"));
 
                 tag = tagValueOutput.buildResult();
@@ -170,22 +183,46 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
 
         public void spawn() {
             final CompoundTag data = serialized.getCompound("data").orElseThrow();
-            final ServerLevel world = MinecraftServer.getServer().getLevel(serialized.read("world", Level.RESOURCE_KEY_CODEC).orElseThrow());
-            if (world == null) {
-                GlobalConfiguration.LOGGER.error("World ({}) did not exist, skipping pearl spawn", serialized.getString("world"));
+            final ServerLevel level = MinecraftServer.getServer().getLevel(serialized.read("level", Level.RESOURCE_KEY_CODEC).orElseThrow());
+            if (level == null) {
+                GlobalConfiguration.LOGGER.error("Level ({}) did not exist, skipping pearl spawn", serialized.getString("level"));
                 return;
             }
-            Entity entity = EntityType.loadEntityRecursive(data, world, EntitySpawnReason.LOAD, EntityProcessor.NOP);
+            Entity entity = EntityType.loadEntityRecursive(data, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
             if (entity != null) {
-                world.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
-                    world.addFreshEntityWithPassengers(entity);
-                    ServerPlayer.placeEnderPearlTicket(world, entity.chunkPosition());
-                    GlobalConfiguration.LOGGER.debug("Spawned saved pearl in world ({})", world.dimension().identifier());
+                level.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
+                    level.addFreshEntityWithPassengers(entity);
+                    ServerPlayer.placeEnderPearlTicket(level, entity.chunkPosition());
+                    GlobalConfiguration.LOGGER.debug("Spawned saved pearl in level ({})", level.dimension().identifier());
                 });
             }
             else {
-                GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in world ({}), skipping", world.dimension().identifier().toDebugFileName());
+                GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", level.dimension().identifier().toDebugFileName());
             }
+        }
+
+        public static void migratePearlData(final CompoundTag root) {
+            CompoundTag data = root.getCompound("Data").orElse(null);
+            if (data == null) {
+                return;
+            }
+            for (Tag pearlListTag : data.values()) {
+                if (!(pearlListTag instanceof ListTag pearls)) {
+                    continue;
+                }
+                for (Tag pearlTag : pearls) {
+                    if (!(pearlTag instanceof CompoundTag pearl)) {
+                        continue;
+                    }
+                    if (!pearl.contains("level") && pearl.contains("world")) {
+                        pearl.read("world", Level.RESOURCE_KEY_CODEC).ifPresent(levelKey -> {
+                            pearl.put("level", Level.RESOURCE_KEY_CODEC.encodeStart(NbtOps.INSTANCE, levelKey).getOrThrow());
+                            pearl.remove("world");
+                        });
+                    }
+                }
+            }
+            root.putInt("DataVersion", CURRENT_DATA_VERSION);
         }
 
         @Override
