@@ -130,7 +130,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
                     data.put(level.getWorld().getName(), result.get(5, TimeUnit.SECONDS));
                     return data;
                 } catch (InterruptedException | TimeoutException | ExecutionException e) {
-                    throw new RuntimeException("Couldn't fetch localized level data", e);
+                    throw new RuntimeException("Couldn't fetch localized world data", e);
                 }
             }
             else return new ChunksResult<>(); // global tick, doesn't own chunks

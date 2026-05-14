@@ -26,7 +26,7 @@ public class TickGuard {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
                 if (!TickThread.isTickThreadFor(world, chunkX, chunkZ)) {
-                    LOGGER.warn("Thread failed main thread check: {}, context={}, level={}, chunk_pos={}", reason, getThreadContext(), WorldUtil.getWorldName(world), new ChunkPos(chunkX, chunkZ), new Throwable());
+                    LOGGER.warn("Thread failed main thread check: {}, context={}, world={}, chunk_pos={}", reason, getThreadContext(), WorldUtil.getWorldName(world), new ChunkPos(chunkX, chunkZ), new Throwable());
                 }
             }
             case THROW -> TickThread.ensureTickThread(world, chunkX, chunkZ, reason);
