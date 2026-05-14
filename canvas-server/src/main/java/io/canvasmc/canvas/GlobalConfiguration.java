@@ -107,7 +107,7 @@ public class GlobalConfiguration extends Part {
                 .blank()
                 .wordWrap(
                     "This is the server-wide configuration file provided by CanvasMC. This config holds options",
-                    "that are set across the entire server, and cannot be overridden per-level. You are free to modify,",
+                    "that are set across the entire server, and cannot be overridden per-world. You are free to modify,",
                     "add, or remove comments as you please."
                 ).endLine()
                 .blank()
@@ -489,8 +489,8 @@ public class GlobalConfiguration extends Part {
 
         option("displayWorldLoadScreenForPortaling")
             .docs(
-                "Folia's portaling rewrite makes the level loading screen not display on the client properly, and",
-                "instead shows an empty void. With this enabled, Canvas will display the proper level loading screen"
+                "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
+                "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
@@ -498,7 +498,7 @@ public class GlobalConfiguration extends Part {
         option("defaultRespawnDimensionKey")
             .docs(
                 "The default respawn dimension for the server. This can assist servers needing to change this to a",
-                "different level due to setup reasoning, like needing to send players to the \"spawn\" level or something.",
+                "different world due to setup reasoning, like needing to send players to the \"spawn\" world or something.",
                 "This also applies to the end portal and nether portal, in replacement of the overworld, meaning the",
                 "target dimension for entities going from the nether for example will be sent here"
             ).identifier(); // TODO - object mapping?

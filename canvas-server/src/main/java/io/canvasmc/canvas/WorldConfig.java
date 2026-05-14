@@ -63,7 +63,7 @@ public class WorldConfig extends Part {
             new Resolver<>() {
                 @Override
                 public void onDiffAdd(final String fullyQualifiedName) {
-                    LOGGER.info("Added new level configuration option, '{}'", fullyQualifiedName);
+                    LOGGER.info("Added new world configuration option, '{}'", fullyQualifiedName);
                 }
 
                 @Override
@@ -140,7 +140,7 @@ public class WorldConfig extends Part {
                 instance.onLoad(level);
             },
             Style.create()
-                .literal("Patch configuration file for level " + dimension.identifier()).endLine()
+                .literal("Patch configuration file for world " + dimension.identifier()).endLine()
                 .blank()
                 .wordWrap(
                     "This configuration file can be used to override the values in the default configuration",
@@ -149,7 +149,7 @@ public class WorldConfig extends Part {
                 .blank()
                 .wordWrap(
                     "To override values in this, just copy the same option path to override the value. Think of",
-                    "the values you place in here for each option as a replacement for the default one for this level specifically"
+                    "the values you place in here for each option as a replacement for the default one for this world specifically"
                 )
                 .compile(60)
         );
@@ -251,7 +251,7 @@ public class WorldConfig extends Part {
         }
 
         {
-            option("dontTrackPlayersInEntityTracking").docs("This makes players not able to see other players in this level when enabled");
+            option("dontTrackPlayersInEntityTracking").docs("This makes players not able to see other players in this world when enabled");
         }
 
         // useful for AFK worlds
