@@ -63,12 +63,12 @@ public class WorldConfig extends Part {
             new Resolver<>() {
                 @Override
                 public void onDiffAdd(final String fullyQualifiedName) {
-                    LOGGER.info("Added new world configuration option, '{}'", fullyQualifiedName);
+                    LOGGER.info("Added new world configuration option, \"{}\"", fullyQualifiedName);
                 }
 
                 @Override
                 public void onDiffRemove(final String fullyQualifiedName) {
-                    LOGGER.warn("World configuration option '{}' no longer exists and is now removed.", fullyQualifiedName);
+                    LOGGER.warn("World configuration option \"{}\" no longer exists and is now removed.", fullyQualifiedName);
                 }
 
                 @Override

@@ -227,7 +227,7 @@ public class GlobalConfiguration extends Part {
             option("affinityScheduler")
                 .docs(
                     "Configurations for the AFFINITY scheduler provided by Canvas. For these options to take effect,",
-                    "change the 'threaded-regions.scheduler' option in 'paper-global.yml' to 'AFFINITY'"
+                    "change the \"threaded-regions.scheduler\" option in \"paper-global.yml\" to \"AFFINITY\""
                 );
         }
 
@@ -258,7 +258,7 @@ public class GlobalConfiguration extends Part {
                 option("enableWorkStealing")
                     .docs(
                         "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
-                        "to improve performance. If this is enabled, and the task misses its deadline by 'stealThresholdMillis', it can",
+                        "to improve performance. If this is enabled, and the task misses its deadline by \"stealThresholdMillis\", it can",
                         "be taken by another tick thread to be run."
                     );
 

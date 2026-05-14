@@ -60,7 +60,7 @@ public class WorldDistanceCommand implements Command {
                         int distance = type.get(level);
 
                         context.getSource().sendSuccess(
-                            () -> Component.literal(type.name + " distance of level '" + level.getWorld().key().asString() + "' is " + distance),
+                            () -> Component.literal(type.name + " distance of level \"" + level.getWorld().key().asString() + "\" is " + distance),
                             false
                         );
                         return distance;
@@ -91,7 +91,7 @@ public class WorldDistanceCommand implements Command {
                                 case SIMULATION -> level.getChunkSource().setSimulationDistance(updated);
                             }
 
-                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level '" + level.getWorld().key().asString() + "' to " + distance, GlobalConfiguration.INFO);
+                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + level.getWorld().key().asString() + "\" to " + distance, GlobalConfiguration.INFO);
                             return distance;
                         })
                     )
