@@ -4,6 +4,28 @@ Date: Thu, 14 May 2026 17:14:48 -0700
 Subject: [PATCH] Restore Scoreboards
 
 
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 5e0987b248ae14591d607167cc6bbddeae38672f..0dc7a5e628d681398d3a4a2a56b03e87d2c8283d 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -361,6 +361,7 @@ public final class RegionizedServer {
+         // connection tick
+         // ender pearls
+         // gui tick
++        // scoreboard
+ 
+         // tick player ping sample
+         this.tickPlayerSample();
+@@ -382,6 +383,9 @@ public final class RegionizedServer {
+ 
+         // gui tick
+         net.minecraft.server.gui.PlayerListComponent.tick();
++
++        // scoreboard
++        MinecraftServer.getServer().getScoreboard().autosave();
+         // Canvas end - region threading
+     }
+ 
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
 index ad764d57dd28f3c97faf9b2edd9bfee526da6a17..b088b833948d88711a8a0ecefcc6604a56dad1b7 100644
 --- a/net/minecraft/commands/Commands.java
@@ -58,10 +80,10 @@ index 28917976f2cfa1df934e7fef30ee5ecd11085b78..0dab3dbd546986b5a8454b5260f20f26
          this.server.spark.registerCommandBeforePlugins(this.server); // Paper - spark
          this.server.spark.enableAfterPlugins(this.server); // Paper - spark
 diff --git a/net/minecraft/server/ServerScoreboard.java b/net/minecraft/server/ServerScoreboard.java
-index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d339935a90 100644
+index 9bf09b888425e491072864265c8de3885154a0ba..7cb6d183be1a04c4f59b2d335fc706c1645deb9f 100644
 --- a/net/minecraft/server/ServerScoreboard.java
 +++ b/net/minecraft/server/ServerScoreboard.java
-@@ -26,24 +26,29 @@ import org.jspecify.annotations.Nullable;
+@@ -26,24 +26,45 @@ import org.jspecify.annotations.Nullable;
  
  public class ServerScoreboard extends Scoreboard {
      private final MinecraftServer server;
@@ -70,6 +92,22 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
 +    // Canvas start - region threading
 +    private final Set<Objective> trackedObjectives = new java.util.concurrent.CopyOnWriteArraySet<>();
 +    private final java.util.concurrent.atomic.AtomicBoolean dirty = new java.util.concurrent.atomic.AtomicBoolean(false);
++
++    private static final java.util.concurrent.atomic.AtomicLong LAST_AUTOSAVE = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
++
++    public void autosave() {
++        ensureMainThread("Cannot autosave async");
++        // autosave every minute if dirty
++        final int autoSavePeriod = MinecraftServer.getServer().autosavePeriod;
++        if (autoSavePeriod <= 0) return;
++        final long periodNanos = autoSavePeriod * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks();
++        final long currTime = System.nanoTime();
++        final long last = LAST_AUTOSAVE.get();
++        if ((currTime - last) > periodNanos && LAST_AUTOSAVE.compareAndSet(last, currTime) && dirty.compareAndExchange(true, false)) {
++            MinecraftServer.getServer().getDataStorage().computeIfAbsent(ScoreboardSaveData.TYPE).setData(this.store());
++            MinecraftServer.getServer().getDataStorage().scheduleSave();
++        }
++    }
 +    // Canvas end - region threading
  
      public ServerScoreboard(final MinecraftServer server) {
@@ -96,7 +134,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          return new ScoreboardSaveData.Packed(this.packObjectives(), this.packPlayerScores(), this.packDisplaySlots(), this.packPlayerTeams());
      }
  
-@@ -90,6 +95,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -90,6 +111,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) {
@@ -104,7 +142,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          Objective old = this.getDisplayObjective(slot);
          super.setDisplayObjective(slot, objective);
          if (old != objective && old != null) {
-@@ -163,12 +169,14 @@ public class ServerScoreboard extends Scoreboard {
+@@ -163,12 +185,14 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onObjectiveAdded(final Objective objective) {
@@ -119,7 +157,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          super.onObjectiveChanged(objective);
          if (this.trackedObjectives.contains(objective)) {
              this.broadcastAll(new ClientboundSetObjectivePacket(objective, ClientboundSetObjectivePacket.METHOD_CHANGE)); // CraftBukkit
-@@ -179,6 +187,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -179,6 +203,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onObjectiveRemoved(final Objective objective) {
@@ -127,7 +165,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          super.onObjectiveRemoved(objective);
          if (this.trackedObjectives.contains(objective)) {
              this.stopTrackingObjective(objective);
-@@ -189,6 +198,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -189,6 +214,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamAdded(final PlayerTeam team) {
@@ -135,7 +173,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          super.onTeamAdded(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true)); // CraftBukkit
          this.setDirty();
-@@ -196,6 +206,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -196,6 +222,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamChanged(final PlayerTeam team) {
@@ -143,7 +181,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          super.onTeamChanged(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, false)); // CraftBukkit
          this.updateTeamWaypoints(team);
-@@ -204,6 +215,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -204,6 +231,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamRemoved(final PlayerTeam team) {
@@ -151,7 +189,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          super.onTeamRemoved(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createRemovePacket(team)); // CraftBukkit
          this.updateTeamWaypoints(team);
-@@ -211,12 +223,14 @@ public class ServerScoreboard extends Scoreboard {
+@@ -211,12 +239,14 @@ public class ServerScoreboard extends Scoreboard {
      }
  
      protected void setDirty() {
@@ -169,7 +207,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
              saveData.setData(this.store());
          }
      }
-@@ -269,6 +283,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -269,6 +299,7 @@ public class ServerScoreboard extends Scoreboard {
      }
  
      public void stopTrackingObjective(final Objective objective) {
@@ -177,7 +215,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..8beb0500d3cf565a103c2c193fc5e4d3
          List<Packet<?>> packets = this.getStopTrackingPackets(objective);
  
          for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
-@@ -293,19 +308,23 @@ public class ServerScoreboard extends Scoreboard {
+@@ -293,19 +324,23 @@ public class ServerScoreboard extends Scoreboard {
          return count;
      }
  
