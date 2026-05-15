@@ -564,7 +564,7 @@ index acb8ffc862860a304c4fa100acecfce746f5fffe..553c13cddd3742e50a8647d778de597c
  
      public record Packed(
 diff --git a/net/minecraft/world/scores/Scoreboard.java b/net/minecraft/world/scores/Scoreboard.java
-index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522bb6588b4 100644
+index 3013937e4b458cd46b6f3e72ce46692a43511423..205aa745dc75514b4060c58bf8d9d331e1026ab2 100644
 --- a/net/minecraft/world/scores/Scoreboard.java
 +++ b/net/minecraft/world/scores/Scoreboard.java
 @@ -30,17 +30,46 @@ import org.slf4j.Logger;
@@ -620,7 +620,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
      public Objective addObjective(
          final String name,
          final ObjectiveCriteria criteria,
-@@ -52,26 +81,37 @@ public class Scoreboard {
+@@ -52,8 +81,9 @@ public class Scoreboard {
          if (this.objectivesByName.containsKey(name)) {
              throw new IllegalArgumentException("An objective with the name '" + name + "' already exists!");
          } else {
@@ -631,13 +631,15 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
              this.objectivesByName.put(name, objective);
              this.onObjectiveAdded(objective);
              return objective;
-         }
+@@ -61,11 +91,21 @@ public class Scoreboard {
      }
  
-+    // TODO - should we thread check the holder if it's an entity?
      public final void forAllObjectives(final ObjectiveCriteria criteria, final ScoreHolder name, final Consumer<ScoreAccess> operation) {
 -        this.objectivesByCriteria.getOrDefault(criteria, Collections.emptyList()).forEach(o -> operation.accept(this.getOrCreatePlayerScore(name, o, true)));
 +        // Canvas start - region threading
++        if (name instanceof Entity entity) {
++            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(entity, "Cannot get or create score for entity async");
++        }
 +        // this basically is just for each objective that has a certain criteria instance
 +        for (final Objective objective : this.objectivesByName.values()) {
 +            if (objective.getCriteria() == criteria) {
@@ -652,34 +654,38 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
 +        return this.scoresByName.computeIfAbsent(name, k -> new PlayerScores()); // Canvas - region threading
      }
  
-+    // TODO - should we thread check the holder if it's an entity?
      public ScoreAccess getOrCreatePlayerScore(final ScoreHolder holder, final Objective objective) {
-         return this.getOrCreatePlayerScore(holder, objective, false);
+@@ -73,6 +113,11 @@ public class Scoreboard {
      }
  
-+    // TODO - should we thread check the holder if it's an entity?
      public ScoreAccess getOrCreatePlayerScore(final ScoreHolder scoreHolder, final Objective objective, final boolean forceWritable) {
++        // Canvas start - region threading
++        if (scoreHolder instanceof Entity entity) {
++            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(entity, "Cannot get or create score for entity async");
++        }
++        // Canvas end - region threading
          final boolean canModify = forceWritable || !objective.getCriteria().isReadOnly();
          PlayerScores playerScore = this.getOrCreatePlayerInfo(scoreHolder.getScoreboardName());
-@@ -81,14 +121,26 @@ public class Scoreboard {
+         final MutableBoolean requiresSync = new MutableBoolean();
+@@ -81,14 +126,26 @@ public class Scoreboard {
              {
                  Objects.requireNonNull(Scoreboard.this);
              }
 +            // Canvas start - region threading
-+
-+            @Override
+ 
+             @Override
+-            public int get() {
 +            public synchronized int add(final int count) {
 +                return ScoreAccess.super.add(count);
 +            }
 +
 +            @Override
-+            public int increment() {
++            public synchronized int increment() {
 +                return ScoreAccess.super.increment();
 +            }
 +            // Canvas end - region threading
- 
-             @Override
--            public int get() {
++
++            @Override
 +            public synchronized int get() { // Canvas - region threading
                  return score.value();
              }
@@ -690,7 +696,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
                  if (!canModify) {
                      throw new IllegalStateException("Cannot modify read-only score");
                  } else {
-@@ -113,12 +165,12 @@ public class Scoreboard {
+@@ -113,12 +170,12 @@ public class Scoreboard {
              }
  
              @Override
@@ -705,7 +711,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
                  if (requiresSync.isTrue() || !Objects.equals(display, score.display())) {
                      score.display(display);
                      this.sendScoreToPlayers();
-@@ -126,13 +178,13 @@ public class Scoreboard {
+@@ -126,13 +183,13 @@ public class Scoreboard {
              }
  
              @Override
@@ -721,7 +727,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
                  return score.isLocked();
              }
  
-@@ -146,7 +198,7 @@ public class Scoreboard {
+@@ -146,7 +203,7 @@ public class Scoreboard {
                  this.setLocked(true);
              }
  
@@ -730,15 +736,20 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
                  score.setLocked(locked);
                  if (requiresSync.isTrue()) {
                      this.sendScoreToPlayers();
-@@ -162,14 +214,15 @@ public class Scoreboard {
+@@ -162,14 +219,19 @@ public class Scoreboard {
          };
      }
  
-+    // TODO - should we thread check the holder if it's an entity?
++    // note: no need for thread check, this is read only
      public @Nullable ReadOnlyScoreInfo getPlayerScoreInfo(final ScoreHolder name, final Objective objective) {
 -        PlayerScores playerScore = this.playerScores.get(name.getScoreboardName());
-+        PlayerScores playerScore = this.scoresByName.get(name.getScoreboardName()); // Canvas - region threading
-         return playerScore != null ? playerScore.get(objective) : null;
+-        return playerScore != null ? playerScore.get(objective) : null;
++        // Canvas start - region threading
++        PlayerScores playerScore = this.scoresByName.get(name.getScoreboardName());
++        // we wrap with our own implementation because technically you can cast ReadOnlyScoreInfo to Score
++        // which then you can modify it with... no thanks!
++        return playerScore != null ? new io.canvasmc.canvas.world.scores.ReadOnlyScore(playerScore.get(objective)) : null;
++        // Canvas end - region threading
      }
  
      public Collection<PlayerScoreEntry> listPlayerScores(final Objective objective) {
@@ -748,7 +759,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
              Score score = scores.get(objective);
              if (score != null) {
                  result.add(new PlayerScoreEntry(player, score.value(), score.display(), score.numberFormat()));
-@@ -187,22 +240,24 @@ public class Scoreboard {
+@@ -187,22 +249,24 @@ public class Scoreboard {
      }
  
      public Collection<ScoreHolder> getTrackedPlayers() {
@@ -777,7 +788,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
                  if (removedPlayer != null) {
                      this.onPlayerRemoved(player);
                  }
-@@ -212,45 +267,50 @@ public class Scoreboard {
+@@ -212,45 +276,50 @@ public class Scoreboard {
          }
      }
  
@@ -838,7 +849,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
          PlayerTeam team = this.getPlayerTeam(name);
          if (team != null) {
              LOGGER.warn("Requested creation of existing team '{}'", name);
-@@ -263,22 +323,26 @@ public class Scoreboard {
+@@ -263,22 +332,26 @@ public class Scoreboard {
          }
      }
  
@@ -870,7 +881,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
          return team.getPlayers().add(player);
      }
  
-@@ -296,21 +360,24 @@ public class Scoreboard {
+@@ -296,21 +369,24 @@ public class Scoreboard {
          if (this.getPlayersTeam(player) != team) {
              throw new IllegalStateException("Player is either on another team or not on any team. Cannot remove from team '" + team.getName() + "'.");
          } else {
@@ -897,7 +908,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
      }
  
      public void onObjectiveAdded(final Objective objective) {
-@@ -343,15 +410,16 @@ public class Scoreboard {
+@@ -343,15 +419,16 @@ public class Scoreboard {
      public void onTeamRemoved(final PlayerTeam team) {
      }
  
@@ -919,7 +930,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
              .entrySet()
              .stream()
              .flatMap(
-@@ -367,7 +435,9 @@ public class Scoreboard {
+@@ -367,7 +444,9 @@ public class Scoreboard {
              .toList();
      }
  
@@ -929,7 +940,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
          Objective objective = this.getObjective(score.objective);
          if (objective == null) {
              LOGGER.error("Unknown objective {} for name {}, ignoring", score.objective, score.owner);
-@@ -377,10 +447,13 @@ public class Scoreboard {
+@@ -377,10 +456,13 @@ public class Scoreboard {
      }
  
      protected List<PlayerTeam.Packed> packPlayerTeams() {
@@ -943,7 +954,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
          PlayerTeam team = this.addPlayerTeam(packed.name());
          packed.displayName().ifPresent(team::setDisplayName);
          packed.color().ifPresent(team::setColor);
-@@ -398,10 +471,13 @@ public class Scoreboard {
+@@ -398,10 +480,13 @@ public class Scoreboard {
      }
  
      protected List<Objective.Packed> packObjectives() {
@@ -957,7 +968,7 @@ index 3013937e4b458cd46b6f3e72ce46692a43511423..385548f1246ea5ce957b88e08295b522
          this.addObjective(
              objective.name(),
              objective.criteria(),
-@@ -413,6 +489,7 @@ public class Scoreboard {
+@@ -413,6 +498,7 @@ public class Scoreboard {
      }
  
      protected Map<DisplaySlot, String> packDisplaySlots() {
