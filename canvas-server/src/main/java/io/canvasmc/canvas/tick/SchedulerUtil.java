@@ -202,10 +202,10 @@ public class SchedulerUtil {
          *     the {@code from} region
          * @param to
          *     the region we are merging into
-         * @param world
-         *     the world associated with the two regions
+         * @param level
+         *     the level associated with the two regions
          */
-        void onRegionMerge(TickRegions.TickRegionData from, TickRegions.TickRegionData to, ServerLevel world);
+        void onRegionMerge(TickRegions.TickRegionData from, TickRegions.TickRegionData to, ServerLevel level);
 
         /**
          * Callback for when a region splits into multiple regions
@@ -214,10 +214,10 @@ public class SchedulerUtil {
          *     the original region
          * @param into
          *     the region(s) being split into
-         * @param world
-         *     the world
+         * @param level
+         *     the level
          */
-        void onRegionSplit(TickRegions.TickRegionData from, Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, ServerLevel world);
+        void onRegionSplit(TickRegions.TickRegionData from, Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, ServerLevel level);
 
         /**
          * Callback for when a region is destroyed
@@ -252,11 +252,11 @@ public class SchedulerUtil {
         }
 
         @Override
-        public void onRegionMerge(final TickRegions.TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel world) {
+        public void onRegionMerge(final TickRegions.TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel level) {
         }
 
         @Override
-        public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel world) {
+        public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel level) {
         }
 
         @Override
@@ -296,7 +296,7 @@ public class SchedulerUtil {
         }
 
         @Override
-        public void onRegionMerge(final TickRegions.TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel world) {
+        public void onRegionMerge(final TickRegions.TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel level) {
             if (!isRunningRegionProfiler()) return;
             AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
             if (!threadRunner.isLinkedTo(from.tickHandle)) return;
@@ -307,7 +307,7 @@ public class SchedulerUtil {
         //       then it wouldn't be a global tick, it would be a region tick we are profiling
         //       because the global tick can't call split
         @Override
-        public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel world) {
+        public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel level) {
             if (!isRunningRegionProfiler()) return;
             AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
             if (!threadRunner.isLinkedTo(from.tickHandle)) return;

@@ -50,16 +50,16 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             // we need tile entities, chunks, entities, and players
             // if this isn't a region pinner, this is the global tick
             if (RegionProfiler.STATE.get().handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
-                final ServerLevel world = pinner.world();
+                final ServerLevel level = pinner.level();
                 final ChunkPos target = pinner.getCenter();
 
                 final CompletableFuture<CountsResult> result = new CompletableFuture<>();
 
                 // schedule to region we were profiling at
                 RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                    world, target.x(), target.z(), () -> {
+                    level, target.x(), target.z(), () -> {
                         // we are scheduled to the region here, fetch localized information
-                        RegionizedWorldData localWorldData = world.getCurrentWorldData();
+                        RegionizedWorldData localWorldData = level.getCurrentWorldData();
 
                         int players = localWorldData.getPlayerCount();
                         int entities = localWorldData.getEntityCount();
@@ -110,16 +110,16 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         // Note: if we are ending a profiler, this will be cached, otherwise this is current
         if (RegionProfiler.isProfiling()) {
             if (RegionProfiler.STATE.get().handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
-                final ServerLevel world = pinner.world();
+                final ServerLevel level = pinner.level();
                 final ChunkPos target = pinner.getCenter();
                 final CompletableFuture<List<FoliaChunkInfo>> result = new CompletableFuture<>();
 
                 RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-                    world, target.x(), target.z(), () -> {
+                    level, target.x(), target.z(), () -> {
                         List<FoliaChunkInfo> chunks = new ArrayList<>();
-                        RegionizedWorldData worldData = world.getCurrentWorldData();
+                        RegionizedWorldData worldData = level.getCurrentWorldData();
                         for (final LevelChunk nms : worldData.getChunks()) {
-                            chunks.add(new FoliaChunkInfo(new CraftChunk(nms), world.getWorld(), this.plugin));
+                            chunks.add(new FoliaChunkInfo(new CraftChunk(nms), level.getWorld(), this.plugin));
                         }
                         result.complete(chunks);
                     }, Priority.BLOCKING
@@ -127,7 +127,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
                 try {
                     // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
-                    data.put(world.getWorld().getName(), result.get(5, TimeUnit.SECONDS));
+                    data.put(level.getWorld().getName(), result.get(5, TimeUnit.SECONDS));
                     return data;
                 } catch (InterruptedException | TimeoutException | ExecutionException e) {
                     throw new RuntimeException("Couldn't fetch localized world data", e);

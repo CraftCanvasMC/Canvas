@@ -56,11 +56,11 @@ public class WorldDistanceCommand implements Command {
                 .then(argument("dimension", DimensionArgument.dimension())
                     .executes(context -> {
                         Type type = Type.valueOf(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
-                        ServerLevel world = DimensionArgument.getDimension(context, "dimension");
-                        int distance = type.get(world);
+                        ServerLevel level = DimensionArgument.getDimension(context, "dimension");
+                        int distance = type.get(level);
 
                         context.getSource().sendSuccess(
-                            () -> Component.literal(type.name + " distance of world '" + world.getWorld().getName() + "' is " + distance),
+                            () -> Component.literal(type.name + " distance of level \"" + level.getWorld().key().asString() + "\" is " + distance),
                             false
                         );
                         return distance;
@@ -68,11 +68,11 @@ public class WorldDistanceCommand implements Command {
                     .then(argument("distance", IntegerArgumentType.integer())
                         .executes(context -> {
                             Type type = Type.valueOf(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
-                            ServerLevel world = DimensionArgument.getDimension(context, "dimension");
+                            ServerLevel level = DimensionArgument.getDimension(context, "dimension");
                             int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE - 3);
 
-                            type.set(world, distance);
-                            PerWorldDistanceConfig state = world.serverLevelData.canvas$distanceConfig;
+                            type.set(level, distance);
+                            PerWorldDistanceConfig state = level.serverLevelData.canvas$distanceConfig;
 
                             int updated = Math.min(
                                 (type.equals(Type.VIEW)
@@ -83,15 +83,15 @@ public class WorldDistanceCommand implements Command {
 
                             switch (type) {
                                 case VIEW -> {
-                                    for (ServerPlayer serverPlayer : world.players()) {
+                                    for (ServerPlayer serverPlayer : level.players()) {
                                         serverPlayer.connection.send(serverPlayer.moonrise$getChunkLoader().updateClientChunkRadius(updated));
                                     }
-                                    world.getChunkSource().setViewDistance(updated);
+                                    level.getChunkSource().setViewDistance(updated);
                                 }
-                                case SIMULATION -> world.getChunkSource().setSimulationDistance(updated);
+                                case SIMULATION -> level.getChunkSource().setSimulationDistance(updated);
                             }
 
-                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of world '" + world.getWorld().getName() + "' to " + distance, GlobalConfiguration.INFO);
+                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + level.getWorld().key().asString() + "\" to " + distance, GlobalConfiguration.INFO);
                             return distance;
                         })
                     )
@@ -124,12 +124,12 @@ public class WorldDistanceCommand implements Command {
             this.name = name;
         }
 
-        public int get(ServerLevel world) {
-            return this.getter.apply(world);
+        public int get(ServerLevel level) {
+            return this.getter.apply(level);
         }
 
-        public void set(ServerLevel world, int dist) {
-            this.setter.accept(world, dist);
+        public void set(ServerLevel level, int dist) {
+            this.setter.accept(level, dist);
         }
     }
 }

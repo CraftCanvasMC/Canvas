@@ -125,7 +125,7 @@ public class RegionBarCommand implements Command {
                                 case "action_bar" -> newPlacement = RegionResourceBar.Placement.ACTION_BAR;
                                 case "boss_bar" -> newPlacement = RegionResourceBar.Placement.BOSS_BAR;
                                 default -> {
-                                    source.sendFailure(Component.literal("Invalid placement: must be 'action_bar' or 'boss_bar'."));
+                                    source.sendFailure(Component.literal("Invalid placement: must be \"action_bar\" or \"boss_bar\"."));
                                     return 0;
                                 }
                             }

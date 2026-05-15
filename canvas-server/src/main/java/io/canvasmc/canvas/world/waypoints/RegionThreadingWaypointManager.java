@@ -45,7 +45,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     private final MultiThreadedQueue<WaypointTransmitter> waypoints = new MultiThreadedQueue<>();
     private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
-    private final ServerLevel world;
+    private final ServerLevel level;
 
     private boolean shouldScheduleBasedOnDistance(@NonNull ServerPlayer origin, ServerPlayer target) {
         final double scaled = origin.distanceTo(target) / scale;
@@ -62,14 +62,14 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         map.clear();
     }
 
-    public RegionThreadingWaypointManager(ServerLevel world) {
-        super(world);
-        this.world = world;
-        this.scale = world.canvasConfig().waypointUpdateScale;
+    public RegionThreadingWaypointManager(ServerLevel level) {
+        super(level);
+        this.level = level;
+        this.scale = level.canvasConfig().waypointUpdateScale;
     }
 
     public boolean isLocatorBarDisabled() {
-        return !world.getGameRules().get(GameRules.LOCATOR_BAR);
+        return !level.getGameRules().get(GameRules.LOCATOR_BAR);
     }
 
     @Override
@@ -255,8 +255,8 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
         return null;
     }
 
-    public ServerLevel getWorld() {
-        return world;
+    public ServerLevel getLevel() {
+        return level;
     }
 
     private static class CallbackHolder {

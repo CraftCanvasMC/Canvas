@@ -83,10 +83,10 @@ public interface RegionScheduleHandlePinner {
      *     the 'from' coordinates
      * @param toPos
      *     the 'to' coordinates
-     * @param world
-     *     the world we are operating on
+     * @param level
+     *     the level we are operating on
      */
-    record RegionPinner(ColumnPos fromPos, ColumnPos toPos, ServerLevel world) implements RegionScheduleHandlePinner {
+    record RegionPinner(ColumnPos fromPos, ColumnPos toPos, ServerLevel level) implements RegionScheduleHandlePinner {
         public @NonNull ChunkPos getCenter() {
             final LongArrayList chunks = LongArrayList.wrap(gatherChunksToProfile());
 
@@ -148,8 +148,8 @@ public interface RegionScheduleHandlePinner {
             int maxChunkX = maxX >> 4;
             int maxChunkZ = maxZ >> 4;
 
-            // validate world bounds
-            WorldBorder border = world.getWorldBorder();
+            // validate level bounds
+            WorldBorder border = level.getWorldBorder();
             double borderMinX = border.getMinX();
             double borderMinZ = border.getMinZ();
             double borderMaxX = border.getMaxX();
@@ -170,23 +170,23 @@ public interface RegionScheduleHandlePinner {
                 for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                     final long longCoord = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
                     Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
-                    world.chunkSource.ticketStorage.addTicket(longCoord, ticket);
+                    level.chunkSource.ticketStorage.addTicket(longCoord, ticket);
                 }
             }
 
             // process ticket updates
-            world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
+            level.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
 
             // load chunks and schedule finalizing
-            world.canvas$loadOrRunAtChunksAsync(
+            level.canvas$loadOrRunAtChunksAsync(
                 // minX, maxX, minZ, maxZ
                 minChunkX, maxChunkX, minChunkZ, maxChunkZ, Priority.HIGHEST, () -> {
                     final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
-                        world.regioniser.getRegionAtSynchronised(minChunkX, minChunkZ);
+                        level.regioniser.getRegionAtSynchronised(minChunkX, minChunkZ);
                     if (region == null) {
                         throw new IllegalStateException("Region must be present at the profiling coordinates");
                     }
-                    if (!TickThread.isTickThreadFor(world, minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
+                    if (!TickThread.isTickThreadFor(level, minChunkX, minChunkZ, maxChunkX, maxChunkZ)) {
                         throw new IllegalStateException("Not ticking on scheduled region");
                     }
                     if (region != TickRegionScheduler.getCurrentRegion()) {
@@ -209,7 +209,7 @@ public interface RegionScheduleHandlePinner {
             final int chunkZ = center.z();
 
             // Note: this should be loaded already, however we run this safe version just to be sure
-            world.canvas$loadOrRunAtChunksAsync(
+            level.canvas$loadOrRunAtChunksAsync(
                 // offset by 8 to get the middle block of the chunk
                 new BlockPos((chunkX << 4) + 8, 0, (chunkZ << 4) + 8),
                 16,
@@ -225,7 +225,7 @@ public interface RegionScheduleHandlePinner {
                     // - clear PROFILING_CHUNKS
                     for (long longCoord : curr) {
                         Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
-                        world.chunkSource.ticketStorage.removeTicket(longCoord, ticket);
+                        level.chunkSource.ticketStorage.removeTicket(longCoord, ticket);
                     }
                 }
             );

@@ -24,8 +24,8 @@ public class FoliaTickStatistics implements TickStatistics {
         DoubleArrayList tpsCounts = new DoubleArrayList();
         tpsCounts.add(getTpsFor(RegionizedServer.getGlobalTickData(), span));
         final Consumer<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> threadedRegionConsumer = (region) -> tpsCounts.add(getTpsFor(region.getData().getRegionSchedulingHandle(), span));
-        for (final ServerLevel world : RegionizedServer.getInstance().worlds) {
-            world.regioniser.computeForAllRegionsUnsynchronised(threadedRegionConsumer);
+        for (final ServerLevel level : RegionizedServer.getInstance().worlds) {
+            level.regioniser.computeForAllRegionsUnsynchronised(threadedRegionConsumer);
         }
 
         if (tpsCounts.isEmpty()) {

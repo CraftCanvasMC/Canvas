@@ -18,25 +18,25 @@ import static io.canvasmc.canvas.GlobalConfiguration.LOGGER;
 
 public class TickGuard {
 
-    public static void guard(final @NonNull BlockPos pos, final Level world, String reason) {
-        guard(pos.getX() >> 4, pos.getZ() >> 4, world, reason);
+    public static void guard(final @NonNull BlockPos pos, final Level level, final String reason) {
+        guard(pos.getX() >> 4, pos.getZ() >> 4, level, reason);
     }
 
-    public static void guard(final int chunkX, final int chunkZ, final Level world, String reason) {
+    public static void guard(final int chunkX, final int chunkZ, final Level level, final String reason) {
         switch (GlobalConfiguration.getInstance().regionScheduler.guardSeverity) {
             case SILENT -> ensureIsTickThread(reason);
             case LOG -> {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
-                if (!TickThread.isTickThreadFor(world, chunkX, chunkZ)) {
-                    LOGGER.warn("Thread failed main thread check: {}, context={}, world={}, chunk_pos={}", reason, getThreadContext(), WorldUtil.getWorldName(world), new ChunkPos(chunkX, chunkZ), new Throwable());
+                if (!TickThread.isTickThreadFor(level, chunkX, chunkZ)) {
+                    LOGGER.warn("Thread failed main thread check: {}, context={}, world={}, chunk_pos={}", reason, getThreadContext(), WorldUtil.getWorldName(level), new ChunkPos(chunkX, chunkZ), new Throwable());
                 }
             }
-            case THROW -> TickThread.ensureTickThread(world, chunkX, chunkZ, reason);
+            case THROW -> TickThread.ensureTickThread(level, chunkX, chunkZ, reason);
         }
     }
 
-    public static void guard(final Entity entity, String reason) {
+    public static void guard(final Entity entity, final String reason) {
         switch (GlobalConfiguration.getInstance().regionScheduler.guardSeverity) {
             case SILENT -> ensureIsTickThread(reason);
             case LOG -> {
@@ -57,7 +57,7 @@ public class TickGuard {
         }
     }
 
-    private static void ensureIsTickThread(String reason) {
+    private static void ensureIsTickThread(final String reason) {
         if (!TickThread.isTickThread()) {
             LOGGER.error("Thread failed main thread check: {}, context={}", reason, getThreadContext(), new Throwable());
             throw new IllegalStateException(reason);

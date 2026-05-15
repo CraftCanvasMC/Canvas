@@ -69,8 +69,8 @@ public class RegionTickCommand implements Command {
             }
             case "server" -> {
                 action.accept(RegionizedServer.getGlobalTickData());
-                for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
-                    world.regioniser.computeForAllRegionsUnsynchronised((region) -> action.accept(region.getData().tickHandle));
+                for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+                    level.regioniser.computeForAllRegionsUnsynchronised((region) -> action.accept(region.getData().tickHandle));
                 }
                 return;
             }
