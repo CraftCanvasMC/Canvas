@@ -1,0 +1,65 @@
+package io.canvasmc.canvas.world.scores;
+
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.numbers.NumberFormat;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.criteria.ObjectiveCriteria;
+import org.jspecify.annotations.Nullable;
+import java.util.Optional;
+
+public class ObjectiveData {
+    private Component formattedDisplayName;
+    private ObjectiveCriteria.RenderType renderType;
+    private boolean displayAutoUpdate;
+    private @Nullable NumberFormat numberFormat;
+    private Component displayName;
+
+    public Component getDisplayName() {
+        return displayName;
+    }
+
+    public ObjectiveData setDisplayName(final Component displayName) {
+        this.displayName = displayName;
+        return this;
+    }
+
+    public Component getFormattedDisplayName() {
+        return formattedDisplayName;
+    }
+
+    public ObjectiveData setFormattedDisplayName(final Component formattedDisplayName) {
+        this.formattedDisplayName = formattedDisplayName;
+        return this;
+    }
+
+    public ObjectiveCriteria.RenderType getRenderType() {
+        return renderType;
+    }
+
+    public ObjectiveData setRenderType(final ObjectiveCriteria.RenderType renderType) {
+        this.renderType = renderType;
+        return this;
+    }
+
+    public boolean doesDisplayAutoUpdate() {
+        return displayAutoUpdate;
+    }
+
+    public ObjectiveData setDisplayAutoUpdate(final boolean displayAutoUpdate) {
+        this.displayAutoUpdate = displayAutoUpdate;
+        return this;
+    }
+
+    public @Nullable NumberFormat getNumberFormat() {
+        return numberFormat;
+    }
+
+    public ObjectiveData setNumberFormat(final @Nullable NumberFormat numberFormat) {
+        this.numberFormat = numberFormat;
+        return this;
+    }
+
+    public Objective.Packed pack(final String name, final ObjectiveCriteria criteria) {
+        return new Objective.Packed(name, criteria, this.displayName, this.renderType, this.displayAutoUpdate, Optional.ofNullable(this.numberFormat));
+    }
+}
