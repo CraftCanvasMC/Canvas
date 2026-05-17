@@ -110,8 +110,9 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
             E value = ref.get();
             if (o.equals(value)) {
                 ref.clear();
-                backed.remove(ref);
-                liveCount.decrementAndGet();
+                if (backed.remove(ref)) {
+                    liveCount.decrementAndGet();
+                }
                 return true;
             }
         }
