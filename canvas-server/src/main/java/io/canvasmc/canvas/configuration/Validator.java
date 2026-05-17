@@ -15,13 +15,13 @@ public class Validator {
         final @NonNull Object obj,
         final @NonNull Map<String, Part.OptionDefinition> partDefinitions
     ) throws IllegalAccessException {
-        // skip any non-public or final fields
-        if (
-            !declaredField.accessFlags().contains(AccessFlag.PUBLIC) ||
-                declaredField.accessFlags().contains(AccessFlag.FINAL)
-        ) {
+        // skip any final fields
+        if (declaredField.accessFlags().contains(AccessFlag.FINAL)) {
             return;
         }
+
+        // make accessible just in case
+        declaredField.setAccessible(true);
 
         Class<?> fieldType = declaredField.getType();
 

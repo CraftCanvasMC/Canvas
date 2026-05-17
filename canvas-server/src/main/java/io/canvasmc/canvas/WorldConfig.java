@@ -6,12 +6,16 @@ import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.util.CanonicalReference;
+import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.TickRegions;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -556,5 +560,108 @@ public class WorldConfig extends Part {
     public boolean disableCriterionTrigger = false;
     public boolean cactusCheckSurvivalBeforeGrowth = false;
     public boolean enableSuffocationOptimization = false;
+
+    public Sleeping sleeping = new Sleeping();
+    public static class Sleeping extends Part {
+
+        // the following options are based of PurpurMC:
+        // - sleepSkippingNight
+        // - sleepingPlayersPercent
+        // - sleepNotPossible
+        // - rainStopsAfterSleep
+        // - thunderStopsAfterSleep
+        // these options were based off the 26.1 versions of these options
+        // but have been modified from their original form
+
+        {
+            option("sleepSkippingNight")
+                .docs(
+                    "The actionbar message that appears when the night has been skipped.",
+                    "Use \"default\" for Vanilla, leave empty to disable"
+                );
+            option("sleepingPlayersPercent")
+                .docs(
+                    "The actionbar message that appears when a player is asleep.",
+                    "Use \"default\" for Vanilla, leave empty to disable. You can use \"<count>\" as",
+                    "a placeholder for the current amount of players sleeping, and \"<total>\"",
+                    "for the total amount of players needed to sleep"
+                );
+            option("sleepNotPossible")
+                .docs(
+                    "The actionbar message that appears when a player tries to sleep, but the \"players_sleeping_percentage\"",
+                    "gamerule is set to a value greater than 100. Use \"default\" for Vanilla, leave empty to disable"
+                );
+        }
+
+        private String sleepSkippingNight = "default";
+        private String sleepingPlayersPercent = "default";
+        private String sleepNotPossible = "default";
+
+        public boolean sleepSkippingNightDisabled() {
+            return sleepSkippingNight.isBlank();
+        }
+
+        public boolean sleepingPlayersPercentDisabled() {
+            return sleepingPlayersPercent.isBlank();
+        }
+
+        public boolean sleepNotPossibleDisabled() {
+            return sleepNotPossible.isBlank();
+        }
+
+        public Component getSleepSkippingNight() {
+            if (sleepSkippingNightDisabled()) {
+                return null;
+            }
+
+            final Component message;
+            if (sleepSkippingNight.equalsIgnoreCase("default")) {
+                message = Component.translatable("sleep.skipping_night");
+            }
+            else {
+                message = PaperAdventure.asVanilla(MiniMessage.miniMessage().deserialize(sleepSkippingNight));
+            }
+
+            return message;
+        }
+
+        public Component getSleepingPlayersPercent(int amountSleeping, int sleepersNeeded) {
+            if (sleepingPlayersPercentDisabled()) {
+                return null;
+            }
+
+            final Component message;
+            if (sleepingPlayersPercent.equalsIgnoreCase("default")) {
+                message = Component.translatable("sleep.players_sleeping", amountSleeping, sleepersNeeded);
+            }
+            else {
+                message = PaperAdventure.asVanilla(MiniMessage.miniMessage().deserialize(sleepingPlayersPercent,
+                    Placeholder.parsed("count", Integer.toString(amountSleeping)),
+                    Placeholder.parsed("total", Integer.toString(sleepersNeeded))));
+            }
+
+            return message;
+        }
+
+        public Component getSleepNotPossible() {
+            if (sleepNotPossibleDisabled()) {
+               return null;
+            }
+
+            final Component message;
+            if (sleepNotPossible.equalsIgnoreCase("default")) {
+                message = Component.translatable("sleep.not_possible");
+            }
+            else {
+                message = PaperAdventure.asVanilla(MiniMessage.miniMessage().deserialize(sleepNotPossible));
+            }
+
+            return message;
+        }
+
+        public boolean sleepIgnoresNearbyMobs = false;
+        public boolean rainStopsAfterSleep = true;
+        public boolean thunderStopsAfterSleep = true;
+    }
 
 }
