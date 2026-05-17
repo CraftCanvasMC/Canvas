@@ -25,7 +25,9 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
 
     @Override
     public int size() {
-        return Math.max(0, liveCount.get());
+        int count = 0;
+        for (E _ : this) count++;
+        return count;
     }
 
     @Override
