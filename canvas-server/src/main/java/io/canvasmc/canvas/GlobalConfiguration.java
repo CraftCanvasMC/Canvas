@@ -532,11 +532,13 @@ public class GlobalConfiguration extends Part {
                         .literal(" - purpur.enderchest.rows.two").endLine()
                         .literal(" - purpur.enderchest.rows.one").endLine()
                 );
+            option("enderChestPersistHiddenRows").docs("Whether items should remain stored in slots, even if those slots become inaccessible through permissions");
         }
 
         public int barrelRows = 3;
         public boolean enderChestSixRows = false;
         public boolean enderChestPermissionRows = false;
+        public boolean enderChestPersistHiddenRows = true;
     }
 
     public boolean blacklistNonPlayerEntitiesFromEnteringNetherPortals = false;
