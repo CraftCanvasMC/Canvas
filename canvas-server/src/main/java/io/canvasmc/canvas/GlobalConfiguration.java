@@ -189,8 +189,8 @@ public class GlobalConfiguration extends Part {
 
         final Path logsDirectoryPath = Path.of("logs");
 
-        // start log cleaner
-        if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath)) {
+        // start log cleaner, only at startup
+        if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath) && !TickRegions.started) {
 
             final Instant now = Instant.now();
             final Instant adjustedInstantToThresh = now.minus(configuration.logs.length, configuration.logs.unit);
