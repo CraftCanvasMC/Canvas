@@ -66,7 +66,7 @@ public class Part {
         // target must exist or we throw
 
         try {
-            getClass().getField(target);
+            getClass().getDeclaredField(target);
         } catch (NoSuchFieldException e) {
             throw new IllegalArgumentException("Target '" + target + "' doesn't exist");
         }
