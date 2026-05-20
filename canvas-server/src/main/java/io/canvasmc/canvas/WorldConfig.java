@@ -280,6 +280,8 @@ public class WorldConfig extends Part {
         public boolean disableLeafDecay = false;
         public boolean cropsIgnoreLightCheck = false;
         public boolean disableFarmlandTrampling = false;
+        public boolean sugarCaneBonemealable = false;
+        public boolean netherWartBonemealable = false;
     }
 
     public Entities entities = new Entities();
