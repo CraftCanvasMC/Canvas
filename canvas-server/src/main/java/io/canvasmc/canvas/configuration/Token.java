@@ -47,10 +47,7 @@ public record Token(
 
                 // build children based on this
                 for (Field nestedField : nested.getDeclaredFields()) {
-                    if (
-                        !nestedField.accessFlags().contains(AccessFlag.PUBLIC) ||
-                            nestedField.accessFlags().contains(AccessFlag.FINAL)
-                    ) {
+                    if (nestedField.accessFlags().contains(AccessFlag.FINAL)) {
                         continue;
                     }
 
@@ -166,11 +163,8 @@ public record Token(
         List<Token> tokens = new LinkedList<>();
 
         for (final Field declaredField : clazz.getDeclaredFields()) {
-            // skip any non-public or final fields
-            if (
-                !declaredField.accessFlags().contains(AccessFlag.PUBLIC) ||
-                    declaredField.accessFlags().contains(AccessFlag.FINAL)
-            ) {
+            // skip any final fields
+            if (declaredField.accessFlags().contains(AccessFlag.FINAL)) {
                 continue;
             }
 
