@@ -9,12 +9,17 @@ import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
+import io.canvasmc.canvas.util.Util;
 import io.canvasmc.canvas.util.version.ApiClient;
 import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.concurrent.CompletableFuture;
 import java.util.random.RandomGeneratorFactory;
 import net.minecraft.ChatFormatting;
@@ -29,6 +34,7 @@ import net.minecraft.server.players.PlayerList;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.RandomSupport;
+import org.apache.commons.lang3.mutable.MutableInt;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -180,6 +186,35 @@ public class GlobalConfiguration extends Part {
         }
 
         broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
+
+        final Path logsDirectoryPath = Path.of("logs");
+
+        // start log cleaner
+        if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath)) {
+
+            final Instant now = Instant.now();
+            final Instant adjustedInstantToThresh = now.minus(configuration.logs.length, configuration.logs.unit);
+            final MutableInt amountRemoved = new MutableInt(0);
+
+            Util.removeDirectoryContentsIf(logsDirectoryPath.toFile(), (path) -> {
+                try {
+                    final Instant lastModified = Files.getLastModifiedTime(path).toInstant();
+                    if (lastModified.isBefore(adjustedInstantToThresh) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
+                        // the time the log file was modified is before the
+                        // thresh, meaning it is older than the thresh set
+                        amountRemoved.increment();
+                        return true;
+                    }
+                } catch (IOException ioe) {
+                    broadcast("Unable to determine if file " + path.getFileName() + " should be removed because: " + ioe.getMessage(), ERROR);
+                }
+                return false;
+            });
+
+            if (amountRemoved.intValue() > 0) {
+                broadcast("Log cleaner removed " + amountRemoved.intValue() + " old log files", INFO);
+            }
+        }
     }
 
     public static GlobalConfiguration getInstance() {
@@ -557,4 +592,17 @@ public class GlobalConfiguration extends Part {
         public boolean disableChatVerificationOrder = false;
     }
 
+    public Logs logs = new Logs();
+    public static class Logs extends Part {
+
+        {
+            option("enableLogCleaner").docs("Auto-removes old log files from the \"logs\" directory");
+            option("length").docs("The amount of the time unit until the log file is marked for deletion");
+            option("unit").docs("The type of time unit to use when comparing how old the file is to the current time");
+        }
+
+        public boolean enableLogCleaner = false;
+        public long length = 30;
+        public ChronoUnit unit = ChronoUnit.DAYS;
+    }
 }
