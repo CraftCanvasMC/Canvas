@@ -8,7 +8,8 @@ plugins {
     id("xyz.jpenilla.resource-factory-paper-convention") version "1.3.1" apply false
 }
 
-val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
+val paperMavenUrl = "https://repo.papermc.io/repository/maven-public/"
+val canvasMavenUrl = "https://maven.canvasmc.io/releases/"
 
 paperweight {
     filterPatches = false
@@ -52,7 +53,8 @@ subprojects {
 
     repositories {
         mavenCentral()
-        maven(paperMavenPublicUrl)
+        maven(paperMavenUrl)
+        maven(canvasMavenUrl)
     }
 
     tasks.withType<JavaCompile>().configureEach {

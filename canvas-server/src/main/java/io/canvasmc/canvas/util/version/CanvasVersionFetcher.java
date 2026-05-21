@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.util.version;
 
 import com.destroystokyo.paper.util.VersionFetcher;
+import io.canvasmc.canvas.ClientV2;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
@@ -211,11 +212,15 @@ public class CanvasVersionFetcher implements VersionFetcher {
 
         final int localNum = buildNumber.getAsInt();
         try {
-            ApiClient.Build build = Util.CANVAS_CLIENT.getLatestBuild(buildInfo.minecraftVersionId(), true);
-            ApiClient.Build currBuild = Util.CANVAS_CLIENT.getBuild(build.buildNumber());
+            ClientV2.Build build = Util.CANVAS_CLIENT.getLatestBuild(buildInfo.minecraftVersionId(), true);
             final int distance = build.buildNumber() - localNum;
 
-            return currBuild.buildStatus() == ApiClient.BuildStatus.STABLE ? new StableStatus(distance) : new BetaStatus(distance);
+            return switch (GlobalConfiguration.getBuildStatus()) {
+                case LOCAL -> new LocalStatus();
+                case STABLE -> new StableStatus(distance);
+                case EXPERIMENTAL -> new BetaStatus(distance);
+                case UNKNOWN -> new ErrorStatus();
+            };
         } catch (Throwable thrown) {
             GlobalConfiguration.LOGGER.error("Error parsing version information from CanvasMC's Jenkins API", thrown);
             return new ErrorStatus();
