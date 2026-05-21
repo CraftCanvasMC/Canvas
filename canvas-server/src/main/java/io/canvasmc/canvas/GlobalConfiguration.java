@@ -9,8 +9,8 @@ import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
+import io.canvasmc.canvas.util.Util;
 import io.canvasmc.canvas.util.version.ApiClient;
-import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
@@ -85,7 +85,7 @@ public class GlobalConfiguration extends Part {
                         }
                         else {
                             try {
-                                buildStatus = CanvasVersionFetcher.CLIENT.getBuild(buildNum).buildStatus();
+                                buildStatus = Util.CANVAS_CLIENT.getBuild(buildNum).buildStatus();
                             } catch (Throwable ignored) {
                             }
                         }

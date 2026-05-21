@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
+import io.canvasmc.canvas.util.version.ApiClient;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.Style;
@@ -24,6 +25,8 @@ import org.jspecify.annotations.Nullable;
 import static net.kyori.adventure.text.Component.text;
 
 public class Util {
+    public static final ApiClient CANVAS_CLIENT = ApiClient.getClientFor("canvas");
+
     private static final ThreadLocal<XoroshiroRandomSource> xoroshiro = ThreadLocal.withInitial(() -> new XoroshiroRandomSource(0L, 0L));
     private static final ThreadLocal<SingleThreadedRandomSource> simple = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));
 
