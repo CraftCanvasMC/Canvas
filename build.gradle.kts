@@ -5,7 +5,7 @@ import io.papermc.paperweight.core.tasks.patchroulette.AbstractPatchRouletteTask
 plugins {
     java
     id("io.canvasmc.weaver.patcher") version "2.4.4"
-    id("test-plugin-conventions") apply false
+    id("xyz.jpenilla.resource-factory-paper-convention") version "1.3.1" apply false
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
@@ -97,7 +97,22 @@ subprojects {
     }
 
     if (project.name.endsWith("-debug") || project.name.endsWith("-plugin")) {
-        apply(plugin = "test-plugin-conventions")
+        apply(plugin = "xyz.jpenilla.resource-factory-paper-convention")
+        dependencies {
+            compileOnly(rootProject.projects.canvasServer) {
+                targetConfiguration = JavaPlugin.RUNTIME_ELEMENTS_CONFIGURATION_NAME
+            }
+        }
+        extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
+            apiVersion.set(providers.gradleProperty("apiVersion"))
+            version = "SNAPSHOT-DEV"
+            authors = listOf("CanvasMC")
+            foliaSupported = true
+        }
+
+        tasks.processResources {
+            duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        }
     }
 }
 
