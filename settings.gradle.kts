@@ -9,6 +9,7 @@ pluginManagement {
             url = uri("https://maven.canvasmc.io/public")
         }
     }
+    includeBuild("build-logic")
 }
 
 plugins {
