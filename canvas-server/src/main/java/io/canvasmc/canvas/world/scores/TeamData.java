@@ -5,6 +5,8 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Team;
+import org.jetbrains.annotations.Contract;
+import org.jspecify.annotations.NonNull;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,6 +20,47 @@ public class TeamData {
     private Team.Visibility deathMessageVisibility = Team.Visibility.ALWAYS;
     private ChatFormatting color = ChatFormatting.RESET;
     private Team.CollisionRule collisionRule = Team.CollisionRule.ALWAYS;
+
+    @Contract("_ -> new")
+    public static @NonNull TeamData copyOf(final @NonNull TeamData toCopy) {
+        return new TeamData(
+            toCopy.isAllowFriendlyFire(),
+            toCopy.isSeeFriendlyInvisibles(),
+            toCopy.getDisplayName(),
+            toCopy.getPlayerPrefix(),
+            toCopy.getPlayerSuffix(),
+            toCopy.getNameTagVisibility(),
+            toCopy.getDeathMessageVisibility(),
+            toCopy.getColor(),
+            toCopy.getCollisionRule()
+        );
+    }
+
+    public TeamData(
+        final boolean allowFriendlyFire,
+        final boolean seeFriendlyInvisibles,
+        final Component displayName,
+        final Component playerPrefix,
+        final Component playerSuffix,
+        final Team.Visibility nameTagVisibility,
+        final Team.Visibility deathMessageVisibility,
+        final ChatFormatting color,
+        final Team.CollisionRule collisionRule
+    ) {
+        this.allowFriendlyFire = allowFriendlyFire;
+        this.seeFriendlyInvisibles = seeFriendlyInvisibles;
+        this.displayName = displayName;
+        this.playerPrefix = playerPrefix;
+        this.playerSuffix = playerSuffix;
+        this.nameTagVisibility = nameTagVisibility;
+        this.deathMessageVisibility = deathMessageVisibility;
+        this.color = color;
+        this.collisionRule = collisionRule;
+    }
+
+    public TeamData() {
+        // no-op
+    }
 
     public boolean isAllowFriendlyFire() {
         return allowFriendlyFire;

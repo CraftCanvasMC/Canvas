@@ -4,6 +4,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.numbers.NumberFormat;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
+import org.jetbrains.annotations.Contract;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import java.util.Optional;
 
@@ -13,6 +15,35 @@ public class ObjectiveData {
     private boolean displayAutoUpdate;
     private @Nullable NumberFormat numberFormat;
     private Component displayName;
+
+    @Contract("_ -> new")
+    public static @NonNull ObjectiveData copyOf(final @NonNull ObjectiveData toCopy) {
+        return new ObjectiveData(
+            toCopy.getFormattedDisplayName(),
+            toCopy.getRenderType(),
+            toCopy.doesDisplayAutoUpdate(),
+            toCopy.getNumberFormat(),
+            toCopy.getDisplayName()
+        );
+    }
+
+    public ObjectiveData(
+        final Component formattedDisplayName,
+        final ObjectiveCriteria.RenderType renderType,
+        final boolean displayAutoUpdate,
+        @Nullable final NumberFormat numberFormat,
+        final Component displayName
+    ) {
+        this.formattedDisplayName = formattedDisplayName;
+        this.renderType = renderType;
+        this.displayAutoUpdate = displayAutoUpdate;
+        this.numberFormat = numberFormat;
+        this.displayName = displayName;
+    }
+
+    public ObjectiveData() {
+        // no-op
+    }
 
     public Component getDisplayName() {
         return displayName;
