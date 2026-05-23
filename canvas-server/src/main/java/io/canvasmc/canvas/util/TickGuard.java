@@ -4,11 +4,14 @@ import ca.spottedleaf.moonrise.common.util.EntityUtil;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import ca.spottedleaf.moonrise.common.util.WorldUtil;
 import io.canvasmc.canvas.GlobalConfiguration;
+import io.papermc.paper.threadedregions.TickRegions;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import org.jspecify.annotations.NonNull;
+
+import java.util.function.BooleanSupplier;
 
 import static ca.spottedleaf.moonrise.common.util.TickThread.getThreadContext;
 import static io.canvasmc.canvas.GlobalConfiguration.LOGGER;
@@ -44,6 +47,13 @@ public class TickGuard {
                 }
             }
             case THROW -> TickThread.ensureTickThread(entity, reason);
+        }
+    }
+
+    public static void hardThrowIfStarted(final BooleanSupplier isTickThreadFor, final String reason) {
+        if (TickRegions.started && !isTickThreadFor.getAsBoolean()) {
+            LOGGER.error("Thread failed main thread check: {}, context={}", reason, getThreadContext(), new Throwable());
+            throw new IllegalStateException(reason);
         }
     }
 
