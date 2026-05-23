@@ -506,6 +506,7 @@ public class GlobalConfiguration extends Part {
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
     public boolean restoreVanillaEnderPearlBehavior = false;
     public boolean displayWorldLoadScreenForPortaling = true;
+    public boolean displayWorldLoadScreenForTeleporting = true;
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
     public boolean tileEntitySnapshotCreation = false;
     public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
