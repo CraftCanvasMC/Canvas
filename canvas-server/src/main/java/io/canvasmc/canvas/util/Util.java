@@ -14,6 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import com.google.common.base.Preconditions;
+import io.canvasmc.canvas.ClientV2;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.Style;
@@ -32,6 +33,8 @@ import org.jspecify.annotations.Nullable;
 import static net.kyori.adventure.text.Component.text;
 
 public class Util {
+    public static final ClientV2 CANVAS_CLIENT = ClientV2.getClientFor("canvas");
+
     private static final ThreadLocal<XoroshiroRandomSource> xoroshiro = ThreadLocal.withInitial(() -> new XoroshiroRandomSource(0L, 0L));
     private static final ThreadLocal<SingleThreadedRandomSource> simple = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));
 

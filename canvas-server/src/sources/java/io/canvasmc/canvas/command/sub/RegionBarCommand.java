@@ -75,7 +75,6 @@ public class RegionBarCommand implements Command {
     @Override
     public LiteralArgumentBuilder<CommandSourceStack> construct(LiteralArgumentBuilder<CommandSourceStack> base) {
         return base
-
             .then(argument("type", StringArgumentType.word())
                 .suggests((_, builder) -> {
                     for (final BarType val : BarType.values()) {
@@ -97,7 +96,6 @@ public class RegionBarCommand implements Command {
                     });
                     return 1;
                 })
-
                 .then(argument("players", EntityArgument.players())
                     .executes(ctx -> {
                         Collection<ServerPlayer> players = EntityArgument.getPlayers(ctx, "players");
@@ -108,7 +106,6 @@ public class RegionBarCommand implements Command {
                         }
                         return 1;
                     })
-
                     .then(argument("placement", StringArgumentType.word())
                         .suggests((_, builder) -> {
                             builder.suggest("action_bar");

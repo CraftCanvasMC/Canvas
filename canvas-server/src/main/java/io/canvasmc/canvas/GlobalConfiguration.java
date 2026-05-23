@@ -10,8 +10,6 @@ import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
 import io.canvasmc.canvas.util.Util;
-import io.canvasmc.canvas.util.version.ApiClient;
-import io.canvasmc.canvas.util.version.CanvasVersionFetcher;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
@@ -53,7 +51,7 @@ public class GlobalConfiguration extends Part {
     public static final int ERROR = 2;
 
     private static GlobalConfiguration INSTANCE;
-    private static ApiClient.BuildStatus BUILD_STATUS;
+    private static ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN;
     private static boolean ENABLE_FASTER_RANDOM = true;
 
     static {
@@ -83,15 +81,15 @@ public class GlobalConfiguration extends Part {
                     postLoad(instance);
 
                     CompletableFuture.supplyAsync(() -> {
-                        ApiClient.BuildStatus buildStatus = ApiClient.BuildStatus.UNKNOWN;
+                        ClientV2.BuildStatus buildStatus = ClientV2.BuildStatus.UNKNOWN;
                         ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
                         int buildNum = buildInfo.buildNumber().orElse(-1);
                         if (buildNum == -1) {
-                            buildStatus = ApiClient.BuildStatus.LOCAL;
+                            buildStatus = ClientV2.BuildStatus.LOCAL;
                         }
                         else {
                             try {
-                                buildStatus = CanvasVersionFetcher.CLIENT.getBuild(buildNum).buildStatus();
+                                buildStatus = Util.CANVAS_CLIENT.getBuild(buildNum).buildStatus();
                             } catch (Throwable ignored) {
                             }
                         }
@@ -221,7 +219,7 @@ public class GlobalConfiguration extends Part {
         return INSTANCE;
     }
 
-    public static ApiClient.BuildStatus getBuildStatus() {
+    public static ClientV2.BuildStatus getBuildStatus() {
         return BUILD_STATUS;
     }
 
