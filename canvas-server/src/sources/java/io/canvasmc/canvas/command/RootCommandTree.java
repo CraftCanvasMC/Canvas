@@ -51,9 +51,9 @@ public class RootCommandTree {
         boolean selfCmd = subCommand.isAllowedSelfCommand();
 
         TextComponent.Builder builder = Component.text()
-            .append(Component.text("----", SECONDARY))
-            .append(Component.text("/canvas " + name, HEADER).decorate(TextDecoration.BOLD))
-            .append(Component.text("----", SECONDARY))
+            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
+            .append(Component.text("/canvas " + name, HEADER, TextDecoration.BOLD))
+            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
             .appendNewline()
             .appendNewline();
 
@@ -72,7 +72,7 @@ public class RootCommandTree {
             .appendNewline()
             .appendNewline();
 
-        builder.append(Component.text("-----------------------", SECONDARY));
+        builder.append(Component.text("-".repeat(16 + name.length() - 1), SECONDARY, TextDecoration.BOLD));
 
         return builder.build();
     }
@@ -102,9 +102,9 @@ public class RootCommandTree {
                 CommandSender bukkitSender = context.getSource().getBukkitSender();
 
                 TextComponent.Builder builder = Component.text()
-                    .append(Component.text("----", SECONDARY))
-                    .append(Component.text("Canvas Commands", HEADER).decorate(TextDecoration.BOLD))
-                    .append(Component.text("----", SECONDARY))
+                    .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
+                    .append(Component.text("Canvas Commands", HEADER, TextDecoration.BOLD))
+                    .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
                     .appendNewline();
 
                 for (Command subCommand : subCommands) {
@@ -132,7 +132,7 @@ public class RootCommandTree {
                     builder.append(entry);
                 }
 
-                builder.append(Component.text("-----------------------", SECONDARY));
+                builder.append(Component.text("-----------------------", SECONDARY, TextDecoration.BOLD));
 
                 bukkitSender.sendMessage(builder.build());
                 return 1;

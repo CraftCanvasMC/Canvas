@@ -48,7 +48,7 @@ public class WorldDistanceCommand implements Command {
     public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
         return base.requires(stack -> stack.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command.worlddistance"))
             .then(argument("type", StringArgumentType.word())
-                .suggests((context, builder) -> {
+                .suggests((_, builder) -> {
                     builder.suggest("view");
                     builder.suggest("simulation");
                     return builder.buildFuture();
@@ -70,6 +70,11 @@ public class WorldDistanceCommand implements Command {
                             Type type = Type.valueOf(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
                             ServerLevel level = DimensionArgument.getDimension(context, "dimension");
                             int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE - 3);
+
+                            if (distance < -1 || distance == 0 || distance == 1) {
+                                context.getSource().sendFailure(Component.literal("New value must be above 1, or set to -1 to disable override"));
+                                return 0;
+                            }
 
                             type.set(level, distance);
                             PerWorldDistanceConfig state = level.serverLevelData.canvas$distanceConfig;

@@ -9,6 +9,7 @@ plugins {
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
+val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
 
 paperweight {
     filterPatches = false
@@ -53,6 +54,7 @@ subprojects {
     repositories {
         mavenCentral()
         maven(paperMavenPublicUrl)
+        maven(canvasMavenPublicUrl)
     }
 
     tasks.withType<JavaCompile>().configureEach {
@@ -104,12 +106,8 @@ subprojects {
         extensions.configure<xyz.jpenilla.resourcefactory.paper.PaperPluginYaml> {
             apiVersion.set(providers.gradleProperty("apiVersion"))
             version = "SNAPSHOT-DEV"
-            main = project.findProperty("main")?.toString()?.replace("\"", "")
             authors = listOf("CanvasMC")
             foliaSupported = true
-            if (project.hasProperty("bootstrapper")) {
-                bootstrapper = project.findProperty("bootstrapper")?.toString()?.replace("\"", "")
-            }
         }
 
         tasks.processResources {
