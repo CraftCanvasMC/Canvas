@@ -1,11 +1,19 @@
 package io.canvasmc.canvas.util;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+import com.google.common.base.Preconditions;
 import io.canvasmc.canvas.ClientV2;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
@@ -102,6 +110,20 @@ public class Util {
             LockSupport.parkNanos("Waiting for future", Math.min(remaining, 1_000_000L));
         }
         return future.isDone();
+    }
+
+    public static void removeDirectoryContentsIf(final @NonNull File directory, final Predicate<Path> removeIf) {
+        Preconditions.checkArgument(directory.isDirectory(), "File provided was not a directory");
+        try (final Stream<Path> stream = Files.walk(directory.toPath(), 1)) {
+            final List<Path> collected = stream.filter(p -> !p.equals(directory.toPath())).toList();
+            for (final Path path : collected) {
+                if (Files.isRegularFile(path) && removeIf.test(path)) {
+                    Files.delete(path);
+                }
+            }
+        } catch (IOException ioe) {
+            throw new RuntimeException("Couldn't clear directory contents", ioe);
+        }
     }
 
     public static @NonNull Component gradient(final String textContent, final @Nullable Consumer<Style.Builder> style, final TextColor... colors) {
