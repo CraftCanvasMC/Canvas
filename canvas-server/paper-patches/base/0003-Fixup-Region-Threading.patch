@@ -1,0 +1,517 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Tue, 21 Apr 2026 19:46:53 -0700
+Subject: [PATCH] Fixup Region Threading
+
+
+diff --git a/src/main/java/io/papermc/paper/SparksFly.java b/src/main/java/io/papermc/paper/SparksFly.java
+index b332645ed65928100f580221d8a9948bc77e362e..8cfabe08364d14db1c7c28b814e69f38a8d490a9 100644
+--- a/src/main/java/io/papermc/paper/SparksFly.java
++++ b/src/main/java/io/papermc/paper/SparksFly.java
+@@ -42,7 +42,7 @@ public final class SparksFly {
+         // Folia - region threading
+         this.logger = Logger.getLogger(ID);
+         this.logger.log(Level.INFO, "This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling");
+-        this.spark = PaperSparkModule.create(Compatibility.VERSION_1_0, server, this.logger, new PaperScheduler() {
++        this.spark = io.canvasmc.canvas.spark.FoliaSparkPlugin.create(Compatibility.VERSION_1_0, server, this.logger, new PaperScheduler() { // Canvas - support spark
+             @Override
+             public void executeAsync(final Runnable runnable) {
+                 MCUtil.scheduleAsyncTask(this.catching(runnable, "asynchronous"));
+@@ -116,7 +116,7 @@ public final class SparksFly {
+ 
+     private void enable() {
+         if (!this.enabled) {
+-            if (false) { // Folia - disable in-built spark profiler
++            if (GlobalConfiguration.get().spark.enabled) { // Folia - disable in-built spark profiler // Canvas - support spark
+                 this.enabled = true;
+                 this.spark.enable();
+             } else {
+@@ -168,7 +168,7 @@ public final class SparksFly {
+     }
+ 
+     public static boolean isPluginPreferred() {
+-        return true; // Folia - disable in-built spark profiler
++        return Boolean.getBoolean(PREFER_SPARK_PLUGIN_PROPERTY); // Folia - disable in-built spark profiler // Canvas - support spark
+     }
+ 
+     private static boolean isPluginEnabled(final Server server) {
+@@ -176,7 +176,7 @@ public final class SparksFly {
+     }
+ 
+     private static boolean shouldEnableImmediately() {
+-        return GlobalConfiguration.get().spark.enableImmediately;
++        return false; // Canvas - support spark
+     }
+ 
+     public static final class CommandImpl extends Command {
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 825d69075ef95586d187e79eea0fc200aaf888bb..7bd2375fc66379dca69a4737ee9d2d4d30f2306d 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1203,7 +1203,7 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public World createWorld(WorldCreator creator) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot create worlds off global tick"); // Canvas - region threading
+         Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
+@@ -1345,6 +1345,67 @@ public final class CraftServer implements Server {
+ 
+         return serverLevel.getWorld();
+     }
++    // Canvas start - region threading
++
++    // note: we need to check these things:
++    //       - joining players
++    //       - teleporting players -- we need to check all players in the server, see if their world
++    //                                points to the unloading world. this is a safer way, since we
++    //                                can guarentee each player will have the destination world set correctly
++    //                                for teleporting on same-world regions
++    //       - portaling players   -- during region unloading, check the pending teleports and if there is a player
++    //                                then we send them back to their origin pos. this covers cross-dimension
++    //                                teleportation and also portaling between dimensions
++
++    @Override
++    public void unloadWorldAsync(@NotNull final String name, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++        unloadWorldAsync(Preconditions.checkNotNull(this.worlds.get(name), "Unknown world with name " + name), save, callback);
++    }
++
++    @Override
++    public void unloadWorldAsync(@NotNull final World world, final boolean save, final @NotNull Consumer<io.canvasmc.canvas.WorldUnloadResult> callback) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Can only unload worlds on global tick"); // Canvas - region threading
++        ServerLevel handle = ((CraftWorld) world).getHandle();
++        try {
++            handle.canvas$obtainWorldStageLock();
++            if (handle.canvas$unloadTicket.isPresent()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_ALREADY_UNLOADING);
++                return;
++            }
++            if (handle.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_OVERWORLD);
++                return;
++            }
++            if (this.console.hasStartedShutdownThread.get()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_SHUTDOWN);
++                return;
++            }
++            if (!handle.canvas$joiningPlayers.isEmpty()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_JOINING);
++                return;
++            }
++            for (final net.minecraft.server.level.ServerPlayer player : console.getPlayerList().players) {
++                if (player.level() == handle) {
++                    callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_PRESENT);
++                    return;
++                }
++            }
++            if (!new io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent(handle.getWorld()).callEvent()) {
++                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNLOAD_EVENT);
++                return;
++            }
++
++            net.minecraft.server.MinecraftServer.LOGGER.info("Marking world '{}' for unload", world.getName());
++            handle.canvas$unloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
++        } catch (Throwable thrown) {
++            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
++            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
++        } finally {
++            handle.canvas$releaseWorldStageLock();
++        }
++    }
++
++    // Canvas end - region threading
+ 
+     @Override
+     public boolean unloadWorld(String name, boolean save) {
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
+index f147590110205f9896c4dea2e88c4169bd20fabf..1c94a6eb624a5f366803a93e94d1ad855b40c219 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
+@@ -16,78 +16,66 @@ final class CraftServerTickManager implements ServerTickManager {
+ 
+     @Override
+     public boolean isRunningNormally() {
+-        return this.manager.runsNormally();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isStepping() {
+-        return this.manager.isSteppingForward();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isSprinting() {
+-        return this.manager.isSprinting();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isFrozen() {
+-        return this.manager.isFrozen();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public float getTickRate() {
+-        return this.manager.tickrate();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public void setTickRate(final float tickRate) {
+-        Preconditions.checkArgument(tickRate >= 1.0F && tickRate <= 10_000.0F, "The given tick rate must not be less than 1.0 or greater than 10,000.0");
+-        this.manager.setTickRate(tickRate);
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public void setFrozen(final boolean frozen) {
+-        if (frozen) {
+-            if (this.manager.isSprinting()) {
+-                this.manager.stopSprinting();
+-            }
+-
+-            if (this.manager.isSteppingForward()) {
+-                this.manager.stopStepping();
+-            }
+-        }
+-
+-        this.manager.setFrozen(frozen);
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean stepGameIfFrozen(final int ticks) {
+-        return this.manager.stepGameIfPaused(ticks);
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean stopStepping() {
+-        return this.manager.stopStepping();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean requestGameToSprint(final int ticks) {
+-        return this.manager.requestGameToSprint(ticks, true);
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean stopSprinting() {
+-        return this.manager.stopSprinting();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public boolean isFrozen(final Entity entity) {
+-        Preconditions.checkArgument(entity != null, "The given entity must not be null");
+-        return this.manager.isEntityFrozen(((CraftEntity) entity).getHandle());
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ 
+     @Override
+     public int getFrozenTicksToRun() {
+-        return this.manager.frozenTicksToRun();
++        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
+     }
+ }
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
+index 0299c282682f623eab358d97604c6b62464a7bac..3489a4e14caec93651544146e00592ac52628311 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
+@@ -502,6 +502,8 @@ public class CraftHumanEntity extends CraftLivingEntity implements HumanEntity {
+     @Override
+     public InventoryView openMerchant(Merchant merchant, boolean force) {
+         Preconditions.checkNotNull(merchant, "merchant cannot be null");
++        io.canvasmc.canvas.util.TickGuard.guard(((org.bukkit.craftbukkit.entity.CraftEntity) merchant).entity, "Cannot open merchant screen of merchant not in same region"); // Canvas - region guards
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot open merchant screen async from target player"); // Canvas - region guards
+ 
+         if (!force && merchant.isTrading()) {
+             return null;
+@@ -563,7 +565,7 @@ public class CraftHumanEntity extends CraftLivingEntity implements HumanEntity {
+     }
+ 
+     private InventoryView openInventory(Location location, boolean force, Material material) {
+-        org.spigotmc.AsyncCatcher.catchOp("open" + material);
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot open inventory async"); // Canvas - region guards
+         if (location == null) {
+             location = this.getLocation();
+         }
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+index 03fea774f874b21e87a1281eb07a6b52ed2c31cd..40b822fcb11965e74a68139f638b51995885779d 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
+@@ -509,7 +509,7 @@ public class CraftLivingEntity extends CraftEntity implements LivingEntity {
+ 
+     @Override
+     public boolean addPotionEffect(PotionEffect effect, boolean force) {
+-        org.spigotmc.AsyncCatcher.catchOp("effect add"); // Paper
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot add potion effect async"); // Canvas - region guards
+         this.getHandle().addEffect(org.bukkit.craftbukkit.potion.CraftPotionUtil.fromBukkit(effect), EntityPotionEffectEvent.Cause.PLUGIN); // Paper - Don't ignore icon
+         return true;
+     }
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index fbf31420cb83287c080c1832bccc167c81526563..ec37cc9d6c082df340a6e15db0f110e1414c8524 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -236,7 +236,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     private long lastPlayed = 0;
+     private boolean hasPlayedBefore = false;
+     private final ConversationTracker conversationTracker = new ConversationTracker();
+-    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new HashMap<>();
++    private final Map<UUID, it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>>> invertedVisibilityEntities = new java.util.concurrent.ConcurrentHashMap<>(); // Canvas - fix folia visibility api
+     private final Set<UUID> unlistedEntities = new HashSet<>(); // Paper - Add Listing API for Player
+     private static final WeakHashMap<Plugin, WeakReference<Plugin>> pluginWeakReferences = new WeakHashMap<>();
+     private int hash = 0;
+@@ -261,10 +261,18 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+         this.lastRegion = region;
+         if (region != null && this.packetProcessor.hasPackets()) {
+             region.regionData.setHasPackets();
++            region.regionData.getRegionSchedulingHandle().getTickManager().sendStateToPlayer(getHandle()); // Canvas - region threading
+         }
+     }
+ 
+     public <T extends net.minecraft.network.PacketListener> void schedulePacket(T listener, net.minecraft.network.protocol.Packet<T> packet) {
++        // Canvas start - region threading
++        if (this.getHandle().canvas$isDisplayingEndCredits) {
++            // if displaying end credits, we want to run this on the global tick
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().schedulePacket(listener, packet);
++            return;
++        }
++        // Canvas end - region threading
+         if (!this.packetProcessor.scheduleIfPossible(listener, packet)) {
+             return;
+         }
+@@ -1373,6 +1381,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+ 
+     @Override
+     public void loadData() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Cannot load data async"); // Canvas - region guards
+         this.server.getHandle().playerIo.load(this.getHandle().nameAndId())
+             .map(tag -> TagValueInput.create(ProblemReporter.DISCARDING, this.server.getServer().registryAccess(), tag))
+             .ifPresent(this.getHandle()::load);
+@@ -1380,6 +1389,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+ 
+     @Override
+     public void saveData() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this.entity, "Cannot save data async"); // Canvas - region guards
+         this.server.getHandle().playerIo.save(this.getHandle());
+     }
+ 
+@@ -1441,6 +1451,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+ 
+     @Override
+     public Collection<EnderPearl> getEnderPearls() {
++        io.canvasmc.canvas.util.TickGuard.guard(this.getHandle(), "Cannot get player ender pearls async"); // Canvas - region threading
+         return this.getHandle().getEnderPearls().stream().map((e) -> (EnderPearl) e.getBukkitEntity()).collect(Collectors.toList());
+     }
+ 
+@@ -1694,6 +1705,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     @Override
+     public void setGameMode(GameMode mode) {
+         Preconditions.checkArgument(mode != null, "GameMode cannot be null");
++        io.canvasmc.canvas.util.TickGuard.guard(this.entity, "Cannot set gamemode async"); // Canvas - region guards
+         if (this.getHandle().connection == null) return;
+ 
+         this.getHandle().setGameMode(GameType.byId(mode.getValue()), org.bukkit.event.player.PlayerGameModeChangeEvent.Cause.PLUGIN, null); // Paper - Expand PlayerGameModeChangeEvent
+@@ -1886,16 +1898,30 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     }
+ 
+     private boolean addInvertedVisibility(@Nullable Plugin plugin, org.bukkit.entity.Entity entity) {
+-        Set<WeakReference<Plugin>> invertedPlugins = this.invertedVisibilityEntities.get(entity.getUniqueId());
+-        if (invertedPlugins != null) {
+-            // Some plugins are already inverting the entity. Just mark that this
+-            // plugin wants the entity inverted too and end.
+-            invertedPlugins.add(CraftPlayer.getPluginWeakReference(plugin));
++        // Canvas start - fix folia visibility api
++        final UUID uuid = entity.getUniqueId();
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> set =
++            invertedVisibilityEntities.get(uuid);
++
++        if (set != null) {
++            set.add(CraftPlayer.getPluginWeakReference(plugin));
++            return false;
++        }
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> newSet =
++            new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>();
++
++        newSet.add(CraftPlayer.getPluginWeakReference(plugin));
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> existing =
++            invertedVisibilityEntities.putIfAbsent(uuid, newSet);
++
++        if (existing != null) {
++            existing.add(CraftPlayer.getPluginWeakReference(plugin));
+             return false;
+         }
+-        invertedPlugins = new HashSet<>();
+-        invertedPlugins.add(CraftPlayer.getPluginWeakReference(plugin));
+-        this.invertedVisibilityEntities.put(entity.getUniqueId(), invertedPlugins);
++        // Canvas end - fix folia visibility api
+ 
+         return true;
+     }
+@@ -1968,16 +1994,24 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     }
+ 
+     private boolean removeInvertedVisibility(@Nullable Plugin plugin, org.bukkit.entity.Entity entity) {
+-        Set<WeakReference<Plugin>> invertedPlugins = this.invertedVisibilityEntities.get(entity.getUniqueId());
+-        if (invertedPlugins == null) {
+-            return false; // Entity isn't inverted
++        // Canvas start - fix folia visibility api
++        final UUID uuid = entity.getUniqueId();
++
++        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> set =
++            invertedVisibilityEntities.get(uuid);
++
++        if (set == null) {
++            return false;
+         }
+-        invertedPlugins.remove(CraftPlayer.getPluginWeakReference(plugin));
+-        if (!invertedPlugins.isEmpty()) {
+-            return false; // Some other plugins still want the entity inverted
++
++        set.remove(CraftPlayer.getPluginWeakReference(plugin));
++
++        if (!set.isEmpty()) {
++            return false;
+         }
+-        this.invertedVisibilityEntities.remove(entity.getUniqueId());
+ 
++        invertedVisibilityEntities.remove(uuid, set);
++        // Canvas end - fix folia visibility api
+         return true;
+     }
+ 
+@@ -2551,6 +2585,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     }
+ 
+     public void setScoreboardOverride(@Nullable CraftScoreboard scoreboardOverride) {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(getHandle(), "Cannot set player board override async"); // Canvas - region threading
+         this.scoreboardOverride = scoreboardOverride;
+     }
+ 
+@@ -2561,6 +2596,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+         if (!(scoreboard instanceof CraftScoreboard craftScoreboard)) {
+             throw new IllegalArgumentException("Cannot set player scoreboard to an unregistered Scoreboard");
+         }
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(getHandle(), "Cannot set player board async"); // Canvas - region threading
+ 
+         this.server.getScoreboardManager().setPlayerBoard(this, craftScoreboard);
+     }
+diff --git a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftObjective.java b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftObjective.java
+index f1a8529bac83de33d4a27bde60b83877119443d7..1ffc76e5da3d982d4750b825fc1de6f2402f62c4 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftObjective.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftObjective.java
+@@ -86,6 +86,7 @@ final class CraftObjective extends CraftScoreboardComponent implements Objective
+     @Override
+     public void setDisplaySlot(DisplaySlot slot) {
+         this.checkState();
++        this.checkMainThread("Cannot set display slot async"); // Canvas - region threading
+ 
+         Scoreboard board = this.getScoreboard().getHandle();
+ 
+@@ -201,6 +202,12 @@ final class CraftObjective extends CraftScoreboardComponent implements Objective
+     void checkState() {
+         Preconditions.checkState(this.getScoreboard().getHandle().getObjective(this.objective.getName()) != null, "Unregistered scoreboard component");
+     }
++    // Canvas start - region threading
++
++    void checkMainThread(final String reason) {
++        this.objective.getScoreboard().ensureMainThread(reason);
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public int hashCode() {
+diff --git a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
+index b959fe4311fc6cbae3dcc052ef4710f8c8aefec6..674a2f56d6f72be753a55df153eb1c1b1516ee94 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
+@@ -32,7 +32,6 @@ public final class CraftScoreboard implements org.bukkit.scoreboard.Scoreboard {
+ 
+     @Override
+     public Objective registerNewObjective(String name, Criteria criteria, net.kyori.adventure.text.Component displayName, RenderType renderType) throws IllegalArgumentException {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+         if (displayName == null) {
+             displayName = net.kyori.adventure.text.Component.empty();
+         }
+@@ -41,6 +40,7 @@ public final class CraftScoreboard implements org.bukkit.scoreboard.Scoreboard {
+         Preconditions.checkArgument(renderType != null, "RenderType cannot be null");
+         Preconditions.checkArgument(name.length() <= Short.MAX_VALUE, "The name '%s' is longer than the limit of 32767 characters (%s)", name, name.length());
+         Preconditions.checkArgument(this.getHandle().getObjective(name) == null, "An objective of name '%s' already exists", name);
++        this.getHandle().ensureMainThread("Cannot register new objective async"); // Canvas - region threading
+         // Paper start - lazily track plugin scoreboards
+         if (((CraftCriteria) criteria).criteria != net.minecraft.world.scores.criteria.ObjectiveCriteria.DUMMY && !this.registeredGlobally) {
+             net.minecraft.server.MinecraftServer.getServer().server.getScoreboardManager().registerScoreboardForVanilla(this);
+@@ -178,10 +178,10 @@ public final class CraftScoreboard implements org.bukkit.scoreboard.Scoreboard {
+ 
+     @Override
+     public Team registerNewTeam(String name) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+         Preconditions.checkArgument(name != null, "Team name cannot be null");
+         Preconditions.checkArgument(name.length() <= Short.MAX_VALUE, "Team name '%s' is longer than the limit of 32767 characters (%s)", name, name.length());
+         Preconditions.checkArgument(this.getHandle().getPlayerTeam(name) == null, "Team name '%s' is already in use", name);
++        this.getHandle().ensureMainThread("Cannot register new team async"); // Canvas - region threading
+ 
+         return new CraftTeam(this, this.getHandle().addPlayerTeam(name));
+     }
+@@ -206,8 +206,8 @@ public final class CraftScoreboard implements org.bukkit.scoreboard.Scoreboard {
+ 
+     @Override
+     public void clearSlot(DisplaySlot slot) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+         Preconditions.checkArgument(slot != null, "Slot cannot be null");
++        this.getHandle().ensureMainThread("Cannot clear display slot async"); // Canvas - region threading
+         this.getHandle().setDisplayObjective(CraftScoreboardTranslations.fromBukkitSlot(slot), null);
+     }
+ 
+diff --git a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
+index ab76c7f9bb0a4980a07a4d08c0d3ecadbca9668b..20993546c00c3e75fe327557e5b42319b8e7f453 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
+@@ -22,7 +22,7 @@ import org.bukkit.scoreboard.ScoreboardManager;
+ public final class CraftScoreboardManager implements ScoreboardManager {
+     private final CraftScoreboard mainScoreboard;
+     private final MinecraftServer server;
+-    private final Collection<CraftScoreboard> scoreboards = new WeakCollection<>();
++    private final Collection<CraftScoreboard> scoreboards = new io.canvasmc.canvas.util.WeakConcurrentCollection<>(); // Canvas - region threading
+ 
+     public CraftScoreboardManager(MinecraftServer server, net.minecraft.world.scores.Scoreboard scoreboard) {
+         this.mainScoreboard = new CraftScoreboard(scoreboard);
+@@ -38,8 +38,7 @@ public final class CraftScoreboardManager implements ScoreboardManager {
+ 
+     @Override
+     public CraftScoreboard getNewScoreboard() {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+-        org.spigotmc.AsyncCatcher.catchOp("scoreboard creation"); // Spigot
++        this.server.getScoreboard().ensureMainThread("Cannot create new scoreboard async"); // Canvas - region threading
+         CraftScoreboard scoreboard = new CraftScoreboard(new ServerScoreboard(this.server));
+         if (io.papermc.paper.configuration.GlobalConfiguration.get().scoreboards.trackPluginScoreboards) {
+             scoreboard.registeredGlobally = true;
+@@ -49,7 +48,7 @@ public final class CraftScoreboardManager implements ScoreboardManager {
+     }
+ 
+     public void registerScoreboardForVanilla(CraftScoreboard scoreboard) {
+-        org.spigotmc.AsyncCatcher.catchOp("scoreboard registration");
++        server.getScoreboard().ensureMainThread("Cannot register CraftScoreboard async"); // Canvas - region threading
+         this.scoreboards.add(scoreboard);
+     }
+ 
+@@ -59,7 +58,7 @@ public final class CraftScoreboardManager implements ScoreboardManager {
+     }
+ 
+     public void setPlayerBoard(CraftPlayer player, CraftScoreboard scoreboard) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(player.getHandle(), "Cannot set player board async"); // Canvas - region threading
+         net.minecraft.world.scores.Scoreboard oldBoard = this.getPlayerBoard(player).getHandle();
+         net.minecraft.world.scores.Scoreboard newBoard = scoreboard.getHandle();
+         if (oldBoard == newBoard) {
