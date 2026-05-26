@@ -2346,7 +2346,7 @@ index a4fa358bf6bb3c84a024620ee77f90b6ac68089b..6ad5b3a48efec788604a854677de4df7
  
      private static int listObjectives(final CommandSourceStack source) {
 diff --git a/net/minecraft/server/commands/SpreadPlayersCommand.java b/net/minecraft/server/commands/SpreadPlayersCommand.java
-index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae52c3a88b 100644
+index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..e5d6e056cecc30f582ea8f348564e2094c9a7214 100644
 --- a/net/minecraft/server/commands/SpreadPlayersCommand.java
 +++ b/net/minecraft/server/commands/SpreadPlayersCommand.java
 @@ -32,6 +32,45 @@ import net.minecraft.world.phys.Vec2;
@@ -2395,7 +2395,7 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
      private static final int MAX_ITERATION_COUNT = 10000;
      private static final Dynamic4CommandExceptionType ERROR_FAILED_TO_SPREAD_TEAMS = new Dynamic4CommandExceptionType(
          (count, x, z, recommended) -> Component.translatableEscape("commands.spreadplayers.failed.teams", count, x, z, recommended)
-@@ -118,24 +157,177 @@ public class SpreadPlayersCommand {
+@@ -118,34 +157,215 @@ public class SpreadPlayersCommand {
              double minZ = center.y - maxRange;
              double maxX = center.x + maxRange;
              double maxZ = center.y + maxRange;
@@ -2408,10 +2408,19 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
 +                //      actually be quite an expensive method, so we use an optimized
 +                //      random source too to try and help out
 +                SpreadPlayersCommand.Position[] positions = createInitialPositions(
-+                    fasterRandom, entities.size(), minX, minZ, maxX, maxZ
++                    fasterRandom, respectTeams ? getNumberOfTeams(entities) : entities.size(), minX, minZ, maxX, maxZ
 +                );
 +                try {
-+                    canvas$spreadRegionThreading(center, spreadDistance, level, fasterRandom, minX, minZ, maxX, maxZ, maxHeight, positions);
++                    canvas$spreadRegionThreading(
++                        center,
++                        spreadDistance,
++                        level,
++                        fasterRandom,
++                        minX, minZ, maxX, maxZ,
++                        maxHeight,
++                        positions,
++                        respectTeams
++                    );
 +                } catch (CommandSyntaxException ex) {
 +                    source.sendFailure(Component.literal(ex.getMessage()));
 +                } catch (Throwable t) {
@@ -2445,7 +2454,8 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
 +        double maxX,
 +        double maxZ,
 +        int maxY,
-+        SpreadPlayersCommand.Position[] piles
++        SpreadPlayersCommand.Position[] positions,
++        boolean respectTeams
 +    ) throws CommandSyntaxException {
 +        boolean needsAnotherPass = true;
 +        double closestDistance = Float.MAX_VALUE;
@@ -2455,14 +2465,14 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
 +            needsAnotherPass = false;
 +            closestDistance = Float.MAX_VALUE;
 +
-+            for (int pileIndex = 0; pileIndex < piles.length; ++pileIndex) {
-+                SpreadPlayersCommand.Position pile = piles[pileIndex];
++            for (int pileIndex = 0; pileIndex < positions.length; ++pileIndex) {
++                SpreadPlayersCommand.Position pile = positions[pileIndex];
 +                int overlapCount = 0;
 +                SpreadPlayersCommand.Position pushVector = new SpreadPlayersCommand.Position();
 +
-+                for (int otherIndex = 0; otherIndex < piles.length; ++otherIndex) {
++                for (int otherIndex = 0; otherIndex < positions.length; ++otherIndex) {
 +                    if (pileIndex != otherIndex) {
-+                        SpreadPlayersCommand.Position otherPile = piles[otherIndex];
++                        SpreadPlayersCommand.Position otherPile = positions[otherIndex];
 +                        double distance = pile.dist(otherPile);
 +                        closestDistance = Math.min(distance, closestDistance);
 +                        if (distance < spreadDistance) {
@@ -2493,16 +2503,13 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
 +            }
 +
 +            if (!needsAnotherPass) {
-+                java.util.List<java.util.concurrent.CompletableFuture<Void>> futures = new java.util.ArrayList<>(piles.length);
++                java.util.List<java.util.concurrent.CompletableFuture<Void>> futures = new java.util.ArrayList<>(positions.length);
 +                java.util.concurrent.atomic.AtomicBoolean invalidPositionFound = new java.util.concurrent.atomic.AtomicBoolean(false);
-+                for (SpreadPlayersCommand.Position pileToCheck : piles) {
-+                    final net.minecraft.world.level.ChunkPos chunkPos = net.minecraft.world.level.ChunkPos.containing(
-+                        BlockPos.containing(pileToCheck.x, 0.0, pileToCheck.z)
-+                    );
++                for (SpreadPlayersCommand.Position pileToCheck : positions) {
 +                    final java.util.concurrent.CompletableFuture<Void> future = new java.util.concurrent.CompletableFuture<>();
 +                    // TODO - can we optimize this?
 +                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(
-+                        level, chunkPos.x(), chunkPos.z(), () -> {
++                        level, ((int) pileToCheck.x) >> 4, ((int) pileToCheck.z >> 4), () -> {
 +                            if (!pileToCheck.isSafe(level, maxY)) {
 +                                pileToCheck.randomize(random, minX, minZ, maxX, maxZ);
 +                                invalidPositionFound.set(true);
@@ -2522,9 +2529,46 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
 +        }
 +
 +        if (iteration >= 10000) {
-+            throw ERROR_FAILED_TO_SPREAD_ENTITIES.create(
-+                piles.length, center.x, center.y,
-+                String.format(Locale.ROOT, "%.2f", closestDistance)
++            if (respectTeams) {
++                throw ERROR_FAILED_TO_SPREAD_TEAMS.create(
++                    positions.length, center.x, center.y,
++                    String.format(Locale.ROOT, "%.2f", closestDistance)
++                );
++            }
++            else {
++                throw ERROR_FAILED_TO_SPREAD_ENTITIES.create(
++                    positions.length, center.x, center.y,
++                    String.format(Locale.ROOT, "%.2f", closestDistance)
++                );
++            }
++        }
++    }
++
++    private static double canvas$teleportEntities(
++        Collection<? extends Entity> entities, ServerLevel world, SpreadPlayersCommand.Position[] positions, int maxY, boolean respectTeams
++    ) {
++        double totalMinDistance = 0.0;
++        int pileIndex = 0;
++        Map<Team, SpreadPlayersCommand.Position> teamAssignments = Maps.newHashMap();
++
++        for (Entity entity : entities) {
++            if (!entity.isAlive()) continue;
++            SpreadPlayersCommand.Position position = null;
++            if (respectTeams) {
++                Team playerTeam = entity instanceof Player player ? player.getTeam() : null;
++                if (playerTeam != null && !teamAssignments.containsKey(playerTeam)) {
++                    teamAssignments.put(playerTeam, positions[pileIndex++]);
++                }
++                position = teamAssignments.get(playerTeam);
++            }
++
++            // if we don't respect teams or there was no team assignment, we do this
++            if (position == null) {
++                position = positions[pileIndex++];
++            }
++
++            final BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos(
++                (int) Math.round(Math.floor(position.x)), 0, (int) Math.round(Math.floor(position.z))
              );
 -            spreadPositions(center, spreadDistance, level, random, minX, minZ, maxX, maxZ, maxHeight, positions, respectTeams);
 -            double distance = setPlayerPositions(entities, level, positions, maxHeight, respectTeams);
@@ -2537,43 +2581,26 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
 -                    String.format(Locale.ROOT, "%.2f", distance)
 -                ),
 -                true
-+        }
-+    }
++            final SpreadPlayersCommand.Position finalPosition = position;
 +
-+    private static double canvas$teleportEntities(
-+        Collection<? extends Entity> entities, ServerLevel world, SpreadPlayersCommand.Position[] piles, int maxY, boolean respectTeams
-+    ) {
-+        int pileIndex = 0;
-+        double totalMinDistance = 0.0;
-+        Map<net.minecraft.world.scores.Team, SpreadPlayersCommand.Position> teamAssignments = Maps.newHashMap();
-+
-+        for (Entity entity : entities) {
-+            if (!entity.isAlive()) continue;
-+            SpreadPlayersCommand.Position pile = piles[pileIndex++];
-+
-+            BlockPos.MutableBlockPos blockPos = new BlockPos.MutableBlockPos(
-+                (int) Math.round(Math.floor(pile.x)), 0, (int) Math.round(Math.floor(pile.z))
-+            );
 +            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
 +                world, blockPos.getX() >> 4, blockPos.getZ() >> 4, () -> {
-+                    blockPos.setY(pile.getSpawnY(world, maxY));
-+                    entity.getBukkitEntity().taskScheduler.schedule((entity1) -> {
-+                        entity.teleportAsync(
-+                            world, blockPos.getCenter(),
-+                            entity.getYRot(), entity.getXRot(), entity.getDeltaMovement(),
-+                            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.COMMAND,
-+                            Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS | Entity.TELEPORT_FLAG_LOAD_CHUNK, null
-+                        );
-+                    }, null, 0L);
++                    blockPos.setY(finalPosition.getSpawnY(world, maxY));
++                    entity.getBukkitEntity().taskScheduler.schedule((entityAt) -> entityAt.teleportAsync(
++                        world, blockPos.getCenter(),
++                        entityAt.getYRot(), entityAt.getXRot(), entityAt.getDeltaMovement(),
++                        org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.COMMAND,
++                        net.minecraft.world.entity.Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS | net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK, null
++                    ), null, 0L);
 +                }
              );
 -            return positions.length;
 +
 +            double minDistanceToOther = Double.MAX_VALUE;
 +
-+            for (SpreadPlayersCommand.Position otherPile : piles) {
-+                if (pile != otherPile) {
-+                    double distance = pile.dist(otherPile);
++            for (SpreadPlayersCommand.Position otherPile : positions) {
++                if (position != otherPile) {
++                    double distance = position.dist(otherPile);
 +                    minDistanceToOther = Math.min(distance, minDistanceToOther);
 +                }
 +            }
@@ -2587,6 +2614,21 @@ index 3331e0aa321a8ccec48495e15012f6f2a75a46d4..b769c8cb912bdf585dbbea7ce77ddbae
  
      private static int getNumberOfTeams(final Collection<? extends Entity> players) {
          Set<Team> teams = Sets.newHashSet();
+ 
+         for (Entity player : players) {
+-            if (player instanceof Player) {
+-                teams.add(player.getTeam());
+-            } else {
+-                teams.add(null);
++            // Canvas start - region threading
++            if (player instanceof Player entityPlayer) {
++                final Team playerTeam = entityPlayer.getTeam();
++                if (playerTeam != null) teams.add(playerTeam);
+             }
++            // Canvas end - region threading
+         }
+ 
+         return teams.size();
 diff --git a/net/minecraft/server/commands/TeamCommand.java b/net/minecraft/server/commands/TeamCommand.java
 index 2dca4067cbd55fd6f08a3e90c79167b156a56c8b..a37a5276b5e705e81d7e18fa3462a9b66e849e26 100644
 --- a/net/minecraft/server/commands/TeamCommand.java
@@ -3078,68 +3120,10 @@ index 676a1c03e6bf43c6ec736f0bc947f8e8b96cffc5..a641f9e7fa85d954bb1f6adf2ef13c7f
              }
  
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index 930a7c3a0a849d5d53bf6fb026cad89352e7fda0..c4cb32e8dfe18b41570fdd4c84a85d338bc8b68b 100644
+index 930a7c3a0a849d5d53bf6fb026cad89352e7fda0..81b0a5f8298b8748201c98233310cb107af11e24 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
-@@ -280,6 +280,57 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
-         return true;
-     }
- 
-+    // Canvas start - region threading
-+    public final void canvas$loadOrRunAtChunksAsync(final BlockPos pos, final int radiusBlocks,
-+                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
-+                                                    final Runnable callback) {
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
-+            this, pos, radiusBlocks
-+        )) {
-+            // already on the running region, run callback
-+            callback.run();
-+        } else if (moonrise$areChunksLoaded(
-+            (pos.getX() - radiusBlocks) >> 4,
-+            (pos.getX() + radiusBlocks) >> 4,
-+            (pos.getZ() - radiusBlocks) >> 4,
-+            (pos.getZ() + radiusBlocks) >> 4
-+        )) {
-+            // chunks are loaded, schedule callback
-+            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-+                this, pos.getX() >> 4, pos.getZ() >> 4, callback, priority
-+            );
-+        } else {
-+            // chunks are not loaded, schedule load and callback
-+            moonrise$loadChunksAsync(
-+                pos, radiusBlocks, priority, (unused) -> callback.run()
-+            );
-+        }
-+    }
-+
-+    public final void canvas$loadOrRunAtChunksAsync(final int minChunkX, final int maxChunkX, final int minChunkZ, final int maxChunkZ,
-+                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
-+                                                    final Runnable callback) {
-+        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
-+            this, minChunkX, minChunkZ, maxChunkX, maxChunkZ
-+        )) {
-+            // already on the running region, run callback
-+            callback.run();
-+        } else if (moonrise$areChunksLoaded(
-+            minChunkX, minChunkZ, maxChunkX, maxChunkZ
-+        )) {
-+            // chunks are loaded, schedule callback
-+            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
-+                this, minChunkX, minChunkZ, callback, priority
-+            );
-+        } else {
-+            // chunks are not loaded, schedule load and callback
-+            moonrise$loadChunksAsync(
-+                minChunkX, minChunkZ, maxChunkX, maxChunkZ, priority, (unused) -> callback.run()
-+            );
-+        }
-+    }
-+
-+    // Canvas end - region threading
-     public final void loadChunksForMoveAsync(AABB box, ca.spottedleaf.concurrentutil.util.Priority priority,
-                                              java.util.function.Consumer<List<net.minecraft.world.level.chunk.ChunkAccess>> onLoad) {
-         // Paper - rewrite chunk system
-@@ -678,7 +729,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -678,7 +678,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
  
          this.sleepStatus = new SleepStatus();
          this.gameEventDispatcher = new GameEventDispatcher(this);
@@ -3148,7 +3132,7 @@ index 930a7c3a0a849d5d53bf6fb026cad89352e7fda0..c4cb32e8dfe18b41570fdd4c84a85d33
          this.environmentAttributes = EnvironmentAttributeSystem.builder().addDefaultLayers(this).build();
          //this.updateSkyBrightness(); // Folia - region threading - delay until first tick
          // Paper start - rewrite chunk system
-@@ -714,6 +765,38 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -714,6 +714,38 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
          );
      }
      public final io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData taskQueueRegionData = new io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData(this);
@@ -3187,7 +3171,7 @@ index 930a7c3a0a849d5d53bf6fb026cad89352e7fda0..c4cb32e8dfe18b41570fdd4c84a85d33
  
      public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
      private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
-@@ -798,8 +881,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -798,8 +830,10 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
      public void tick(BooleanSupplier haveTime, final io.papermc.paper.threadedregions.TickRegions.TickRegionData region) { // Folia - regionised ticking
          final io.papermc.paper.threadedregions.RegionizedWorldData regionizedWorldData = this.getCurrentWorldData(); // Folia - regionised ticking
          regionizedWorldData.setHandlingTick(true); // Folia - regionised ticking
@@ -3200,7 +3184,7 @@ index 930a7c3a0a849d5d53bf6fb026cad89352e7fda0..c4cb32e8dfe18b41570fdd4c84a85d33
          if (runs) {
              //this.getWorldBorder().tick(); // Folia - regionised ticking
              // Folia start - regionised ticking
-@@ -895,7 +980,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -895,7 +929,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                  .forEachTickingEntity( // Folia - regionised ticking
                      entity -> {
                          if (!entity.isRemoved()) {
@@ -3209,7 +3193,7 @@ index 930a7c3a0a849d5d53bf6fb026cad89352e7fda0..c4cb32e8dfe18b41570fdd4c84a85d33
                                  entity.checkDespawn();
                                  if (entity.isRemoved()) return; // Folia - region threading - if we despawned, DON'T TICK IT!
                                  if (true) { // Paper - rewrite chunk system
-@@ -1688,7 +1773,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -1688,7 +1722,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
  
      // CraftBukkit start
      private boolean addEntity(final Entity entity, final org.bukkit.event.entity.CreatureSpawnEvent.@Nullable SpawnReason spawnReason) {
@@ -4855,10 +4839,70 @@ index a592cdacb46f95ced9f995beb6b5e1e9c5151778..bfec5537e71bd245ff79c7a7ff490305
  
                  @Override
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index d725a60f634718baadf7865a51ef4ea903a141e8..564dc86138eedffc7512dfa7baee11a5a47ae233 100644
+index d725a60f634718baadf7865a51ef4ea903a141e8..54171b574b596268c7ff046f6f9be05b7278b2da 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
-@@ -1537,7 +1537,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+@@ -1350,6 +1350,59 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         chunk = chunkProvider.getChunk(pos.getX() >> 4, pos.getZ() >> 4, ChunkStatus.EMPTY, true);
+         return chunk.getBlockState(pos);
+     }
++    // Canvas start - region threading
++
++    public final void canvas$loadOrRunAtChunksAsync(final BlockPos pos, final int radiusBlocks,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, pos, radiusBlocks
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            (pos.getX() - radiusBlocks) >> 4,
++            (pos.getX() + radiusBlocks) >> 4,
++            (pos.getZ() - radiusBlocks) >> 4,
++            (pos.getZ() + radiusBlocks) >> 4
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                serverLevel, pos.getX() >> 4, pos.getZ() >> 4, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            serverLevel.moonrise$loadChunksAsync(
++                pos, radiusBlocks, priority, (_) -> callback.run()
++            );
++        }
++    }
++
++    public final void canvas$loadOrRunAtChunksAsync(final int minChunkX, final int maxChunkX, final int minChunkZ, final int maxChunkZ,
++                                                    final ca.spottedleaf.concurrentutil.util.Priority priority,
++                                                    final Runnable callback) {
++        if (!(this instanceof ServerLevel serverLevel)) throw new UnsupportedOperationException();
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            this, minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // already on the running region, run callback
++            callback.run();
++        } else if (moonrise$areChunksLoaded(
++            minChunkX, minChunkZ, maxChunkX, maxChunkZ
++        )) {
++            // chunks are loaded, schedule callback
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                serverLevel, minChunkX, minChunkZ, callback, priority
++            );
++        } else {
++            // chunks are not loaded, schedule load and callback
++            serverLevel.moonrise$loadChunksAsync(
++                minChunkX, minChunkZ, maxChunkX, maxChunkZ, priority, (_) -> callback.run()
++            );
++        }
++    }
++    // Canvas end - region threading
+     // Folia end - region threading
+ 
+     @Override
+@@ -1537,7 +1590,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
          List<TickingBlockEntity> blockEntityTickers = regionizedWorldData.getBlockEntityTickers(); // Folia - regionised ticking
  
          // Paper - Fix MC-117075 use removeAll - remove iterator in favour of indexed for loop, ensuring compile error if something uses iter incorrectly
