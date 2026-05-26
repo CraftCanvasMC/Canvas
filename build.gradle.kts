@@ -14,7 +14,8 @@ val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
 paperweight {
     filterPatches = false
     gitFilePatches = false
-    upstreams.folia {
+    upstreams.register("folia") {
+        repo = github("CraftCanvasMC", "Folia")
         ref = providers.gradleProperty("foliaCommit")
 
         patchFile {
