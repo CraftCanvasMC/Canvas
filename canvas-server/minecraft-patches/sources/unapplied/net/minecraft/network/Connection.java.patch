@@ -1,0 +1,75 @@
+From 53e1a57c72953de1bfcc94c3257c724e7fa1f88f Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
+index 9cf4e2b1d5bd9cfe0eeeb3ce179705131f46d6ee..f4a0935f91e5fe67c42374e62d9764bb7997d1c0 100644
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -214,7 +214,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+                     if (player != null) player.quitReason = org.bukkit.event.player.PlayerQuitEvent.QuitReason.TIMED_OUT; // Paper - Add API for quit reason
+                     this.disconnect(Component.translatable("disconnect.timeout"));
+                 } else {
+-                    Component reason = Component.translatable("disconnect.genericReason", "Internal Exception: " + cause);
++                    Component reason = Component.translatable("disconnect.genericReason", "Internal Exception: " + (cause instanceof PacketEncoder.PacketTooLargeException ? io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.packetTooLargeDisconnectReason : cause)); // Canvas - configurable packet too large disconnect reason
+                     PacketListener listener = this.packetListener;
+                     DisconnectionDetails details;
+                     if (listener != null) {
+@@ -355,6 +355,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+         if (protocol.flow() != this.getReceiving()) {
+             throw new IllegalStateException("Invalid inbound protocol: " + protocol.id());
+         } else {
++            if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.asyncProtocolSwitch && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) this.channel.config().setAutoRead(false); // Canvas - async protocol switch
+             this.packetListener = packetListener;
+             this.disconnectListener = null;
+             UnconfiguredPipelineHandler.InboundConfigurationTask configMessage = UnconfiguredPipelineHandler.setupInboundProtocol(protocol);
+@@ -364,9 +365,46 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+                 configMessage = configMessage.andThen(ctx -> ctx.pipeline().addAfter(HandlerNames.DECODER, HandlerNames.BUNDLER, newBundler));
+             }
+ 
+-            syncAfterConfigurationChange(this.channel.writeAndFlush(configMessage));
++            // Canvas start - async protocol switch
++            ChannelFuture cf = this.channel.writeAndFlush(configMessage);
++            if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.asyncProtocolSwitch && ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) {
++                cf.addListener((ChannelFutureListener) Connection::syncAfterConfigurationChange);
++            } else syncAfterConfigurationChange(cf);
++            // Canvas end - async protocol switch
+         }
+     }
++    // Canvas start - async protocol switch
++
++    public @Nullable ChannelFuture canvas$setupOutboundProtocolAsync(ProtocolInfo<?> protocolInfo) {
++        if (protocolInfo.flow() != this.getSending()) {
++            throw new IllegalStateException("Invalid outbound protocol: " + protocolInfo.id());
++        }
++
++        UnconfiguredPipelineHandler.OutboundConfigurationTask outboundTask =
++            UnconfiguredPipelineHandler.setupOutboundProtocol(protocolInfo);
++
++        BundlerInfo bundlerInfo = protocolInfo.bundlerInfo();
++        if (bundlerInfo != null) {
++            PacketBundleUnpacker unpacker = new PacketBundleUnpacker(bundlerInfo);
++            outboundTask = outboundTask.andThen(context ->
++                context.pipeline().addAfter("encoder", "unbundler", unpacker)
++            );
++        }
++
++        boolean isLoginProtocol = protocolInfo.id() == ConnectionProtocol.LOGIN;
++
++        ChannelFuture future = this.channel.writeAndFlush(
++            outboundTask.andThen(context -> this.sendLoginDisconnect = isLoginProtocol)
++        );
++
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.asyncProtocolSwitch) {
++            future.addListener((ChannelFutureListener) Connection::syncAfterConfigurationChange);
++            return future;
++        }
++
++        return null;
++    }
++    // Canvas end - async protocol switch
+ 
+     public void setupOutboundProtocol(final ProtocolInfo<?> protocol) {
+         if (protocol.flow() != this.getSending()) {

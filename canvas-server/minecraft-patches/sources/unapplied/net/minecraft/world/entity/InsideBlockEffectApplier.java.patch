@@ -1,0 +1,155 @@
+From 53e1a57c72953de1bfcc94c3257c724e7fa1f88f Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/entity/InsideBlockEffectApplier.java b/net/minecraft/world/entity/InsideBlockEffectApplier.java
+index fa7ae9b80fe0035aca42d18c5983b7f3861bc098..e3b4a56d6e6a4f0c5744fca99a5378e228472e7a 100644
+--- a/net/minecraft/world/entity/InsideBlockEffectApplier.java
++++ b/net/minecraft/world/entity/InsideBlockEffectApplier.java
+@@ -30,20 +30,27 @@ public interface InsideBlockEffectApplier {
+     void runAfter(InsideBlockEffectType type, Consumer<Entity> effect);
+ 
+     public static class StepBasedCollector implements InsideBlockEffectApplier {
++        // Canvas start - optimize step based collector
++        // heavily based off of https://github.com/Winds-Studio/Leaf/blob/ver/1.21.8/leaf-server/minecraft-patches/features/0273-optimize-checkInsideBlocks-calls.patch
++        // modifications included for micro optimizations and slight performance increases
+         private static final InsideBlockEffectType[] APPLY_ORDER = InsideBlockEffectType.values();
+-        private static final int NO_STEP = -1;
+-        private final Map<InsideBlockEffectType, Consumer<Entity>> effectsInStep = new java.util.EnumMap<>(InsideBlockEffectType.class); // Paper - track position inside effect was triggered on
+-        private final Map<InsideBlockEffectType, List<Consumer<Entity>>> beforeEffectsInStep = Util.makeEnumMap(
+-            InsideBlockEffectType.class, type -> new ArrayList<>()
+-        );
+-        private final Map<InsideBlockEffectType, List<Consumer<Entity>>> afterEffectsInStep = Util.makeEnumMap(
+-            InsideBlockEffectType.class, type -> new ArrayList<>()
+-        );
+-        private final List<Consumer<Entity>> finalEffects = new ArrayList<>();
++
++        private final Consumer<Entity>[] effectsInStep = new Consumer[APPLY_ORDER.length];
++        private final it.unimi.dsi.fastutil.objects.ObjectArrayList<Consumer<Entity>>[] beforeEffectsInStep = new it.unimi.dsi.fastutil.objects.ObjectArrayList[APPLY_ORDER.length];
++        private final it.unimi.dsi.fastutil.objects.ObjectArrayList<Consumer<Entity>>[] afterEffectsInStep = new it.unimi.dsi.fastutil.objects.ObjectArrayList[APPLY_ORDER.length];
++
++        private final it.unimi.dsi.fastutil.objects.ObjectArrayList<Consumer<Entity>> finalEffects = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
+         private int lastStep = -1;
+ 
+-        public void advanceStep(final int step, net.minecraft.core.BlockPos pos) { // Paper - track position inside effect was triggered on
+-            this.currentBlockPos = pos; // Paper - track position inside effect was triggered on
++        public StepBasedCollector() {
++            for (int i = 0; i < APPLY_ORDER.length; i++) {
++                beforeEffectsInStep[i] = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(2);
++                afterEffectsInStep[i] = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(2);
++            }
++        }
++
++        public void advanceStep(final int step, net.minecraft.core.BlockPos pos) {
++            this.currentBlockPos = pos;
+             if (this.lastStep != step) {
+                 this.lastStep = step;
+                 this.flushStep();
+@@ -53,46 +60,83 @@ public interface InsideBlockEffectApplier {
+         public void applyAndClear(final Entity entity) {
+             this.flushStep();
+ 
+-            for (Consumer<Entity> effect : this.finalEffects) {
++            List<Consumer<Entity>> effects = this.finalEffects;
++            int size = effects.size();
++
++            if (size == 0) {
++                this.lastStep = -1;
++                return;
++            }
++
++            if (!entity.isAlive()) {
++                effects.clear();
++                this.lastStep = -1;
++                return;
++            }
++
++            int i = 0;
++            while (i < size - 3) {
++                effects.get(i++).accept(entity);
++                effects.get(i++).accept(entity);
++                effects.get(i++).accept(entity);
++                effects.get(i++).accept(entity);
+                 if (!entity.isAlive()) {
+                     break;
+                 }
++            }
+ 
+-                effect.accept(entity);
++            if (entity.isAlive()) {
++                for (; i < size; i++) {
++                    effects.get(i).accept(entity);
++                    if (!entity.isAlive()) {
++                        break;
++                    }
++                }
+             }
+ 
+-            this.finalEffects.clear();
++            effects.clear();
+             this.lastStep = -1;
+         }
+ 
+         private void flushStep() {
+-            for (InsideBlockEffectType type : APPLY_ORDER) {
+-                List<Consumer<Entity>> beforeEffects = this.beforeEffectsInStep.get(type);
+-                this.finalEffects.addAll(beforeEffects);
+-                beforeEffects.clear();
+-                if (this.effectsInStep.remove(type) instanceof final Consumer<Entity> recordedEffect) { // Paper - track position inside effect was triggered on - better than null check to avoid diff.
+-                    this.finalEffects.add(recordedEffect); // Paper - track position inside effect was triggered on
++            final int len = APPLY_ORDER.length;
++            final Consumer<Entity>[] effectArr = this.effectsInStep;
++            final List<Consumer<Entity>> finalList = this.finalEffects;
++
++            for (int i = 0; i < len; i++) {
++                List<Consumer<Entity>> beforeList = this.beforeEffectsInStep[i];
++                if (!beforeList.isEmpty()) {
++                    finalList.addAll(beforeList);
++                    beforeList.clear();
+                 }
+ 
+-                List<Consumer<Entity>> afterEffects = this.afterEffectsInStep.get(type);
+-                this.finalEffects.addAll(afterEffects);
+-                afterEffects.clear();
++                Consumer<Entity> effect = effectArr[i];
++                if (effect != null) {
++                    finalList.add(effect);
++                    effectArr[i] = null;
++                }
++
++                List<Consumer<Entity>> afterList = this.afterEffectsInStep[i];
++                if (!afterList.isEmpty()) {
++                    finalList.addAll(afterList);
++                    afterList.clear();
++                }
+             }
+         }
+ 
+         @Override
+         public void apply(final InsideBlockEffectType type) {
+-            this.effectsInStep.put(type, recorded(type)); // Paper - track position inside effect was triggered on
++            effectsInStep[type.ordinal()] = recorded(type);
+         }
+ 
+         @Override
+         public void runBefore(final InsideBlockEffectType type, final Consumer<Entity> effect) {
+-            this.beforeEffectsInStep.get(type).add(effect);
++            beforeEffectsInStep[type.ordinal()].add(effect);
+         }
+ 
+         @Override
+         public void runAfter(final InsideBlockEffectType type, final Consumer<Entity> effect) {
+-            this.afterEffectsInStep.get(type).add(effect);
++            afterEffectsInStep[type.ordinal()].add(effect);
+         }
+ 
+         // Paper start - track position inside effect was triggered on
+@@ -113,5 +157,6 @@ public interface InsideBlockEffectApplier {
+             }
+         }
+         // Paper end - track position inside effect was triggered on
++        // Canvas end - optimize step based collector
+     }
+ }

@@ -1,0 +1,140 @@
+From 53e1a57c72953de1bfcc94c3257c724e7fa1f88f Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 54171b574b596268c7ff046f6f9be05b7278b2da..ac9604ee803494971bcd800c353a9c74d99ebd21 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -219,7 +219,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+     @Override
+     public final <T extends Entity> List<T> getEntitiesOfClass(final Class<T> entityClass, final AABB boundingBox, final Predicate<? super T> predicate) {
+-        final List<T> ret = new java.util.ArrayList<>();
++        final List<T> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - use optimized collection
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(entityClass, null, boundingBox, ret, predicate);
+ 
+@@ -228,7 +228,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+     @Override
+     public final List<Entity> moonrise$getHardCollidingEntities(final Entity entity, final AABB box, final Predicate<? super Entity> predicate) {
+-        final List<Entity> ret = new java.util.ArrayList<>();
++        final List<Entity> ret = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>(); // Canvas - use optimized collection
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getHardCollidingEntities(entity, box, ret, predicate);
+ 
+@@ -1592,32 +1592,62 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         // Paper - Fix MC-117075 use removeAll - remove iterator in favour of indexed for loop, ensuring compile error if something uses iter incorrectly
+         boolean tickBlockEntities = regionizedWorldData.regionData.tickHandle.getTickManager().doesRunGameElements(); // Canvas - region threading
+ 
+-        int tickedEntities = 0; // Paper - rewrite chunk system
+-        // Paper start - Fix MC-117075 use removeAll
+-        final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<@Nullable TickingBlockEntity> toRemove = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+-        toRemove.add(null);
+-        for (int tickerIndex = 0; tickerIndex < blockEntityTickers.size(); tickerIndex++) { // Folia - regionised ticking
+-            final TickingBlockEntity ticker = blockEntityTickers.get(tickerIndex); // Folia - regionised ticking
+-        // Paper end - Fix MC-117075 use removeAll
++        // Canvas start - optimize BE iteration
++        int tickedEntities = 0;
++        int size = blockEntityTickers.size();
++        int writeIdx = 0;
++
++        for (int readIdx = 0; readIdx < size; readIdx++) {
++            TickingBlockEntity ticker = blockEntityTickers.get(readIdx);
++
+             if (ticker.isRemoved()) {
+-                toRemove.add(ticker); // Paper - Fix MC-117075 use removeAll
+-            } else if (tickBlockEntities && this.shouldTickBlocksAt(ticker.getPos())) {
++                continue;
++            }
++
++            if (tickBlockEntities && ticker.getPos() != null) { // block entity sleeping
+                 ticker.tick();
+-                // Paper start - rewrite chunk system
+                 if ((++tickedEntities & 7) == 0) {
+-                    ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)(Level)(Object)this).moonrise$midTickTasks();
++                    this.moonrise$midTickTasks();
+                 }
+-                // Paper end - rewrite chunk system
+             }
++
++            if (writeIdx != readIdx) {
++                blockEntityTickers.set(writeIdx, ticker);
++            }
++            writeIdx++;
++        }
++
++        if (writeIdx < size) {
++            blockEntityTickers.subList(writeIdx, size).clear();
+         }
+ 
+-        blockEntityTickers.removeAll(toRemove); // Paper - Fix MC-117075 use removeAll // Folia - regionised ticking
++        // Canvas end - optimize BE iteration
+         regionizedWorldData.setTickingBlockEntities(false); // Folia - regionised ticking
+     }
+ 
+     public <T extends Entity> void guardEntityTick(final Consumer<T> tick, final T entity) {
+         try {
+             tick.accept(entity);
++        // Canvas start - reroute cross-region movement after tick unwind
++        } catch (io.canvasmc.canvas.world.entity.EntityMoveOutOfRegionException moveOutOfRegionException) {
++            final net.minecraft.world.entity.Entity movingEntity = moveOutOfRegionException.entity();
++            final net.minecraft.world.phys.Vec3 currentPosition = movingEntity.position();
++            final net.minecraft.world.phys.Vec3 destinationPosition = currentPosition.add(moveOutOfRegionException.movement());
++            movingEntity.getBukkitEntity().taskScheduler.schedule(
++                entityFresh -> entityFresh.teleportAsync(
++                    (net.minecraft.server.level.ServerLevel)entityFresh.level(),
++                    destinationPosition,
++                    entityFresh.getYRot(),
++                    entityFresh.getXRot(),
++                    entityFresh.getDeltaMovement(),
++                    org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
++                    net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK,
++                    null
++                ),
++                null,
++                1L
++            );
++        // Canvas end - reroute cross-region movement after tick unwind
+         } catch (Throwable var6) {
+             // Paper start - Prevent block entity and entity crashes
+             final String msg = String.format("Entity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(entity.level()), entity.getX(), entity.getY(), entity.getZ());
+@@ -2011,6 +2041,35 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     public List<Entity> getPushableEntities(final Entity pusher, final AABB boundingBox) {
+         return this.getEntities(pusher, boundingBox, EntitySelector.pushableBy(pusher));
+     }
++    // Canvas start - only players push config
++
++    public it.unimi.dsi.fastutil.objects.ObjectArrayList<net.minecraft.server.level.ServerPlayer> canvas$getIntersectingPlayers(Entity calling, AABB boundingBox, Predicate<Entity> predicate) {
++        final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.server.level.ServerPlayer> players = ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel) this).moonrise$getNearbyPlayers().getPlayers(
++            calling.blockPosition, calling.level().canvasConfig().entities.entityCollisionMode.isLargePushRange() ?
++                ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.SPAWN_RANGE :
++                ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.GENERAL_REALLY_REALLY_SMALL
++        );
++
++        if (players == null) {
++            return new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
++        }
++
++        final net.minecraft.server.level.ServerPlayer[] arr = players.getRawDataUnchecked();
++        final it.unimi.dsi.fastutil.objects.ObjectArrayList<net.minecraft.server.level.ServerPlayer> serverPlayers = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
++        for (int i = 0; i < arr.length; i++) {
++            net.minecraft.server.level.ServerPlayer player = arr[i];
++            if (
++                player != calling
++                && boundingBox.intersects(player.getBoundingBox())
++                && predicate.test(player)
++            ) {
++                serverPlayers.add(player);
++            }
++        }
++
++        return serverPlayers;
++    }
++    // Canvas end - only players push config
+ 
+     public abstract @Nullable Entity getEntity(int id);
+ 
