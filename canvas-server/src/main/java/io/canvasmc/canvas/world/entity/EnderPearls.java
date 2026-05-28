@@ -69,9 +69,9 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
             try {
                 CompoundTag tag = Objects.requireNonNull(NbtIo.readCompressed(resolved, NbtAccounter.unlimitedHeap()), "NBT cannot be null")
                     .asCompound().orElseThrow(UnknownError::new);
-                // migration of world tag to level tag
                 final int version = tag.getIntOr("DataVersion", 1);
-                if (version < CURRENT_DATA_VERSION) {
+                // migration of world tag to level tag
+                if (version < 2) {
                     GlobalConfiguration.LOGGER.info("Migrating pearl data from version {} to {}", version, CURRENT_DATA_VERSION);
                     Pearl.migratePearlData(tag);
                 } else if (version > CURRENT_DATA_VERSION) {
@@ -230,6 +230,13 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
             // if uuids match, same pearl
             return o instanceof Pearl(CompoundTag otherSerialized) &&
                 otherSerialized.read("uuid", Codecs.UUID_CODEC).orElseThrow().equals(serialized.read("uuid", Codecs.UUID_CODEC).orElseThrow());
+        }
+
+        @Override
+        public int hashCode() {
+            return serialized.read("uuid", Codecs.UUID_CODEC)
+                .orElseThrow()
+                .hashCode();
         }
     }
 }
