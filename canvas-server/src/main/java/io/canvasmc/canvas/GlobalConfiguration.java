@@ -397,7 +397,6 @@ public class GlobalConfiguration extends Part {
         public boolean useEndBiomeCache = false;
         public int endBiomeCacheSize = 1024;
         public boolean optimizeBeardifier = false;
-        public boolean optimizeNoiseGeneration = false;
 
         public StructureGen structureOptimizations = new StructureGen();
         public static class StructureGen extends Part {
