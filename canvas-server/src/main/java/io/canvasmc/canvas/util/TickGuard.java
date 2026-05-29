@@ -4,8 +4,10 @@ import ca.spottedleaf.moonrise.common.util.EntityUtil;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import ca.spottedleaf.moonrise.common.util.WorldUtil;
 import io.canvasmc.canvas.GlobalConfiguration;
+import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -47,6 +49,20 @@ public class TickGuard {
                 }
             }
             case THROW -> TickThread.ensureTickThread(entity, reason);
+        }
+    }
+
+    public static void ensureGlobalOrStartup(final String reason) {
+        if (TickRegions.started) {
+            RegionizedServer.ensureGlobalTickThread(reason);
+        }
+        else {
+            final Thread currentThread = Thread.currentThread();
+            final Thread startupThread = MinecraftServer.getServer().serverThread;
+            if (currentThread != startupThread) {
+                LOGGER.error("Thread failed startup thread check: {}, context={}", reason, getThreadContext(), new Throwable());
+                throw new IllegalStateException(reason);
+            }
         }
     }
 
