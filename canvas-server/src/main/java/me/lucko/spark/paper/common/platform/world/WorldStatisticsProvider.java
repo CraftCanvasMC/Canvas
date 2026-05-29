@@ -109,65 +109,6 @@ public class WorldStatisticsProvider {
 
     @VisibleForTesting
     static List<Region> groupIntoRegions(String worldName, List<? extends ChunkInfo<?>> chunks) {
-        if (GlobalConfiguration.getInstance().regionReporting.isFoliaRegions()) {
-            return groupIntoRegionsByFoliaId(worldName, chunks);
-        }
-        List<Region> regions = new ArrayList<>();
-
-        LinkedHashMap<ChunkCoordinate, ChunkInfo<?>> chunkMap = new LinkedHashMap<>(chunks.size());
-
-        for (ChunkInfo<?> chunk : chunks) {
-            CountMap<?> counts = chunk.getEntityCounts();
-            if (counts.total().get() == 0) {
-                continue;
-            }
-            chunkMap.put(new ChunkCoordinate(chunk.getX(), chunk.getZ()), chunk);
-        }
-
-        ArrayDeque<ChunkInfo<?>> queue = new ArrayDeque<>();
-        ChunkCoordinate index = new ChunkCoordinate(); // avoid allocating per check
-
-        while (!chunkMap.isEmpty()) {
-            Map.Entry<ChunkCoordinate, ChunkInfo<?>> first = chunkMap.entrySet().iterator().next();
-            ChunkInfo<?> firstValue = first.getValue();
-
-            chunkMap.remove(first.getKey());
-
-            Region region = new Region(worldName, 0L, firstValue);
-            regions.add(region);
-
-            queue.add(firstValue);
-
-            ChunkInfo<?> queued;
-            while ((queued = queue.pollFirst()) != null) {
-                int queuedX = queued.getX();
-                int queuedZ = queued.getZ();
-
-                // merge adjacent chunks
-                for (int dz = -1; dz <= 1; ++dz) {
-                    for (int dx = -1; dx <= 1; ++dx) {
-                        if ((dx | dz) == 0) {
-                            continue;
-                        }
-
-                        index.setCoordinate(queuedX + dx, queuedZ + dz);
-                        ChunkInfo<?> adjacent = chunkMap.remove(index);
-
-                        if (adjacent == null) {
-                            continue;
-                        }
-
-                        region.add(adjacent);
-                        queue.add(adjacent);
-                    }
-                }
-            }
-        }
-
-        return regions;
-    }
-
-    private static List<Region> groupIntoRegionsByFoliaId(String worldName, List<? extends ChunkInfo<?>> chunks) {
         Map<Long, Region> regions = new LinkedHashMap<>();
         for (ChunkInfo<?> chunk : chunks) {
             CountMap<?> counts = chunk.getEntityCounts();

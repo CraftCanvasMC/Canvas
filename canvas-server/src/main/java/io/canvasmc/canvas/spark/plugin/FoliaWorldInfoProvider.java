@@ -2,7 +2,6 @@ package io.canvasmc.canvas.spark.plugin;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.moonrise.common.time.TickData;
-import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.spark.FoliaSparkPlugin;
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
 import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
@@ -21,7 +20,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
-import me.lucko.spark.paper.common.platform.world.AbstractChunkInfo;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
 import net.minecraft.server.level.ServerLevel;
@@ -140,46 +138,30 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             else return new ChunksResult<>(); // global tick, doesn't own chunks
         }
 
-        if (GlobalConfiguration.getInstance().regionReporting.isFoliaRegions()) {
-            for (World world : this.server.getWorlds()) {
-                final Map<Long, List<FoliaChunkInfo>> byRegion = new HashMap<>();
-                final Map<Long, RegionStats> statsByRegion = new HashMap<>();
+        for (World world : this.server.getWorlds()) {
+            final Map<Long, List<FoliaChunkInfo>> byRegion = new HashMap<>();
+            final Map<Long, RegionStats> statsByRegion = new HashMap<>();
 
-                for (Chunk chunk : world.getLoadedChunks()) {
-                    if (chunk == null) continue;
-                    FoliaChunkInfo info = new FoliaChunkInfo(chunk, world, this.plugin);
-                    final long regionId = info.getFoliaRegionId();
-                    byRegion.computeIfAbsent(regionId, k -> new ArrayList<>()).add(info);
+            for (Chunk chunk : world.getLoadedChunks()) {
+                if (chunk == null) continue;
+                FoliaChunkInfo info = new FoliaChunkInfo(chunk, world, this.plugin);
+                final long regionId = info.getFoliaRegionId();
+                byRegion.computeIfAbsent(regionId, k -> new ArrayList<>()).add(info);
 
-                    statsByRegion.putIfAbsent(regionId, new RegionStats(
-                        regionId,
-                        info.getRegionTps(),
-                        info.getRegionMspt(),
-                        info.getRegionUtil()
-                    ));
-                }
-
-                for (Map.Entry<Long, List<FoliaChunkInfo>> entry : byRegion.entrySet()) {
-                    final long regionId = entry.getKey();
-                    final List<FoliaChunkInfo> chunks = entry.getValue();
-                    final RegionStats stats  = statsByRegion.getOrDefault(regionId, RegionStats.UNKNOWN);
-
-                    data.put(buildRegionKey(world.getName(), stats), chunks);
-                }
+                statsByRegion.putIfAbsent(regionId, new RegionStats(
+                    regionId,
+                    info.getRegionTps(),
+                    info.getRegionMspt(),
+                    info.getRegionUtil()
+                ));
             }
-        } else {
-            // non-specific region profiler, just fetch everything (god I hate this)
-            for (World world : this.server.getWorlds()) {
-                Chunk[] chunks = world.getLoadedChunks();
 
-                List<FoliaChunkInfo> list = new ArrayList<>(chunks.length);
-                for (Chunk chunk : chunks) {
-                    if (chunk != null) {
-                        list.add(new FoliaChunkInfo(chunk, world, this.plugin));
-                    }
-                }
+            for (Map.Entry<Long, List<FoliaChunkInfo>> entry : byRegion.entrySet()) {
+                final long regionId = entry.getKey();
+                final List<FoliaChunkInfo> chunks = entry.getValue();
+                final RegionStats stats  = statsByRegion.getOrDefault(regionId, RegionStats.UNKNOWN);
 
-                data.put(world.getName(), list);
+                data.put(buildRegionKey(world.getName(), stats), chunks);
             }
         }
 

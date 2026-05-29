@@ -603,36 +603,4 @@ public class GlobalConfiguration extends Part {
         public long length = 30;
         public ChronoUnit unit = ChronoUnit.DAYS;
     }
-
-    public RegionReporting regionReporting = new RegionReporting();
-    public static class RegionReporting extends Part {
-        {
-            option("parser")
-                .docs(
-                    Style.wrap(
-                        "Defines the format used to parse and display region information."
-                    ).defineEnum(RegionReportingFormat.class, (parser) -> {
-                        return switch (parser) {
-                            case SPARK_REGIONS -> "Groups chunks using Spark's own region detection";
-                            case FOLIA_REGIONS -> "Groups chunks by Folia's threaded regions, enriching the key with region id, TPS and MSPT";
-                        };
-                    })
-                );
-        }
-
-        public RegionReportingFormat format = RegionReportingFormat.SPARK_REGIONS;
-
-        public enum RegionReportingFormat {
-            SPARK_REGIONS,
-            FOLIA_REGIONS
-        }
-
-        public boolean isFoliaRegions() {
-            return format == RegionReportingFormat.FOLIA_REGIONS;
-        }
-
-        public boolean isSparkRegions() {
-            return format == RegionReportingFormat.SPARK_REGIONS;
-        }
-    }
 }
