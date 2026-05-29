@@ -1,6 +1,8 @@
 package io.canvasmc.canvas.spark.plugin;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
+import ca.spottedleaf.moonrise.common.time.TickData;
+import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.spark.FoliaSparkPlugin;
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
 import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
@@ -8,8 +10,10 @@ import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -136,21 +140,62 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             else return new ChunksResult<>(); // global tick, doesn't own chunks
         }
 
-        // non-specific region profiler, just fetch everything (god I hate this)
-        for (World world : this.server.getWorlds()) {
-            Chunk[] chunks = world.getLoadedChunks();
+        if (GlobalConfiguration.getInstance().regionReporting.isFoliaRegions()) {
+            for (World world : this.server.getWorlds()) {
+                final Map<Long, List<FoliaChunkInfo>> byRegion = new HashMap<>();
+                final Map<Long, RegionStats> statsByRegion = new HashMap<>();
 
-            List<FoliaChunkInfo> list = new ArrayList<>(chunks.length);
-            for (Chunk chunk : chunks) {
-                if (chunk != null) {
-                    list.add(new FoliaChunkInfo(chunk, world, this.plugin));
+                for (Chunk chunk : world.getLoadedChunks()) {
+                    if (chunk == null) continue;
+                    FoliaChunkInfo info = new FoliaChunkInfo(chunk, world, this.plugin);
+                    final long regionId = info.getFoliaRegionId();
+                    byRegion.computeIfAbsent(regionId, k -> new ArrayList<>()).add(info);
+
+                    statsByRegion.putIfAbsent(regionId, new RegionStats(
+                        regionId,
+                        info.getRegionTps(),
+                        info.getRegionMspt(),
+                        info.getRegionUtil()
+                    ));
+                }
+
+                for (Map.Entry<Long, List<FoliaChunkInfo>> entry : byRegion.entrySet()) {
+                    final long regionId = entry.getKey();
+                    final List<FoliaChunkInfo> chunks = entry.getValue();
+                    final RegionStats stats  = statsByRegion.getOrDefault(regionId, RegionStats.UNKNOWN);
+
+                    data.put(buildRegionKey(world.getName(), stats), chunks);
                 }
             }
+        } else {
+            // non-specific region profiler, just fetch everything (god I hate this)
+            for (World world : this.server.getWorlds()) {
+                Chunk[] chunks = world.getLoadedChunks();
 
-            data.put(world.getName(), list);
+                List<FoliaChunkInfo> list = new ArrayList<>(chunks.length);
+                for (Chunk chunk : chunks) {
+                    if (chunk != null) {
+                        list.add(new FoliaChunkInfo(chunk, world, this.plugin));
+                    }
+                }
+
+                data.put(world.getName(), list);
+            }
         }
 
         return data;
+    }
+
+    private static String buildRegionKey(String worldName, RegionStats stats) {
+        if (stats.id() == -1L) {
+            return worldName + " [region=unknown]";
+        }
+
+        return worldName
+            + " [region=" + stats.id()
+            + " | " + String.format("%.1f", stats.tps()) + "tps"
+            + " " + String.format("%.2f", stats.mspt()) + "ms"
+            + " " + String.format("%.1f", stats.util()) + "%]";
     }
 
     @Override
@@ -192,14 +237,37 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             .collect(Collectors.toList());
     }
 
-    public static final class FoliaChunkInfo extends AbstractChunkInfo<EntityType> {
+    public static final class FoliaChunkInfo extends AbstractFoliaChunkInfo<EntityType> {
         private final CompletableFuture<CountMap<EntityType>> entityCounts;
 
         FoliaChunkInfo(@NonNull Chunk chunk, World world, FoliaSparkPlugin plugin) {
-            super(chunk.getX(), chunk.getZ());
+            super(
+                chunk.getX(),
+                chunk.getZ(),
+                resolveRegionStats(((CraftWorld) world).getHandle(), chunk.getX(), chunk.getZ())
+            );
 
             Executor executor = task -> RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(((CraftWorld) world).getHandle(), getX(), getZ(), task, Priority.BLOCKING);
             this.entityCounts = CompletableFuture.supplyAsync(() -> calculate(chunk), executor);
+        }
+
+        private static RegionStats resolveRegionStats(@NonNull ServerLevel level, int chunkX, int chunkZ) {
+            final var region = level.regioniser.getRegionAtSynchronised(chunkX, chunkZ);
+
+            if (region == null) return RegionStats.UNKNOWN;
+
+            final TickData.TickReportData tickReportData = region.getData().getRegionSchedulingHandle().getTickReport5s(System.nanoTime());
+
+            final TickData.SegmentedAverage tpsAverage = tickReportData.tpsData();
+            final TickData.SegmentedAverage msptAverage = tickReportData.timePerTickData();
+
+            final double utilPercent = tickReportData.utilisation();
+            final double tps = tpsAverage.segmentAll().average();
+            final double mspt = msptAverage.segmentAll().average() / 1.0E6;
+
+            final long id = region.id;
+
+            return new RegionStats(id, tps, mspt, utilPercent);
         }
 
         private @NonNull CountMap<EntityType> calculate(@NonNull Chunk chunk) {
