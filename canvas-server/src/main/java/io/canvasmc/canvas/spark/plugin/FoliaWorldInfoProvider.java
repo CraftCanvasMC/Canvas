@@ -177,19 +177,25 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
     @Override
     public GameRulesResult pollGameRules() {
         GameRulesResult data = new GameRulesResult();
-        List<World> worlds = this.server.getWorlds();
-        if (worlds.isEmpty()) return data;
 
-        for (GameRule<?> rule : Registry.GAME_RULE) {
-            String name = rule.getKey().value();
-            data.putDefault(name, Objects.toString(rule.getDefaultValue()));
-        }
+        boolean addDefaults = true; // add defaults in the first iteration
+        for (World world : this.server.getWorlds()) {
+            for (String gameRule : world.getGameRules()) {
+                GameRule<?> ruleObj = GameRule.getByName(gameRule);
+                if (ruleObj == null) {
+                    continue;
+                }
 
-        for (World world : worlds) {
-            for (GameRule<?> rule : Registry.GAME_RULE) {
-                String name = rule.getKey().value();
-                data.put(name, world.getName(), Objects.toString(world.getGameRuleValue(rule)));
+                if (addDefaults) {
+                    Object defaultValue = world.getGameRuleDefault(ruleObj);
+                    data.putDefault(gameRule, Objects.toString(defaultValue));
+                }
+
+                Object value = world.getGameRuleValue(ruleObj);
+                data.put(gameRule, world.getName(), Objects.toString(value));
             }
+
+            addDefaults = false;
         }
 
         return data;
