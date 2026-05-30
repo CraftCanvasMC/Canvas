@@ -28,6 +28,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.GameRule;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftChunk;
@@ -174,34 +176,27 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         }
 
         return worldName
-            + " [region=" + stats.id()
-            + " | " + String.format("%.1f", stats.tps()) + "tps"
-            + " " + String.format("%.2f", stats.mspt()) + "ms"
-            + " " + String.format("%.1f", stats.util()) + "%]";
+            + " [ TPS: " + String.format("%.1f", stats.tps())
+            + " - MSPT: " + String.format("%.2f", stats.mspt()) + "ms"
+            + " - Util: " + String.format("%.2f", stats.util() * 100.0) + "% ]";
     }
 
     @Override
     public GameRulesResult pollGameRules() {
         GameRulesResult data = new GameRulesResult();
+        List<World> worlds = this.server.getWorlds();
+        if (worlds.isEmpty()) return data;
 
-        boolean addDefaults = true; // add defaults in the first iteration
-        for (World world : this.server.getWorlds()) {
-            for (String gameRule : world.getGameRules()) {
-                GameRule<?> ruleObj = GameRule.getByName(gameRule);
-                if (ruleObj == null) {
-                    continue;
-                }
+        for (GameRule<?> rule : Registry.GAME_RULE) {
+            String name = rule.getKey().value();
+            data.putDefault(name, Objects.toString(rule.getDefaultValue()));
+        }
 
-                if (addDefaults) {
-                    Object defaultValue = world.getGameRuleDefault(ruleObj);
-                    data.putDefault(gameRule, Objects.toString(defaultValue));
-                }
-
-                Object value = world.getGameRuleValue(ruleObj);
-                data.put(gameRule, world.getName(), Objects.toString(value));
+        for (World world : worlds) {
+            for (GameRule<?> rule : Registry.GAME_RULE) {
+                String name = rule.getKey().value();
+                data.put(name, world.getName(), Objects.toString(world.getGameRuleValue(rule)));
             }
-
-            addDefaults = false;
         }
 
         return data;
