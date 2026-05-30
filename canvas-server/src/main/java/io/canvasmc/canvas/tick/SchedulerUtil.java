@@ -237,6 +237,7 @@ public class SchedulerUtil {
     }
 
     public static final class NullHandler implements SchedulerHandler {
+
         @Override
         public boolean isRunningRegionProfiler() {
             return false;
@@ -269,6 +270,7 @@ public class SchedulerUtil {
     }
 
     public static final class AffinityHandler implements SchedulerHandler {
+
         @Override
         public boolean isRunningRegionProfiler() {
             return RegionProfiler.isProfiling();
@@ -285,10 +287,13 @@ public class SchedulerUtil {
 
         @Override
         public void tryTransferPinningState(final TickRegionScheduler.@NonNull RegionScheduleHandle from, final TickRegionScheduler.RegionScheduleHandle to) {
-            if (!isRunningRegionProfiler() || !(TickRegions.getScheduler().scheduler instanceof AffinitySchedulerThreadPool affinitySchedulerThreadPool)) {
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state == null || state.regionScheduleHandle() != from) {
                 return;
             }
-            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = affinitySchedulerThreadPool.getCurrentTickThreadRunner();
+            // if we made it here, the "from" is the profiling region currently. we COULD be on the owning tick runner,
+            // however this can be done async(which is mean) so we just get the thread from the state
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
             // if not linked to the previous, don't try and change
             if (!threadRunner.isLinkedTo(from)) return;
             threadRunner.unlink();

@@ -531,7 +531,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
             STATE_HANDLE.setVolatile(this, state);
         }
 
-        private static record TickThreadRunnerState(ScheduledState stateTarget, int state) {}
+        private record TickThreadRunnerState(ScheduledState stateTarget, int state) {}
 
         public TickThreadRunner(final int id, final AffinitySchedulerThreadPool scheduler, final int affinity) {
             this.id = id;
