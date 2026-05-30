@@ -440,6 +440,8 @@ public class WorldConfig extends Part {
             public boolean reduceHomePoiSearchRange = false;
             public boolean reduceMeetingPointPoiSearchRange = false;
         }
+
+        public boolean experienceOrbsAreFireResistant = false;
     }
 
     public Combat combat = new Combat();
