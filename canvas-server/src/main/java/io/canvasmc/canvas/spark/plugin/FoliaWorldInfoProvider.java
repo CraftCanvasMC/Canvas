@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.spark.plugin;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
+import ca.spottedleaf.moonrise.common.time.TickData;
 import io.canvasmc.canvas.spark.FoliaSparkPlugin;
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
 import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
@@ -8,8 +9,10 @@ import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -17,7 +20,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
-import me.lucko.spark.paper.common.platform.world.AbstractChunkInfo;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
 import net.minecraft.server.level.ServerLevel;
@@ -26,6 +28,8 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.GameRule;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftChunk;
@@ -34,6 +38,7 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 public class FoliaWorldInfoProvider implements WorldInfoProvider {
     private final FoliaSparkPlugin plugin;
@@ -136,21 +141,35 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             else return new ChunksResult<>(); // global tick, doesn't own chunks
         }
 
-        // non-specific region profiler, just fetch everything (god I hate this)
         for (World world : this.server.getWorlds()) {
-            Chunk[] chunks = world.getLoadedChunks();
+            final ServerLevel level = ((CraftWorld) world).getHandle();
+            final Map<Long, List<FoliaChunkInfo>> byRegion = new HashMap<>();
+            final Map<Long, ChunkRegionCenter> centerByRegion = new HashMap<>();
+            final String worldKey = world.key().asMinimalString().replace('/', '_').replace(':', '_');
+            final String worldCapitalized = worldKey.substring(0, 1).toUpperCase(Locale.ROOT) + worldKey.substring(1);
 
-            List<FoliaChunkInfo> list = new ArrayList<>(chunks.length);
-            for (Chunk chunk : chunks) {
-                if (chunk != null) {
-                    list.add(new FoliaChunkInfo(chunk, world, this.plugin));
-                }
+            for (Chunk chunk : world.getLoadedChunks()) {
+                if (chunk == null) continue;
+                final ChunkRegionCenter center = FoliaChunkInfo.resolveRegionCenter(level, chunk.getX(), chunk.getZ(), centerByRegion);
+                final FoliaChunkInfo info = new FoliaChunkInfo(chunk, world, this.plugin, center);
+                byRegion.computeIfAbsent(center.id(), k -> new ArrayList<>()).add(info);
             }
 
-            data.put(world.getName(), list);
+            for (Map.Entry<Long, List<FoliaChunkInfo>> entry : byRegion.entrySet()) {
+                final ChunkRegionCenter center = centerByRegion.getOrDefault(entry.getKey(), ChunkRegionCenter.UNKNOWN);
+                data.put(buildRegionKey(worldCapitalized, center), entry.getValue());
+            }
         }
 
         return data;
+    }
+
+    private static String buildRegionKey(String worldCapitalized, ChunkRegionCenter center) {
+        if (center.id() == -1L) {
+            return worldCapitalized + " [region=unknown]";
+        }
+
+        return worldCapitalized + " region at " + center.centerBlockX() + ", " + center.centerBlockZ();
     }
 
     @Override
@@ -192,14 +211,43 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             .collect(Collectors.toList());
     }
 
-    public static final class FoliaChunkInfo extends AbstractChunkInfo<EntityType> {
+    public static final class FoliaChunkInfo extends AbstractFoliaChunkInfo<EntityType> {
         private final CompletableFuture<CountMap<EntityType>> entityCounts;
 
         FoliaChunkInfo(@NonNull Chunk chunk, World world, FoliaSparkPlugin plugin) {
-            super(chunk.getX(), chunk.getZ());
+            this(chunk, world, plugin,
+                resolveRegionCenter(
+                    ((CraftWorld) world).getHandle(),
+                    chunk.getX(),
+                    chunk.getZ(),
+                    new HashMap<>()
+                ));
+        }
+
+        FoliaChunkInfo(@NonNull Chunk chunk, World world, FoliaSparkPlugin plugin, ChunkRegionCenter center) {
+            super(chunk.getX(), chunk.getZ(), center);
 
             Executor executor = task -> RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(((CraftWorld) world).getHandle(), getX(), getZ(), task, Priority.BLOCKING);
             this.entityCounts = CompletableFuture.supplyAsync(() -> calculate(chunk), executor);
+        }
+
+        private static ChunkRegionCenter resolveRegionCenter(@NonNull ServerLevel level, int chunkX, int chunkZ, @NonNull Map<Long, ChunkRegionCenter> cache) {
+            final var region = level.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
+
+            if (region == null) return ChunkRegionCenter.UNKNOWN;
+            final long id = region.id;
+            final ChunkRegionCenter cached = cache.get(id);
+            if (cached != null) return cached;
+
+            final ChunkPos center = region.getCenterChunk();
+            if (center == null) {
+                return ChunkRegionCenter.UNKNOWN;
+            }
+
+            final ChunkRegionCenter regionCenter = new ChunkRegionCenter(id, center.getMiddleBlockX(), center.getMiddleBlockZ());
+            cache.put(id, regionCenter);
+
+            return regionCenter;
         }
 
         private @NonNull CountMap<EntityType> calculate(@NonNull Chunk chunk) {
