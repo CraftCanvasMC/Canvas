@@ -215,7 +215,12 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
         FoliaChunkInfo(@NonNull Chunk chunk, World world, FoliaSparkPlugin plugin) {
             this(chunk, world, plugin,
-                resolveRegionCenter(((CraftWorld) world).getHandle(), chunk.getX(), chunk.getZ(), new HashMap<>()));
+                resolveRegionCenter(
+                    ((CraftWorld) world).getHandle(),
+                    chunk.getX(),
+                    chunk.getZ(),
+                    new HashMap<>()
+                ));
         }
 
         FoliaChunkInfo(@NonNull Chunk chunk, World world, FoliaSparkPlugin plugin, ChunkRegionCenter center) {
@@ -226,7 +231,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         }
 
         private static ChunkRegionCenter resolveRegionCenter(@NonNull ServerLevel level, int chunkX, int chunkZ, @NonNull Map<Long, ChunkRegionCenter> cache) {
-            final var region = level.regioniser.getRegionAtSynchronised(chunkX, chunkZ);
+            final var region = level.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
 
             if (region == null) return ChunkRegionCenter.UNKNOWN;
             final long id = region.id;
@@ -234,10 +239,11 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             if (cached != null) return cached;
 
             final ChunkPos center = region.getCenterChunk();
-            final int centerBlockX = center != null ? center.x() * 16 + 8 : 0;
-            final int centerBlockZ = center != null ? center.z() * 16 + 8 : 0;
+            if (center == null) {
+                return ChunkRegionCenter.UNKNOWN;
+            }
 
-            final ChunkRegionCenter regionCenter = new ChunkRegionCenter(id, centerBlockX, centerBlockZ);
+            final ChunkRegionCenter regionCenter = new ChunkRegionCenter(id, center.getMiddleBlockX(), center.getMiddleBlockZ());
             cache.put(id, regionCenter);
 
             return regionCenter;
