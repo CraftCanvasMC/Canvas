@@ -145,7 +145,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             final ServerLevel level = ((CraftWorld) world).getHandle();
             final Map<Long, List<FoliaChunkInfo>> byRegion = new HashMap<>();
             final Map<Long, ChunkRegionCenter> centerByRegion = new HashMap<>();
-            final String worldKey = world.getKey().asMinimalString().replace('/', '_').replace(':', '_');
+            final String worldKey = world.key().asMinimalString().replace('/', '_').replace(':', '_');
             final String worldCapitalized = worldKey.substring(0, 1).toUpperCase(Locale.ROOT) + worldKey.substring(1);
 
             for (Chunk chunk : world.getLoadedChunks()) {
