@@ -145,6 +145,8 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             final ServerLevel level = ((CraftWorld) world).getHandle();
             final Map<Long, List<FoliaChunkInfo>> byRegion = new HashMap<>();
             final Map<Long, ChunkRegionCenter> centerByRegion = new HashMap<>();
+            final String worldKey = world.getKey().getKey();
+            final String worldCapitalized = worldKey.substring(0, 1).toUpperCase(Locale.ROOT) + worldKey.substring(1);
 
             for (Chunk chunk : world.getLoadedChunks()) {
                 if (chunk == null) continue;
@@ -155,20 +157,18 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
             for (Map.Entry<Long, List<FoliaChunkInfo>> entry : byRegion.entrySet()) {
                 final ChunkRegionCenter center = centerByRegion.getOrDefault(entry.getKey(), ChunkRegionCenter.UNKNOWN);
-                data.put(buildRegionKey(world, center), entry.getValue());
+                data.put(buildRegionKey(worldCapitalized, center), entry.getValue());
             }
         }
 
         return data;
     }
 
-    private static String buildRegionKey(World world, ChunkRegionCenter center) {
-        String worldKey = world.getKey().getKey();
+    private static String buildRegionKey(String worldCapitalized, ChunkRegionCenter center) {
         if (center.id() == -1L) {
-            return worldKey + " [region=unknown]";
+            return worldCapitalized + " [region=unknown]";
         }
 
-        final String worldCapitalized = worldKey.substring(0, 1).toUpperCase(Locale.ROOT) + worldKey.substring(1);
         return worldCapitalized + " region at " + center.centerBlockX() + ", " + center.centerBlockZ();
     }
 
