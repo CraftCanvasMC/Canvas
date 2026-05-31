@@ -1,7 +1,5 @@
 package me.lucko.spark.paper.common.platform.world;
 
-import io.canvasmc.canvas.GlobalConfiguration;
-import io.canvasmc.canvas.spark.plugin.AbstractFoliaChunkInfo;
 import me.lucko.spark.paper.proto.SparkProtos.WorldStatistics;
 import org.jetbrains.annotations.VisibleForTesting;
 
@@ -16,6 +14,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Source: <a href="https://github.com/lucko/spark/blob/6c7e414530425da7e167f0060cc0a67d4771f3f9/spark-common/src/main/java/me/lucko/spark/common/platform/world/WorldStatisticsProvider.java">WorldStatisticsProvider.java</a>
+ */
 public class WorldStatisticsProvider {
     private final AsyncWorldInfoProvider provider;
 
@@ -38,7 +39,7 @@ public class WorldStatisticsProvider {
             WorldStatistics.World.Builder builder = WorldStatistics.World.newBuilder();
             builder.setName(worldName);
 
-            List<Region> regions = groupIntoRegions(worldName, chunks);
+            List<Region> regions = groupIntoRegions(worldName, chunks); // Canvas - pass worldName to groupIntoRegions
 
             int total = 0;
 
@@ -108,6 +109,7 @@ public class WorldStatisticsProvider {
     }
 
     @VisibleForTesting
+    // Canvas start - pass worldName and group chunks by Folia region ID instead of Euclidean distance
     static List<Region> groupIntoRegions(String worldName, List<? extends ChunkInfo<?>> chunks) {
         Map<Long, Region> regions = new LinkedHashMap<>();
         for (ChunkInfo<?> chunk : chunks) {
@@ -117,7 +119,7 @@ public class WorldStatisticsProvider {
             }
 
             long id;
-            if (chunk instanceof AbstractFoliaChunkInfo<?> folia) {
+            if (chunk instanceof io.canvasmc.canvas.spark.plugin.AbstractFoliaChunkInfo<?> folia) {
                 id = folia.getFoliaRegionId();
             } else {
                 id = Long.MIN_VALUE;
@@ -133,6 +135,7 @@ public class WorldStatisticsProvider {
         }
 
         return new ArrayList<>(regions.values());
+        // Canvas end -  pass worldName and group chunks by Folia region ID instead of Euclidean distance
     }
 
     /**
@@ -141,10 +144,12 @@ public class WorldStatisticsProvider {
     static final class Region {
         private final Set<ChunkInfo<?>> chunks;
         private final AtomicInteger totalEntities;
-
+        // Canvas start - track world name and Folia region ID
         final String worldName;
         final long foliaRegionId;
+        // Canvas end - track world name and Folia region ID
 
+        // Canvas start - accept worldName and foliaRegionId
         private Region(String worldName, long foliaRegionId, ChunkInfo<?> initial) {
             this.worldName = worldName;
             this.foliaRegionId = foliaRegionId;
@@ -152,6 +157,7 @@ public class WorldStatisticsProvider {
             this.chunks.add(initial);
             this.totalEntities = new AtomicInteger(initial.getEntityCounts().total().get());
         }
+        // Canvas end - accept worldName and foliaRegionId
 
         public Set<ChunkInfo<?>> getChunks() {
             return this.chunks;
@@ -166,9 +172,11 @@ public class WorldStatisticsProvider {
             this.totalEntities.addAndGet(chunk.getEntityCounts().total().get());
         }
 
+        // Canvas start - expose Folia region ID
         public long getFoliaRegionId() {
             return foliaRegionId;
         }
+        // Canvas end - expose Folia region ID
     }
 
     static final class ChunkCoordinate implements Comparable<ChunkCoordinate> {
