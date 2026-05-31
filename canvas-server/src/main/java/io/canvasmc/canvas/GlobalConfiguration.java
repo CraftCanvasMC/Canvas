@@ -40,7 +40,7 @@ import org.slf4j.LoggerFactory;
 public class GlobalConfiguration extends Part {
 
     private static final Path CONFIG_PATH = Path.of("config/canvas-server.yml").toAbsolutePath().normalize();
-    private static final String BROADCAST_PERMISSION = "canvas.broadcasting.reciever";
+    private static final String BROADCAST_PERMISSION = "canvas.broadcasting.receiver";
 
     protected static final int CHAR_LIM = 90;
 
@@ -473,7 +473,7 @@ public class GlobalConfiguration extends Part {
                     "consume major amounts of network usage, often being up to 60% on large production servers",
                     "This option filters the unnecessary packets sent, while still maintaining Vanilla visual effects"
                 );
-            option("filterMovePackets").docs("Filters useless move packets that dont need to be sent");
+            option("filterMovePackets").docs("Filters useless move packets that don't need to be sent");
 
             option("alternativePlayerListTick").docs("Splits players into buckets to be spread evenly across the playerlist tick");
             option("playerInfoSendInterval")
