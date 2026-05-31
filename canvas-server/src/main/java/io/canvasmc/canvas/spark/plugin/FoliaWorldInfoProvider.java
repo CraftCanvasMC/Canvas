@@ -155,19 +155,20 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
             for (Map.Entry<Long, List<FoliaChunkInfo>> entry : byRegion.entrySet()) {
                 final ChunkRegionCenter center = centerByRegion.getOrDefault(entry.getKey(), ChunkRegionCenter.UNKNOWN);
-                data.put(buildRegionKey(world.getName(), center), entry.getValue());
+                data.put(buildRegionKey(world, center), entry.getValue());
             }
         }
 
         return data;
     }
 
-    private static String buildRegionKey(String worldName, ChunkRegionCenter center) {
+    private static String buildRegionKey(World world, ChunkRegionCenter center) {
+        String worldKey = world.getKey().getKey();
         if (center.id() == -1L) {
-            return worldName + " [region=unknown]";
+            return worldKey + " [region=unknown]";
         }
 
-        final String worldCapitalized = worldName.substring(0, 1).toUpperCase(Locale.ROOT) + worldName.substring(1);
+        final String worldCapitalized = worldKey.substring(0, 1).toUpperCase(Locale.ROOT) + worldKey.substring(1);
         return worldCapitalized + " region at " + center.centerBlockX() + ", " + center.centerBlockZ();
     }
 
