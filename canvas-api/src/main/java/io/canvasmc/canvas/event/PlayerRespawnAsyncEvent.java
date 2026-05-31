@@ -42,8 +42,8 @@ public class PlayerRespawnAsyncEvent extends AbstractRespawnEvent {
      *     new location for the respawn
      */
     public void setRespawnLocation(Location respawnLocation) {
-        Preconditions.checkArgument(respawnLocation != null, "Respawn location can not be null");
-        Preconditions.checkArgument(respawnLocation.getWorld() != null, "Respawn world can not be null");
+        Preconditions.checkArgument(respawnLocation != null, "Respawn location cannot be null");
+        Preconditions.checkArgument(respawnLocation.getWorld() != null, "Respawn world cannot be null");
 
         this.respawnLocation = respawnLocation.clone();
     }

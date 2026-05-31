@@ -192,7 +192,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
         return this.join(msToWait, true);
     }
 
-    private boolean join(final long msToWait, final boolean interruptable) throws InterruptedException {
+    private boolean join(final long msToWait, final boolean interruptible) throws InterruptedException {
         final long nsToWait = TimeUnit.MILLISECONDS.toNanos(msToWait);
         final long start = System.nanoTime();
         final long deadline = start + nsToWait;
@@ -211,7 +211,7 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
                             thread.join();
                         }
                     } catch (final InterruptedException ex) {
-                        if (interruptable) {
+                        if (interruptible) {
                             throw ex;
                         }
                         interrupted = true;

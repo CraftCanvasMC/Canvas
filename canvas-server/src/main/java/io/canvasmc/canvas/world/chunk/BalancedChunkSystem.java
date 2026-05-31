@@ -121,7 +121,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         return this.join(msToWait, true);
     }
 
-    private boolean join(final long msToWait, final boolean interruptable) throws InterruptedException {
+    private boolean join(final long msToWait, final boolean interruptible) throws InterruptedException {
         synchronized (this) {
             if (!this.shutdown) {
                 throw new IllegalStateException("Attempting to join on non-shutdown pool");
@@ -147,7 +147,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                             thread.thread.join();
                         }
                     } catch (final InterruptedException ex) {
-                        if (interruptable) {
+                        if (interruptible) {
                             throw ex;
                         }
                         interrupted = true;
