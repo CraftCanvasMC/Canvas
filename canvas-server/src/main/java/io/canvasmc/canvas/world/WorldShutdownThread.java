@@ -54,6 +54,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
         super(worldName + " shutdown thread");
         this.setUncaughtExceptionHandler((_, thrown) -> {
             LOGGER.error("Error shutting down world {}", worldName, thrown);
+            MinecraftServer.getServer().stopServer();
         });
 
         this.debugName = worldName;
@@ -61,7 +62,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
         this.theWaiter = theWaiter;
 
         // we set this because frankly, we don't want to log everything
-        super.LOGGER = new SilentLogger();
+        // super.LOGGER = new SilentLogger(); // TODO - we just want errors only
     }
 
     private String getWorldName() {
@@ -103,6 +104,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
             haltChunkSystem(this.level);
         } catch (final Throwable thrown) {
             LOGGER.error("Failed to halt chunk system for {}", getWorldName(), thrown);
+            throw thrown;
         }
 
         boolean processedAnyTeleports = false;
@@ -175,6 +177,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
             }
         } catch (final Throwable thrown) {
             LOGGER.error("Failed to save chunks in {}", getWorldName(), thrown);
+            throw thrown;
         } finally {
             LOGGER.info("Saved chunks in {}", getWorldName());
         }
