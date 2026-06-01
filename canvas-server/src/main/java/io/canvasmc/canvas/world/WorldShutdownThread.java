@@ -3,7 +3,6 @@ package io.canvasmc.canvas.world;
 import com.google.common.base.Preconditions;
 import com.mojang.logging.LogUtils;
 import io.canvasmc.canvas.util.ServerLocation;
-import io.canvasmc.canvas.util.SilentLogger;
 import io.papermc.paper.threadedregions.RegionShutdownThread;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
