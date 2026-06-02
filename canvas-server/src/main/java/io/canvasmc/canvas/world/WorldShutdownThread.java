@@ -152,7 +152,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
                 else {
                     // if the player isn't removed yet, they are still processing
                     // the initial teleport/portal, so we should delay this a bit
-                    RegionizedServer.getInstance().addTask(() -> {
+                    RegionizedServer.getInstance().blockOn(() -> {
                         teleportPlayer(entityPlayer, teleportingFrom);
                     });
                 }
