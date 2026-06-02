@@ -3,6 +3,7 @@ package io.canvasmc.canvas.world;
 import com.google.common.base.Preconditions;
 import com.mojang.logging.LogUtils;
 import io.canvasmc.canvas.util.ServerLocation;
+import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.threadedregions.RegionShutdownThread;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
@@ -48,7 +49,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
         final @NonNull ServerLevel level,
         final Supplier<List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>> theWaiter
     ) {
-        final String worldName = level.dimension().identifier().toDebugFileName();
+        final String worldName = Util.getWorldName(level);
 
         super(worldName + " shutdown thread");
         this.setUncaughtExceptionHandler((_, thrown) -> {
