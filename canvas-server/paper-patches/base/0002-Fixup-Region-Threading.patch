@@ -4,6 +4,106 @@ Date: Tue, 21 Apr 2026 19:46:53 -0700
 Subject: [PATCH] Fixup Region Threading
 
 
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+index 9933517d4671d46530c840b14f559f382c7f46ab..839f6509adf0e810ff7bbab3c826857e38e8ce5c 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+@@ -147,7 +147,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static boolean isShutdownThread() {
+-        return Thread.currentThread().getClass() == RegionShutdownThread.class;
++        return Thread.currentThread() instanceof RegionShutdownThread; // Canvas - region threading
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final BlockPos pos) {
+@@ -171,10 +171,19 @@ public class TickThread extends Thread {
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final int chunkX, final int chunkZ) {
+-        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+-            TickRegionScheduler.getCurrentRegion();
++        // Canvas start - optimize thread check
++        final Thread thread = Thread.currentThread();
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
++        if (!(thread instanceof io.papermc.paper.threadedregions.TickRegionScheduler.TickThreadRunner threadRunner)) {
++            if (thread instanceof RegionShutdownThread shutdownThread) {
++                region = shutdownThread.shuttingDown;
++            }
++            else region = null;
++        }
++        else region = threadRunner.currentTickingRegion;
++        // Canvas end - optimize thread check
+         if (region == null) {
+-            return isShutdownThread();
++            return thread instanceof RegionShutdownThread; // Canvas - optimize thread check
+         }
+         return ((net.minecraft.server.level.ServerLevel)world).regioniser.getRegionAtUnsynchronised(chunkX, chunkZ) == region;
+     }
+@@ -209,10 +218,19 @@ public class TickThread extends Thread {
+     }
+ 
+     public static boolean isTickThreadFor(final Level world, final int fromChunkX, final int fromChunkZ, final int toChunkX, final int toChunkZ) {
+-        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+-            TickRegionScheduler.getCurrentRegion();
++        // Canvas start - optimize thread check
++        final Thread thread = Thread.currentThread();
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
++        if (!(thread instanceof io.papermc.paper.threadedregions.TickRegionScheduler.TickThreadRunner threadRunner)) {
++            if (thread instanceof RegionShutdownThread shutdownThread) {
++                region = shutdownThread.shuttingDown;
++            }
++            else region = null;
++        }
++        else region = threadRunner.currentTickingRegion;
++        // Canvas end - optimize thread check
+         if (region == null) {
+-            return isShutdownThread();
++            return thread instanceof RegionShutdownThread; // Canvas - optimize thread check
+         }
+ 
+         final int shift = ((net.minecraft.server.level.ServerLevel)world).regioniser.sectionChunkShift;
+@@ -243,10 +261,19 @@ public class TickThread extends Thread {
+         if (entity == null) {
+             return true;
+         }
+-        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+-            TickRegionScheduler.getCurrentRegion();
++        // Canvas start - optimize thread check
++        final Thread thread = Thread.currentThread();
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
++        if (!(thread instanceof io.papermc.paper.threadedregions.TickRegionScheduler.TickThreadRunner threadRunner)) {
++            if (thread instanceof RegionShutdownThread shutdownThread) {
++                region = shutdownThread.shuttingDown;
++            }
++            else region = null;
++        }
++        else region = threadRunner.currentTickingRegion;
++        // Canvas end - optimize thread check
+         if (region == null) {
+-            if (RegionizedServer.isGlobalTickThread()) {
++            if (thread instanceof io.papermc.paper.threadedregions.TickRegionScheduler.TickThreadRunner threadRunner && RegionizedServer.getGlobalTickData() == threadRunner.currentTickingTask) { // Canvas - optimize thread check
+                 if (entity instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+                     final net.minecraft.server.network.ServerGamePacketListenerImpl possibleBad = serverPlayer.connection;
+                     if (possibleBad == null) {
+@@ -265,7 +292,7 @@ public class TickThread extends Thread {
+                     return false;
+                 }
+             }
+-            if (isShutdownThread()) {
++            if (thread instanceof RegionShutdownThread) { // Canvas - optimize thread check
+                 return true;
+             }
+             if (entity instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+@@ -286,7 +313,7 @@ public class TickThread extends Thread {
+             return false;
+         }
+ 
+-        final RegionizedWorldData worldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        final RegionizedWorldData worldData = region.getData().world.worldRegionData.get(); // Canvas - optimize thread check
+ 
+         // pass through the check if the entity is removed and we own its chunk
+         if (worldData.hasEntity(entity)) {
 diff --git a/src/main/java/io/papermc/paper/SparksFly.java b/src/main/java/io/papermc/paper/SparksFly.java
 index b332645ed65928100f580221d8a9948bc77e362e..8cfabe08364d14db1c7c28b814e69f38a8d490a9 100644
 --- a/src/main/java/io/papermc/paper/SparksFly.java
@@ -45,10 +145,29 @@ index b332645ed65928100f580221d8a9948bc77e362e..8cfabe08364d14db1c7c28b814e69f38
  
      public static final class CommandImpl extends Command {
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 825d69075ef95586d187e79eea0fc200aaf888bb..d22e47d66e67277b864fd205a0c0e446dacf27ab 100644
+index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc9388f35a 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -1203,7 +1203,7 @@ public final class CraftServer implements Server {
+@@ -380,6 +380,18 @@ public final class CraftServer implements Server {
+         return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((org.bukkit.craftbukkit.entity.CraftEntity) entity).getHandleRaw());
+     }
+ 
++    // Canvas start - expand region threading api
++    @Override
++    public boolean isOwnedByCurrentRegion(@org.jspecify.annotations.NonNull final World world, final org.bukkit.util.@org.jspecify.annotations.NonNull BoundingBox aabb) {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((CraftWorld) world).getHandle(), new net.minecraft.world.phys.AABB(aabb.getMinX(), aabb.getMinY(), aabb.getMinZ(), aabb.getMaxX(), aabb.getMaxY(), aabb.getMaxZ()));
++    }
++
++    @Override
++    public boolean isOwnedByCurrentRegion(@org.jspecify.annotations.NonNull final Location position, final org.bukkit.util.@org.jspecify.annotations.NonNull Vector velocity, final int buffer) {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((CraftWorld) position.getWorld()).getHandle(), CraftLocation.toVec3(position), org.bukkit.craftbukkit.util.CraftVector.toVec3(velocity), buffer);
++    }
++
++    // Canvas end - expand region threading api
+     @Override
+     public final boolean isGlobalTickThread() {
+         return io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread(); // Folia - region threading API
+@@ -1203,7 +1215,7 @@ public final class CraftServer implements Server {
  
      @Override
      public World createWorld(WorldCreator creator) {
@@ -57,7 +176,7 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..d22e47d66e67277b864fd205a0c0e446
          Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
          //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
          Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
-@@ -1345,6 +1345,67 @@ public final class CraftServer implements Server {
+@@ -1345,6 +1357,121 @@ public final class CraftServer implements Server {
  
          return serverLevel.getWorld();
      }
@@ -84,6 +203,14 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..d22e47d66e67277b864fd205a0c0e446
 +        ServerLevel handle = ((CraftWorld) world).getHandle();
 +        try {
 +            handle.canvas$obtainWorldStageLock();
++
++            // after obtaining locks, check preconditions required by bukkit
++            // this includes:
++            // - not already unloading
++            // - not overworld
++            // - isn't in shutdown
++            // - no players in the world
++
 +            if (handle.canvas$unloadTicket.isPresent()) {
 +                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_ALREADY_UNLOADING);
 +                return;
@@ -96,23 +223,69 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..d22e47d66e67277b864fd205a0c0e446
 +                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_IS_SHUTDOWN);
 +                return;
 +            }
++
++            // kinda a funky one, but we have to ensure no players
++            // are actively joining into this world, since they can be stuck
++            // in limbo on login if they are joining an unloading world
++
 +            if (!handle.canvas$joiningPlayers.isEmpty()) {
 +                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_JOINING);
 +                return;
 +            }
++
++            // we check every single player here, since if a player is cross-region teleporting
++            // but in the same world, they get removed from ServerLevel#players, but we don't
++            // change the level in ServerPlayer, so ServerPlayer is a safe place to check this
++
 +            for (final net.minecraft.server.level.ServerPlayer player : console.getPlayerList().players) {
 +                if (player.level() == handle) {
 +                    callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_PRESENT);
 +                    return;
 +                }
 +            }
++
++            // call unload async event
++
 +            if (!new io.canvasmc.canvas.event.world.WorldUnloadAsyncEvent(handle.getWorld()).callEvent()) {
 +                callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNLOAD_EVENT);
 +                return;
 +            }
 +
-+            net.minecraft.server.MinecraftServer.LOGGER.info("Marking world '{}' for unload", world.getName());
++            // propagate the unload ticket for regions to start descheduling
 +            handle.canvas$unloadTicket.propagate(new io.canvasmc.canvas.util.ticket.UnloadTicket(callback, save));
++
++            final io.canvasmc.canvas.world.WorldShutdownThread worldShutdownThread = new io.canvasmc.canvas.world.WorldShutdownThread(
++                handle, () -> {
++                    List<io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>>
++                        regions = new ArrayList<>();
++                    handle.regioniser.computeForAllRegions(regions::add);
++
++                    waiter:
++                    for (;;) {
++                        java.util.concurrent.locks.LockSupport.parkNanos("waiting on next pass", 1_000_000);
++
++                        // check for alive regions, if we have one, continue waiting
++                        boolean hasAliveRegion = false;
++
++                        checker:
++                        for (final io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> region : regions) {
++                            if (!region.getData().getRegionSchedulingHandle().isMarkedAsNonSchedulable()) {
++                                hasAliveRegion = true;
++                                break checker;
++                            }
++                        }
++
++                        if (!hasAliveRegion) {
++                            break waiter;
++                        }
++                    }
++
++                    return regions;
++                }
++            );
++
++            // start shutdown thread
++            worldShutdownThread.start();
 +        } catch (Throwable thrown) {
 +            MinecraftServer.LOGGER.error("Failed to prepare unload for world", thrown);
 +            callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_UNKNOWN);
@@ -125,6 +298,31 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..d22e47d66e67277b864fd205a0c0e446
  
      @Override
      public boolean unloadWorld(String name, boolean save) {
+@@ -3095,4 +3222,24 @@ public final class CraftServer implements Server {
+         }
+     }
+     // Folia end - region TPS API
++    // Canvas start - region threading
++    // note: in impl the world is provided, same as 'getWorld()'
++    @Override
++    public <T> io.canvasmc.canvas.region.RegionTickData.@NotNull IRegionizedData<T> createRegionizedData(java.util.function.@NotNull BiFunction<io.canvasmc.canvas.region.RegionTickData, org.bukkit.World, T> supplier, io.canvasmc.canvas.region.RegionTickData.IRegionizedData.IRegionizedCallback<T> callback) {
++        return io.papermc.paper.threadedregions.TickRegions.TickRegionData.createRegionizedDataApiHandle(supplier, callback);
++    }
++
++    @Override
++    public <T> T getLocalRegionizedData(final io.canvasmc.canvas.region.RegionTickData.IRegionizedData<T> regionizedData) {
++        io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>
++            region = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion();
++        if (region == null) throw new IllegalStateException("Must be on a tick thread runner that currently owns a region");
++        return region.getData().getOrCreateFromIRegionizedData(regionizedData);
++    }
++
++    @Override
++    public io.canvasmc.canvas.region.RegionThreadingTickManager getRegionThreadingTickRateManager() {
++        return io.canvasmc.canvas.tick.ServerRegionTickManager.API_INSTANCE;
++    }
++    // Canvas end - region threading
+ }
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java b/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
 index f147590110205f9896c4dea2e88c4169bd20fabf..1c94a6eb624a5f366803a93e94d1ad855b40c219 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServerTickManager.java
@@ -220,6 +418,42 @@ index f147590110205f9896c4dea2e88c4169bd20fabf..1c94a6eb624a5f366803a93e94d1ad85
 -        return this.manager.frozenTicksToRun();
 +        throw new UnsupportedOperationException("Not supported in region threading"); // Canvas - region threading
      }
+ }
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index 0eeef1e8ab14f25db5089e4d389ef7e49eed6d0f..e4fe4cbcf68daaa3a9dafc5fb915a15e2a1ff973 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -1152,12 +1152,13 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+     public void save(boolean flush) {
+         org.spigotmc.AsyncCatcher.catchOp("world save"); // Spigot
+         this.server.checkSaveState();
+-        boolean oldSave = this.world.noSave;
+-
+-        this.world.noSave = false;
+-        this.world.save(null, flush, false);
+-
+-        this.world.noSave = oldSave;
++        // Canvas start - region threading
++        this.world.regioniser.computeForAllRegionsUnsynchronised((region) -> {
++            region.getData().canvas$saveAllTicket.propagate(
++                new io.canvasmc.canvas.util.ticket.SaveAllTicket(() -> {}, (thrown) -> net.minecraft.server.MinecraftServer.LOGGER.error("Failed to save region", thrown), flush)
++            );
++        });
++        // Canvas end - region threading
+     }
+ 
+     @Override
+@@ -2093,4 +2094,11 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+         return POINTERS_SUPPLIER.view(this);
+     }
+     // Paper end
++    // Canvas start - region threading
++
++    @Override
++    public io.canvasmc.canvas.region.@org.jspecify.annotations.NonNull WorldRegionizer getRegionizer() {
++        return this.world.regioniser;
++    }
++    // Canvas end - region threading
  }
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
 index 58d7cdd484b76cfbd7123f1f88e70eb2e51c87f9..9ec6b1f853f6ef9a4c9df48d129156154d18e146 100644

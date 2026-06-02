@@ -1,5 +1,7 @@
 package io.canvasmc.canvas.util;
 
+import com.google.common.base.Preconditions;
+import io.canvasmc.canvas.ClientV2;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -13,14 +15,14 @@ import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
-import com.google.common.base.Preconditions;
-import io.canvasmc.canvas.ClientV2;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.Style;
 import net.kyori.adventure.text.format.TextColor;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.LegacyRandomSource;
 import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
@@ -138,6 +140,24 @@ public class Util {
             builder.append(text(c, gradient.nextColor()));
         }
         return builder.build();
+    }
+
+    /**
+     * Gets the world name used internally by Canvas, this does not match Bukkit. This matches the
+     * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
+     * part at the start of the string if the namespace is {@code minecraft}.
+     *
+     * @param level
+     *     the world
+     *
+     * @return the world name used by Canvas internals
+     */
+    public static String getWorldName(final @NonNull Level level) {
+        final Identifier dimensionId = level.dimension().identifier();
+        if (dimensionId.getNamespace().equalsIgnoreCase("minecraft")) {
+            return dimensionId.getPath().replace('/', '_').replace(':', '_');
+        }
+        return dimensionId.toDebugFileName();
     }
 
     public static final class Gradient {
