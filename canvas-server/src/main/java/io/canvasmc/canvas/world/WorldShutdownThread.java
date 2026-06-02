@@ -140,10 +140,10 @@ public class WorldShutdownThread extends RegionShutdownThread {
         }
 
         for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().players) {
-            ServerLocation teleportingTo = entityPlayer.canvas$teleportingTo;
+            ServerLevel teleportingToDimension = entityPlayer.canvas$teleportingToDimension;
             ServerLocation teleportingFrom = entityPlayer.canvas$lastTeleportOrigin;
 
-            if (teleportingTo != null && teleportingFrom != null && teleportingTo.level() == this.level) {
+            if (teleportingToDimension != null && teleportingFrom != null && teleportingToDimension == this.level) {
                 // someone is trying to teleport here... no
 
                 if (entityPlayer.isRemoved()) {
