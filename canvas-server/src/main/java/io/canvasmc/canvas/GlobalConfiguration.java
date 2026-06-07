@@ -524,6 +524,12 @@ public class GlobalConfiguration extends Part {
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
+        option("allowUnsafeEndPortalTeleportation")
+            .docs(
+                "Allows non-player entities to use End portals through Canvas' async portal path. This enables",
+                "sand duping machines, but can cause unsafe teleportation behavior in Folia's region threading model.",
+                "See: https://github.com/PaperMC/Folia/issues/297"
+            );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
 
@@ -540,6 +546,7 @@ public class GlobalConfiguration extends Part {
     public boolean restoreVanillaEnderPearlBehavior = false;
     public boolean displayWorldLoadScreenForPortaling = true;
     public boolean displayWorldLoadScreenForTeleporting = true;
+    public boolean allowUnsafeEndPortalTeleportation = false;
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
     public boolean tileEntitySnapshotCreation = false;
     public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
