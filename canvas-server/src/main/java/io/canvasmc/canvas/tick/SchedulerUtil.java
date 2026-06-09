@@ -128,24 +128,25 @@ public class SchedulerUtil {
                 HANDLER = new AffinityHandler();
 
                 return new AffinitySchedulerThreadPool(
-                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler, enableStealing, enableAffinity, enableIntermediateTasks, (thrown) -> {
-                    TickRegionScheduler.LOGGER.error("Uncaught exception in scheduler internals", thrown);
+                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler, enableStealing, enableAffinity, enableIntermediateTasks,
+                    (thrown) -> {
+                        TickRegionScheduler.LOGGER.error("Uncaught exception in scheduler internals", thrown);
 
-                    CrashReport crashReport = CrashReport.forThrowable(thrown, "Scheduler Internal Exception");
-                    MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
-                    Path path = MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
-                    if (crashReport.saveToFile(path, ReportType.CRASH)) {
-                        TickRegionScheduler.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
-                    }
-                    else {
-                        TickRegionScheduler.LOGGER.error("We were unable to save this crash report to disk.");
-                    }
-                    // prevent further ticks from occurring
-                    // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-                    TickRegions.getScheduler().scheduler.halt();
+                        CrashReport crashReport = CrashReport.forThrowable(thrown, "Scheduler Internal Exception");
+                        MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
+                        Path path = MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
+                        if (crashReport.saveToFile(path, ReportType.CRASH)) {
+                            TickRegionScheduler.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
+                        }
+                        else {
+                            TickRegionScheduler.LOGGER.error("We were unable to save this crash report to disk.");
+                        }
+                        // prevent further ticks from occurring
+                        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
+                        TickRegions.getScheduler().scheduler.halt();
 
-                    MinecraftServer.getServer().stopServer();
-                }
+                        MinecraftServer.getServer().stopServer();
+                    }
                 );
             }
             default: {
