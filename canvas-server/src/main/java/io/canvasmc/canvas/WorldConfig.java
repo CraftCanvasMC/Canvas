@@ -416,6 +416,31 @@ public class WorldConfig extends Part {
         }
 
         {
+            option("tickIntervals")
+                .docs(
+                    "Controls how often each entity category ticks. A value of 1 means every tick, 2 means every",
+                    "other tick, 3 means every third tick, etc. Higher values reduce CPU usage for large mob farms",
+                    "and entity-dense areas but may cause noticeable AI delays. Players always tick every tick."
+                );
+        }
+
+        public TickIntervals tickIntervals = new TickIntervals();
+        public static class TickIntervals extends Part {
+            {
+                option("monster").docs("Hostile mobs (zombies, skeletons, creepers, etc.)").greaterThan(0.0F);
+                option("creature").docs("Passive animals (sheep, cows, pigs, etc.)").greaterThan(0.0F);
+                option("ambient").docs("Ambient entities (bats)").greaterThan(0.0F);
+                option("waterCreature").docs("Water creatures (squid, dolphins, fish, axolotls)").greaterThan(0.0F);
+                option("misc").docs("Miscellaneous entities (minecarts, boats, item frames, etc.)").greaterThan(0.0F);
+            }
+            public int monster = 1;
+            public int creature = 1;
+            public int ambient = 1;
+            public int waterCreature = 1;
+            public int misc = 1;
+        }
+
+        {
             option("skeletonAimAccuracy").docs("Defines the inaccuracy of skeleton bow shots. 14 is Vanilla, higher is more inaccurate and lower is more accurate");
             option("villagers")
                 .docs(
