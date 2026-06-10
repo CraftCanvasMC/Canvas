@@ -1539,7 +1539,7 @@ index 54a377f147edb24b88f72fcb0a45d337d818b128..9c13c02cf60ed472b91e269bf57015a6
              // Paper end - Expand PlayerGameModeChangeEvent
          }
 diff --git a/net/minecraft/server/ServerScoreboard.java b/net/minecraft/server/ServerScoreboard.java
-index 9bf09b888425e491072864265c8de3885154a0ba..7cb6d183be1a04c4f59b2d335fc706c1645deb9f 100644
+index 9bf09b888425e491072864265c8de3885154a0ba..24e0004e824f96b9688f408dc2297df66a0c79bb 100644
 --- a/net/minecraft/server/ServerScoreboard.java
 +++ b/net/minecraft/server/ServerScoreboard.java
 @@ -26,24 +26,45 @@ import org.jspecify.annotations.Nullable;
@@ -1624,31 +1624,33 @@ index 9bf09b888425e491072864265c8de3885154a0ba..7cb6d183be1a04c4f59b2d335fc706c1
          super.onObjectiveRemoved(objective);
          if (this.trackedObjectives.contains(objective)) {
              this.stopTrackingObjective(objective);
-@@ -189,6 +214,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -189,6 +214,8 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamAdded(final PlayerTeam team) {
 +        ensureMainThread("Cannot add player team async"); // Canvas - region threading
++        team.registerCallback(); // Canvas - region threading
          super.onTeamAdded(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true)); // CraftBukkit
          this.setDirty();
-@@ -196,6 +222,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -196,6 +223,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamChanged(final PlayerTeam team) {
-+        ensureMainThread("Cannot change player team async"); // Canvas - region threading
++        team.ensureMainThread("Cannot change player team async"); // Canvas - region threading
          super.onTeamChanged(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, false)); // CraftBukkit
          this.updateTeamWaypoints(team);
-@@ -204,6 +231,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -204,6 +232,8 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamRemoved(final PlayerTeam team) {
 +        ensureMainThread("Cannot remove player team async"); // Canvas - region threading
++        team.unregisterCallback(); // Canvas - region threading
          super.onTeamRemoved(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createRemovePacket(team)); // CraftBukkit
          this.updateTeamWaypoints(team);
-@@ -211,12 +239,14 @@ public class ServerScoreboard extends Scoreboard {
+@@ -211,12 +241,14 @@ public class ServerScoreboard extends Scoreboard {
      }
  
      protected void setDirty() {
@@ -1666,7 +1668,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..7cb6d183be1a04c4f59b2d335fc706c1
              saveData.setData(this.store());
          }
      }
-@@ -269,6 +299,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -269,6 +301,7 @@ public class ServerScoreboard extends Scoreboard {
      }
  
      public void stopTrackingObjective(final Objective objective) {
@@ -1674,7 +1676,7 @@ index 9bf09b888425e491072864265c8de3885154a0ba..7cb6d183be1a04c4f59b2d335fc706c1
          List<Packet<?>> packets = this.getStopTrackingPackets(objective);
  
          for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
-@@ -293,19 +324,23 @@ public class ServerScoreboard extends Scoreboard {
+@@ -293,19 +326,23 @@ public class ServerScoreboard extends Scoreboard {
          return count;
      }
  
@@ -5277,10 +5279,10 @@ index 18efc6c44b94d24b9f4a3a828cfba1410131c6f3..fd48ba936144841c1c983e78386e1106
      public @Nullable Score get(final Objective objective) {
          return this.scores.get(objective);
 diff --git a/net/minecraft/world/scores/PlayerTeam.java b/net/minecraft/world/scores/PlayerTeam.java
-index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf29534964b679f0 100644
+index 39e068b1b917a37d85f756f85c9f35acb0b091c4..0c48099e986b876eda2358cccfb507f620f3617f 100644
 --- a/net/minecraft/world/scores/PlayerTeam.java
 +++ b/net/minecraft/world/scores/PlayerTeam.java
-@@ -22,39 +22,22 @@ public class PlayerTeam extends Team {
+@@ -22,39 +22,38 @@ public class PlayerTeam extends Team {
      private static final int BIT_SEE_INVISIBLES = 1;
      private final Scoreboard scoreboard;
      private final String name;
@@ -5298,6 +5300,22 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
 +    private final Set<String> players = new java.util.concurrent.CopyOnWriteArraySet<>();
 +    private final io.canvasmc.canvas.util.LockedReference<io.canvasmc.canvas.world.scores.TeamData> teamData =
 +        new io.canvasmc.canvas.util.LockedReference<>(new io.canvasmc.canvas.world.scores.TeamData());
++    private final java.util.concurrent.atomic.AtomicBoolean isRegistered = new java.util.concurrent.atomic.AtomicBoolean(false);
++
++    public void ensureMainThread(final String reason) {
++        if (isRegistered.get()) {
++            this.scoreboard.ensureMainThread(reason);
++        }
++        // else, we don't care. if we aren't registered we don't need to run thread checks
++    }
++
++    public void registerCallback() {
++        isRegistered.set(true);
++    }
++
++    public void unregisterCallback() {
++        isRegistered.set(false);
++    }
 +    // Canvas end - region threading
      private final Style displayNameStyle;
  
@@ -5327,7 +5345,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      }
  
      public Scoreboard getScoreboard() {
-@@ -67,11 +50,11 @@ public class PlayerTeam extends Team {
+@@ -67,11 +66,11 @@ public class PlayerTeam extends Team {
      }
  
      public Component getDisplayName() {
@@ -5341,11 +5359,11 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
          ChatFormatting color = this.getColor();
          if (color != ChatFormatting.RESET) {
              result.withStyle(color);
-@@ -81,30 +64,37 @@ public class PlayerTeam extends Team {
+@@ -81,30 +80,37 @@ public class PlayerTeam extends Team {
      }
  
      public void setDisplayName(final Component displayName) {
-+        this.scoreboard.ensureMainThread("Cannot set display name for team async"); // Canvas - region threading
++        this.ensureMainThread("Cannot set display name for team async"); // Canvas - region threading
          if (displayName == null) {
              throw new IllegalArgumentException("Name cannot be null");
          }
@@ -5358,7 +5376,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      public void setPlayerPrefix(final @Nullable Component playerPrefix) {
 -        this.playerPrefix = playerPrefix == null ? CommonComponents.EMPTY : playerPrefix;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set player prefix for team async");
++        this.ensureMainThread("Cannot set player prefix for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setPlayerPrefix(playerPrefix == null ? CommonComponents.EMPTY : playerPrefix));
 +        // Canvas end - region threading
          this.scoreboard.onTeamChanged(this);
@@ -5372,7 +5390,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      public void setPlayerSuffix(final @Nullable Component playerSuffix) {
 -        this.playerSuffix = playerSuffix == null ? CommonComponents.EMPTY : playerSuffix;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set player suffix for team async");
++        this.ensureMainThread("Cannot set player suffix for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setPlayerSuffix(playerSuffix == null ? CommonComponents.EMPTY : playerSuffix));
 +        // Canvas end - region threading
          this.scoreboard.onTeamChanged(this);
@@ -5384,7 +5402,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      }
  
      @Override
-@@ -114,7 +104,7 @@ public class PlayerTeam extends Team {
+@@ -114,7 +120,7 @@ public class PlayerTeam extends Team {
  
      @Override
      public MutableComponent getFormattedName(final Component teamMemberName) {
@@ -5393,7 +5411,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
          ChatFormatting color = this.getColor();
          if (color != ChatFormatting.RESET) {
              result.withStyle(color);
-@@ -129,51 +119,66 @@ public class PlayerTeam extends Team {
+@@ -129,51 +135,66 @@ public class PlayerTeam extends Team {
  
      @Override
      public boolean isAllowFriendlyFire() {
@@ -5404,7 +5422,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      public void setAllowFriendlyFire(final boolean allowFriendlyFire) {
 -        this.allowFriendlyFire = allowFriendlyFire;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set friendly fire flag for team async");
++        this.ensureMainThread("Cannot set friendly fire flag for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setAllowFriendlyFire(allowFriendlyFire));
 +        // Canvas end - region threading
          this.scoreboard.onTeamChanged(this);
@@ -5419,7 +5437,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      public void setSeeFriendlyInvisibles(final boolean seeFriendlyInvisibles) {
 -        this.seeFriendlyInvisibles = seeFriendlyInvisibles;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set friendly invisibles flag for team async");
++        this.ensureMainThread("Cannot set friendly invisibles flag for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setSeeFriendlyInvisibles(seeFriendlyInvisibles));
 +        // Canvas end - region threading
          this.scoreboard.onTeamChanged(this);
@@ -5440,7 +5458,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      public void setNameTagVisibility(final Team.Visibility visibility) {
 -        this.nameTagVisibility = visibility;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set name tag visibility for team async");
++        this.ensureMainThread("Cannot set name tag visibility for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setNameTagVisibility(visibility));
          this.scoreboard.onTeamChanged(this);
 +        // Canvas end - region threading
@@ -5449,7 +5467,7 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      public void setDeathMessageVisibility(final Team.Visibility visibility) {
 -        this.deathMessageVisibility = visibility;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set death message visibility for team async");
++        this.ensureMainThread("Cannot set death message visibility for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setDeathMessageVisibility(visibility));
          this.scoreboard.onTeamChanged(this);
 +        // Canvas end - region threading
@@ -5464,19 +5482,19 @@ index 39e068b1b917a37d85f756f85c9f35acb0b091c4..8b63b0d09f8346469b7ba863bf295349
      public void setCollisionRule(final Team.CollisionRule collisionRule) {
 -        this.collisionRule = collisionRule;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set collision rule for team async");
++        this.ensureMainThread("Cannot set collision rule for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setCollisionRule(collisionRule));
 +        // Canvas end - region threading
          this.scoreboard.onTeamChanged(this);
      }
  
-@@ -196,13 +201,16 @@ public class PlayerTeam extends Team {
+@@ -196,13 +217,16 @@ public class PlayerTeam extends Team {
      }
  
      public void setColor(final ChatFormatting color) {
 -        this.color = color;
 +        // Canvas start - region threading
-+        this.scoreboard.ensureMainThread("Cannot set color for team async");
++        this.ensureMainThread("Cannot set color for team async");
 +        this.teamData.swapValue((data) -> io.canvasmc.canvas.world.scores.TeamData.copyOf(data).setColor(color));
 +        // Canvas end - region threading
          this.scoreboard.onTeamChanged(this);
