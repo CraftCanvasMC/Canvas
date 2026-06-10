@@ -10,6 +10,8 @@ import io.canvasmc.canvas.world.PerWorldDistanceConfig;
 import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import io.papermc.paper.FeatureHooks;
+import io.papermc.paper.util.MCUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.network.chat.Component;
@@ -60,7 +62,7 @@ public class WorldDistanceCommand implements Command {
                         int distance = type.get(level);
 
                         context.getSource().sendSuccess(
-                            () -> Component.literal(type.name + " distance of level \"" + level.getWorld().key().asString() + "\" is " + distance),
+                            () -> Component.literal(type.name + " distance of level \"" + MCUtil.getLevelName(level) + "\" is " + distance),
                             false
                         );
                         return distance;
@@ -87,16 +89,11 @@ public class WorldDistanceCommand implements Command {
                             );
 
                             switch (type) {
-                                case VIEW -> {
-                                    for (ServerPlayer serverPlayer : level.players()) {
-                                        serverPlayer.connection.send(serverPlayer.moonrise$getChunkLoader().updateClientChunkRadius(updated));
-                                    }
-                                    level.getChunkSource().setViewDistance(updated);
-                                }
-                                case SIMULATION -> level.getChunkSource().setSimulationDistance(updated);
+                                case VIEW -> FeatureHooks.setViewDistance(level, updated);
+                                case SIMULATION -> FeatureHooks.setSimulationDistance(level, updated);
                             }
 
-                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + level.getWorld().key().asString() + "\" to " + distance, GlobalConfiguration.INFO);
+                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + MCUtil.getLevelName(level) + "\" to " + distance, GlobalConfiguration.INFO);
                             return distance;
                         })
                     )
