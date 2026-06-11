@@ -28,6 +28,7 @@ import net.minecraft.world.level.levelgen.PositionalRandomFactory;
 import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
 import net.minecraft.world.level.levelgen.Xoroshiro128PlusPlus;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
+import org.bukkit.World;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -162,18 +163,19 @@ public class Util {
     }
 
     /**
-     * Gets the level name used internally by Canvas, this does not match Bukkit. This matches the
+     * Gets the world name used internally by Canvas, this does not match Bukkit. This matches the
      * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
      * part at the start of the string if the namespace is {@link net.minecraft.resources.Identifier#DEFAULT_NAMESPACE}.
      *
-     * @param id
-     *     the identifier
+     * @param world
+     *     the world
      *
-     * @return the level name used by Canvas internals
+     * @return the world name used by Canvas internals
      */
-    public static String getLevelName(final @NonNull Identifier id) {
-        final String dimensionName = id.toDebugFileName();
-        if (id.getNamespace().equalsIgnoreCase(Identifier.DEFAULT_NAMESPACE)) {
+    public static String getWorldName(final @NonNull World world) {
+        final Identifier dimensionId = Identifier.parse(world.key().asString());
+        final String dimensionName = dimensionId.toDebugFileName();
+        if (dimensionId.getNamespace().equalsIgnoreCase(Identifier.DEFAULT_NAMESPACE)) {
             return dimensionName.substring((Identifier.DEFAULT_NAMESPACE + "_").length());
         }
         return dimensionName;
