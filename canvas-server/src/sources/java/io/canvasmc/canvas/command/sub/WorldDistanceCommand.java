@@ -77,6 +77,7 @@ public class WorldDistanceCommand implements Command {
                                 return 0;
                             }
 
+                            // update the distance override that we can use later on
                             type.set(level, distance);
                             PerWorldDistanceConfig state = level.serverLevelData.canvas$distanceConfig;
 
@@ -88,8 +89,10 @@ public class WorldDistanceCommand implements Command {
                             );
 
                             switch (type) {
-                                case VIEW -> FeatureHooks.setViewDistance(level, updated);
-                                case SIMULATION -> FeatureHooks.setSimulationDistance(level, updated);
+                                // we go straight through here because FeatureHooks hard-clamps at 32, which is technically wrong
+                                // since it should abide by the MAX_VIEW_DISTANCE arg
+                                case VIEW -> level.getChunkSource().chunkMap.setServerViewDistance(updated);
+                                case SIMULATION -> level.chunkSource.chunkMap.distanceManager.updateSimulationDistance(updated);
                             }
 
                             GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + Util.getLevelName(level) + "\" to " + distance, GlobalConfiguration.INFO);
