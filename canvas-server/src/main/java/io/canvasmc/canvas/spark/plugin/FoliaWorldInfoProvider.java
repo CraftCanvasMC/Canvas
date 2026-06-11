@@ -5,6 +5,7 @@ import ca.spottedleaf.moonrise.common.time.TickData;
 import io.canvasmc.canvas.spark.FoliaSparkPlugin;
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
 import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
+import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -145,7 +147,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
             final ServerLevel level = ((CraftWorld) world).getHandle();
             final Map<Long, List<FoliaChunkInfo>> byRegion = new HashMap<>();
             final Map<Long, ChunkRegionCenter> centerByRegion = new HashMap<>();
-            final String worldKey = world.key().asMinimalString().replace('/', '_').replace(':', '_');
+            final String worldKey = Util.getLevelName(Identifier.parse(world.key().asString()));
             final String worldCapitalized = worldKey.substring(0, 1).toUpperCase(Locale.ROOT) + worldKey.substring(1);
 
             for (Chunk chunk : world.getLoadedChunks()) {

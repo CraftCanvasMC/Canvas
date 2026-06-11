@@ -6,17 +6,16 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.command.Command;
+import io.canvasmc.canvas.util.Util;
 import io.canvasmc.canvas.world.PerWorldDistanceConfig;
 import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import io.papermc.paper.FeatureHooks;
-import io.papermc.paper.util.MCUtil;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -62,7 +61,7 @@ public class WorldDistanceCommand implements Command {
                         int distance = type.get(level);
 
                         context.getSource().sendSuccess(
-                            () -> Component.literal(type.name + " distance of level \"" + MCUtil.getLevelName(level) + "\" is " + distance),
+                            () -> Component.literal(type.name + " distance of level \"" + Util.getLevelName(level) + "\" is " + distance),
                             false
                         );
                         return distance;
@@ -93,7 +92,7 @@ public class WorldDistanceCommand implements Command {
                                 case SIMULATION -> FeatureHooks.setSimulationDistance(level, updated);
                             }
 
-                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + MCUtil.getLevelName(level) + "\" to " + distance, GlobalConfiguration.INFO);
+                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + Util.getLevelName(level) + "\" to " + distance, GlobalConfiguration.INFO);
                             return distance;
                         })
                     )

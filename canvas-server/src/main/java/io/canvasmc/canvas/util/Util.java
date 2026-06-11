@@ -143,21 +143,40 @@ public class Util {
     }
 
     /**
-     * Gets the world name used internally by Canvas, this does not match Bukkit. This matches the
+     * Gets the level name used internally by Canvas, this does not match Bukkit. This matches the
      * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
      * part at the start of the string if the namespace is {@code minecraft}.
      *
      * @param level
-     *     the world
+     *     the level
      *
-     * @return the world name used by Canvas internals
+     * @return the level name used by Canvas internals
      */
-    public static String getWorldName(final @NonNull Level level) {
+    public static String getLevelName(final @NonNull Level level) {
         final Identifier dimensionId = level.dimension().identifier();
-        if (dimensionId.getNamespace().equalsIgnoreCase("minecraft")) {
-            return dimensionId.getPath().replace('/', '_').replace(':', '_');
+        final String dimensionName = dimensionId.toDebugFileName();
+        if (dimensionId.getNamespace().equalsIgnoreCase(Identifier.DEFAULT_NAMESPACE)) {
+            return dimensionName.substring((Identifier.DEFAULT_NAMESPACE + "_").length());
         }
-        return dimensionId.toDebugFileName();
+        return dimensionName;
+    }
+
+    /**
+     * Gets the level name used internally by Canvas, this does not match Bukkit. This matches the
+     * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
+     * part at the start of the string if the namespace is {@link net.minecraft.resources.Identifier#DEFAULT_NAMESPACE}.
+     *
+     * @param id
+     *     the identifier
+     *
+     * @return the level name used by Canvas internals
+     */
+    public static String getLevelName(final @NonNull Identifier id) {
+        final String dimensionName = id.toDebugFileName();
+        if (id.getNamespace().equalsIgnoreCase(Identifier.DEFAULT_NAMESPACE)) {
+            return dimensionName.substring((Identifier.DEFAULT_NAMESPACE + "_").length());
+        }
+        return dimensionName;
     }
 
     public static final class Gradient {

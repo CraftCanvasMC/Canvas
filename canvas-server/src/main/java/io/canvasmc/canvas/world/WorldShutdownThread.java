@@ -49,7 +49,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
         final @NonNull ServerLevel level,
         final Supplier<List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>> theWaiter
     ) {
-        final String worldName = Util.getWorldName(level);
+        final String worldName = Util.getLevelName(level);
 
         super(worldName + " shutdown thread");
         this.setUncaughtExceptionHandler((_, thrown) -> {
