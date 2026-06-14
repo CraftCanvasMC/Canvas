@@ -1256,18 +1256,24 @@ index 8d4f092ec65d285508be81cbfadd6e747e1d067e..2db474ced22d5867b0f6315185af31d3
  
      public static ServerPlayer getPlayer(final String name) {
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
-index aa3e2b7aca2163c61de949519f332cd1dba5920a..434563cf7958aa4fec624293968d1236cb351c2e 100644
+index aa3e2b7aca2163c61de949519f332cd1dba5920a..a4d799f297f9178a83b639b2a9d4b9d98d84b2ad 100644
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java
-@@ -195,7 +195,7 @@ public class Commands {
+@@ -195,11 +195,11 @@ public class Commands {
          AdvancementCommands.register(this.dispatcher);
          AttributeCommand.register(this.dispatcher, context);
          ExecuteCommand.register(this.dispatcher, context);
 -        //BossBarCommands.register(this.dispatcher, context); // Folia - region threading - TODO
 +        BossBarCommands.register(this.dispatcher, context);
          ClearInventoryCommands.register(this.dispatcher, context);
-         //CloneCommands.register(this.dispatcher, context); // Folia - region threading - TODO
+-        //CloneCommands.register(this.dispatcher, context); // Folia - region threading - TODO
++        CloneCommands.register(this.dispatcher, context);
          DamageCommand.register(this.dispatcher, context);
+-        //DataCommands.register(this.dispatcher); // Folia - region threading - TODO
++        DataCommands.register(this.dispatcher);
+         //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO
+         //DebugCommand.register(this.dispatcher); // Folia - region threading - TODO
+         DefaultGameModeCommands.register(this.dispatcher);
 @@ -222,7 +222,7 @@ public class Commands {
          KillCommand.register(this.dispatcher);
          ListPlayersCommand.register(this.dispatcher);
@@ -1744,6 +1750,250 @@ index fb55ed68a1f8470b551030a27ca2656555c93d9e..5756f7aca1a80782a88b0e82ef82a626
  
      public @Nullable CustomBossEvent get(final Identifier id) {
          return this.events.get(id);
+diff --git a/net/minecraft/server/commands/CloneCommands.java b/net/minecraft/server/commands/CloneCommands.java
+index 50d671bc5a8860883239590c030881043c791ca1..92f1416b3994e7f1334bdf41f8c00f619288e92d 100644
+--- a/net/minecraft/server/commands/CloneCommands.java
++++ b/net/minecraft/server/commands/CloneCommands.java
+@@ -163,6 +163,70 @@ public class CloneCommands {
+                     )
+             );
+     }
++    // Canvas start - region threading
++
++    private record BlockInfo(
++        // note: if blockEntityInfo != null, we should set the block entity data
++        BlockPos pos, BlockState state, CloneCommands.@Nullable CloneBlockEntityInfo blockEntityInfo, BlockPos offset
++    ) {
++        BlockPos destinationPos() {
++            return pos.offset(offset);
++        }
++    }
++
++    private static class Area {
++        // in Vanilla, this would be "clearBlockList"
++        final Deque<net.minecraft.core.BlockPos> allPositions = Lists.newLinkedList();
++        final List<BlockInfo> collectedStates = new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
++        final org.apache.commons.lang3.mutable.MutableBoolean hasBlockEntities = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++
++        void collect(
++            final BlockPos pos,
++            final BlockPos offset,
++            final BlockInWorld block,
++            final ServerLevel level,
++            final Predicate<BlockInWorld> predicate,
++            final ProblemReporter reporter,
++            final net.minecraft.core.HolderLookup.Provider registryAccess
++        ) {
++            if (!predicate.test(block)) {
++                return;
++            }
++
++            boolean last;
++
++            final BlockEntity blockEntity = level.getBlockEntity(pos);
++            final BlockState blockState = block.getState();
++
++            if (blockEntity != null) {
++                TagValueOutput output = TagValueOutput.createWithContext(reporter.forChild(blockEntity.problemPath()), registryAccess);
++                blockEntity.saveCustomOnly(output);
++                CloneCommands.CloneBlockEntityInfo blockEntityInfo = new CloneCommands.CloneBlockEntityInfo(
++                    output.buildResult(), blockEntity.components()
++                );
++                collectedStates.add(new CloneCommands.BlockInfo(pos, blockState, blockEntityInfo, offset));
++                hasBlockEntities.setTrue();
++                last = true;
++            }
++            else {
++                collectedStates.add(new CloneCommands.BlockInfo(pos, blockState, null, offset));
++                last = !(!blockState.isSolidRender() && !blockState.isCollisionShapeFullBlock(level, pos));
++            }
++
++            // add to our list of blocks
++            if (last) {
++                allPositions.addLast(pos);
++            }
++            else {
++                allPositions.addFirst(pos);
++            }
++        }
++
++        List<BlockInfo> reversed() {
++            return this.collectedStates.reversed();
++        }
++    }
++    // Canvas end - region threading
+ 
+     private static int clone(
+         final CommandSourceStack source,
+@@ -199,6 +263,168 @@ public class CloneCommands {
+             throw ERROR_FAILED.create();
+         }
+ 
++        // Canvas start - region threading
++        if (true) {
++
++            // we use a snapshot copy-paste style thing, since we can't just directly
++            // clone it over since we may not even be in the correct region for either of these
++
++            // we need to schedule to "from" first to collect our snapshot
++
++            fromDimension.canvas$loadOrRunAtChunksAsync(
++                // min/max x, min/max z
++                from.minX() >> 4, from.maxX() >> 4, from.minZ() >> 4, from.maxZ() >> 4,
++                ca.spottedleaf.concurrentutil.util.Priority.NORMAL, () -> {
++
++                    // we need to collect the blocks in this area now and copy-paste
++
++                    final Area snapshot = new CloneCommands.Area();
++                    final net.minecraft.world.ticks.LevelTicks<Block> fromBlockTicks = fromDimension.getBlockTicks();
++                    final BlockPos offset = new BlockPos(destination.minX() - from.minX(), destination.minY() - from.minY(), destination.minZ() - from.minZ());
++
++                    try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(LOGGER)) {
++
++                        // note: for merging block ticks, we need can follow this similar to how Folia does
++                        //       merging of these for region merges. the Vanilla version seems to update lists
++                        //       that are actually transient, only used during the tick, so we don't actually
++                        //       need to do anything about those, which simplifies this logic greatly
++
++                        // copy ticks first, based from LevelTicks#copyAreaFrom
++
++                        List<net.minecraft.world.ticks.ScheduledTick<Block>> ticksToAdd = new java.util.ArrayList<>();
++                        Predicate<net.minecraft.world.ticks.ScheduledTick<Block>> tickInsideBB = t -> from.isInside(t.pos());
++                        fromBlockTicks.alreadyRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++                        fromBlockTicks.toRunThisTick.stream().filter(tickInsideBB).forEach(ticksToAdd::add);
++                        fromBlockTicks.forContainersInArea(from, (_, container) -> container.getAll().filter(tickInsideBB).forEach(ticksToAdd::add));
++                        java.util.LongSummaryStatistics info = ticksToAdd.stream().mapToLong(net.minecraft.world.ticks.ScheduledTick::subTickOrder).summaryStatistics();
++                        long minSubTick = info.getMin();
++                        long maxSubTick = info.getMax();
++
++                        final net.minecraft.core.BlockPos.MutableBlockPos sourcePos = new net.minecraft.core.BlockPos.MutableBlockPos();
++
++                        for (int z = from.minZ(); z <= from.maxZ(); z++) {
++                            for (int y = from.minY(); y <= from.maxY(); y++) {
++                                for (int x = from.minX(); x <= from.maxX(); x++) {
++                                    sourcePos.set(x, y, z);
++                                    BlockInWorld block = new BlockInWorld(fromDimension, sourcePos, false);
++                                    snapshot.collect(sourcePos.immutable(), offset, block, fromDimension, predicate, problemReporter, source.registryAccess());
++                                }
++                            }
++                        }
++
++                        // now that we have collected everything, we need to try to set things in the source
++                        // before we move to the destination
++
++                        // note: clearBlockList is basically just a list of all the blocks we collected that
++                        //       at least passed the predicate
++
++                        int defaultUpdateFlags = 2 | (strict ? 816 : 0);
++                        if (mode == CloneCommands.Mode.MOVE) {
++                            for (BlockPos pos : snapshot.allPositions) {
++                                fromDimension.setBlock(pos, Blocks.BARRIER.defaultBlockState(), defaultUpdateFlags | Block.UPDATE_SKIP_ALL_SIDEEFFECTS);
++                            }
++
++                            int standardUpdateFlags = strict ? defaultUpdateFlags : Block.UPDATE_ALL;
++
++                            for (BlockPos pos : snapshot.allPositions) {
++                                fromDimension.setBlock(pos, Blocks.AIR.defaultBlockState(), standardUpdateFlags);
++                            }
++                        }
++
++                        // we have finished our work in the source dimension, now we move to the destination
++
++                        toDimension.canvas$loadOrRunAtChunksAsync(
++                            destination.minX() >> 4, destination.maxX() >> 4, destination.minZ() >> 4, destination.maxZ() >> 4,
++                            ca.spottedleaf.concurrentutil.util.Priority.NORMAL, () -> {
++
++                                // we need the reversed version of this for later usage
++
++                                final it.unimi.dsi.fastutil.objects.Object2ObjectMap<BlockPos, BlockState> previousStates = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
++                                final List<BlockInfo> reversedInfo = snapshot.reversed();
++                                final org.apache.commons.lang3.mutable.MutableInt count = new org.apache.commons.lang3.mutable.MutableInt(0);
++
++                                // if the position isn't there, just guess air, but that shouldn't happen
++                                previousStates.defaultReturnValue(Blocks.AIR.defaultBlockState());
++
++                                // we set everything to barriers first, then we need to set the state and then BE data
++
++                                for (CloneCommands.BlockInfo cloneInfo : reversedInfo) {
++
++                                    final BlockPos destinationPos = cloneInfo.destinationPos();
++
++                                    // we are iterating over everything, so we can set the previous states map here but only
++                                    // if not strict, since "strict" just hard-sets the states with no neighbor updates
++
++                                    if (!strict) {
++                                        previousStates.put(
++                                            destinationPos, toDimension.getBlockState(destinationPos)
++                                        );
++                                    }
++
++                                    toDimension.setBlock(destinationPos, Blocks.BARRIER.defaultBlockState(), defaultUpdateFlags | Block.UPDATE_SKIP_ALL_SIDEEFFECTS);
++                                }
++
++                                for (CloneCommands.BlockInfo cloneInfo : snapshot.collectedStates) {
++                                    if (toDimension.setBlock(cloneInfo.destinationPos(), cloneInfo.state, defaultUpdateFlags)) {
++                                        count.increment();
++                                    }
++                                }
++
++                                // we check if we even have block entities first, since if we don't then why should we
++                                // ever iterate over this, that's just dumb
++
++                                if (snapshot.hasBlockEntities.isTrue()) {
++
++                                    try (final ProblemReporter.ScopedCollector blockEntitiesReporter = new ProblemReporter.ScopedCollector(LOGGER)) {
++
++                                        // if we are here, we have block entities, so we now iterate over all entries
++                                        // until we find any
++
++                                        for (CloneCommands.BlockInfo cloneInfo : snapshot.collectedStates) {
++                                            if (cloneInfo.blockEntityInfo == null) continue; // skip entries with no data
++
++                                            BlockEntity newBlockEntity = toDimension.getBlockEntity(cloneInfo.destinationPos());
++                                            if (newBlockEntity != null) {
++                                                newBlockEntity.loadCustomOnly(
++                                                    TagValueInput.create(blockEntitiesReporter.forChild(newBlockEntity.problemPath()), toDimension.registryAccess(), cloneInfo.blockEntityInfo.tag)
++                                                );
++                                                newBlockEntity.setComponents(cloneInfo.blockEntityInfo.components);
++                                                newBlockEntity.setChanged();
++                                            }
++
++                                            toDimension.setBlock(cloneInfo.destinationPos(), cloneInfo.state, defaultUpdateFlags);
++                                        }
++
++                                    }
++
++                                }
++
++                                if (!strict) {
++                                    for (CloneCommands.BlockInfo cloneInfo : reversedInfo) {
++                                        final BlockPos destinationPos = cloneInfo.destinationPos();
++                                        toDimension.updateNeighboursOnBlockSet(destinationPos, previousStates.get(destinationPos));
++                                    }
++                                }
++
++                                ticksToAdd.forEach(
++                                    tick -> toDimension.getBlockTicks().schedule(
++                                        new net.minecraft.world.ticks.ScheduledTick<>(
++                                            tick.type(), tick.pos().offset(offset), tick.triggerTick(), tick.priority(), tick.subTickOrder() - minSubTick + maxSubTick + 1L
++                                        )
++                                    )
++                                );
++
++                                source.sendSuccess(() -> Component.translatable("commands.clone.success", count.get()), true);
++                            }
++                        );
++
++                    }
++                }
++            );
++
++            return 0;
++        }
++        // Canvas end - region threading
+         List<CloneCommands.CloneBlockInfo> solidList = Lists.newArrayList();
+         List<CloneCommands.CloneBlockInfo> blockEntitiesList = Lists.newArrayList();
+         List<CloneCommands.CloneBlockInfo> otherBlocksList = Lists.newArrayList();
 diff --git a/net/minecraft/server/commands/ExperienceCommand.java b/net/minecraft/server/commands/ExperienceCommand.java
 index 8eae0c33e3f37c388f3c7466e5733fb5da90258a..2b5a8893473a5d2c28c53095e9cec34f638c33c5 100644
 --- a/net/minecraft/server/commands/ExperienceCommand.java
@@ -3097,6 +3347,282 @@ index 088b7b91154546fc9c020cab5cefbb4b89762ac8..9d5f76ff2892fd38a21397698a986027
      }
  
      private static ScoreAccess getScore(final Scoreboard scoreboard, final ScoreHolder scoreHolder, final Objective objective) throws CommandSyntaxException {
+diff --git a/net/minecraft/server/commands/data/BlockDataAccessor.java b/net/minecraft/server/commands/data/BlockDataAccessor.java
+index 1b0ad9375986fe35795fc75f8eecfecaacc0cc13..f0fa46ad2ceb82555bd89d0898493f095a6dd449 100644
+--- a/net/minecraft/server/commands/data/BlockDataAccessor.java
++++ b/net/minecraft/server/commands/data/BlockDataAccessor.java
+@@ -55,6 +55,37 @@ public class BlockDataAccessor implements DataAccessor {
+         this.entity = entity;
+         this.pos = pos;
+     }
++    // Canvas start - region threading
++    // note: this is only used by the data command
++
++    @Override
++    public void ensureTickThread(final String reason) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        if (!isTickThreadFor()) {
++            throw net.minecraft.server.commands.data.DataAccessor.CSE_TARGET_NOT_SAME_REGION.create();
++        }
++        // on same region, pass
++    }
++
++    @Override
++    public void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> daConsumer) {
++        final net.minecraft.world.level.Level entityLevel = this.entity.getLevel();
++        if (entityLevel == null) {
++            return;
++        }
++        // if we own the pos we just run it
++        entityLevel.canvas$loadOrRunAtChunksAsync(
++            // just set radius to 0, nobody cares about surrounding blocks
++            pos, 0, ca.spottedleaf.concurrentutil.util.Priority.NORMAL, () -> {
++                daConsumer.accept(this);
++            }
++        );
++    }
++
++    @Override
++    public boolean isTickThreadFor() {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.entity.getLevel(), pos);
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public void setData(final CompoundTag tag) {
+diff --git a/net/minecraft/server/commands/data/DataAccessor.java b/net/minecraft/server/commands/data/DataAccessor.java
+index 8eed353e878d3c2bede58ed526c4bc065fe7db90..ad196fd4abb90eae75a27ea91ac3d30a314d9e1e 100644
+--- a/net/minecraft/server/commands/data/DataAccessor.java
++++ b/net/minecraft/server/commands/data/DataAccessor.java
+@@ -16,4 +16,19 @@ public interface DataAccessor {
+     Component getPrintSuccess(Tag data);
+ 
+     Component getPrintSuccess(NbtPathArgument.NbtPath path, double scale, int value);
++    // Canvas start - region threading
++    com.mojang.brigadier.exceptions.SimpleCommandExceptionType CSE_TARGET_NOT_SAME_REGION =
++        new com.mojang.brigadier.exceptions.SimpleCommandExceptionType(Component.literal("Target not in same region"));
++    // note: this should throw a CSE that says "not in same region" or something,
++    //       we do not trigger a REAL ISE thread check
++    default void ensureTickThread(final String reason) throws CommandSyntaxException {
++        // no-op
++    }
++    default void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> daConsumer) {
++        // no-op
++    }
++    default boolean isTickThreadFor() {
++        return false;
++    }
++    // Canvas end - region threading
+ }
+diff --git a/net/minecraft/server/commands/data/DataCommands.java b/net/minecraft/server/commands/data/DataCommands.java
+index 6ed3ed01d42faa3421e280e55f023a05702e43df..7c6c5bb41ae29bf1facbb146a26c8f8d35c264b6 100644
+--- a/net/minecraft/server/commands/data/DataCommands.java
++++ b/net/minecraft/server/commands/data/DataCommands.java
+@@ -53,7 +53,7 @@ public class DataCommands {
+         (start, end) -> Component.translatableEscape("commands.data.modify.invalid_substring", start, end)
+     );
+     public static final List<Function<String, DataCommands.DataProvider>> ALL_PROVIDERS = ImmutableList.of(
+-        EntityDataAccessor.PROVIDER, BlockDataAccessor.PROVIDER, StorageDataAccessor.PROVIDER
++        EntityDataAccessor.PROVIDER, BlockDataAccessor.PROVIDER//, StorageDataAccessor.PROVIDER // Canvas - region threading
+     );
+     public static final List<DataCommands.DataProvider> TARGET_PROVIDERS = ALL_PROVIDERS.stream()
+         .map(f -> f.apply("target"))
+@@ -162,6 +162,33 @@ public class DataCommands {
+ 
+         dispatcher.register(root);
+     }
++    // Canvas start - region threading
++
++    // we disallow getting/modifying data of accessors not in the same region unless the sender is
++    // calling from the global tick(most likely meaning console or RCON). we can't add the global
++    // data accessor back since that's not quite thread safe and that implementation I haven't quite
++    // figured out yet, but that is something we can revisit in the future
++
++    // TODO - bring back global storage data accessor?
++
++    private static void handleAction(final io.canvasmc.canvas.util.CommandFunction<net.minecraft.server.commands.data.DataAccessor> iAction, final DataAccessor accessor, final CommandSourceStack sourceStack) throws CommandSyntaxException {
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
++            // just schedule to the instance in question
++            accessor.scheduleOrExecute((da) -> {
++                try {
++                    iAction.act(da);
++                } catch (CommandSyntaxException e) {
++                    sourceStack.sendFailure(Component.literal(e.getMessage()));
++                }
++            });
++        }
++        else {
++            // on a region thread
++            accessor.ensureTickThread("Cannot access or modify data of target off region");
++            iAction.act(accessor);
++        }
++    }
++    // Canvas end - region threading
+ 
+     private static String getAsText(final Tag tag) throws CommandSyntaxException {
+         return switch (tag) {
+@@ -311,7 +338,10 @@ public class DataCommands {
+         final DataCommands.DataManipulator manipulator,
+         final List<Tag> source
+     ) throws CommandSyntaxException {
+-        DataAccessor target = targetProvider.access(context);
++        // Canvas start - region threading
++        DataAccessor providerAccessed = targetProvider.access(context);
++        handleAction((target) -> {
++        // Canvas end - region threading
+         NbtPathArgument.NbtPath targetPath = NbtPathArgument.getPath(context, "targetPath");
+         CompoundTag targetData = target.getData();
+         int result = manipulator.modify(context, targetData, targetPath, source);
+@@ -322,18 +352,31 @@ public class DataCommands {
+         target.setData(targetData);
+         context.getSource().sendSuccess(() -> target.getModifiedSuccess(), true);
+         return result;
++        // Canvas start - region threading
++        }, providerAccessed, context.getSource());
++        return 0;
++        // Canvas end - region threading
+     }
+ 
+     private static int removeData(final CommandSourceStack source, final DataAccessor accessor, final NbtPathArgument.NbtPath path) throws CommandSyntaxException {
+-        CompoundTag result = accessor.getData();
++        // Canvas start - region threading
++        handleAction((dataAccessor) -> {
++        CompoundTag result = dataAccessor.getData();
++        // Canvas end - region threading
+         int count = path.remove(result);
+         if (count == 0) {
+             throw ERROR_MERGE_UNCHANGED.create();
+         }
+ 
+-        accessor.setData(result);
+-        source.sendSuccess(() -> accessor.getModifiedSuccess(), true);
++        // Canvas start - region threading
++        dataAccessor.setData(result);
++        source.sendSuccess(dataAccessor::getModifiedSuccess, true);
++        // Canvas end - region threading
+         return count;
++        // Canvas start - region threading
++        }, accessor, source);
++        return 0;
++        // Canvas end - region threading
+     }
+ 
+     public static Tag getSingleTag(final NbtPathArgument.NbtPath path, final DataAccessor accessor) throws CommandSyntaxException {
+@@ -348,7 +391,10 @@ public class DataCommands {
+     }
+ 
+     private static int getData(final CommandSourceStack source, final DataAccessor accessor, final NbtPathArgument.NbtPath path) throws CommandSyntaxException {
+-        Tag tag = getSingleTag(path, accessor);
++        // Canvas start - region threading
++        handleAction((dataAccessor) -> {
++        Tag tag = getSingleTag(path, dataAccessor);
++        // Canvas end - region threading
+ 
+         int result = switch (tag) {
+             case NumericTag numericTag -> Mth.floor(numericTag.doubleValue());
+@@ -358,29 +404,48 @@ public class DataCommands {
+             case EndTag ignored -> throw ERROR_GET_NON_EXISTENT.create(path.toString());
+             default -> throw new MatchException(null, null);
+         };
+-        source.sendSuccess(() -> accessor.getPrintSuccess(tag), false);
++        source.sendSuccess(() -> dataAccessor.getPrintSuccess(tag), false); // Canvas - region threading
+         return result;
++        // Canvas start - region threading
++        }, accessor, source);
++        return 0;
++        // Canvas end - region threading
+     }
+ 
+     private static int getNumeric(final CommandSourceStack source, final DataAccessor accessor, final NbtPathArgument.NbtPath path, final double scale) throws CommandSyntaxException {
+-        Tag tag = getSingleTag(path, accessor);
++        // Canvas start - region threading
++        handleAction((dataAccessor) -> {
++        Tag tag = getSingleTag(path, dataAccessor);
++        // Canvas end - region threading
+         if (!(tag instanceof NumericTag)) {
+             throw ERROR_GET_NOT_NUMBER.create(path.toString());
+         }
+ 
+         int result = Mth.floor(((NumericTag)tag).doubleValue() * scale);
+-        source.sendSuccess(() -> accessor.getPrintSuccess(path, scale, result), false);
++        source.sendSuccess(() -> dataAccessor.getPrintSuccess(path, scale, result), false); // Canvas - region threading
+         return result;
++        // Canvas start - region threading
++        }, accessor, source);
++        return 0;
++        // Canvas end - region threading
+     }
+ 
+     private static int getData(final CommandSourceStack source, final DataAccessor accessor) throws CommandSyntaxException {
+-        CompoundTag data = accessor.getData();
+-        source.sendSuccess(() -> accessor.getPrintSuccess(data), false);
++        // Canvas start - region threading
++        handleAction((dataAccessor) -> {
++            CompoundTag data = dataAccessor.getData();
++            source.sendSuccess(() -> accessor.getPrintSuccess(data), false);
++            return 1;
++        }, accessor, source);
++        // Canvas end - region threading
+         return 1;
+     }
+ 
+     private static int mergeData(final CommandSourceStack source, final DataAccessor accessor, final CompoundTag nbt) throws CommandSyntaxException {
+-        CompoundTag old = accessor.getData();
++        // Canvas start - region threading
++        handleAction((dataAccessor) -> {
++        CompoundTag old = dataAccessor.getData();
++        // Canvas end - region threading
+         if (NbtPathArgument.NbtPath.isTooDeep(nbt, 0)) {
+             throw NbtPathArgument.ERROR_DATA_TOO_DEEP.create();
+         }
+@@ -390,9 +455,15 @@ public class DataCommands {
+             throw ERROR_MERGE_UNCHANGED.create();
+         }
+ 
+-        accessor.setData(result);
+-        source.sendSuccess(() -> accessor.getModifiedSuccess(), true);
++        // Canvas start - region threading
++        dataAccessor.setData(result);
++        source.sendSuccess(dataAccessor::getModifiedSuccess, true);
++        // Canvas end - region threading
++        return 1;
++        // Canvas start - region threading
++        }, accessor, source);
+         return 1;
++        // Canvas end - region threading
+     }
+ 
+     @FunctionalInterface
+diff --git a/net/minecraft/server/commands/data/EntityDataAccessor.java b/net/minecraft/server/commands/data/EntityDataAccessor.java
+index bcd7097def03c59140e1774cfdc787d526fb205b..696ae3ae630e89591bf3bb71f23ef76ab263e675 100644
+--- a/net/minecraft/server/commands/data/EntityDataAccessor.java
++++ b/net/minecraft/server/commands/data/EntityDataAccessor.java
+@@ -45,6 +45,26 @@ public class EntityDataAccessor implements DataAccessor {
+     public EntityDataAccessor(final Entity entity) {
+         this.entity = entity;
+     }
++    // Canvas start - region threading
++    // note: this is only used by the data command
++
++    @Override
++    public void ensureTickThread(final String reason) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
++        if (!isTickThreadFor()) {
++            throw DataAccessor.CSE_TARGET_NOT_SAME_REGION.create();
++        }
++    }
++
++    @Override
++    public void scheduleOrExecute(final java.util.function.Consumer<DataAccessor> daConsumer) {
++        this.entity.getBukkitEntity().taskScheduler.scheduleOrExecute((_) -> daConsumer.accept(this));
++    }
++
++    @Override
++    public boolean isTickThreadFor() {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.entity);
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public void setData(final CompoundTag tag) throws CommandSyntaxException {
 diff --git a/net/minecraft/server/gui/PlayerListComponent.java b/net/minecraft/server/gui/PlayerListComponent.java
 index 37c9f983ae89c497f44a1b7967d741abf909e0a0..366c20adab0620c579510a09adc58e83cce9dec1 100644
 --- a/net/minecraft/server/gui/PlayerListComponent.java
