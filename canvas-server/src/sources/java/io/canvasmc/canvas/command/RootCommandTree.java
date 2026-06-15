@@ -2,10 +2,10 @@ package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import io.canvasmc.canvas.command.sub.RegionBarCommand;
 import io.canvasmc.canvas.command.sub.RegionTickCommand;
 import io.canvasmc.canvas.command.sub.ReloadCommand;
 import io.canvasmc.canvas.command.sub.SetMaxPlayersCommand;
-import io.canvasmc.canvas.command.sub.RegionBarCommand;
 import io.canvasmc.canvas.command.sub.WorldDistanceCommand;
 import java.lang.reflect.InvocationTargetException;
 import java.util.LinkedList;
@@ -24,13 +24,13 @@ import static net.minecraft.commands.Commands.literal;
 
 @NullMarked
 public class RootCommandTree {
-    private static final TextColor HEADER = TextColor.color(79, 164, 240);
-    private static final TextColor PRIMARY = TextColor.color(48, 145, 237);
-    private static final TextColor SECONDARY = TextColor.color(104, 177, 240);
-    private static final TextColor INFORMATION = TextColor.color(145, 198, 243);
-    private static final TextColor LIST = TextColor.color(33, 97, 188);
-    private static final TextColor ACCENT = TextColor.color(173, 216, 255);
-    private static final TextColor MUTED = TextColor.color(80, 120, 170);
+    private static final TextColor HEADER = TextColor.color(160, 90, 245);
+    private static final TextColor PRIMARY = TextColor.color(118, 52, 212);
+    private static final TextColor SECONDARY = TextColor.color(182, 118, 248);
+    private static final TextColor INFORMATION = TextColor.color(208, 168, 252);
+    private static final TextColor LIST = TextColor.color(62, 18, 148);
+    private static final TextColor ACCENT = TextColor.color(230, 200, 255);
+    private static final TextColor MUTED = TextColor.color(98, 52, 172);
 
     public static final RootCommandTree INSTANCE;
 
