@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.command.Command;
+import io.papermc.paper.threadedregions.RegionizedServer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
@@ -18,8 +19,10 @@ import static net.minecraft.commands.Commands.argument;
 public class SetMaxPlayersCommand implements Command {
 
     private static int execute(int newSize, boolean persist) {
-        setMaxPlayers(newSize, persist);
-        GlobalConfiguration.broadcast("Set max player count to " + newSize, GlobalConfiguration.INFO);
+        RegionizedServer.getInstance().scheduleToOrExecute(() -> {
+            setMaxPlayers(newSize, persist);
+            GlobalConfiguration.broadcast("Set max player count to " + newSize, GlobalConfiguration.INFO);
+        });
         return 1;
     }
 
