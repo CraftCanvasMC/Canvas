@@ -32,15 +32,11 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
     private final Logger LOGGER;
 
-    private final COWArrayList<BalancedChunkSystem.OrderedStreamGroup> groups = new COWArrayList<>(BalancedChunkSystem.OrderedStreamGroup.class);
     private final COWArrayList<WorkerThread> threads = new COWArrayList<>(WorkerThread.class);
     private final COWArrayList<WorkerThread> aliveThreads = new COWArrayList<>(WorkerThread.class);
+    private final BalancedChunkSystem.OrderedStreamGroup stream = new OrderedStreamGroup(new AtomicLong());
 
     private boolean shutdown;
-
-    private static int compareGroup(final BalancedChunkSystem.@NonNull OrderedStreamGroup g1, final BalancedChunkSystem.@NonNull OrderedStreamGroup g2) {
-        return TimeUtil.compareTimes(g1.lastRetrieved, g2.lastRetrieved);
-    }
 
     public BalancedChunkSystem(final long groupTimeSliceNS, final int workerThreadCount, final ThreadFactory threadInitializer, final String name) {
         super(groupTimeSliceNS, threadInitializer);
@@ -78,10 +74,8 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
 
         if (shutdownQueues) {
-            for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
-                for (final BalancedChunkSystem.OrderedStreamGroup.Queue queue : group.queues.getArray()) {
-                    queue.shutdown();
-                }
+            for (final BalancedChunkSystem.OrderedStreamGroup.Queue queue : this.stream.queues.getArray()) {
+                queue.shutdown();
             }
         }
 
@@ -175,12 +169,9 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             this.shutdown = true;
         }
 
-        for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
-            for (final BalancedChunkSystem.OrderedStreamGroup.Queue queue : group.queues.getArray()) {
-                queue.shutdown();
-            }
+        for (final BalancedChunkSystem.OrderedStreamGroup.Queue queue : this.stream.queues.getArray()) {
+            queue.shutdown();
         }
-
 
         for (final WorkerThread thread : this.threads.getArray()) {
             // none of these can be true or else NPE
@@ -247,58 +238,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                 throw new IllegalStateException("Queue is shutdown");
             }
 
-            final BalancedChunkSystem.OrderedStreamGroup ret = new BalancedChunkSystem.OrderedStreamGroup(subOrderGenerate);
-
-            this.groups.add(ret);
-
-            return ret;
-        }
-    }
-
-    private @NonNull List<BalancedChunkSystem.OrderedStreamGroup> findEligibleGroups() {
-        final List<BalancedChunkSystem.OrderedStreamGroup> nonEmpty = new ArrayList<>();
-
-        for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
-            if (group.hasAnyTasks()) {
-                nonEmpty.add(group);
-            }
-        }
-
-        return nonEmpty;
-    }
-
-    private BalancedChunkSystem.@Nullable OrderedStreamGroup findFirstNonEmpty() {
-        for (final BalancedChunkSystem.OrderedStreamGroup group : this.groups.getArray()) {
-            if (group.hasAnyTasks()) {
-                return group;
-            }
-        }
-
-        return null;
-    }
-
-    private BalancedChunkSystem.OrderedStreamGroup obtainGroup0(final @NonNull List<BalancedChunkSystem.OrderedStreamGroup> groups, final long time) {
-        BalancedChunkSystem.OrderedStreamGroup ret = null;
-
-        for (final BalancedChunkSystem.OrderedStreamGroup group : groups) {
-            if (ret == null || compareGroup(group, ret) < 0) {
-                ret = group;
-            }
-        }
-
-        if (ret != null) {
-            ret.lastRetrieved = time;
-            return ret;
-        }
-
-        return ret;
-    }
-
-    private BalancedChunkSystem.OrderedStreamGroup obtainGroup(final long time) {
-        final List<BalancedChunkSystem.OrderedStreamGroup> groups = this.findEligibleGroups();
-
-        synchronized (this) {
-            return this.obtainGroup0(groups, time);
+            return this.stream;
         }
     }
 
@@ -306,8 +246,6 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
         private final AtomicLong subOrderGenerator;
         private final COWArrayList<Queue> queues = new COWArrayList<>(Queue.class);
-
-        private long lastRetrieved = System.nanoTime();
 
         public OrderedStreamGroup(final AtomicLong subOrderGenerator) {
             this.subOrderGenerator = subOrderGenerator;
@@ -604,34 +542,16 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         @Override
         protected boolean pollTasks() {
             boolean ret = false;
-
-            for (; ; ) {
-                if (this.halted) {
-                    break;
+            final long deadline = System.nanoTime() + BalancedChunkSystem.this.groupTimeSliceNS;
+            do {
+                if (this.halted) break;
+                try {
+                    if (!BalancedChunkSystem.this.stream.executeTask()) break;
+                    ret = true;
+                } catch (final Throwable thrown) {
+                    LOGGER.error("Exception thrown from thread '" + this.thread.getName(), thrown);
                 }
-
-                final BalancedChunkSystem.OrderedStreamGroup group = BalancedChunkSystem.this.obtainGroup(System.nanoTime());
-                if (group == null) {
-                    break;
-                }
-                final long deadline = System.nanoTime() + BalancedChunkSystem.this.groupTimeSliceNS;
-                do {
-                    try {
-                        if (this.halted) {
-                            break;
-                        }
-                        if (!group.executeTask()) {
-                            // no more tasks, try next group
-                            break;
-                        }
-                        ret = true;
-                    } catch (final Throwable throwable) {
-                        LOGGER.error("Exception thrown from thread '" + this.thread.getName(), throwable);
-                    }
-                } while (System.nanoTime() - deadline <= 0L);
-            }
-
-
+            } while (System.nanoTime() - deadline <= 0L);
             return ret;
         }
     }
