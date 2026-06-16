@@ -1,10 +1,10 @@
 package io.canvasmc.canvas.world.scores;
 
-import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Team;
+import net.minecraft.world.scores.TeamColor;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
 import java.util.List;
@@ -18,7 +18,7 @@ public class TeamData {
     private Component playerSuffix = CommonComponents.EMPTY;
     private Team.Visibility nameTagVisibility = Team.Visibility.ALWAYS;
     private Team.Visibility deathMessageVisibility = Team.Visibility.ALWAYS;
-    private ChatFormatting color = ChatFormatting.RESET;
+    private Optional<TeamColor> color = Optional.empty();
     private Team.CollisionRule collisionRule = Team.CollisionRule.ALWAYS;
 
     @Contract("_ -> new")
@@ -44,7 +44,7 @@ public class TeamData {
         final Component playerSuffix,
         final Team.Visibility nameTagVisibility,
         final Team.Visibility deathMessageVisibility,
-        final ChatFormatting color,
+        final Optional<TeamColor> color,
         final Team.CollisionRule collisionRule
     ) {
         this.allowFriendlyFire = allowFriendlyFire;
@@ -80,15 +80,11 @@ public class TeamData {
         return this;
     }
 
-    public Optional<ChatFormatting> getPackedColor() {
-        return this.color != ChatFormatting.RESET ? Optional.of(this.color) : Optional.empty();
-    }
-
-    public ChatFormatting getColor() {
+    public Optional<TeamColor> getColor() {
         return color;
     }
 
-    public TeamData setColor(final ChatFormatting color) {
+    public TeamData setColor(final Optional<TeamColor> color) {
         this.color = color;
         return this;
     }
@@ -152,7 +148,7 @@ public class TeamData {
         return new PlayerTeam.Packed(
             name,
             Optional.of(this.displayName),
-            this.color != ChatFormatting.RESET ? Optional.of(this.color) : Optional.empty(),
+            this.color,
             this.allowFriendlyFire,
             this.seeFriendlyInvisibles,
             this.playerPrefix,
