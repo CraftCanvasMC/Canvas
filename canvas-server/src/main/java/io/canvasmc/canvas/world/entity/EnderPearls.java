@@ -38,7 +38,9 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.level.storage.TagValueOutput;
+import net.minecraft.world.level.storage.ValueInput;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -196,16 +198,29 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
                 GlobalConfiguration.LOGGER.error("Level ({}) did not exist, skipping pearl spawn", serialized.getString("level"));
                 return;
             }
-            Entity entity = EntityType.loadEntityRecursive(data, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
-            if (entity != null) {
-                level.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
-                    level.addFreshEntityWithPassengers(entity);
-                    ServerPlayer.placeEnderPearlTicket(level, entity.chunkPosition());
-                    GlobalConfiguration.LOGGER.debug("Spawned saved pearl in level ({})", level.dimension().identifier());
-                });
-            }
-            else {
-                GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", level.dimension().identifier().toDebugFileName());
+
+            try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
+                () -> "pearl-spawn", GlobalConfiguration.LOGGER
+            )) {
+                final ValueInput tagValueInput = TagValueInput.create(
+                    problemReporter,
+                    MinecraftServer.getServer().registryAccess(),
+                    data
+                );
+
+                Entity entity = EntityType.loadEntityRecursive(tagValueInput, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
+                if (entity != null) {
+                    level.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
+                        level.addFreshEntityWithPassengers(entity);
+                        ServerPlayer.placeEnderPearlTicket(level, entity.chunkPosition());
+                        GlobalConfiguration.LOGGER.debug("Spawned saved pearl in level ({})", level.dimension().identifier());
+                    });
+                }
+                else {
+                    GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", level.dimension().identifier().toDebugFileName());
+                }
+            } catch (Throwable thrown) {
+                GlobalConfiguration.LOGGER.error("Failed to spawn player pearl in level ({})", level, thrown);
             }
         }
 

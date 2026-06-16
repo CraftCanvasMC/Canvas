@@ -49,7 +49,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
 
     private boolean shouldScheduleBasedOnDistance(@NonNull ServerPlayer origin, ServerPlayer target) {
         final double scaled = origin.distanceTo(target) / scale;
-        return origin.random.nextDouble() < (1.0 / (1.0 + (scaled * scaled)));
+        return origin.getRandom().nextDouble() < (1.0 / (1.0 + (scaled * scaled)));
     }
 
     // Note: this should be scheduled on the 'player'

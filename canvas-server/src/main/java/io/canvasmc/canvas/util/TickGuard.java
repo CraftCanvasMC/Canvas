@@ -58,7 +58,7 @@ public class TickGuard {
         }
         else {
             final Thread currentThread = Thread.currentThread();
-            final Thread startupThread = MinecraftServer.getServer().serverThread;
+            final Thread startupThread = MinecraftServer.getServer().getRunningThread();
             if (currentThread != startupThread) {
                 LOGGER.error("Thread failed startup thread check: {}, context={}", reason, getThreadContext(), new Throwable());
                 throw new IllegalStateException(reason);

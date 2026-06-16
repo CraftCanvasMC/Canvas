@@ -116,7 +116,7 @@ public class WorldDistanceCommand implements Command {
                                 // we go straight through here because FeatureHooks hard-clamps at 32, which is technically wrong
                                 // since it should abide by the MAX_VIEW_DISTANCE arg
                                 case VIEW -> level.getChunkSource().chunkMap.setServerViewDistance(updated);
-                                case SIMULATION -> level.chunkSource.chunkMap.distanceManager.updateSimulationDistance(updated);
+                                case SIMULATION -> level.getChunkSource().chunkMap.getDistanceManager().updateSimulationDistance(updated);
                             }
 
                             GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + Util.getLevelName(level) + "\" to " + distance, GlobalConfiguration.INFO);

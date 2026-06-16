@@ -170,7 +170,7 @@ public interface RegionScheduleHandlePinner {
                 for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                     final long longCoord = ((long) chunkZ << 32) | (chunkX & 0xFFFFFFFFL);
                     Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
-                    level.chunkSource.ticketStorage.addTicket(longCoord, ticket);
+                    level.getChunkSource().ticketStorage.addTicket(longCoord, ticket);
                 }
             }
 
@@ -226,7 +226,7 @@ public interface RegionScheduleHandlePinner {
                     // - clear PROFILING_CHUNKS
                     for (long longCoord : curr) {
                         Ticket ticket = new Ticket(TicketType.REGION_PROFILING_HOLD, ChunkMap.FORCED_TICKET_LEVEL);
-                        level.chunkSource.ticketStorage.removeTicket(longCoord, ticket);
+                        level.getChunkSource().ticketStorage.removeTicket(longCoord, ticket);
                     }
                 }
             );
