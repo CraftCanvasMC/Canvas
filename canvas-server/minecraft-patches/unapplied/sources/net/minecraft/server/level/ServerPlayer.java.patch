@@ -1,0 +1,182 @@
+From 56fbeba69dc02a23c55fcd9bf06e3cae1da93bce Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 17850e18c650df003494f6e525386c3af795e6a7..7849c3f8b4df3a4761a4e8e9247f593455d795d5 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -463,6 +463,9 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     public boolean sentListPacket = false;
+     public boolean suppressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
+     // CraftBukkit end
++    public final io.canvasmc.canvas.world.RegionResourceBar.DisplayManager canvas$tpsBarDisplay = io.canvasmc.canvas.world.RegionResourceBar.DisplayManager.createNew(this, net.kyori.adventure.bossbar.BossBar.Color.BLUE); // Canvas - tpsbar
++    public final io.canvasmc.canvas.world.RegionResourceBar.DisplayManager canvas$ramBarDisplay = io.canvasmc.canvas.world.RegionResourceBar.DisplayManager.createNew(this, net.kyori.adventure.bossbar.BossBar.Color.GREEN); // Canvas - rambar
++    public final int canvas$infoBucketIndex; // Canvas - optimize playerlist tick
+     public boolean isRealPlayer; // Paper
+     public com.destroystokyo.paper.event.entity.@Nullable PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
+     public org.bukkit.event.player.PlayerQuitEvent.@Nullable QuitReason quitReason = null; // Paper - Add API for quit reason; there are a lot of changes to do if we change all methods leading to the event
+@@ -514,6 +517,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         this.bukkitPickUpLoot = true;
+         this.maxHealthCache = this.getMaxHealth();
+         // CraftBukkit end
++        this.canvas$infoBucketIndex = Math.floorMod(this.uuid.hashCode(), net.minecraft.server.players.PlayerList.SEND_PLAYER_INFO_INTERVAL); // Canvas - optimize playerlist tick
+     }
+ 
+     // Folia start - region threading
+@@ -536,8 +540,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         double amountX = selectMaxX - selectMinX;
+         double amountZ = selectMaxZ - selectMinZ;
+ 
+-        int selectX = amountX < 1.0 ? Mth.floor(worldBorder.getCenterX()) : (int)Mth.floor((amountX + 1.0) * random.nextDouble() + selectMinX);
+-        int selectZ = amountZ < 1.0 ? Mth.floor(worldBorder.getCenterZ()) : (int)Mth.floor((amountZ + 1.0) * random.nextDouble() + selectMinZ);
++        int selectX = amountX < 0.0 ? Mth.floor(worldBorder.getCenterX()) : Mth.floor(amountX * random.nextDouble() + selectMinX); // Luminol - correct respawn place
++        int selectZ = amountZ < 0.0 ? Mth.floor(worldBorder.getCenterZ()) : Mth.floor(amountZ * random.nextDouble() + selectMinZ); // Luminol - correct respawn place
+ 
+         return new BlockPos(selectX, 0, selectZ);
+     }
+@@ -548,10 +552,21 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+ 
+     private static BlockPos findSpawnAround(ServerLevel world, BlockPos selected) {
++        // Luminol start - Correct player respawn place
++        BlockPos inChunk;
++        inChunk = PlayerSpawnFinder.getOverworldRespawnPos(world, selected.getX(), selected.getZ());
++        if (inChunk != null) {
++            AABB checkVolume = PlayerSpawnFinder.PLAYER_DIMENSIONS.makeBoundingBox((double)inChunk.getX() + 0.5, (double)inChunk.getY(), (double)inChunk.getZ() + 0.5);
++
++            if (world.noCollision(null, checkVolume, true)) {
++                return inChunk;
++            }
++        }
++        // Luminol end - Correct player respawn place
+         // try hard to find, so that we don't attempt another chunk load
+         for (int dz = -SPAWN_RADIUS_SELECTION_SEARCH; dz <= SPAWN_RADIUS_SELECTION_SEARCH; ++dz) {
+             for (int dx = -SPAWN_RADIUS_SELECTION_SEARCH; dx <= SPAWN_RADIUS_SELECTION_SEARCH; ++dx) {
+-                BlockPos inChunk = PlayerSpawnFinder.getOverworldRespawnPos(world, selected.getX() + dx, selected.getZ() + dz);
++                inChunk = PlayerSpawnFinder.getOverworldRespawnPos(world, selected.getX() + dx, selected.getZ() + dz); // Luminol - Correct player respawn place
+                 if (inChunk == null) {
+                     continue;
+                 }
+@@ -683,6 +698,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
+         this.spawnExtraParticlesOnFall = input.getBooleanOr("spawn_extra_particles_on_fall", false);
+         this.raidOmenPosition = input.read("raid_omen_position", BlockPos.CODEC).orElse(null);
++        this.canvas$tpsBarDisplay.updateFromEntry(input.read("TpsBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC).orElse(io.canvasmc.canvas.world.RegionResourceBar.Entry.FALLBACK)); // Canvas - tpsbar
++        this.canvas$ramBarDisplay.updateFromEntry(input.read("RamBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC).orElse(io.canvasmc.canvas.world.RegionResourceBar.Entry.FALLBACK)); // Canvas - rambar
+         // Paper start - Expand PlayerGameModeChangeEvent
+         this.loadGameTypes(input);
+     }
+@@ -724,6 +741,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             output.store("ShoulderEntityRight", CompoundTag.CODEC, this.getShoulderEntityRight());
+         }
+         this.getBukkitEntity().setExtraData(output); // CraftBukkit
++        output.store("TpsBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC, this.canvas$tpsBarDisplay.serializeDisplay()); // Canvas - tpsbar
++        output.store("RamBar", io.canvasmc.canvas.world.RegionResourceBar.Entry.CODEC, this.canvas$ramBarDisplay.serializeDisplay()); // Canvas - rambar
+     }
+ 
+     private void saveParentVehicle(final ValueOutput playerOutput) {
+@@ -1451,6 +1470,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         if (killer != null) {
+             this.awardStat(Stats.ENTITY_KILLED_BY.get(killer.getType()));
+             killer.awardKillScore(this, source);
++            if (source.is(DamageTypes.WITHER_SKULL)) this.canvas$isDyingFromWitherRose = true; // Canvas - fix Folia#388
+             this.createWitherRose(killer);
+         }
+ 
+@@ -1727,7 +1747,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         }
+         // Canvas end - region threading
+         this.respawn((player) -> {
+-            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, Level.OVERWORLD);
++            CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey()); // Canvas - default respawn dimension config
+         }, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.END_PORTAL, true);
+     }
+ 
+@@ -1860,7 +1880,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         // find and modify respawn block state
+         if (respawnWorld == null || respawnConfig == null) {
+             // default to regular spawn
+-            fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), spawnPosComplete);
++            fudgeSpawnLocation(this.server.getLevel(io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey()), spawnPosComplete); // Canvas - default respawn dimension config
+         } else {
+             // load chunk for block
+             // give at least 1 radius of loaded chunks so that we do not sync load anything
+@@ -1881,7 +1901,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                             null, false, com.destroystokyo.paper.event.player.PlayerSetSpawnEvent.Cause.PLAYER_RESPAWN
+                         );
+                         // default to regular spawn
+-                        fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), spawnPosComplete);
++                        fudgeSpawnLocation(this.server.getLevel(io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey()), spawnPosComplete); // Canvas - default respawn dimension config
+                         return;
+                     }
+ 
+@@ -2233,7 +2253,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             CriteriaTriggers.CHANGED_DIMENSION.trigger(this, oldKey, newKey);
+         }
+ 
+-        if (maindimensionkey == Level.NETHER && maindimensionkey1 == Level.OVERWORLD && this.enteredNetherPosition != null) {
++        if (maindimensionkey == Level.NETHER && maindimensionkey1 == io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey() && this.enteredNetherPosition != null) { // Canvas - default respawn dimension config
+             // CraftBukkit end
+             if (!respawning) CriteriaTriggers.NETHER_TRAVEL.trigger(this, this.enteredNetherPosition); // Canvas - region threading
+         }
+@@ -2300,7 +2320,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                         new AABB(bedCenter.x() - 8.0, bedCenter.y() - 5.0, bedCenter.z() - 8.0, bedCenter.x() + 8.0, bedCenter.y() + 5.0, bedCenter.z() + 8.0),
+                         monster -> monster.isPreventingPlayerRest(this.level(), this)
+                     );
+-                if (!monsters.isEmpty()) {
++                if (!this.level().canvasConfig().sleeping.sleepIgnoresNearbyMobs && !monsters.isEmpty()) { // Canvas - sleeping configs
+                     return Either.left(Player.BedSleepingProblem.NOT_SAFE);
+                 }
+             }
+@@ -2336,7 +2356,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                 CriteriaTriggers.SLEPT_IN_BED.trigger(this);
+             });
+             if (!this.level().canSleepThroughNights()) {
+-                this.sendOverlayMessage(Component.translatable("sleep.not_possible"));
++                // Canvas start - sleeping configs
++                Component msg = this.level().canvasConfig().sleeping.getSleepNotPossible();
++                if (msg != null) {
++                    this.sendOverlayMessage(msg);
++                }
++                // Canvas end - sleeping configs
+             }
+ 
+             this.level().updateSleepingPlayerList();
+@@ -2406,7 +2431,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         if (this.spawnExtraParticlesOnFall && onGround && this.fallDistance > 0.0) {
+             Vec3 centered = pos.getCenter().add(0.0, 0.5, 0.0);
+             int particles = (int)Mth.clamp(50.0 * this.fallDistance, 0.0, 200.0);
+-            this.level()
++            if (!level().canvasConfig().visuals.particles.disableFallParticles) this.level() // Canvas - particles config
+                 .sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, onState), centered.x, centered.y, centered.z, particles, 0.3F, 0.3F, 0.3F, 0.15F);
+             this.spawnExtraParticlesOnFall = false;
+         }
+@@ -2754,6 +2779,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+     public void disconnect() {
+         this.disconnected = true;
++        if (this.canvas$isTemporarilyBlocking) this.releaseUsingItem(); // Canvas - implement sword blocking
+         this.ejectPassengers();
+ 
+         // Paper start - Workaround vehicle not tracking the passenger disconnection dismount
+@@ -3639,7 +3665,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+ 
+     public Set<DebugSubscription<?>> debugSubscriptions() {
+-        return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : this.requestedDebugSubscriptions;
++        return Set.of(); // Canvas - disable debug subscriptions
+     }
+ 
+     public record RespawnConfig(LevelData.RespawnData respawnData, boolean forced) {
+@@ -3652,7 +3678,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         );
+ 
+         private static ResourceKey<Level> getDimensionOrDefault(final ServerPlayer.@Nullable RespawnConfig respawnConfig) {
+-            return respawnConfig != null ? respawnConfig.respawnData().dimension() : Level.OVERWORLD;
++            return respawnConfig != null ? respawnConfig.respawnData().dimension() : io.canvasmc.canvas.GlobalConfiguration.fetchRespawnDimensionKey(); // Canvas - default respawn dimension config
+         }
+ 
+         public boolean isSamePosition(final ServerPlayer.@Nullable RespawnConfig other) {

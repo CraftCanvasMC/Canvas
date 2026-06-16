@@ -1,0 +1,100 @@
+From 56fbeba69dc02a23c55fcd9bf06e3cae1da93bce Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/world/entity/projectile/Projectile.java b/net/minecraft/world/entity/projectile/Projectile.java
+index 67d01bb84cd40a3f67de441e9dbdc2ac7638cada..e15847d50fbc5192068abb81eb2b79d16563ce2a 100644
+--- a/net/minecraft/world/entity/projectile/Projectile.java
++++ b/net/minecraft/world/entity/projectile/Projectile.java
+@@ -45,10 +45,51 @@ public abstract class Projectile extends Entity implements TraceableEntity {
+     public boolean hasBeenShot = false;
+     private @Nullable Entity lastDeflectedBy;
+     protected boolean hitCancelled = false; // CraftBukkit
++    private long canvas$ticketTimer = 0L; // Canvas - configurable projectile types can load chunks
++    private final boolean canvas$loadsChunksOverride; // Canvas - configurable projectile types can load chunks
+ 
+     protected Projectile(final EntityType<? extends Projectile> type, final Level level) {
+         super(type, level);
++        this.canvas$loadsChunksOverride = level.canvasConfig().entities.projectiles.getDoesProjectileLoadChunksOverridePredicate().test(this); // Canvas - configurable projectile types can load chunks
+     }
++    // Pufferfish start
++
++    private int loadedLifetime = 0;
++
++    @Override
++    public void setPos(double x, double y, double z) {
++        // Canvas start - region threading
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            super.setPos(x, y, z);
++            return;
++        }
++        // if current world data is null, we may be async or on startup thread
++        io.papermc.paper.threadedregions.RegionizedWorldData currWorldData = this.level().getCurrentWorldData();
++        if (currWorldData != null) {
++            long currentTick = currWorldData.regionData.getCurrentTick();
++            if (currWorldData.canvas$loadedTick != currentTick) {
++                currWorldData.canvas$loadedTick = currentTick;
++                currWorldData.canvas$loadedThisTick = 0;
++            }
++        }
++        // Canvas end - region threading
++        int previousX = Mth.floor(this.getX()) >> 4, previousZ = Mth.floor(this.getZ()) >> 4;
++        int newX = Mth.floor(x) >> 4, newZ = Mth.floor(z) >> 4;
++        if (previousX != newX || previousZ != newZ) {
++            boolean isLoaded = ((net.minecraft.server.level.ServerChunkCache) this.level().getChunkSource()).getChunkAtIfLoadedImmediately(newX, newZ) != null;
++            if (!isLoaded && currWorldData != null) {
++                if (currWorldData.canvas$loadedThisTick > level().canvasConfig().entities.projectiles.maxProjectileChunkLoadsPerTick) { // Canvas - region threading
++                    if (++this.loadedLifetime > level().canvasConfig().entities.projectiles.maxProjectileChunkLoadsPerProjectileBeforeRemoval) {
++                        this.discard();
++                    }
++                    return;
++                }
++                currWorldData.canvas$loadedThisTick++; // Canvas - region threading
++            }
++        }
++        super.setPos(x, y, z);
++    }
++    // Pufferfish end
+ 
+     protected void setOwner(final @Nullable EntityReference<Entity> owner) {
+         this.owner = owner;
+@@ -118,6 +159,25 @@ public abstract class Projectile extends Entity implements TraceableEntity {
+         this.checkLeftOwner();
+         super.tick();
+         this.leftOwnerChecked = false;
++        // Canvas start - configurable projectile types can load chunks
++        if (
++            !(this instanceof net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl) // ender pearls have their own logic
++            && this.isAlive()
++            && this.canvas$loadsChunksOverride
++        ) {
++            BlockPos blockPos = BlockPos.containing(this.position());
++            int sectionPosX = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
++            int sectionPosZ = net.minecraft.core.SectionPos.blockToSectionCoord(this.position().x());
++            if ((
++                --this.canvas$ticketTimer <= 0L
++                    || sectionPosX != net.minecraft.core.SectionPos.blockToSectionCoord(blockPos.getX())
++                    || sectionPosZ != net.minecraft.core.SectionPos.blockToSectionCoord(blockPos.getZ())
++            )
++                && this.getOwner() instanceof net.minecraft.server.level.ServerPlayer) {
++                this.canvas$ticketTimer = net.minecraft.server.level.ServerPlayer.placeEnderPearlTicket((ServerLevel) this.level(), this.chunkPosition()) - 1L;
++            }
++        }
++        // Canvas end - configurable projectile types can load chunks
+     }
+ 
+     protected void checkLeftOwner() {
+@@ -390,7 +450,10 @@ public abstract class Projectile extends Entity implements TraceableEntity {
+             EntityHitResult entityHitResult = (EntityHitResult)hitResult;
+             Entity entityHit = entityHitResult.getEntity();
+             if (entityHit.is(EntityTypeTags.REDIRECTABLE_PROJECTILE) && entityHit instanceof Projectile projectile) {
+-                projectile.deflect(ProjectileDeflection.AIM_DEFLECT, this.getOwner(), this.owner, true);
++                // Canvas start - configurable cross-region redirect deflection
++                Entity owner = level().canvasConfig().entities.projectiles.crossRegionRedirectableProjectileDeflection ? this.getOwnerRaw() : this.getOwner();
++                projectile.deflect(ProjectileDeflection.AIM_DEFLECT, owner, this.owner, true);
++                // Canvas end - configurable cross-region redirect deflection
+             }
+ 
+             this.onHitEntity(entityHitResult);

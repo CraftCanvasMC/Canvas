@@ -1,0 +1,49 @@
+From 56fbeba69dc02a23c55fcd9bf06e3cae1da93bce Mon Sep 17 00:00:00 2001
+From: File <noreply+automated@papermc.io>
+Date: Sun, 20 Apr 1997 15:37:42 +0200
+Subject: [PATCH] canvas File Patches
+
+
+diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+index 57180f9c84fd011832ab2d32a0b3d47d7cc472db..6c7f8b0ea408a4e389887b9d2bd7d4da474f4ed4 100644
+--- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
+@@ -71,6 +71,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+     private int velocityLoginMessageId = -1; // Paper - Add Velocity IP Forwarding Support
+     public java.util.@Nullable UUID requestedUuid; // Paper
+     private final io.papermc.paper.connection.PaperPlayerLoginConnection paperLoginConnection; // Paper - Config API
++    private volatile boolean canvas$switchedAlready = false; // Canvas - async protocol switch
+ 
+     public ServerLoginPacketListenerImpl(final MinecraftServer minecraftserver, final Connection connection, final boolean transferred) {
+         this.server = minecraftserver;
+@@ -431,9 +432,29 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+ 
+     @Override
+     public void handleLoginAcknowledgement(final ServerboundLoginAcknowledgedPacket packet) {
++        // Canvas start - async protocol switch
++        if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.asyncProtocolSwitch && !canvas$switchedAlready) {
++            canvas$switchedAlready = true;
++            this.connection.canvas$setupOutboundProtocolAsync(ConfigurationProtocols.CLIENTBOUND)
++                .addListener(unused -> {
++                    try {
++                        // just run PacketUtils, this will schedule this to the global tick for us
++                        net.minecraft.network.protocol.PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
++                    } catch (net.minecraft.server.RunningOnDifferentThreadException | io.papermc.paper.util.ServerStopRejectedExecutionException ignored) {
++                    } catch (java.util.concurrent.RejectedExecutionException rejExc) {
++                        this.connection.disconnect(Component.translatable("multiplayer.disconnect.server_shutdown"));
++                    } catch (ClassCastException castClass) {
++                        LOGGER.error("Received {} that couldn't be processed", packet.getClass(), castClass);
++                        this.connection.disconnect(Component.translatable("multiplayer.disconnect.invalid_packet"));
++                    }
++                }
++            );
++            return;
++        }
+         net.minecraft.network.protocol.PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor()); // CraftBukkit
+         Validate.validState(this.state == ServerLoginPacketListenerImpl.State.PROTOCOL_SWITCHING, "Unexpected login acknowledgement packet");
+-        this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
++        if (!io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.asyncProtocolSwitch) this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
++        // Canvas end - async protocol switch
+         CommonListenerCookie cookie = CommonListenerCookie.createInitial(Objects.requireNonNull(this.authenticatedProfile), this.transferred);
+         ServerConfigurationPacketListenerImpl configPacketListener = new ServerConfigurationPacketListenerImpl(this.server, this.connection, cookie);
+         this.connection.setupInboundProtocol(ConfigurationProtocols.SERVERBOUND, configPacketListener);
