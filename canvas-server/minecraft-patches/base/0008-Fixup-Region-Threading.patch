@@ -44,7 +44,7 @@ index e9ca1a15049b0211d10401cb78e953b93afaf6c7..88067a935b2de9c4763e5f8e3752e543
                  if (tick.handle instanceof TickRegions.ConcreteRegionTickHandle region) {
                      LOGGER.error(
 diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
-index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..75b88ab017cadb3ff942df86760c2e2e74d77b5a 100644
+index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..11610b628bbf328fef39b4bfe1f8f522730a16e6 100644
 --- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
 +++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 @@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
@@ -88,7 +88,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..75b88ab017cadb3ff942df86760c2e2e
      }
  
      public void saveRegionChunks(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region,
-@@ -148,9 +150,76 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
+@@ -148,9 +150,110 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
              this.shuttingDown = null;
          }
      }
@@ -115,29 +115,63 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..75b88ab017cadb3ff942df86760c2e2e
 +        }
 +
 +        // save pearls
-+        for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-+            final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
-+                regions = new ArrayList<>();
-+            level.regioniser.computeForAllRegionsUnsynchronised(regions::add);
++        final org.apache.commons.lang3.mutable.MutableInt savedPearlCount = new org.apache.commons.lang3.mutable.MutableInt(0);
++        final java.util.Map<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, List<com.mojang.datafixers.util.Pair<java.util.UUID, net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl>>>
++            region2Pearls = com.google.common.collect.Maps.newHashMap();
++        final boolean removeDuplicatePearl = io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.pearlDuplication;
 +
-+            for (int i = 0, len = regions.size(); i < len; ++i) {
-+                io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
-+                    region = regions.get(i);
-+                ChunkPos center = null;
-+                try {
-+                    this.shuttingDown = region;
-+                    center = region.getCenterChunk();
-+                    final RegionizedWorldData worldData = region.regioniser.world.worldRegionData.get();
-+                    for (final ServerPlayer localPlayer : worldData.getLocalPlayers()) {
-+                        // if pearl duplication fix is enabled, remove the pearl
-+                        localPlayer.savePearls(io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.pearlDuplication);
-+                    }
-+                } catch (Throwable thrown) {
-+                    LOGGER.error("Failed to save pearls for region around chunk " + center + " in level '" + region.regioniser.world.getWorld().getName() + "'", thrown);
-+                } finally {
-+                    this.shuttingDown = null;
++        for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().players) {
++            final java.util.UUID uuid = entityPlayer.getUUID();
++            final java.util.Set<net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl> toSave = entityPlayer.getEnderPearls();
++
++            // we have to save manually like this since technically pearls
++            // can be anywhere in the world during shutdown, including out of
++            // the region of the existing player(stasis chambers for example).
++
++            // because of that, we need to collect all pearls and make sure we
++            // save them all with the proper region set
++
++            for (final net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl thrownEnderpearl : toSave) {
++                if (thrownEnderpearl.level().paperConfig().misc.legacyEnderPearlBehavior) continue;
++
++                final int chunkX = thrownEnderpearl.getBlockX() >> 4;
++                final int chunkZ = thrownEnderpearl.getBlockZ() >> 4;
++                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++                    regionAtChunk = entityPlayer.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++                if (regionAtChunk == null) {
++                    // if region isn't loaded, skip
++                    continue;
 +                }
++
++                region2Pearls.computeIfAbsent(
++                    regionAtChunk,
++                    (_) -> new ArrayList<>()
++                ).add(new com.mojang.datafixers.util.Pair<>(uuid, thrownEnderpearl));
 +            }
++        }
++
++        region2Pearls.forEach((region, listOfPearls) -> {
++            ChunkPos center = null;
++            try {
++                this.shuttingDown = region;
++                center = region.getCenterChunk();
++                for (final com.mojang.datafixers.util.Pair<java.util.UUID, net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl> pair : listOfPearls) {
++                    MinecraftServer.getServer().pearls.addPearl(pair.getFirst(), pair.getSecond());
++                    if (removeDuplicatePearl) {
++                        pair.getSecond().setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
++                    }
++                    savedPearlCount.increment();
++                }
++            } catch (Throwable thrown) {
++                LOGGER.error("Failed to save pearls for region around chunk " + center + " in level '" + region.regioniser.world.getWorld().getName() + "'", thrown);
++            } finally {
++                this.shuttingDown = null;
++            }
++        });
++
++        final int total = savedPearlCount.intValue();
++        if (total > 0) {
++            LOGGER.info("Saved {} in-flight pearl{}", total, total > 1 ? "s" : "");
 +        }
 +
 +        // now, remove players and wait
@@ -165,7 +199,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..75b88ab017cadb3ff942df86760c2e2e
          // await scheduler termination
          LOGGER.info("Awaiting scheduler termination for 60s...");
          if (TickRegions.getScheduler().halt(true, TimeUnit.SECONDS.toNanos(60L))) {
-@@ -161,6 +230,11 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
+@@ -161,6 +264,11 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
          }
  
          MinecraftServer.getServer().stopServer(); // stop part 1: most logic, kicking players, plugins, etc
@@ -3299,7 +3333,7 @@ index 24450c98da398d13a3f215d464356e7c67a318b6..c6672dfbb0d177ba13cdb8649146af1f
  
      public boolean isSpawnerBlockEnabled() {
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index 145dc8559e570696baa3f1f2294a2258b94d7727..49cfe2aa5281da3cfe8789bd148fe8dcee7a285e 100644
+index 145dc8559e570696baa3f1f2294a2258b94d7727..17850e18c650df003494f6e525386c3af795e6a7 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
 @@ -267,7 +267,40 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
@@ -3359,6 +3393,11 @@ index 145dc8559e570696baa3f1f2294a2258b94d7727..49cfe2aa5281da3cfe8789bd148fe8dc
 +    // Canvas start - region threading
 +
 +    public void savePearls(boolean removePearl) {
++        // shutdown should manually go through pearls
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isShutdownThread()) {
++            throw new IllegalStateException("Cannot save pearls through shutdown thread here");
++        }
++
 +        for (ThrownEnderpearl thrownEnderpearl : enderPearls) {
 +            if (thrownEnderpearl.level().paperConfig().misc.legacyEnderPearlBehavior) continue;
 +
@@ -3366,11 +3405,6 @@ index 145dc8559e570696baa3f1f2294a2258b94d7727..49cfe2aa5281da3cfe8789bd148fe8dc
 +                MinecraftServer.getServer().pearls.addPearl(this.uuid, pearl);
 +                if (removePearl) pearl.setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
 +            };
-+
-+            if (io.papermc.paper.threadedregions.RegionShutdownThread.isShutdownThread()) {
-+                task.accept(thrownEnderpearl);
-+                continue;
-+            }
 +
 +            thrownEnderpearl.getBukkitEntity().taskScheduler.scheduleOrExecute(task);
 +        }
