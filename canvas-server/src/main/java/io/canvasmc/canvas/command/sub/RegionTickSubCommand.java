@@ -2,6 +2,7 @@ package io.canvasmc.canvas.command.sub;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
@@ -13,7 +14,7 @@ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
-import io.canvasmc.canvas.command.Command;
+import io.canvasmc.canvas.command.SubCommand;
 import io.canvasmc.canvas.tick.ScheduledHandleTickState;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
@@ -44,7 +45,8 @@ import static net.minecraft.commands.Commands.literal;
 import static net.minecraft.commands.SharedSuggestionProvider.matchesSubStr;
 
 @NullMarked
-public class RegionTickCommand implements Command {
+public class RegionTickSubCommand implements SubCommand {
+
     private static final SimpleCommandExceptionType TOO_MANY_ARGUMENTS = new SimpleCommandExceptionType(
         Component.literal("Too many arguments provided for handle definition")
     );
@@ -58,7 +60,7 @@ public class RegionTickCommand implements Command {
         Component.literal("No region exists at the specified block coordinates")
     );
 
-    private static void postActionTo(String arg, @Nullable ServerPlayer player, Consumer<TickRegionScheduler.RegionScheduleHandle> action) throws CommandSyntaxException {
+    private static void postActionTo(final String arg, final @Nullable ServerPlayer entityPlayer, final Consumer<TickRegionScheduler.RegionScheduleHandle> action) throws CommandSyntaxException {
         String[] parts = arg.split("\\s+");
         if (parts.length == 0) throw UNKNOWN_ARGUMENTS.create();
         String first = parts[0].toLowerCase();
@@ -77,13 +79,13 @@ public class RegionTickCommand implements Command {
             default -> {
                 if (parts.length == 2) {
                     String second = parts[1];
-                    if (player == null) {
+                    if (entityPlayer == null) {
                         throw MUST_BE_PLAYER.create();
                     }
-                    int chunkX = (first.equalsIgnoreCase("~") ? player.blockPosition.getX() : Integer.parseInt(first)) >> 4;
-                    int chunkZ = (second.equalsIgnoreCase("~") ? player.blockPosition.getZ() : Integer.parseInt(second)) >> 4;
-                    ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
-                        player.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
+                    final int chunkX = (first.equalsIgnoreCase("~") ? entityPlayer.blockPosition.getX() : Integer.parseInt(first)) >> 4;
+                    final int chunkZ = (second.equalsIgnoreCase("~") ? entityPlayer.blockPosition.getZ() : Integer.parseInt(second)) >> 4;
+                    final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+                        entityPlayer.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
                     if (region == null) {
                         throw NO_REGION_EXISTS.create();
                     }
@@ -114,44 +116,44 @@ public class RegionTickCommand implements Command {
             .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(0.0F)).executes((context) -> {
                 float newTickRate = context.getArgument("rate", Float.class);
                 TickRegionScheduler.setTickRate(newTickRate);
-                return 0;
+                return Command.SINGLE_SUCCESS;
             })))
             // we cap it at 100k ticks to sprint, because yes... people do this... and it causes issues
             .then(literal("sprint").then(argument("ticks", LongArgumentType.longArg(0, 100_000L))
-                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes((context) -> {
+                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes(context -> {
                     long ticksToSprint = context.getArgument("ticks", Long.class);
                     postActionTo(context.getArgument("handle", String.class), context.getSource().getPlayer(), (scheduleHandle) -> {
                         scheduleHandle.getTickManager().postAction(new ScheduledHandleTickState.Action.StartSprinting(ticksToSprint));
                     });
                     context.getSource().sendSuccess(() -> Component.literal(String.format("Posted to marked schedule handles to sprint for %s ticks", ticksToSprint)), true);
-                    return 0;
+                    return Command.SINGLE_SUCCESS;
                 }))
             ))
             .then(literal("walk")
-                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes((context) -> {
+                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes(context -> {
                     postActionTo(context.getArgument("handle", String.class), context.getSource().getPlayer(), (scheduleHandle) -> {
                         if (scheduleHandle.getTickManager().isSprinting()) {
                             scheduleHandle.getTickManager().postAction(new ScheduledHandleTickState.Action.StopSprinting());
                         }
                     });
                     context.getSource().sendSuccess(() -> Component.literal("Posted to marked schedule handles to stop sprinting"), true);
-                    return 0;
+                    return Command.SINGLE_SUCCESS;
                 })))
             .then(literal("pause")
-                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes((context) -> {
+                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes(context -> {
                     postActionTo(context.getArgument("handle", String.class), context.getSource().getPlayer(), (scheduleHandle) -> {
                         scheduleHandle.getTickManager().postAction(new ScheduledHandleTickState.Action.Pause());
                     });
                     context.getSource().sendSuccess(() -> Component.literal("Posted to marked schedule handles to pause running game elements"), true);
-                    return 0;
+                    return Command.SINGLE_SUCCESS;
                 })))
             .then(literal("play")
-                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes((context) -> {
+                .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes(context -> {
                     postActionTo(context.getArgument("handle", String.class), context.getSource().getPlayer(), (scheduleHandle) -> {
                         scheduleHandle.getTickManager().postAction(new ScheduledHandleTickState.Action.Play());
                     });
                     context.getSource().sendSuccess(() -> Component.literal("Posted to marked schedule handles to run game elements"), true);
-                    return 0;
+                    return Command.SINGLE_SUCCESS;
                 })));
     }
 
@@ -176,14 +178,7 @@ public class RegionTickCommand implements Command {
             }
 
             List<String> list = gatherCoordinates(remaining, coordinates);
-            String string = builder.getRemaining().toLowerCase(Locale.ROOT);
-
-            for (String string1 : list) {
-                if (matchesSubStr(string, string1.toLowerCase(Locale.ROOT))) {
-                    builder.suggest(string1);
-                }
-            }
-            return builder.buildFuture();
+            return SharedSuggestionProvider.suggest(list, builder);
         }
 
         private List<String> gatherCoordinates(final String remaining, final Collection<SharedSuggestionProvider.TextCoordinates> coordinates) {
@@ -212,7 +207,7 @@ public class RegionTickCommand implements Command {
             return list;
         }
 
-        public void parse(StringReader reader) throws CommandSyntaxException {
+        public void parse(final StringReader reader) throws CommandSyntaxException {
             int cursor = reader.getCursor();
             if (!reader.canRead()) {
                 throw ERROR_NOT_COMPLETE.createWithContext(reader);

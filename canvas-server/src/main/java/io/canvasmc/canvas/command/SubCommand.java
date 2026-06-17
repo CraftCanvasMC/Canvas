@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import java.util.function.Predicate;
 import net.minecraft.commands.CommandSourceStack;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -8,11 +9,11 @@ import org.jspecify.annotations.Nullable;
 /**
  * Represents a subcommand that can be registered under the Canvas command system.
  * <p>
- * Implementations define their name, description, and Brigadier command structure
- * via the {@link #construct(LiteralArgumentBuilder)} method.
+ * Implementations define their name, description, and Brigadier command structure via the
+ * {@link #construct(LiteralArgumentBuilder)} method.
  * </p>
  */
-public interface Command {
+public interface SubCommand {
 
     /**
      * Gets the unique name of this subcommand.
@@ -39,23 +40,46 @@ public interface Command {
     /**
      * Constructs and returns the Brigadier command structure for this subcommand.
      * <p>
-     * Implementations should attach arguments and execution logic to the provided
-     * {@code base} literal. The base literal is already initialized with the
-     * command’s name and basic permission requirements.
+     * Implementations should attach arguments and execution logic to the provided {@code base} literal. The base
+     * literal is already initialized with the command’s name and basic permission requirements.
      * </p>
      *
-     * @param base the base literal builder to append arguments and execution logic to
+     * @param base
+     *     the base literal builder to append arguments and execution logic to
+     *
      * @return the fully constructed {@link LiteralArgumentBuilder} for registration
      */
     LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base);
 
     /**
-     * Gets if the command can be registered on its own
-     * and not as a subcommand of `/canvas`
+     * Gets if the command can be registered on its own and not as a subcommand of `/canvas`
      *
      * @return if it can have a self-command
      */
     default boolean isAllowedSelfCommand() {
         return true;
+    }
+
+    /**
+     * Gets if the command has extra arguments or not or if it's just executed from the literal base of this sub
+     * command
+     *
+     * @return If the command can be executed from just the literal base
+     */
+    default boolean hasExtraArgs() {
+        return true;
+    }
+
+    /**
+     * Returns the permission predicate for if the source stack in context has the permission node
+     * {@code canvas.command.{sub command name}.{node arg}}
+     *
+     * @param node
+     *     the node arg
+     *
+     * @return the constructed predicate
+     */
+    default Predicate<CommandSourceStack> check(final String node) {
+        return CanvasCommands.hasPermission(getName() + "." + node);
     }
 }

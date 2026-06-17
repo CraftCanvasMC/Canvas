@@ -165,7 +165,8 @@ public class Util {
     /**
      * Gets the world name used internally by Canvas, this does not match Bukkit. This matches the
      * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
-     * part at the start of the string if the namespace is {@link net.minecraft.resources.Identifier#DEFAULT_NAMESPACE}.
+     * part at the start of the string if the namespace is
+     * {@link net.minecraft.resources.Identifier#DEFAULT_NAMESPACE}.
      *
      * @param world
      *     the world
@@ -179,6 +180,46 @@ public class Util {
             return dimensionName.substring((Identifier.DEFAULT_NAMESPACE + "_").length());
         }
         return dimensionName;
+    }
+
+    /**
+     * Capitalizes the first character in the text
+     *
+     * @param text
+     *     the text to capitalize
+     *
+     * @return the capitalized text
+     */
+    public static @NonNull String capitalize(final @NonNull String text) {
+        if (text.isEmpty()) {
+            return text;
+        }
+        return Character.toUpperCase(text.charAt(0)) + text.substring(1).toLowerCase();
+    }
+
+    /**
+     * Translates the provided text from snake case to camel case
+     *
+     * @param text
+     *     the text to convert
+     *
+     * @return the text in camel case
+     */
+    public static @NonNull String snakeToCamel(final @NonNull String text) {
+        if (text.isEmpty()) {
+            return text;
+        }
+
+        final String[] parts = text.split("_");
+        final StringBuilder result = new StringBuilder(parts[0].toLowerCase());
+
+        for (int i = 1; i < parts.length; i++) {
+            if (!parts[i].isEmpty()) {
+                result.append(capitalize(parts[i]));
+            }
+        }
+
+        return result.toString();
     }
 
     public static final class Gradient {

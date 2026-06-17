@@ -1,9 +1,10 @@
 package io.canvasmc.canvas.command.sub;
 
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.WorldConfig;
-import io.canvasmc.canvas.command.Command;
+import io.canvasmc.canvas.command.SubCommand;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
@@ -11,7 +12,7 @@ import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 @NullMarked
-public class ReloadCommand implements Command {
+public class ReloadSubCommand implements SubCommand {
     @Override
     public String getName() {
         return "reload";
@@ -24,6 +25,11 @@ public class ReloadCommand implements Command {
 
     @Override
     public boolean isAllowedSelfCommand() {
+        return false;
+    }
+
+    @Override
+    public boolean hasExtraArgs() {
         return false;
     }
 
@@ -42,7 +48,7 @@ public class ReloadCommand implements Command {
             GlobalConfiguration.reload();
             WorldConfig.reload();
             GlobalConfiguration.broadcast("Reloaded all Canvas solid and patch configurations in " + String.format("%.2f", ((System.nanoTime() - start) / 1e+6)) + "ms", GlobalConfiguration.INFO);
-            return 1;
+            return Command.SINGLE_SUCCESS;
         });
     }
 }

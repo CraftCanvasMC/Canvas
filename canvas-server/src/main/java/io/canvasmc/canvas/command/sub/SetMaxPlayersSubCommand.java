@@ -1,10 +1,11 @@
 package io.canvasmc.canvas.command.sub;
 
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.GlobalConfiguration;
-import io.canvasmc.canvas.command.Command;
+import io.canvasmc.canvas.command.SubCommand;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
@@ -16,18 +17,18 @@ import org.jspecify.annotations.Nullable;
 import static net.minecraft.commands.Commands.argument;
 
 @NullMarked
-public class SetMaxPlayersCommand implements Command {
+public class SetMaxPlayersSubCommand implements SubCommand {
 
-    private static int execute(int newSize, boolean persist) {
+    private static int execute(final int newSize, final boolean persist) {
         RegionizedServer.getInstance().scheduleToOrExecute(() -> {
             setMaxPlayers(newSize, persist);
             GlobalConfiguration.broadcast("Set max player count to " + newSize, GlobalConfiguration.INFO);
         });
-        return 1;
+        return Command.SINGLE_SUCCESS;
     }
 
-    private static void setMaxPlayers(int max, boolean saveToDisk) {
-        MinecraftServer server = MinecraftServer.getServer();
+    private static void setMaxPlayers(final int max, final boolean saveToDisk) {
+        final MinecraftServer server = MinecraftServer.getServer();
         server.server.setMaxPlayers(max);
 
         if (saveToDisk && server instanceof DedicatedServer dedicatedServer) {
@@ -48,13 +49,13 @@ public class SetMaxPlayersCommand implements Command {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
         return base.then(argument("count", IntegerArgumentType.integer(0))
-            .executes(ctx -> execute(
-                IntegerArgumentType.getInteger(ctx, "count"), false))
+            .executes(context -> execute(
+                IntegerArgumentType.getInteger(context, "count"), false))
             .then(argument("persist", BoolArgumentType.bool())
-                .executes(ctx -> execute(
-                    IntegerArgumentType.getInteger(ctx, "count"),
-                    BoolArgumentType.getBool(ctx, "persist")))));
+                .executes(context -> execute(
+                    IntegerArgumentType.getInteger(context, "count"),
+                    BoolArgumentType.getBool(context, "persist")))));
     }
 }
