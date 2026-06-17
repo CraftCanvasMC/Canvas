@@ -1290,10 +1290,10 @@ index 1e82bc45ce3c285360da5dad2c488db24422371f..6cddf70a1d4e7639deff3753eb875339
  
      public static ServerPlayer getPlayer(final String name) {
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
-index 73f708a3a7b4cd3914cc6f4b22980351f9ef9a5c..1307beab98cd028ac8087aa32aa499fb920cc5e7 100644
+index 585dcf881008e28aba077092943d4cbf4eb5f5b4..1307beab98cd028ac8087aa32aa499fb920cc5e7 100644
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java
-@@ -196,11 +196,11 @@ public class Commands {
+@@ -196,15 +196,15 @@ public class Commands {
          AdvancementCommands.register(this.dispatcher);
          AttributeCommand.register(this.dispatcher, context);
          ExecuteCommand.register(this.dispatcher, context);
@@ -1308,6 +1308,11 @@ index 73f708a3a7b4cd3914cc6f4b22980351f9ef9a5c..1307beab98cd028ac8087aa32aa499fb
          //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO
          //DebugCommand.register(this.dispatcher); // Folia - region threading - TODO
          DefaultGameModeCommands.register(this.dispatcher);
+-        //DialogCommand.register(this.dispatcher, context); // Folia - region threading - TODO
++        DialogCommand.register(this.dispatcher, context);
+         DifficultyCommand.register(this.dispatcher);
+         EffectCommands.register(this.dispatcher, context);
+         EmoteCommands.register(this.dispatcher);
 @@ -223,7 +223,7 @@ public class Commands {
          KillCommand.register(this.dispatcher);
          ListPlayersCommand.register(this.dispatcher);
@@ -1328,8 +1333,9 @@ index 73f708a3a7b4cd3914cc6f4b22980351f9ef9a5c..1307beab98cd028ac8087aa32aa499fb
          SetBlockCommand.register(this.dispatcher, context);
          SetSpawnCommand.register(this.dispatcher);
          SetWorldSpawnCommand.register(this.dispatcher);
-         SpectateCommand.register(this.dispatcher);
+-        //SpectateCommand.register(this.dispatcher); // Folia - region threading - TODO later
 -        //SpreadPlayersCommand.register(this.dispatcher); // Folia - region threading - TODO later
++        SpectateCommand.register(this.dispatcher);
 +        SpreadPlayersCommand.register(this.dispatcher);
          StopSoundCommand.register(this.dispatcher);
          StopwatchCommand.register(this.dispatcher);
@@ -2050,6 +2056,36 @@ index 50d671bc5a8860883239590c030881043c791ca1..92f1416b3994e7f1334bdf41f8c00f61
          List<CloneCommands.CloneBlockInfo> solidList = Lists.newArrayList();
          List<CloneCommands.CloneBlockInfo> blockEntitiesList = Lists.newArrayList();
          List<CloneCommands.CloneBlockInfo> otherBlocksList = Lists.newArrayList();
+diff --git a/net/minecraft/server/commands/DialogCommand.java b/net/minecraft/server/commands/DialogCommand.java
+index fcbe76e95a7de7c79afd0a116b6cbcf286ba85ff..7bc0ac279913ffd436cbeaa09ab965bd4995acd2 100644
+--- a/net/minecraft/server/commands/DialogCommand.java
++++ b/net/minecraft/server/commands/DialogCommand.java
+@@ -46,7 +46,11 @@ public class DialogCommand {
+ 
+     private static int showDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets, final Holder<Dialog> dialog) {
+         for (ServerPlayer target : targets) {
+-            target.openDialog(dialog);
++            // Canvas start - region threading
++            target.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> {
++                player.openDialog(dialog);
++            });
++            // Canvas end - region threading
+         }
+ 
+         if (targets.size() == 1) {
+@@ -60,7 +64,11 @@ public class DialogCommand {
+ 
+     private static int clearDialog(final CommandSourceStack sender, final Collection<ServerPlayer> targets) {
+         for (ServerPlayer target : targets) {
+-            target.connection.send(ClientboundClearDialogPacket.INSTANCE);
++            // Canvas start - region threading
++            target.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> {
++                player.connection.send(ClientboundClearDialogPacket.INSTANCE);
++            });
++            // Canvas end - region threading
+         }
+ 
+         if (targets.size() == 1) {
 diff --git a/net/minecraft/server/commands/ExperienceCommand.java b/net/minecraft/server/commands/ExperienceCommand.java
 index 8eae0c33e3f37c388f3c7466e5733fb5da90258a..2b5a8893473a5d2c28c53095e9cec34f638c33c5 100644
 --- a/net/minecraft/server/commands/ExperienceCommand.java
@@ -2873,6 +2909,43 @@ index 1e8f4cb55851b89ee2272917fd440e2f8749442f..d492975eeb5a8f4daaab871646365b3e
      }
  
      private static int listObjectives(final CommandSourceStack source) {
+diff --git a/net/minecraft/server/commands/SpectateCommand.java b/net/minecraft/server/commands/SpectateCommand.java
+index 3cb3b93851ccbbb8879fc871954da30a12dd54a4..39cba393723b0910011eee12abd45f33f2723a3b 100644
+--- a/net/minecraft/server/commands/SpectateCommand.java
++++ b/net/minecraft/server/commands/SpectateCommand.java
+@@ -38,7 +38,17 @@ public class SpectateCommand {
+         );
+     }
+ 
+-    private static int spectate(final CommandSourceStack source, final @Nullable Entity target, final ServerPlayer player) throws CommandSyntaxException {
++    // Canvas start - region threading
++    private static void sendMessage(CommandSourceStack src, CommandSyntaxException ex) {
++        src.sendFailure((Component)ex.getRawMessage());
++    }
++    // Canvas end - region threading
++
++    private static int spectate(final CommandSourceStack source, final @Nullable Entity target, final ServerPlayer spectator) throws CommandSyntaxException { // Folia - region threading
++        // Canvas start - region threading
++        spectator.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> {
++            try {
++        // Canvas end - region threading
+         if (player == target) {
+             throw ERROR_SELF.create();
+         }
+@@ -58,6 +68,13 @@ public class SpectateCommand {
+             source.sendSuccess(() -> Component.translatable("commands.spectate.success.stopped"), false);
+         }
+ 
++        // Canvas start - region threading
++        return;
++            } catch (CommandSyntaxException ex) {
++                sendMessage(source, ex);
++            }
++        });
++        // Canvas end - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ }
 diff --git a/net/minecraft/server/commands/SpreadPlayersCommand.java b/net/minecraft/server/commands/SpreadPlayersCommand.java
 index f6f7d738ceecab197607a2017616b03bac8b4de7..de1d824bff34b05d4dcbd790076fe9106392ee7f 100644
 --- a/net/minecraft/server/commands/SpreadPlayersCommand.java
@@ -5501,6 +5574,27 @@ index cfc773ff6158323014b93379b1c2c0323cef67f1..8f1b5a8cf54fa17b18e56067f2cfca33
              return false;
          }
          LivingEntity originalTarget = target;
+diff --git a/net/minecraft/world/entity/TamableAnimal.java b/net/minecraft/world/entity/TamableAnimal.java
+index 95ba821a895c7ea8fffcbf1df2e7b3c174463d9e..75bbea3a510d87be8074ab72d92ee279ee3a5085 100644
+--- a/net/minecraft/world/entity/TamableAnimal.java
++++ b/net/minecraft/world/entity/TamableAnimal.java
+@@ -281,6 +281,16 @@ public abstract class TamableAnimal extends Animal implements OwnableEntity {
+     }
+ 
+     private boolean maybeTeleportTo(final int x, final int y, final int z) {
++        // Canvas start - region threading
++        // the tamable entity can, when trying to see if it can teleport to the
++        // block position, try and load chunks that may or may not be outside the
++        // region boundaries. if it tries to load chunks outside the region,
++        // the server crashes. so we do a quick check here first to ensure
++        // that the chunk *is* loaded first, and if it is, then we attempt teleport
++        if (this.level().getChunkIfLoaded(x >> 4, z >> 4) == null) {
++            return false; // chunk not loaded, don't teleport
++        }
++        // Canvas end - region threading
+         if (!this.canTeleportTo(new BlockPos(x, y, z))) {
+             return false;
+         }
 diff --git a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java b/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
 index 801ba5da1fa5fb8b2fc6e76053cf150c040f455a..f32971c003aee48dca2aea6d212bef6081a70d63 100644
 --- a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
@@ -5731,7 +5825,7 @@ index 891ae74d34274c41ca44a614d7a2c62a588490ec..b53285d8f6b622a0931d0518e73d9d4b
                  if (this.getOwner() instanceof LivingEntity livingEntity) {
                      cloud.setOwner(livingEntity);
 diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
-index 7c61b492da3cf03542e41e54b8c49c2251ccac18..dabf54faca41ec1a4858c864441a59081b0ecc8b 100644
+index bd0537eb2e3cb3cc374bea1bee1310f667789c4b..1e1418179da42d65c86bcb041a244714ebf057ed 100644
 --- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
 +++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
 @@ -54,11 +54,15 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
@@ -5771,6 +5865,15 @@ index 7c61b492da3cf03542e41e54b8c49c2251ccac18..dabf54faca41ec1a4858c864441a5908
          );
      }
      // Folia end - region threading
+@@ -264,7 +267,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+             int previousChunkZ = SectionPos.blockToSectionCoord(this.position().z());
+             Entity owner = this.owner != null ? findOwnerIncludingDeadPlayer(serverLevel, this.owner.getUUID()) : null;
+             if (owner instanceof ServerPlayer serverPlayer
+-                && !owner.isAlive()
++                && serverPlayer.getHealth() <= 0.0f // Canvas - region threading
+                 && !serverPlayer.wonGame
+                 && serverPlayer.level().getGameRules().get(GameRules.ENDER_PEARLS_VANISH_ON_DEATH)) {
+                 this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
 diff --git a/net/minecraft/world/entity/raid/Raid.java b/net/minecraft/world/entity/raid/Raid.java
 index 32e20979b9343efa6b5903c7b6baf351205654a0..004aae9bae4feac11513649e474196095bb746f3 100644
 --- a/net/minecraft/world/entity/raid/Raid.java
