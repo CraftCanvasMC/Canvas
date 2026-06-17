@@ -15,10 +15,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
+import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
+import net.kyori.adventure.text.event.ClickCallback;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.minecraft.commands.CommandSourceStack;
@@ -40,7 +43,25 @@ import static io.canvasmc.canvas.command.CanvasCommands.SECONDARY;
 import static net.minecraft.commands.Commands.literal;
 
 public class HelpCommand {
+
     private static final Boolean USE_LEGACY = Boolean.getBoolean("Canvas.LegacyHelpCommand");
+
+    // odd workaround for when the server gives permission to the help command but doesn't give
+    // full "admin"/"operator" status. when the player doesn't have that, then Minecraft asks the
+    // player "are you sure?" every time the "Go back" button is clicked, which is annoying
+
+    public static final ClickCallback<Audience> GO_BACK_ACTION = (audience) -> {
+        if (
+            audience instanceof Player bukkitPlayer &&
+                CanvasCommands.hasPermission("help").test(((CraftPlayer) bukkitPlayer).getHandle().createCommandSourceStack())
+        ) {
+            // audience is a player and has "help" permissions
+            bukkitPlayer.performCommand("canvas help");
+        }
+        else {
+            audience.sendMessage(Component.text("You do not have the required permissions to run this command", NamedTextColor.RED));
+        }
+    };
 
     private static void appendConsoleOutput(
         final @NonNull Supplier<List<SubCommand>> commands,
@@ -169,7 +190,7 @@ public class HelpCommand {
                                             getLink("Modrinth", "https://modrinth.com/organization/canvasmc/", "Click to open Canvas' Modrinth org"),
                                             ActionButton.builder(Component.text("Go back"))
                                                 .width(100)
-                                                .action(DialogAction.staticAction(ClickEvent.runCommand("/canvas help")))
+                                                .action(DialogAction.staticAction(ClickEvent.callback(GO_BACK_ACTION)))
                                                 .build(),
                                             ActionButton.builder(Component.text("Exit menu"))
                                                 .width(100)
@@ -287,7 +308,7 @@ public class HelpCommand {
                 Component.text("Go back"),
                 Component.text("Go back to the main menu"),
                 120,
-                DialogAction.staticAction(ClickEvent.runCommand("/canvas help"))
+                DialogAction.staticAction(ClickEvent.callback(GO_BACK_ACTION))
             ),
             ActionButton.builder(Component.text("Exit menu")).width(120).build()
         ));
