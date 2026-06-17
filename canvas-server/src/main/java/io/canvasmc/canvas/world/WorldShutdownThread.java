@@ -140,7 +140,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
             teleportPlayer(localPlayer, lastTeleportPos);
         }
 
-        for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().players) {
+        for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().getPlayers()) {
             ServerLevel teleportingToDimension = entityPlayer.canvas$teleportingToDimension;
             ServerLocation teleportingFrom = entityPlayer.canvas$lastTeleportOrigin;
 
@@ -186,7 +186,7 @@ public class WorldShutdownThread extends RegionShutdownThread {
 
         MinecraftServer.getServer().pearls.save(null);
         saveLevelData(this.level);
-        this.level.chunkSource.getDataStorage().close();
+        this.level.getChunkSource().getDataStorage().close();
 
         LOGGER.info("Saved {} level data", getWorldName());
 

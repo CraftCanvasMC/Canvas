@@ -24,6 +24,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.custom.BrandPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -146,12 +148,18 @@ public class GlobalConfiguration extends Part {
             // if this is a reload, we may have things that need to be taken into effect now
             // for example, 1.8 combat delay configs may be updated, so we conduct updates
 
-            final PlayerList playerList = MinecraftServer.getServer().getPlayerList();
+            final MinecraftServer server = MinecraftServer.getServer();
+            final PlayerList playerList = server.getPlayerList();
 
-            for (final ServerPlayer player : playerList.players) {
-                // update all info with player, covers 1.8 combat config
-                playerList.sendAllPlayerInfo(player);
+            for (final ServerPlayer player : playerList.getPlayers()) {
+                // update all info with player, covers 1.8 combat config and branding
+                player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+                    playerList.sendAllPlayerInfo(entityPlayer);
+                    entityPlayer.connection.send(new ClientboundCustomPayloadPacket(new BrandPayload(server.getServerModName())));
+                });
             }
+
+            server.rebuildServerStatus();
         }
         else {
 
@@ -238,7 +246,7 @@ public class GlobalConfiguration extends Part {
 
             // players might be in the server, try and send msg to people with perms
 
-            for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().players) {
+            for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().getPlayers()) {
                 if (entityPlayer.getBukkitEntity().hasPermission(BROADCAST_PERMISSION)) {
                     entityPlayer.sendSystemMessage(literal);
                 }

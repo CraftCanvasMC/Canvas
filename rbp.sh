@@ -22,6 +22,7 @@ set -e
 
 force_run=false
 gradle_run=false
+debug=false
 
 for arg in "$@"; do
   case "$arg" in
@@ -33,10 +34,12 @@ for arg in "$@"; do
       gradle_run=true
       echo "--gradle flag detected. Will run rebuildFoliaSingleFilePatches."
       ;;
+    --debug)
+      debug=true
+      echo "Enabled debug logs"
+      ;;
   esac
 done
-
-echo "Processing file patches..."
 
 declare -A gradle_tasks
 
@@ -45,18 +48,15 @@ process_changes() {
   local project="$2"
 
   if [ ! -d "$dir" ]; then
-    echo "Error: The directory '$dir' does not exist or is not valid."
+    echo "err: The directory '$dir' does not exist or is not valid."
     exit 1
   fi
 
   cd "$dir"
 
   if $force_run || ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "Changes detected in $dir (or force mode enabled). Running Gradle fixup and rebuild tasks."
     gradle_tasks["fixup${project}FilePatches"]="true"
     gradle_tasks["rebuild${project}FilePatches"]="true"
-  else
-    echo "No changes detected in $dir"
   fi
 
   cd - > /dev/null
@@ -64,12 +64,14 @@ process_changes() {
 
 run_gradle_task() {
   local task="$1"
-  if [ "${gradle_tasks[$task]}" = "true" ]; then
-    echo "Running Gradle task: $task"
-    ./gradlew "$task" -Dpaperweight.debug=true || echo "Gradle task '$task' failed, continuing..."
-    echo "Gradle task '$task' completed (or failed but continuing)."
-  else
-    echo "Skipping Gradle task '$task' as no changes were detected."
+  local extra=""
+  [[ "$debug" == "true" ]] && extra="-Dpaperweight.debug=true"
+ if [[ "${gradle_tasks[$task]}" == "true" ]]; then
+    if [[ -n "$extra" ]]; then
+      ./gradlew "$task" $extra || { echo "Gradle task '$task' failed."; }
+    else
+      ./gradlew "$task" || { echo "Gradle task '$task' failed."; }
+    fi
   fi
 }
 
@@ -81,13 +83,11 @@ process_changes "./canvas-server/src/minecraft/java" "Minecraft"
 
 gradle_rebuild_task=false
 
-if $force_run || ! git diff --quiet "./canvas-server/build.gradle.kts" || ! git diff --cached --quiet "./canvas-server/build.gradle.kts"; then
-  echo "Changes detected in ./canvas-server/build.gradle.kts"
+if $gradle_run || ! git diff --quiet "./canvas-server/build.gradle.kts" || ! git diff --cached --quiet "./canvas-server/build.gradle.kts"; then
   gradle_rebuild_task=true
 fi
 
-if $force_run || ! git diff --quiet "./canvas-api/build.gradle.kts" || ! git diff --cached --quiet "./canvas-api/build.gradle.kts"; then
-  echo "Changes detected in ./canvas-api/build.gradle.kts"
+if $gradle_run || ! git diff --quiet "./canvas-api/build.gradle.kts" || ! git diff --cached --quiet "./canvas-api/build.gradle.kts"; then
   gradle_rebuild_task=true
 fi
 
@@ -95,17 +95,19 @@ if $gradle_rebuild_task || $gradle_run; then
   gradle_tasks["rebuildFoliaSingleFilePatches"]="true"
 fi
 
-echo "Running fixup tasks..."
+echo "running fixup"
 run_gradle_task "fixupPaperApiFilePatches"
 run_gradle_task "fixupPaperServerFilePatches"
 run_gradle_task "fixupFoliaApiFilePatches"
 run_gradle_task "fixupFoliaServerFilePatches"
 run_gradle_task "fixupMinecraftFilePatches"
 
-echo "Running rebuild tasks..."
+echo "rebuilding"
 run_gradle_task "rebuildPaperApiFilePatches"
 run_gradle_task "rebuildPaperServerFilePatches"
 run_gradle_task "rebuildFoliaApiFilePatches"
 run_gradle_task "rebuildFoliaServerFilePatches"
 run_gradle_task "rebuildMinecraftFilePatches"
 run_gradle_task "rebuildFoliaSingleFilePatches"
+
+echo "done :)"

@@ -152,11 +152,44 @@ index b332645ed65928100f580221d8a9948bc77e362e..8cfabe08364d14db1c7c28b814e69f38
      }
  
      public static final class CommandImpl extends Command {
+diff --git a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+index 57e091df075809c3629ba22562053251037917b5..ad1aaee4e70b6501f8a5cf5bf87afe6451714592 100644
+--- a/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
++++ b/src/main/java/io/papermc/paper/antixray/ChunkPacketBlockControllerAntiXray.java
+@@ -186,16 +186,21 @@ public final class ChunkPacketBlockControllerAntiXray extends ChunkPacketBlockCo
+             return;
+         }
+ 
+-        if (!Bukkit.isPrimaryThread()) {
+-            // Plugins?
+-            MinecraftServer.getServer().scheduleOnMain(() -> modifyBlocks(chunkPacket, chunkPacketInfo));
++        // Canvas start - region threading
++        // from below
++        final LevelChunk chunk = chunkPacketInfo.getChunk();
++        final Level level = chunk.getLevel();
++        final int x = chunk.getPos().x();
++        final int z = chunk.getPos().z();
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, x, z)) {
++            // not in proper region, schedule to it
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueChunkTask(
++                (ServerLevel) level, x, z, () -> modifyBlocks(chunkPacket, chunkPacketInfo));
++        // Canvas end - region threading
+             return;
+         }
+ 
+-        LevelChunk chunk = chunkPacketInfo.getChunk();
+-        int x = chunk.getPos().x();
+-        int z = chunk.getPos().z();
+-        Level level = chunk.getLevel();
++        // Canvas - region threading - move up
+         ((ChunkPacketInfoAntiXray) chunkPacketInfo).setNearbyChunks(level.getChunkIfLoaded(x - 1, z), level.getChunkIfLoaded(x + 1, z), level.getChunkIfLoaded(x, z - 1), level.getChunkIfLoaded(x, z + 1));
+         executor.execute((Runnable) chunkPacketInfo);
+     }
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc9388f35a 100644
+index 4d06bd358720961c32cb67823f34aeec162af69e..7577f15bf95a28a318094f23b79105e7e80f0352 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -380,6 +380,18 @@ public final class CraftServer implements Server {
+@@ -381,6 +381,18 @@ public final class CraftServer implements Server {
          return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(((org.bukkit.craftbukkit.entity.CraftEntity) entity).getHandleRaw());
      }
  
@@ -175,7 +208,7 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
      @Override
      public final boolean isGlobalTickThread() {
          return io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread(); // Folia - region threading API
-@@ -1203,7 +1215,7 @@ public final class CraftServer implements Server {
+@@ -1198,7 +1210,7 @@ public final class CraftServer implements Server {
  
      @Override
      public World createWorld(WorldCreator creator) {
@@ -184,7 +217,7 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
          Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
          //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
          Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
-@@ -1345,6 +1357,121 @@ public final class CraftServer implements Server {
+@@ -1348,6 +1360,121 @@ public final class CraftServer implements Server {
  
          return serverLevel.getWorld();
      }
@@ -245,7 +278,7 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
 +            // but in the same world, they get removed from ServerLevel#players, but we don't
 +            // change the level in ServerPlayer, so ServerPlayer is a safe place to check this
 +
-+            for (final net.minecraft.server.level.ServerPlayer player : console.getPlayerList().players) {
++            for (final net.minecraft.server.level.ServerPlayer player : console.getPlayerList().getPlayers()) {
 +                if (player.level() == handle) {
 +                    callback.accept(io.canvasmc.canvas.WorldUnloadResult.FAIL_PLAYERS_PRESENT);
 +                    return;
@@ -306,7 +339,7 @@ index 825d69075ef95586d187e79eea0fc200aaf888bb..880ed8cbae969366cd58bdb6bc19fbcc
  
      @Override
      public boolean unloadWorld(String name, boolean save) {
-@@ -3095,4 +3222,24 @@ public final class CraftServer implements Server {
+@@ -3097,4 +3224,24 @@ public final class CraftServer implements Server {
          }
      }
      // Folia end - region TPS API
@@ -428,10 +461,10 @@ index f147590110205f9896c4dea2e88c4169bd20fabf..1c94a6eb624a5f366803a93e94d1ad85
      }
  }
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
-index 0eeef1e8ab14f25db5089e4d389ef7e49eed6d0f..e4fe4cbcf68daaa3a9dafc5fb915a15e2a1ff973 100644
+index 3a031e14daa45db5c0400ae18637530e9a2aa341..8a38dbb788ca325506f3a351ec9b6bb175184462 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
-@@ -1152,12 +1152,13 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1148,12 +1148,13 @@ public class CraftWorld extends CraftRegionAccessor implements World {
      public void save(boolean flush) {
          org.spigotmc.AsyncCatcher.catchOp("world save"); // Spigot
          this.server.checkSaveState();
@@ -451,7 +484,7 @@ index 0eeef1e8ab14f25db5089e4d389ef7e49eed6d0f..e4fe4cbcf68daaa3a9dafc5fb915a15e
      }
  
      @Override
-@@ -2093,4 +2094,11 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -2077,4 +2078,11 @@ public class CraftWorld extends CraftRegionAccessor implements World {
          return POINTERS_SUPPLIER.view(this);
      }
      // Paper end
@@ -464,7 +497,7 @@ index 0eeef1e8ab14f25db5089e4d389ef7e49eed6d0f..e4fe4cbcf68daaa3a9dafc5fb915a15e
 +    // Canvas end - region threading
  }
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
-index 58d7cdd484b76cfbd7123f1f88e70eb2e51c87f9..9ec6b1f853f6ef9a4c9df48d129156154d18e146 100644
+index bba6a2b1054fbcdacd996380f2a0a64b82839a52..9cf6a3b01aadfa549316d91bac4fa076a7d63286 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftHumanEntity.java
 @@ -502,6 +502,8 @@ public class CraftHumanEntity extends CraftLivingEntity implements HumanEntity {
@@ -486,10 +519,10 @@ index 58d7cdd484b76cfbd7123f1f88e70eb2e51c87f9..9ec6b1f853f6ef9a4c9df48d12915615
              location = this.getLocation();
          }
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
-index 03fea774f874b21e87a1281eb07a6b52ed2c31cd..40b822fcb11965e74a68139f638b51995885779d 100644
+index ec3d28aa9cf72f89bfb5ac54776d2b1e43595fb9..96a29f925b2c57b979b5059ef42a1508e82f1ef9 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
-@@ -509,7 +509,7 @@ public class CraftLivingEntity extends CraftEntity implements LivingEntity {
+@@ -506,7 +506,7 @@ public class CraftLivingEntity extends CraftEntity implements LivingEntity {
  
      @Override
      public boolean addPotionEffect(PotionEffect effect, boolean force) {
@@ -499,10 +532,10 @@ index 03fea774f874b21e87a1281eb07a6b52ed2c31cd..40b822fcb11965e74a68139f638b5199
          return true;
      }
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
-index 9cf9605d32116a2c89772a3664a1aaf1745676a1..e0f8511485d3e80b03a4cb2f02f8f2e51140aaab 100644
+index 10e4e20af3505128536e0cd6ea472ef8c372993f..7c9ee464763030de638ba211ec4cad245ad1019a 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
-@@ -236,7 +236,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -237,7 +237,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      private long lastPlayed = 0;
      private boolean hasPlayedBefore = false;
      private final ConversationTracker conversationTracker = new ConversationTracker();
@@ -511,7 +544,7 @@ index 9cf9605d32116a2c89772a3664a1aaf1745676a1..e0f8511485d3e80b03a4cb2f02f8f2e5
      private final Set<UUID> unlistedEntities = new HashSet<>(); // Paper - Add Listing API for Player
      private static final WeakHashMap<Plugin, WeakReference<Plugin>> pluginWeakReferences = new WeakHashMap<>();
      private int hash = 0;
-@@ -261,10 +261,18 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -262,10 +262,18 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
          this.lastRegion = region;
          if (region != null && this.packetProcessor.hasPackets()) {
              region.regionData.setHasPackets();
@@ -530,7 +563,7 @@ index 9cf9605d32116a2c89772a3664a1aaf1745676a1..e0f8511485d3e80b03a4cb2f02f8f2e5
          if (!this.packetProcessor.scheduleIfPossible(listener, packet)) {
              return;
          }
-@@ -1373,6 +1381,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1374,6 +1382,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
  
      @Override
      public void loadData() {
@@ -538,7 +571,7 @@ index 9cf9605d32116a2c89772a3664a1aaf1745676a1..e0f8511485d3e80b03a4cb2f02f8f2e5
          this.server.getHandle().playerIo.load(this.getHandle().nameAndId())
              .map(tag -> TagValueInput.create(ProblemReporter.DISCARDING, this.server.getServer().registryAccess(), tag))
              .ifPresent(this.getHandle()::load);
-@@ -1380,6 +1389,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1381,6 +1390,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
  
      @Override
      public void saveData() {
@@ -546,7 +579,7 @@ index 9cf9605d32116a2c89772a3664a1aaf1745676a1..e0f8511485d3e80b03a4cb2f02f8f2e5
          this.server.getHandle().playerIo.save(this.getHandle());
      }
  
-@@ -1441,6 +1451,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1442,6 +1452,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
  
      @Override
      public Collection<EnderPearl> getEnderPearls() {
@@ -554,7 +587,7 @@ index 9cf9605d32116a2c89772a3664a1aaf1745676a1..e0f8511485d3e80b03a4cb2f02f8f2e5
          return this.getHandle().getEnderPearls().stream().map((e) -> (EnderPearl) e.getBukkitEntity()).collect(Collectors.toList());
      }
  
-@@ -1694,6 +1705,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1695,6 +1706,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      @Override
      public void setGameMode(GameMode mode) {
          Preconditions.checkArgument(mode != null, "GameMode cannot be null");
