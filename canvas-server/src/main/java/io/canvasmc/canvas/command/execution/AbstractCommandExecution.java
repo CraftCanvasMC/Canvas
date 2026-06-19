@@ -211,7 +211,7 @@ public class AbstractCommandExecution<R, E extends Entity> {
             throw INVALID_EXECUTION.create("on complete");
         }
         if (!this.targets.isSet()) {
-            throw INVALID_EXECUTION.create("on complete");
+            throw INVALID_EXECUTION.create("targets");
         }
 
         final List<? extends E> targets = this.targets.value();
