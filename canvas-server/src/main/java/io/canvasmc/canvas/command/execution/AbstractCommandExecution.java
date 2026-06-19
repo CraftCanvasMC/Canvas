@@ -54,11 +54,11 @@ public class AbstractCommandExecution<R, E extends Entity> {
     }
 
     public static int executeAtPosWithRadius(final @NonNull CommandIntSupplier action, final @NonNull Vec3 pos, final int radius, final Level level, final CommandSourceStack css) {
-        return executeAtPosWithRadius(action, new BlockPos((int) pos.x, (int) pos.y, (int) pos.z), radius, level, css);
+        return executeAtPosWithRadius(action, BlockPos.containing(pos), radius, level, css);
     }
 
     public static int executeAtPosWithRadius(final CommandRunnable action, final @NonNull Vec3 pos, final int radius, final Level level, final CommandSourceStack css) {
-        return executeAtPosWithRadius(action, new BlockPos((int) pos.x, (int) pos.y, (int) pos.z), radius, level, css);
+        return executeAtPosWithRadius(action, BlockPos.containing(pos), radius, level, css);
     }
 
     public static int executeAtPosWithRadius(final CommandRunnable action, final @NonNull BlockPos pos, final int radius, final @NonNull Level level, final CommandSourceStack css) {
@@ -81,26 +81,26 @@ public class AbstractCommandExecution<R, E extends Entity> {
         return Command.SINGLE_SUCCESS;
     }
 
-    public static int executeAtPos(final CommandRunnable action, final @NonNull BlockPos pos, final Level level, final CommandSourceStack css) {
-        return executeAtPos(action, new Vec3(pos), level, css);
-    }
-
-    public static int executeAtPos(final CommandIntSupplier action, final @NonNull BlockPos pos, final Level level, final CommandSourceStack css) {
-        return executeAtPos(action, new Vec3(pos), level, css);
-    }
-
     public static int executeAtPos(final CommandRunnable action, final @NonNull Vec3 pos, final Level level, final CommandSourceStack css) {
+        return executeAtPos(action, BlockPos.containing(pos), level, css);
+    }
+
+    public static int executeAtPos(final CommandIntSupplier action, final @NonNull Vec3 pos, final Level level, final CommandSourceStack css) {
+        return executeAtPos(action, BlockPos.containing(pos), level, css);
+    }
+
+    public static int executeAtPos(final CommandRunnable action, final @NonNull BlockPos pos, final Level level, final CommandSourceStack css) {
         return executeAtPos(() -> {
             action.act();
             return Command.SINGLE_SUCCESS;
         }, pos, level, css);
     }
 
-    public static int executeAtPos(final CommandIntSupplier action, final @NonNull Vec3 pos, final Level level, final CommandSourceStack css) {
+    public static int executeAtPos(final CommandIntSupplier action, final @NonNull BlockPos pos, final Level level, final CommandSourceStack css) {
         RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(
             (ServerLevel) level,
-            ((int) pos.x) >> 4,
-            ((int) pos.z) >> 4,
+            pos.getX() >> 4,
+            pos.getZ() >> 4,
             () -> {
                 try {
                     action.act();
