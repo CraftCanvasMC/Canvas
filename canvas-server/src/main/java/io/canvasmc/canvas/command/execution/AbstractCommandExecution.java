@@ -5,7 +5,6 @@ import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
-import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import io.canvasmc.canvas.util.CanonicalReference;
 import io.canvasmc.canvas.util.LockedReference;
 import io.canvasmc.canvas.util.command.AbstractCommandFunction;
