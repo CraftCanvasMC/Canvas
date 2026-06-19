@@ -212,7 +212,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
          LOGGER.info("Halting chunk systems...");
          for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 918d58644ac028a1025811ebd459112ff6a0e78f..be02125b9f01ee60df771f83aa91551f54755f57 100644
+index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c86cf28254 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -31,7 +31,7 @@ import java.util.function.BooleanSupplier;
@@ -272,11 +272,11 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..be02125b9f01ee60df771f83aa91551f
          // connection tick
 +        // ender pearls
 +        // gui tick
-+        // scoreboard
++        // scoreboard, stopwatches
  
          // tick player ping sample
          this.tickPlayerSample();
-@@ -362,6 +377,17 @@ public final class RegionizedServer {
+@@ -362,7 +377,63 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
@@ -288,13 +288,59 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..be02125b9f01ee60df771f83aa91551f
 +        // gui tick
 +        net.minecraft.server.gui.PlayerListComponent.tick();
 +
-+        // scoreboard
-+        MinecraftServer.getServer().getScoreboard().autosave();
++        // scoreboards, stopwatches
++        autosaveSafeGlobalData(false, false);
 +        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    private static final java.util.concurrent.atomic.AtomicLong LAST_GLOBAL_AUTOSAVE = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
++
++    // note: not everything is thread-safe, only a few things are thread-safe
++    //       due to specific design of these reimplementations. those are:
++    //  - scoreboards: from Canvas scoreboards rewrite
++    //  - stopwatches: we made this SWMR fully, and only the global tick can
++    //                 write to the backend map so this is safe to save here
++    // note: this does not save maps at all, those are per-world
++    public void autosaveSafeGlobalData(final boolean force, final boolean sync) {
++        ensureGlobalTickThread("Cannot save global data async");
++
++        final MinecraftServer server = MinecraftServer.getServer();
++
++        final int autoSavePeriod = server.autosavePeriod;
++        if (autoSavePeriod <= 0 && !force) return;
++        final long periodNanos = autoSavePeriod * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks();
++        final long currTime = System.nanoTime();
++        final long last = LAST_GLOBAL_AUTOSAVE.get();
++
++        if (force || ((currTime - last) > periodNanos && LAST_GLOBAL_AUTOSAVE.compareAndSet(last, currTime))) {
++
++            // these 2 are the only safe global data ones besides maps,
++            // however those are per-world and saved in world global tick
++
++            // we have to do this for the scoreboard system or else the scoreboard
++            // system won't actually save. see MinecraftServer#saveGlobalData
++
++            server.getScoreboard().storeToSaveDataIfDirty(server.getDataStorage().computeIfAbsent(net.minecraft.world.scores.ScoreboardSaveData.TYPE));
++
++            java.util.concurrent.CompletableFuture<?> future = server.getDataStorage().saveSpecific(
++                net.minecraft.world.scores.ScoreboardSaveData.class,
++                net.minecraft.world.Stopwatches.class
++            );
++
++            // if sync we need to just join here. this shouldn't be done
++            // for autosave or every tick since this blocks waiting for completion
++
++            if (sync) {
++                future.join();
++            }
++        }
      }
++    // Canvas end - region threading
  
      private void tickPlayerSample() {
-@@ -402,9 +428,14 @@ public final class RegionizedServer {
+         final MinecraftServer mcServer = MinecraftServer.getServer();
+@@ -402,9 +473,14 @@ public final class RegionizedServer {
              }
  
              if (isNotOwnedByGlobalRegion(conn)) {
@@ -312,7 +358,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..be02125b9f01ee60df771f83aa91551f
              }
  
              if (!conn.isConnected()) {
-@@ -435,6 +466,12 @@ public final class RegionizedServer {
+@@ -435,6 +511,12 @@ public final class RegionizedServer {
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final long tickCount) {
@@ -325,7 +371,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..be02125b9f01ee60df771f83aa91551f
          // needs
          // worldborder tick
          // advancing the weather cycle
-@@ -480,6 +517,7 @@ public final class RegionizedServer {
+@@ -480,6 +562,7 @@ public final class RegionizedServer {
      }
  
      private void advanceWeatherCycle(final ServerLevel world) {
@@ -333,7 +379,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..be02125b9f01ee60df771f83aa91551f
          world.advanceWeatherCycle();
      }
  
-@@ -492,11 +530,13 @@ public final class RegionizedServer {
+@@ -492,11 +575,13 @@ public final class RegionizedServer {
      }
  
      private void tickClocks() {
@@ -347,7 +393,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..be02125b9f01ee60df771f83aa91551f
                  level.clockManager().tick();
              }
          }
-@@ -504,6 +544,7 @@ public final class RegionizedServer {
+@@ -504,6 +589,7 @@ public final class RegionizedServer {
      }
  
      private void tickTime(final ServerLevel world, final long tickCount) {
@@ -1607,10 +1653,10 @@ index f233c2fea9e2008f0c15aa80eb07cae3bb68b005..09146997c3d82b96224b392862926a0e
  
      public static CompletableFuture<ReloadableServerResources> loadResources(
 diff --git a/net/minecraft/server/ServerScoreboard.java b/net/minecraft/server/ServerScoreboard.java
-index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e769809a383 100644
+index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..a1b32f272a6f1df2e48fafc5bf99d445ab745232 100644
 --- a/net/minecraft/server/ServerScoreboard.java
 +++ b/net/minecraft/server/ServerScoreboard.java
-@@ -26,24 +26,45 @@ import org.jspecify.annotations.Nullable;
+@@ -26,24 +26,29 @@ import org.jspecify.annotations.Nullable;
  
  public class ServerScoreboard extends Scoreboard {
      private final MinecraftServer server;
@@ -1619,22 +1665,6 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
 +    // Canvas start - region threading
 +    private final Set<Objective> trackedObjectives = new java.util.concurrent.CopyOnWriteArraySet<>();
 +    private final java.util.concurrent.atomic.AtomicBoolean dirty = new java.util.concurrent.atomic.AtomicBoolean(false);
-+
-+    private static final java.util.concurrent.atomic.AtomicLong LAST_AUTOSAVE = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
-+
-+    public void autosave() {
-+        ensureMainThread("Cannot autosave async");
-+        // autosave every minute if dirty
-+        final int autoSavePeriod = MinecraftServer.getServer().autosavePeriod;
-+        if (autoSavePeriod <= 0) return;
-+        final long periodNanos = autoSavePeriod * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks();
-+        final long currTime = System.nanoTime();
-+        final long last = LAST_AUTOSAVE.get();
-+        if ((currTime - last) > periodNanos && LAST_AUTOSAVE.compareAndSet(last, currTime) && dirty.compareAndExchange(true, false)) {
-+            MinecraftServer.getServer().getDataStorage().computeIfAbsent(ScoreboardSaveData.TYPE).setData(this.store());
-+            MinecraftServer.getServer().getDataStorage().scheduleSave();
-+        }
-+    }
 +    // Canvas end - region threading
  
      public ServerScoreboard(final MinecraftServer server) {
@@ -1661,7 +1691,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          return new ScoreboardSaveData.Packed(this.packObjectives(), this.packPlayerScores(), this.packDisplaySlots(), this.packPlayerTeams());
      }
  
-@@ -90,6 +111,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -90,6 +95,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) {
@@ -1669,7 +1699,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          Objective old = this.getDisplayObjective(slot);
          super.setDisplayObjective(slot, objective);
          if (old != objective && old != null) {
-@@ -163,12 +185,14 @@ public class ServerScoreboard extends Scoreboard {
+@@ -163,12 +169,14 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onObjectiveAdded(final Objective objective) {
@@ -1684,7 +1714,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          super.onObjectiveChanged(objective);
          if (this.trackedObjectives.contains(objective)) {
              this.broadcastAll(new ClientboundSetObjectivePacket(objective, ClientboundSetObjectivePacket.METHOD_CHANGE)); // CraftBukkit
-@@ -179,6 +203,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -179,6 +187,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onObjectiveRemoved(final Objective objective) {
@@ -1692,7 +1722,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          super.onObjectiveRemoved(objective);
          if (this.trackedObjectives.contains(objective)) {
              this.stopTrackingObjective(objective);
-@@ -189,6 +214,8 @@ public class ServerScoreboard extends Scoreboard {
+@@ -189,6 +198,8 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamAdded(final PlayerTeam team) {
@@ -1701,7 +1731,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          super.onTeamAdded(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, true)); // CraftBukkit
          this.setDirty();
-@@ -196,6 +223,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -196,6 +207,7 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamChanged(final PlayerTeam team) {
@@ -1709,7 +1739,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          super.onTeamChanged(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, false)); // CraftBukkit
          this.updateTeamWaypoints(team);
-@@ -204,6 +232,8 @@ public class ServerScoreboard extends Scoreboard {
+@@ -204,6 +216,8 @@ public class ServerScoreboard extends Scoreboard {
  
      @Override
      public void onTeamRemoved(final PlayerTeam team) {
@@ -1718,7 +1748,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          super.onTeamRemoved(team);
          this.broadcastAll(ClientboundSetPlayerTeamPacket.createRemovePacket(team)); // CraftBukkit
          this.updateTeamWaypoints(team);
-@@ -211,12 +241,14 @@ public class ServerScoreboard extends Scoreboard {
+@@ -211,12 +225,14 @@ public class ServerScoreboard extends Scoreboard {
      }
  
      protected void setDirty() {
@@ -1736,7 +1766,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
              saveData.setData(this.store());
          }
      }
-@@ -269,6 +301,7 @@ public class ServerScoreboard extends Scoreboard {
+@@ -269,6 +285,7 @@ public class ServerScoreboard extends Scoreboard {
      }
  
      public void stopTrackingObjective(final Objective objective) {
@@ -1744,7 +1774,7 @@ index 7ffd683c42557052d7bfa963d87e68f4e8f62d6c..62806133f13e8938983018c8330e6e76
          List<Packet<?>> packets = this.getStopTrackingPackets(objective);
  
          for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
-@@ -293,19 +326,23 @@ public class ServerScoreboard extends Scoreboard {
+@@ -293,19 +310,23 @@ public class ServerScoreboard extends Scoreboard {
          return count;
      }
  
@@ -4223,59 +4253,95 @@ index 2f6c0784126e1ab22ca7e138452325ebc425001c..032e0bc99a703c8bd5789fffcd99d9ce
      }
  }
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index 299991905c24a7018f8ac60d0c16e56fa43cd710..abbb8f14a1acc05a647d6a18c23a3cc75bae72e8 100644
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..4e05380b283c804ffe791ad0c44d302d75faf68c 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -24,12 +24,49 @@ public class SaveAllCommand {
+@@ -24,12 +24,84 @@ public class SaveAllCommand {
      private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
 -        boolean success = server.saveEverything(true, flush, true);
 -        if (!success) {
 -            throw ERROR_FAILED.create();
-+
-+        // Canvas start - region threading
-+        final java.util.concurrent.atomic.AtomicInteger regionCount = new java.util.concurrent.atomic.AtomicInteger();
-+        final java.util.concurrent.atomic.AtomicInteger totalCount = new java.util.concurrent.atomic.AtomicInteger();
-+        Runnable callback = () -> {
-+            if (regionCount.decrementAndGet() == 0 || totalCount.get() == 0) {
-+                source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
-+            }
-+        };
-+        for (final net.minecraft.server.level.ServerLevel world : server.getAllLevels()) {
-+            world.regioniser.computeForAllRegions((region) -> {
-+                regionCount.getAndIncrement();
-+                totalCount.getAndIncrement();
-+                region.getData().canvas$saveAllTicket.propagate(
-+                    new io.canvasmc.canvas.util.ticket.SaveAllTicket(callback, (ex) -> {
-+                        source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
-+                        MinecraftServer.LOGGER.error(ERROR_FAILED.create().getMessage(), ex);
-+                    }, flush)
-+                );
-+            });
-         }
+-        }
  
 -        source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
-+        // pearl save rewrite
-+        MinecraftServer.getServer().pearls.save((result) -> {
-+            if (result) {
-+                source.sendSuccess(() -> Component.literal("Saved pearl data"), true);
-+            } else {
-+                source.sendFailure(Component.literal("Failed to save pearl data, check console for details"));
++        // Canvas start - region threading
++
++        // we are going to order this in a chain-like fashion:
++        // - global data
++        // - pearls
++        // - regions
++
++        // scoreboards, stopwatches, maps
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().scheduleToOrExecute(() -> {
++            // by setting the last map autosave to 0 we can just force an autosave to occur
++            for (final net.minecraft.server.level.ServerLevel world : io.papermc.paper.threadedregions.RegionizedServer.getInstance().worlds) {
++                world.lastMapAutoSave = 0;
++            }
++
++            // as for scoreboards and stopwatches, those can only be written to on the global tick
++            // meaning we need to pack/save on the global tick too, but we can't save everything
++            // because not everything is infact thread-safe, so we force a global data autosave
++
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().autosaveSafeGlobalData(true, true);
++            source.sendSuccess(() -> Component.literal("Saved global data"), true);
++
++            // pearl save rewrite
++            MinecraftServer.getServer().pearls.save((result) -> {
++                if (result) {
++                    source.sendSuccess(() -> Component.literal("Saved pearl data"), true);
++                }
++                else {
++                    source.sendFailure(Component.literal("Failed to save pearl data, check console for details"));
++                }
++            }).join(); // synchronize this
++
++            // regions next
++            final java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger(0);
++            final java.util.concurrent.atomic.AtomicInteger total = new java.util.concurrent.atomic.AtomicInteger(0);
++            final Runnable callback = () -> {
++                if (count.decrementAndGet() <= 0) {
++                    source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
++                }
++            };
++
++            for (final net.minecraft.server.level.ServerLevel level : server.getAllLevels()) {
++                level.regioniser.computeForAllRegions((region) -> {
++
++                    // if has no alive sections, this region is basically dead
++                    // so we have no reason to actually save this
++
++                    // note: we are holding the read lock in this, so technically
++                    //       we can assume the region data is safe and won't change
++                    //       while we are iterating over regions in this world
++
++                    if (region.hasNoAliveSections() || region.isDead()) {
++                        return;
++                    }
++
++                    // increment counts
++                    count.incrementAndGet();
++                    total.incrementAndGet();
++
++                    // propagate the ticket
++                    region.getData().canvas$saveAllTicket.propagate(
++                        new io.canvasmc.canvas.util.ticket.SaveAllTicket(callback, (ex) -> {
++                            source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
++                            MinecraftServer.LOGGER.error(ERROR_FAILED.create().getMessage(), ex);
++                        }, flush)
++                    );
++                });
++            }
++
++            if (total.get() == 0) {
++                source.sendSuccess(() -> Component.literal("No regions to save"), true);
++                callback.run();
++            }
++            else {
++                source.sendSuccess(() -> Component.literal("Saving " + total.get() + " regions"), true);
 +            }
 +        });
-+
-+        // scoreboards
-+        io.papermc.paper.threadedregions.RegionizedServer.getInstance().scheduleToOrExecute(() -> {
-+            // TODO - run full autosave
-+            MinecraftServer.getServer().getScoreboard().storeToSaveDataIfDirty(
-+                MinecraftServer.getServer().getDataStorage().computeIfAbsent(net.minecraft.world.scores.ScoreboardSaveData.TYPE)
-+            );
-+        });
-+
-+        // if no regions loaded, run callback
-+        source.sendSuccess(() -> Component.literal("Saving " + totalCount.get() + " regions"), true);
-+        if (totalCount.get() == 0) callback.run();
 +        // Canvas end - region threading
          return Command.SINGLE_SUCCESS;
      }
@@ -8815,6 +8881,63 @@ index eb52accfdd16a07b2e59a2e65c1007e8920aea36..18c5121d24268cfa5fa7ed22b1dce93a
  
      public void postProcessGeneration(final ServerLevel level) {
          ChunkPos chunkPos = this.getPos();
+diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
+index 81c1541d8fa272e84316e87c3418ee727111a65c..0b99cf09d3abeb06ea4f653b63a96185c069eab6 100644
+--- a/net/minecraft/world/level/storage/SavedDataStorage.java
++++ b/net/minecraft/world/level/storage/SavedDataStorage.java
+@@ -216,6 +216,52 @@ public class SavedDataStorage implements AutoCloseable {
+         }
+     }
+     // Folia end - region threading
++    // Canvas start - region threading
++
++    @SafeVarargs
++    public final CompletableFuture<?> saveSpecific(final Class<? extends SavedData>... classTypes) {
++        Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
++        RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
++        for (Map.Entry<SavedDataType<?>, Optional<SavedData>> entry : this.cache.entrySet()) {
++            SavedDataType<?> key = entry.getKey();
++            SavedData state = entry.getValue().orElse(null);
++
++            if (state == null || !state.isDirty()) {
++                continue;
++            }
++
++            // check if the type passes, since we only want specific data to pass through
++            // similar to how Folia does the saveMaps function
++
++            boolean pass = false;
++            for (final Class<? extends SavedData> classType : classTypes) {
++                if (classType.isInstance(state)) {
++                    pass = true;
++                    break;
++                }
++            }
++            if (!pass) {
++                continue;
++            }
++
++            state.setDirty(false);
++
++            savedData.put(key, this.encodeUnchecked(key, state, registryOps));
++        }
++
++        if (savedData.isEmpty()) {
++            return CompletableFuture.completedFuture(null);
++        } else {
++            this.pendingWriteFuture = this.pendingWriteFuture
++                .thenCompose(
++                    v -> CompletableFuture.allOf(
++                        savedData.entrySet().stream().map(entry -> CompletableFuture.runAsync(() -> tryWrite(entry.getKey(), entry.getValue()), Util.DIMENSION_DATA_IO_POOL)).toArray(CompletableFuture[]::new)
++                    )
++                );
++            return this.pendingWriteFuture;
++        }
++    }
++    // Canvas end - region threading
+ 
+     public CompletableFuture<?> scheduleSave() {
+         if (this.closed) {
 diff --git a/net/minecraft/world/scores/Objective.java b/net/minecraft/world/scores/Objective.java
 index 64ea4741b7ed58fe7914b9431353abd1f658a935..d4ddbdf895e19cf15929bc6ba4ea2258ab92d0da 100644
 --- a/net/minecraft/world/scores/Objective.java
