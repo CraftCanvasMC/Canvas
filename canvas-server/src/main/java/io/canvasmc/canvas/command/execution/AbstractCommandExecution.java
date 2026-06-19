@@ -14,6 +14,7 @@ import io.canvasmc.canvas.util.command.TriCommandFunction;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -215,27 +216,7 @@ public class AbstractCommandExecution<R, E extends Entity> {
 
         final List<? extends E> targets = this.targets.value();
         final AtomicInteger count = new AtomicInteger(targets.size());
-
-        final Consumer<E> action = (entity) -> {
-            try {
-                final Function<R, R> dataModifier = this.commandAction.value().act(entity);
-                this.dataInstance.swapValue(dataModifier::apply);
-                if (count.decrementAndGet() == 0) {
-                    // we reached the end!
-                    this.complete.value().act(this.dataInstance.getValue(), targets, sourceStack);
-                }
-            } catch (final CommandSyntaxException cse) {
-                sourceStack.sendFailure(Component.literal(cse.getMessage()));
-                if (count.decrementAndGet() == 0) {
-                    // we reached the end! unfortunately we failed though
-                    try {
-                        this.complete.value().act(this.dataInstance.getValue(), targets, sourceStack);
-                    } catch (final CommandSyntaxException cse1) {
-                        sourceStack.sendFailure(Component.literal(cse1.getMessage()));
-                    }
-                }
-            }
-        };
+        final Consumer<E> action = constructAction(sourceStack, count, targets);
 
         // handle the special case where a command could give 0 valid targets
         if (count.get() == 0) {
@@ -268,5 +249,42 @@ public class AbstractCommandExecution<R, E extends Entity> {
                 );
             }
         }
+    }
+
+    private @NonNull Consumer<E> constructAction(final CommandSourceStack sourceStack, final AtomicInteger count, final List<? extends E> targets) {
+        final AtomicBoolean hasFailed = new AtomicBoolean(false);
+
+        return (entity) -> {
+
+            // if we failed, don't do anything
+            if (hasFailed.get()) {
+                return;
+            }
+
+            try {
+                final Function<R, R> dataModifier = this.commandAction.value().act(entity);
+                this.dataInstance.swapValue(dataModifier::apply);
+            } catch (final Throwable uncaught) {
+                // if syntax exception, we should tell the source
+                if (uncaught instanceof CommandSyntaxException cse) {
+                    sourceStack.sendFailure(Component.literal(cse.getMessage()));
+                }
+
+                // realistically, this should kill the server if not a CSE...in theory
+                // but only if this was scheduled. if it wasn't this will do nothing so we
+                // need to set "has failed" anyway or else this may continue
+
+                hasFailed.set(true);
+                throw new RuntimeException("Uncaught exception when executing ACE constructed command", uncaught);
+            } finally {
+                if (count.decrementAndGet() == 0 && !hasFailed.get()) {
+                    try {
+                        this.complete.value().act(this.dataInstance.getValue(), targets, sourceStack);
+                    } catch (final CommandSyntaxException cse1) {
+                        sourceStack.sendFailure(Component.literal(cse1.getMessage()));
+                    }
+                }
+            }
+        };
     }
 }
