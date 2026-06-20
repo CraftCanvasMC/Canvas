@@ -445,11 +445,6 @@ public class GlobalConfiguration extends Part {
             //     }
             //     return null;
             // });
-            option("pearlDuplication")
-                .docs(
-                    "There is a Vanilla bug where in-flight pearls are duplicated at shutdown. This fixes that when",
-                    "the option \"restoreVanillaEnderPearlBehavior\" is enabled alongside this."
-                );
         }
 
         public boolean mc298464 = false;
@@ -468,7 +463,6 @@ public class GlobalConfiguration extends Part {
         public boolean mc30391 = false;
         public boolean mc183990 = false;
         public boolean mc136249 = false;
-        public boolean pearlDuplication = false;
     }
 
     public Networking networking = new Networking();

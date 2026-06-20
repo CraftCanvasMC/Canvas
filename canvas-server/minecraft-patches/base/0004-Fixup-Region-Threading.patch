@@ -44,7 +44,7 @@ index e9ca1a15049b0211d10401cb78e953b93afaf6c7..88067a935b2de9c4763e5f8e3752e543
                  if (tick.handle instanceof TickRegions.ConcreteRegionTickHandle region) {
                      LOGGER.error(
 diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
-index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e0162087e3b546 100644
+index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..d63faa18568b80ad3ff170e053e60715cbcc2869 100644
 --- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
 +++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 @@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
@@ -88,7 +88,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
      }
  
      public void saveRegionChunks(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region,
-@@ -148,9 +150,110 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
+@@ -148,9 +150,113 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
              this.shuttingDown = null;
          }
      }
@@ -114,11 +114,12 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
 +            futures.add(future);
 +        }
 +
-+        // save pearls
++        // make sure the pearl map is fully set, so this can be picked
++        // up on the global data save later on during shutdown
++
 +        final org.apache.commons.lang3.mutable.MutableInt savedPearlCount = new org.apache.commons.lang3.mutable.MutableInt(0);
 +        final java.util.Map<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, List<com.mojang.datafixers.util.Pair<java.util.UUID, net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl>>>
 +            region2Pearls = com.google.common.collect.Maps.newHashMap();
-+        final boolean removeDuplicatePearl = io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.pearlDuplication;
 +
 +        for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().getPlayers()) {
 +            final java.util.UUID uuid = entityPlayer.getUUID();
@@ -157,9 +158,13 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
 +                center = region.getCenterChunk();
 +                for (final com.mojang.datafixers.util.Pair<java.util.UUID, net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl> pair : listOfPearls) {
 +                    MinecraftServer.getServer().pearls.addPearl(pair.getFirst(), pair.getSecond());
-+                    if (removeDuplicatePearl) {
-+                        pair.getSecond().setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
-+                    }
++
++                    // remove the pearl or else we end up with a bug in our system
++                    // that causes the pearl to be retained in the set until the next
++                    // login, since the entity UUID exists so it just adds to the
++                    // pearl set and then never gets removed so it gets caught on save
++
++                    pair.getSecond().setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
 +                    savedPearlCount.increment();
 +                }
 +            } catch (Throwable thrown) {
@@ -187,8 +192,6 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
 +            }
 +        }
 +
-+        // wait for pearl save, then wait for connection shutdown
-+        MinecraftServer.getServer().pearls.save(null).join();
 +        MinecraftServer.getServer().getConnection().stop();
 +    }
 +    // Canvas end - region threading
@@ -199,7 +202,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
          // await scheduler termination
          LOGGER.info("Awaiting scheduler termination for 60s...");
          if (TickRegions.getScheduler().halt(true, TimeUnit.SECONDS.toNanos(60L))) {
-@@ -161,6 +264,11 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
+@@ -161,6 +267,11 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
          }
  
          MinecraftServer.getServer().stopServer(); // stop part 1: most logic, kicking players, plugins, etc
@@ -212,7 +215,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
          LOGGER.info("Halting chunk systems...");
          for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c86cf28254 100644
+index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd6f2c36c2 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -31,7 +31,7 @@ import java.util.function.BooleanSupplier;
@@ -276,14 +279,11 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
  
          // tick player ping sample
          this.tickPlayerSample();
-@@ -362,7 +377,63 @@ public final class RegionizedServer {
+@@ -362,7 +377,61 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
 +        // Canvas start - region threading
-+
-+        // ender pearls
-+        MinecraftServer.getServer().pearls.autosave();
 +
 +        // gui tick
 +        net.minecraft.server.gui.PlayerListComponent.tick();
@@ -291,7 +291,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
 +        // scoreboards, stopwatches
 +        autosaveSafeGlobalData(false, false);
 +        // Canvas end - region threading
-+    }
+     }
 +    // Canvas start - region threading
 +
 +    private static final java.util.concurrent.atomic.AtomicLong LAST_GLOBAL_AUTOSAVE = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
@@ -325,7 +325,8 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
 +
 +            java.util.concurrent.CompletableFuture<?> future = server.getDataStorage().saveSpecific(
 +                net.minecraft.world.scores.ScoreboardSaveData.class,
-+                net.minecraft.world.Stopwatches.class
++                net.minecraft.world.Stopwatches.class,
++                io.canvasmc.canvas.world.entity.EnderPearls.class
 +            );
 +
 +            // if sync we need to just join here. this shouldn't be done
@@ -335,12 +336,12 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
 +                future.join();
 +            }
 +        }
-     }
++    }
 +    // Canvas end - region threading
  
      private void tickPlayerSample() {
          final MinecraftServer mcServer = MinecraftServer.getServer();
-@@ -402,9 +473,14 @@ public final class RegionizedServer {
+@@ -402,9 +471,14 @@ public final class RegionizedServer {
              }
  
              if (isNotOwnedByGlobalRegion(conn)) {
@@ -358,7 +359,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
              }
  
              if (!conn.isConnected()) {
-@@ -435,6 +511,12 @@ public final class RegionizedServer {
+@@ -435,6 +509,12 @@ public final class RegionizedServer {
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final long tickCount) {
@@ -371,7 +372,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
          // needs
          // worldborder tick
          // advancing the weather cycle
-@@ -480,6 +562,7 @@ public final class RegionizedServer {
+@@ -480,6 +560,7 @@ public final class RegionizedServer {
      }
  
      private void advanceWeatherCycle(final ServerLevel world) {
@@ -379,7 +380,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
          world.advanceWeatherCycle();
      }
  
-@@ -492,11 +575,13 @@ public final class RegionizedServer {
+@@ -492,11 +573,13 @@ public final class RegionizedServer {
      }
  
      private void tickClocks() {
@@ -393,7 +394,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
                  level.clockManager().tick();
              }
          }
-@@ -504,6 +589,7 @@ public final class RegionizedServer {
+@@ -504,6 +587,7 @@ public final class RegionizedServer {
      }
  
      private void tickTime(final ServerLevel world, final long tickCount) {
@@ -1428,7 +1429,7 @@ index 24a530fc07f5dc42a91dabaccf498e418fe7e2ad..3b672257851ed5ab9f5cd03f1c437cdc
          // Paper end
      }
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index b0da5a9fa114fe57f0f304d6763c655c081c60ab..728312496851e127da328db768ad2c3ca1325988 100644
+index b0da5a9fa114fe57f0f304d6763c655c081c60ab..6a4b1b2c91c6bca9ad587c64c9aeb2b896f66230 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -208,7 +208,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -1465,14 +1466,14 @@ index b0da5a9fa114fe57f0f304d6763c655c081c60ab..728312496851e127da328db768ad2c3c
  
      @Override
      public <V> CompletableFuture<V> submit(java.util.function.Supplier<V> task) {
-@@ -609,6 +609,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
-         Runtime.getRuntime().addShutdownHook(new org.bukkit.craftbukkit.util.ServerShutdownThread(this));
-         // CraftBukkit end
-         this.paperConfigurations = services.paper().configurations(); // Paper - add paper configuration files
-+        this.pearls = io.canvasmc.canvas.world.entity.EnderPearls.read(storageSource.getLevelPath(LevelResource.DATA)); // Canvas - region threading
-     }
- 
-     protected abstract boolean initServer() throws IOException;
+@@ -576,6 +576,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.clockManager = this.getDataStorage().computeIfAbsent(ServerClockManager.TYPE);
+         this.clockManager.init(this);
+         this.customBossEvents = this.savedDataStorage.computeIfAbsent(CustomBossEvents.TYPE);
++        this.pearls = this.savedDataStorage.computeIfAbsent(io.canvasmc.canvas.world.entity.EnderPearls.TYPE); // Canvas - region threading
+         // Paper - per-level scheduledEvents
+         // CraftBukkit start
+         this.options = options;
 @@ -665,19 +666,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
      // Paper start - rework world loading process
@@ -4253,10 +4254,10 @@ index 2f6c0784126e1ab22ca7e138452325ebc425001c..032e0bc99a703c8bd5789fffcd99d9ce
      }
  }
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index 299991905c24a7018f8ac60d0c16e56fa43cd710..4e05380b283c804ffe791ad0c44d302d75faf68c 100644
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..897432af08dd4978e313d2109fd9b7bb507e96ca 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -24,12 +24,84 @@ public class SaveAllCommand {
+@@ -24,12 +24,74 @@ public class SaveAllCommand {
      private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
@@ -4286,16 +4287,6 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..4e05380b283c804ffe791ad0c44d302d
 +
 +            io.papermc.paper.threadedregions.RegionizedServer.getInstance().autosaveSafeGlobalData(true, true);
 +            source.sendSuccess(() -> Component.literal("Saved global data"), true);
-+
-+            // pearl save rewrite
-+            MinecraftServer.getServer().pearls.save((result) -> {
-+                if (result) {
-+                    source.sendSuccess(() -> Component.literal("Saved pearl data"), true);
-+                }
-+                else {
-+                    source.sendFailure(Component.literal("Failed to save pearl data, check console for details"));
-+                }
-+            }).join(); // synchronize this
 +
 +            // regions next
 +            final java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger(0);
