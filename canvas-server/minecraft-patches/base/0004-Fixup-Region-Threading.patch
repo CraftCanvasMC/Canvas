@@ -1879,31 +1879,274 @@ index c47d2e00b79e80b914a5bf24b24b13b8f344ebe3..9d3d7986f52f2a05866ab93a0a44fd1e
          this.setFrozen(this.previousIsFrozen);
          this.server.onTickRateChanged();
 diff --git a/net/minecraft/server/bossevents/CustomBossEvent.java b/net/minecraft/server/bossevents/CustomBossEvent.java
-index f55f22b3d3d765d790ac7bb85727846de01b57d6..cb7b9aff23353639b720f93a414041bfad9aafd4 100644
+index f55f22b3d3d765d790ac7bb85727846de01b57d6..703fae51a5185afaaf47503ac492325594fc9bf2 100644
 --- a/net/minecraft/server/bossevents/CustomBossEvent.java
 +++ b/net/minecraft/server/bossevents/CustomBossEvent.java
-@@ -20,7 +20,7 @@ import net.minecraft.world.BossEvent;
- public class CustomBossEvent extends ServerBossEvent {
-     private static final int DEFAULT_MAX = 100;
-     private final Identifier customId;
--    private final Set<UUID> players = Sets.newHashSet();
-+    private final Set<UUID> players = Sets.newConcurrentHashSet(); // Canvas - fix commands with region threading - TODO - do better
-     private int value;
-     private int max = 100;
-     private final Runnable dirtyCallback;
+@@ -40,6 +40,7 @@ public class CustomBossEvent extends ServerBossEvent {
+         this.dirtyCallback = dirtyCallback;
+         this.customId = customId;
+         this.setProgress(0.0F);
++        getBukkitEntity(); // Canvas - init this early
+     }
+ 
+     public Identifier customId() {
+@@ -48,27 +49,33 @@ public class CustomBossEvent extends ServerBossEvent {
+ 
+     @Override
+     public void addPlayer(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         super.addPlayer(player);
+         if (this.players.add(player.getUUID())) {
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     @Override
+     public void removePlayer(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         super.removePlayer(player);
+         if (this.players.remove(player.getUUID())) {
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     @Override
+     public void removeAllPlayers() {
++        synchronized (playerLock) { // Canvas - region threading
+         super.removeAllPlayers();
+         if (!this.players.isEmpty()) {
+             this.players.clear();
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     public int value() {
+@@ -80,15 +87,19 @@ public class CustomBossEvent extends ServerBossEvent {
+     }
+ 
+     public void setValue(final int value) {
++        synchronized (playerLock) { // Canvas - region threading
+         this.value = value;
+         this.setProgress(Mth.clamp((float)value / this.max, 0.0F, 1.0F));
+         this.setDirty();
++        } // Canvas - region threading
+     }
+ 
+     public void setMax(final int max) {
++        synchronized (playerLock) { // Canvas - region threading
+         this.max = max;
+         this.setProgress(Mth.clamp((float)this.value / max, 0.0F, 1.0F));
+         this.setDirty();
++        } // Canvas - region threading
+     }
+ 
+     public final Component getDisplayName() {
+@@ -101,60 +112,21 @@ public class CustomBossEvent extends ServerBossEvent {
+     }
+ 
+     public boolean setPlayers(final Collection<ServerPlayer> players) {
+-        Set<UUID> toRemove = Sets.newHashSet();
+-        Set<ServerPlayer> toAdd = Sets.newHashSet();
++        // Canvas start - region threading
+ 
+-        for (UUID uuid : this.players) {
+-            boolean found = false;
++        // to be completely blunt, this doesn't matter. if anything,
++        // when this function is executed, it will flicker the bossbar
++        // once for any players in both the before and after sets
+ 
+-            for (ServerPlayer player : players) {
+-                if (player.getUUID().equals(uuid)) {
+-                    found = true;
+-                    break;
+-                }
++        synchronized (playerLock) {
++            this.removeAllPlayers();
++            for (final ServerPlayer player : players) {
++                addPlayer(player);
+             }
+-
+-            if (!found) {
+-                toRemove.add(uuid);
+-            }
+-        }
+-
+-        for (ServerPlayer player : players) {
+-            boolean found = false;
+-
+-            for (UUID uuid : this.players) {
+-                if (player.getUUID().equals(uuid)) {
+-                    found = true;
+-                    break;
+-                }
+-            }
+-
+-            if (!found) {
+-                toAdd.add(player);
+-            }
+-        }
+-
+-        for (UUID uuid : toRemove) {
+-            for (ServerPlayer player : this.getPlayers()) {
+-                if (player.getUUID().equals(uuid)) {
+-                    this.removePlayer(player);
+-                    break;
+-                }
+-            }
+-
+-            this.players.remove(uuid);
+-        }
+-
+-        for (ServerPlayer player : toAdd) {
+-            this.addPlayer(player);
+-        }
+-
+-        boolean playersChanged = !toRemove.isEmpty() || !toAdd.isEmpty();
+-        if (playersChanged) {
+-            this.setDirty();
+         }
+ 
+-        return playersChanged;
++        return true;
++        // Canvas end - region threading
+     }
+ 
+     public static CustomBossEvent load(final UUID id, final Identifier customId, final CustomBossEvent.Packed packed, final Runnable setDirty) {
+@@ -172,6 +144,7 @@ public class CustomBossEvent extends ServerBossEvent {
+     }
+ 
+     public CustomBossEvent.Packed pack() {
++        synchronized (playerLock) { // Canvas - region threading
+         return new CustomBossEvent.Packed(
+             this.getName(),
+             this.isVisible(),
+@@ -184,12 +157,15 @@ public class CustomBossEvent extends ServerBossEvent {
+             this.shouldCreateWorldFog(),
+             Set.copyOf(this.players)
+         );
++        } // Canvas - region threading
+     }
+ 
+     public void onPlayerConnect(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         if (this.players.contains(player.getUUID())) {
+             this.addPlayer(player);
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void onPlayerDisconnect(final ServerPlayer player) {
 diff --git a/net/minecraft/server/bossevents/CustomBossEvents.java b/net/minecraft/server/bossevents/CustomBossEvents.java
-index fb55ed68a1f8470b551030a27ca2656555c93d9e..5756f7aca1a80782a88b0e82ef82a626172be539 100644
+index fb55ed68a1f8470b551030a27ca2656555c93d9e..b6c7c0a0fe21b3ed5d316dc8c5b8b813fd20e349 100644
 --- a/net/minecraft/server/bossevents/CustomBossEvents.java
 +++ b/net/minecraft/server/bossevents/CustomBossEvents.java
-@@ -26,7 +26,7 @@ public class CustomBossEvents extends SavedData {
+@@ -22,45 +22,98 @@ public class CustomBossEvents extends SavedData {
+         CustomBossEvents r = new CustomBossEvents();
+         events.forEach((id, packed) -> r.events.put(id, CustomBossEvent.load(UUID.randomUUID(), id, packed, r::setDirty)));
+         return r;
+-    }, c -> Util.mapValues(c.events, CustomBossEvent::pack));
++    }, c -> Util.mapValues(c.unmodifiableCopy(), CustomBossEvent::pack)); // Canvas - region threading
      public static final SavedDataType<CustomBossEvents> TYPE = new SavedDataType<>(
          Identifier.withDefaultNamespace("custom_boss_events"), CustomBossEvents::new, CODEC, DataFixTypes.SAVED_DATA_CUSTOM_BOSS_EVENTS
      );
--    private final Map<Identifier, CustomBossEvent> events = Maps.newHashMap();
-+    private final Map<Identifier, CustomBossEvent> events = Maps.newConcurrentMap(); // Canvas - fix commands with region threading - TODO - do better
+     private final Map<Identifier, CustomBossEvent> events = Maps.newHashMap();
++    // Canvas start - region threading
++    private final java.util.concurrent.locks.ReentrantReadWriteLock lock = new java.util.concurrent.locks.ReentrantReadWriteLock(true);
++
++    private Map<Identifier, CustomBossEvent> unmodifiableCopy() {
++        lock.readLock().lock();
++        try {
++            return com.google.common.collect.ImmutableMap.copyOf(events);
++        } finally {
++            lock.readLock().unlock();
++        }
++    }
++    // Canvas end - region threading
  
      public @Nullable CustomBossEvent get(final Identifier id) {
++        // Canvas start - region threading
++        lock.readLock().lock();
++        try {
++        // Canvas end - region threading
          return this.events.get(id);
++        // Canvas start - region threading
++        } finally {
++            lock.readLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public CustomBossEvent create(final RandomSource random, final Identifier id, final Component name) {
++        // Canvas start - region threading
++        lock.writeLock().lock();
++        try {
++        // Canvas end - region threading
+         CustomBossEvent result = new CustomBossEvent(Mth.createInsecureUUID(random), id, name, this::setDirty);
+         this.events.put(id, result);
+         this.setDirty();
+         return result;
++        // Canvas start - region threading
++        } finally {
++            lock.writeLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public void remove(final CustomBossEvent event) {
++        // Canvas start - region threading
++        lock.writeLock().lock();
++        try {
++        // Canvas end - region threading
+         if (this.events.remove(event.customId()) != null) {
+             this.setDirty();
+         }
++        // Canvas start - region threading
++        } finally {
++            lock.writeLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public Collection<Identifier> getIds() {
+-        return this.events.keySet();
++        // Canvas start - region threading
++        lock.readLock().lock();
++        try {
++        return new java.util.HashSet<>(this.events.keySet());
++        } finally {
++            lock.readLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public Collection<CustomBossEvent> getEvents() {
+-        return this.events.values();
++        // Canvas start - region threading
++        lock.readLock().lock();
++        try {
++        return new java.util.HashSet<>(this.events.values());
++        } finally {
++            lock.readLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public void onPlayerConnect(final ServerPlayer player) {
+-        for (CustomBossEvent event : this.events.values()) {
++        for (CustomBossEvent event : getEvents()) { // Canvas - region threading
+             event.onPlayerConnect(player);
+         }
+     }
+ 
+     public void onPlayerDisconnect(final ServerPlayer player) {
+-        for (CustomBossEvent event : this.events.values()) {
++        for (CustomBossEvent event : getEvents()) { // Canvas - region threading
+             event.onPlayerDisconnect(player);
+         }
+     }
 diff --git a/net/minecraft/server/commands/AdvancementCommands.java b/net/minecraft/server/commands/AdvancementCommands.java
 index dfabf9b9870091087ab8b48634ecf9e2316b7f68..ffdf3e49d9366e89940a043907b2d83ab62b22ba 100644
 --- a/net/minecraft/server/commands/AdvancementCommands.java
@@ -6782,17 +7025,151 @@ index 084fb56f4fe06cc56f126269390027e277577b81..146079713998a01df67a4ad567a809a2
              this.updatePlayerStatus(player, false);
  
 diff --git a/net/minecraft/server/level/ServerBossEvent.java b/net/minecraft/server/level/ServerBossEvent.java
-index f1c8e45fdc4d7c70c4c5c6d4d6533364b74dba97..92ca314da1290ad75e61dab0a5a3122c23f9b11c 100644
+index f1c8e45fdc4d7c70c4c5c6d4d6533364b74dba97..062a19f4f3fb57ec1843d6e25af0b3ffd79b4d7c 100644
 --- a/net/minecraft/server/level/ServerBossEvent.java
 +++ b/net/minecraft/server/level/ServerBossEvent.java
-@@ -13,7 +13,7 @@ import net.minecraft.network.protocol.game.ClientboundBossEventPacket;
- import net.minecraft.world.BossEvent;
- 
+@@ -15,7 +15,8 @@ import net.minecraft.world.BossEvent;
  public class ServerBossEvent extends BossEvent {
--    private final Set<ServerPlayer> players = Sets.newHashSet();
-+    private final Set<ServerPlayer> players = Sets.newConcurrentHashSet(); // Canvas - fix commands with region threading
+     private final Set<ServerPlayer> players = Sets.newHashSet();
      private final Set<ServerPlayer> unmodifiablePlayers = Collections.unmodifiableSet(this.players);
-     private boolean visible = true;
+-    private boolean visible = true;
++    protected final Object playerLock = new Object(); // Canvas - region threading
++    private final java.util.concurrent.atomic.AtomicBoolean visible = new java.util.concurrent.atomic.AtomicBoolean(true); // Canvas - region threading
+ 
+     public ServerBossEvent(final UUID id, final Component name, final BossEvent.BossBarColor color, final BossEvent.BossBarOverlay overlay) {
+         super(id, name, color, overlay);
+@@ -23,8 +24,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setProgress(final float progress) {
+-        if (progress != this.progress) {
+-            super.setProgress(progress);
++        if (compareAndSetProgress(progress)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateProgressPacket);
+         }
+@@ -32,8 +32,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setColor(final BossEvent.BossBarColor color) {
+-        if (color != this.color) {
+-            super.setColor(color);
++        if (compareAndSetColor(color)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateStylePacket);
+         }
+@@ -41,8 +40,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setOverlay(final BossEvent.BossBarOverlay overlay) {
+-        if (overlay != this.overlay) {
+-            super.setOverlay(overlay);
++        if (compareAndSetOverlay(overlay)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateStylePacket);
+         }
+@@ -50,8 +48,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public BossEvent setDarkenScreen(final boolean darkenScreen) {
+-        if (darkenScreen != this.darkenScreen) {
+-            super.setDarkenScreen(darkenScreen);
++        if (compareAndSetDarkenScreen(darkenScreen)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -61,8 +58,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public BossEvent setPlayBossMusic(final boolean playBossMusic) {
+-        if (playBossMusic != this.playBossMusic) {
+-            super.setPlayBossMusic(playBossMusic);
++        if (compareAndSetPlayBossMusic(playBossMusic)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -72,8 +68,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public BossEvent setCreateWorldFog(final boolean createWorldFog) {
+-        if (createWorldFog != this.createWorldFog) {
+-            super.setCreateWorldFog(createWorldFog);
++        if (compareAndSetCreateWorldFog(createWorldFog)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -83,56 +78,64 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setName(final Component name) {
+-        if (!Objects.equal(name, this.name)) {
+-            super.setName(name);
++        if (compareAndSetName(name)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateNamePacket);
+         }
+     }
+ 
+     public void broadcast(final Function<BossEvent, ClientboundBossEventPacket> factory) {
+-        if (this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.visible.get()) { // Canvas - region threading
+             ClientboundBossEventPacket packet = factory.apply(this);
+ 
+             for (ServerPlayer player : this.players) {
+                 player.connection.send(packet);
+             }
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void addPlayer(final ServerPlayer player) {
+-        if (this.players.add(player) && this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.players.add(player) && this.visible.get()) { // Canvas - region threading
+             player.connection.send(ClientboundBossEventPacket.createAddPacket(this));
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void removePlayer(final ServerPlayer player) {
+-        if (this.players.remove(player) && this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.players.remove(player) && this.visible.get()) { // Canvas - region threading
+             player.connection.send(ClientboundBossEventPacket.createRemovePacket(this.getId()));
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void removeAllPlayers() {
++        synchronized (playerLock) { // Canvas - region threading
+         if (!this.players.isEmpty()) {
+             for (ServerPlayer player : Lists.newArrayList(this.players)) {
+                 this.removePlayer(player);
+             }
+         }
++        } // Canvas - region threading
+     }
+ 
+     public boolean isVisible() {
+-        return this.visible;
++        return this.visible.get(); // Canvas - region threading
+     }
+ 
+     public void setVisible(final boolean visible) {
+-        if (visible != this.visible) {
+-            this.visible = visible;
++        if (this.visible.compareAndSet(!visible, visible)) { // Canvas - region threading
+             this.setDirty();
+ 
++            synchronized (playerLock) { // Canvas - region threading
+             for (ServerPlayer player : this.players) {
+                 player.connection
+                     .send(visible ? ClientboundBossEventPacket.createAddPacket(this) : ClientboundBossEventPacket.createRemovePacket(this.getId()));
+             }
++            } // Canvas - region threading
+         }
+     }
  
 diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
 index 296d3c86aa83857190686fe28e98b452120dcd0d..3cfc0a9d45c0306b846daeb1b17be9484aebe8f7 100644
@@ -7750,6 +8127,274 @@ index b455050c16946f54fc1d9893173777e39baf4290..5ee7759034404b37df09a368a9cc87f5
 +        // Canvas - region threading
      }
  }
+diff --git a/net/minecraft/world/BossEvent.java b/net/minecraft/world/BossEvent.java
+index 484f8da6c1b3f93088040899196ba017fc8fb7c7..7ea6227d6778d9f713569511445e542238532972 100644
+--- a/net/minecraft/world/BossEvent.java
++++ b/net/minecraft/world/BossEvent.java
+@@ -8,21 +8,34 @@ import net.minecraft.util.StringRepresentable;
+ 
+ public abstract class BossEvent {
+     private final UUID id;
+-    public Component name;
+-    protected float progress;
+-    public BossEvent.BossBarColor color;
+-    public BossEvent.BossBarOverlay overlay;
+-    protected boolean darkenScreen;
+-    protected boolean playBossMusic;
+-    protected boolean createWorldFog;
+-    public net.kyori.adventure.bossbar.BossBar adventure; // Paper
++    // Canvas start - region threading
++    public volatile net.kyori.adventure.bossbar.BossBar adventure; // Paper
++    public final io.canvasmc.canvas.util.LockedReference<VanillaBossData> vanillaBossData;
++
++    public record VanillaBossData(
++        Component name,
++        float progress,
++        BossBarColor color,
++        BossBarOverlay overlay,
++        boolean darkenScreen,
++        boolean playBossMusic,
++        boolean createWorldFog
++    ) {}
++    // Canvas end - region threading
+ 
+     public BossEvent(final UUID id, final Component name, final BossEvent.BossBarColor color, final BossEvent.BossBarOverlay overlay) {
+         this.id = id;
+-        this.name = name;
+-        this.color = color;
+-        this.overlay = overlay;
+-        this.progress = 1.0F;
++        // Canvas start - region threading
++        this.vanillaBossData = new io.canvasmc.canvas.util.LockedReference<>(new VanillaBossData(
++            name,
++            1.0F,
++            color,
++            overlay,
++            false,
++            false,
++            false
++        ));
++        // Canvas end - region threading
+     }
+ 
+     public UUID getId() {
+@@ -31,76 +44,202 @@ public abstract class BossEvent {
+ 
+     public Component getName() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.name()); // Paper
+-        return this.name;
++        return this.vanillaBossData.getValue().name(); // Canvas - region threading
+     }
+ 
+     public void setName(final Component name) {
+         if (this.adventure != null) this.adventure.name(io.papermc.paper.adventure.PaperAdventure.asAdventure(name)); // Paper
+-        this.name = name;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetName(final Component name) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (!com.google.common.base.Objects.equal(name, c.name)) {
++                changed.setTrue();
++                return new VanillaBossData(name, c.progress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public float getProgress() {
+         if (this.adventure != null) return this.adventure.progress(); // Paper
+-        return this.progress;
++        return this.vanillaBossData.getValue().progress(); // Canvas - region threading
+     }
+ 
+     public void setProgress(final float progress) {
+         if (this.adventure != null) this.adventure.progress(progress); // Paper
+-        this.progress = progress;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetProgress(final float newProgress) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.progress != newProgress) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, newProgress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public BossEvent.BossBarColor getColor() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.color()); // Paper
+-        return this.color;
++        return this.vanillaBossData.getValue().color(); // Canvas - region threading
+     }
+ 
+     public void setColor(final BossEvent.BossBarColor color) {
+         if (this.adventure != null) this.adventure.color(io.papermc.paper.adventure.PaperAdventure.asAdventure(color)); // Paper
+-        this.color = color;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetColor(final BossEvent.BossBarColor color) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.color != color) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public BossEvent.BossBarOverlay getOverlay() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.overlay()); // Paper
+-        return this.overlay;
++        return this.vanillaBossData.getValue().overlay(); // Canvas - region threading
+     }
+ 
+     public void setOverlay(final BossEvent.BossBarOverlay overlay) {
+         if (this.adventure != null) this.adventure.overlay(io.papermc.paper.adventure.PaperAdventure.asAdventure(overlay)); // Paper
+-        this.overlay = overlay;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetOverlay(final BossEvent.BossBarOverlay overlay) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.overlay != overlay) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public boolean shouldDarkenScreen() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.DARKEN_SCREEN); // Paper
+-        return this.darkenScreen;
++        return this.vanillaBossData.getValue().darkenScreen(); // Canvas - region threading
+     }
+ 
+     public BossEvent setDarkenScreen(final boolean darkenScreen) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.DARKEN_SCREEN, darkenScreen); // Paper
+-        this.darkenScreen = darkenScreen;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetDarkenScreen(final boolean darkenScreen) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.darkenScreen != darkenScreen) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public boolean shouldPlayBossMusic() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.PLAY_BOSS_MUSIC); // Paper
+-        return this.playBossMusic;
++        return this.vanillaBossData.getValue().playBossMusic(); // Canvas - region threading
+     }
+ 
+     public BossEvent setPlayBossMusic(final boolean playBossMusic) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.PLAY_BOSS_MUSIC, playBossMusic); // Paper
+-        this.playBossMusic = playBossMusic;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetPlayBossMusic(final boolean playBossMusic) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.playBossMusic != playBossMusic) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, c.darkenScreen, playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public BossEvent setCreateWorldFog(final boolean createWorldFog) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.CREATE_WORLD_FOG, createWorldFog); // Paper
+-        this.createWorldFog = createWorldFog;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
+ 
+     public boolean shouldCreateWorldFog() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.CREATE_WORLD_FOG); // Paper
+-        return this.createWorldFog;
++        return this.vanillaBossData.getValue().createWorldFog(); // Canvas - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetCreateWorldFog(final boolean createWorldFog) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.createWorldFog != createWorldFog) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public enum BossBarColor implements StringRepresentable {
+         PINK("pink", ChatFormatting.RED),
 diff --git a/net/minecraft/world/Stopwatches.java b/net/minecraft/world/Stopwatches.java
 index 4fda3efe9eb24bdb1828078b3c296c497bd211d3..1ca622a587ac55ae893ff78b83ea87725062f171 100644
 --- a/net/minecraft/world/Stopwatches.java
