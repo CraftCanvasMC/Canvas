@@ -265,16 +265,17 @@ public class AbstractCommandExecution<R, E extends Entity> {
                 final Function<R, R> dataModifier = this.commandAction.value().act(entity);
                 this.dataInstance.swapValue(dataModifier::apply);
             } catch (final Throwable uncaught) {
+                hasFailed.set(true);
                 // if syntax exception, we should tell the source
                 if (uncaught instanceof CommandSyntaxException cse) {
                     sourceStack.sendFailure(Component.literal(cse.getMessage()));
+                    return;
                 }
 
                 // realistically, this should kill the server if not a CSE...in theory
                 // but only if this was scheduled. if it wasn't this will do nothing so we
                 // need to set "has failed" anyway or else this may continue
 
-                hasFailed.set(true);
                 throw new RuntimeException("Uncaught exception when executing ACE constructed command", uncaught);
             } finally {
                 if (count.decrementAndGet() == 0 && !hasFailed.get()) {
