@@ -27,11 +27,7 @@ public record PerWorldDistanceConfig(
             )
             .apply(instance, PerWorldDistanceConfig::new)
     );
-    public static PerWorldDistanceConfig DEFAULT = new PerWorldDistanceConfig();
-
-    public PerWorldDistanceConfig() {
-        this(new LockedReference<>(null), new LockedReference<>(null));
-    }
+    public static PerWorldDistanceConfig DEFAULT = new PerWorldDistanceConfig(Optional.empty(), Optional.empty());
 
     // this is for the codec, nothing much else
     @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
@@ -42,13 +38,24 @@ public record PerWorldDistanceConfig(
         );
     }
 
-    public PerWorldDistanceConfig(final @NonNull LockedReference<Integer> viewDistance, final @NonNull LockedReference<Integer> simulationDistance) {
+    public PerWorldDistanceConfig(
+        final @NonNull LockedReference<Integer> viewDistance,
+        final @NonNull LockedReference<Integer> simulationDistance
+    ) {
 
         // for backwards compat with old system. we used to store
         // the -1 value, so this is a good way to clean this up
 
-        this.viewDistance = viewDistance.getValue() == -1 ? new LockedReference<>(null) : viewDistance;
-        this.simulationDistance = simulationDistance.getValue() == -1 ? new LockedReference<>(null) : simulationDistance;
+        Integer view = viewDistance.getValue();
+        Integer simulation = simulationDistance.getValue();
+
+        this.viewDistance = Integer.valueOf(-1).equals(view)
+            ? new LockedReference<>(null)
+            : viewDistance;
+
+        this.simulationDistance = Integer.valueOf(-1).equals(simulation)
+            ? new LockedReference<>(null)
+            : simulationDistance;
     }
 
     public int snapshotViewDistance() {
