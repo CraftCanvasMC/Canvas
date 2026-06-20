@@ -234,19 +234,23 @@ public class AbstractCommandExecution<R, E extends Entity> {
                 action.accept(selected);
             }
             else {
-                selected.getBukkitEntity().taskScheduler.schedule(
-                    action, (_) -> {
-                        // entity is retired, so we just decrement
-                        // with no action being executed
-                        if (count.decrementAndGet() == 0) {
-                            try {
-                                this.complete.value().act(this.dataInstance.getValue(), targets, sourceStack);
-                            } catch (final CommandSyntaxException cse1) {
-                                sourceStack.sendFailure(Component.literal(cse1.getMessage()));
-                            }
+                final Consumer<Entity> retired = (_) -> {
+                    // entity is retired, so we just decrement
+                    // with no action being executed
+                    if (count.decrementAndGet() == 0) {
+                        try {
+                            this.complete.value().act(this.dataInstance.getValue(), targets, sourceStack);
+                        } catch (final CommandSyntaxException cse1) {
+                            sourceStack.sendFailure(Component.literal(cse1.getMessage()));
                         }
-                    }, 1L
-                );
+                    }
+                };
+                if (!selected.getBukkitEntity().taskScheduler.schedule(
+                    action, retired, 1L
+                )) {
+                    // entity is retired already
+                    retired.accept(selected);
+                }
             }
         }
     }
