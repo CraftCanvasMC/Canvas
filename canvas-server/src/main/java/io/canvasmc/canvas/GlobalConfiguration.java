@@ -452,6 +452,7 @@ public class GlobalConfiguration extends Part {
                 );
         }
 
+        public boolean mc261810 = false;
         public boolean mc298464 = false;
         public boolean mc223153 = false;
         public boolean mc200418 = false;
