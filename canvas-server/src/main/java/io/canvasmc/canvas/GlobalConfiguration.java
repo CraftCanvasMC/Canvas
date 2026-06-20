@@ -599,10 +599,13 @@ public class GlobalConfiguration extends Part {
             option("enableLogCleaner").docs("Auto-removes old log files from the \"logs\" directory");
             option("length").docs("The amount of the time unit until the log file is marked for deletion");
             option("unit").docs("The type of time unit to use when comparing how old the file is to the current time");
+            option("logEnderPearlRewriteActions").docs("Logs when a pearl is saved or loaded from Canvas' pearl save rewrite");
         }
 
         public boolean enableLogCleaner = false;
         public long length = 30;
         public ChronoUnit unit = ChronoUnit.DAYS;
+
+        public boolean logEnderPearlRewriteActions = true;
     }
 }

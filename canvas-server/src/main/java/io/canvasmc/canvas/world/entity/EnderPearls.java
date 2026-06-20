@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.world.entity;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
+import com.mojang.logging.LogUtils;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
@@ -35,6 +36,7 @@ import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.storage.ValueInput;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NullMarked;
+import org.slf4j.Logger;
 
 @NullMarked
 public final class EnderPearls extends SavedData {
@@ -46,12 +48,15 @@ public final class EnderPearls extends SavedData {
             Codecs.UUID_CODEC, Codecs.copyOnWriteArrayListCodec(PEARL_CODEC.listOf())
         ).optionalFieldOf("Data", new ConcurrentHashMap<>()).forGetter(EnderPearls::pearls)
     ).apply(instance, EnderPearls::new));
+
     public static final SavedDataType<EnderPearls> TYPE = new SavedDataType<>(
         Identifier.fromNamespaceAndPath("canvas", "pearls"),
         EnderPearls::new,
         CODEC,
         DataFixTypes.NONE
     );
+
+    private static final Logger LOGGER = LogUtils.getClassLogger();
 
     private final Map<UUID, List<Pearl>> pearls;
 
@@ -80,14 +85,21 @@ public final class EnderPearls extends SavedData {
     }
 
     public void addPearl(final UUID uuid, final ThrownEnderpearl thrownEnderpearl) {
-        if (thrownEnderpearl.isRemoved() || thrownEnderpearl.hasNullCallback()) {
-            GlobalConfiguration.LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason() == null ? "NULL_CALLBACK" : thrownEnderpearl.getRemovalReason(), new Throwable());
+        if (thrownEnderpearl.hasNullCallback()) {
+            LOGGER.warn("Trying to add pearl with null callback, skipping", new Throwable());
+            return;
+        }
+        else if (thrownEnderpearl.isRemoved()) {
+            LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason(), new Throwable());
             return;
         }
         List<Pearl> pearls = pearls().computeIfAbsent(uuid, (ignored) -> new CopyOnWriteArrayList<>());
         Pearl encoded = Pearl.of(thrownEnderpearl);
         pearls.remove(encoded); // remove if it's already in the list, we don't want duplicates
         pearls.add(encoded);
+        if (GlobalConfiguration.getInstance().logs.logEnderPearlRewriteActions) {
+            LOGGER.info("Saved pearl at [{}] for {}", thrownEnderpearl.blockPosition().toShortString(), uuid);
+        }
     }
 
     public Map<UUID, List<Pearl>> pearls() {
@@ -142,7 +154,7 @@ public final class EnderPearls extends SavedData {
         public static Pearl of(final ThrownEnderpearl pearl) {
             final CompoundTag tag;
             try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
-                () -> "pearl-serialize", GlobalConfiguration.LOGGER
+                () -> "pearl-serialize", LOGGER
             )) {
                 final TagValueOutput tagValueOutput = TagValueOutput.createWithContext(
                     problemReporter,
@@ -162,37 +174,39 @@ public final class EnderPearls extends SavedData {
             final CompoundTag data = serialized.getCompound("data").orElseThrow();
             final ServerLevel level = MinecraftServer.getServer().getLevel(serialized.read("level", Level.RESOURCE_KEY_CODEC).orElseThrow());
             if (level == null) {
-                GlobalConfiguration.LOGGER.error("Level ({}) did not exist, skipping pearl spawn", serialized.getString("level"));
+                LOGGER.error("Level ({}) did not exist, skipping pearl spawn", serialized.getString("level"));
                 return;
             }
 
             final String levelName = Util.getLevelName(level);
             try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
-                () -> "pearl-spawn", GlobalConfiguration.LOGGER
+                () -> "pearl-spawn", LOGGER
             )) {
                 final ValueInput tagValueInput = TagValueInput.create(
                     problemReporter,
                     MinecraftServer.getServer().registryAccess(),
                     data
                 );
+                final Entity loadedEntity = EntityType.loadEntityRecursive(tagValueInput, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
 
-                Entity entity = EntityType.loadEntityRecursive(tagValueInput, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
-                if (entity != null) {
-                    level.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
-                        if (level.tryAddFreshEntityWithPassengers(entity)) {
-                            ServerPlayer.placeEnderPearlTicket(level, entity.chunkPosition());
-                            GlobalConfiguration.LOGGER.info("Spawned saved pearl in level ({})", levelName);
+                if (loadedEntity != null) {
+                    level.canvas$loadOrRunAtChunksAsync(loadedEntity.blockPosition(), 16, Priority.NORMAL, () -> {
+                        if (level.tryAddFreshEntityWithPassengers(loadedEntity)) {
+                            ServerPlayer.placeEnderPearlTicket(level, loadedEntity.chunkPosition());
+                            if (GlobalConfiguration.getInstance().logs.logEnderPearlRewriteActions) {
+                                LOGGER.info("Spawned saved pearl [{}] in level ({})", loadedEntity.blockPosition().toShortString(), levelName);
+                            }
                         }
                         else {
-                            GlobalConfiguration.LOGGER.warn("Unable to spawn saved pearl in level ({})", levelName);
+                            LOGGER.warn("Unable to spawn saved pearl in level ({})", levelName);
                         }
                     });
                 }
                 else {
-                    GlobalConfiguration.LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", levelName);
+                    LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", levelName);
                 }
-            } catch (Throwable thrown) {
-                GlobalConfiguration.LOGGER.error("Failed to spawn player pearl in level ({})", levelName, thrown);
+            } catch (final Throwable thrown) {
+                LOGGER.error("Failed to spawn player pearl in level ({})", levelName, thrown);
             }
         }
 
