@@ -215,7 +215,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..d63faa18568b80ad3ff170e053e60715
          LOGGER.info("Halting chunk systems...");
          for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd6f2c36c2 100644
+index 918d58644ac028a1025811ebd459112ff6a0e78f..7fc030a587696e95b60dac6d5a474a0882fe392e 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -31,7 +31,7 @@ import java.util.function.BooleanSupplier;
@@ -279,7 +279,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
  
          // tick player ping sample
          this.tickPlayerSample();
-@@ -362,7 +377,61 @@ public final class RegionizedServer {
+@@ -362,7 +377,109 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
@@ -296,12 +296,10 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
 +
 +    private static final java.util.concurrent.atomic.AtomicLong LAST_GLOBAL_AUTOSAVE = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
 +
-+    // note: not everything is thread-safe, only a few things are thread-safe
-+    //       due to specific design of these reimplementations. those are:
-+    //  - scoreboards: from Canvas scoreboards rewrite
-+    //  - stopwatches: we made this SWMR fully, and only the global tick can
-+    //                 write to the backend map so this is safe to save here
-+    // note: this does not save maps at all, those are per-world
++    // note: not every saved data type is thread-safe, only a few things are thread-safe
++    //       due to specific design of these reimplementations. these are listed in the
++    //       respective methods themselves
++
 +    public void autosaveSafeGlobalData(final boolean force, final boolean sync) {
 +        ensureGlobalTickThread("Cannot save global data async");
 +
@@ -309,14 +307,18 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
 +
 +        final int autoSavePeriod = server.autosavePeriod;
 +        if (autoSavePeriod <= 0 && !force) return;
-+        final long periodNanos = autoSavePeriod * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks();
++        final long periodNanos = autoSavePeriod * TickRegionScheduler.getTimeBetweenTicks();
 +        final long currTime = System.nanoTime();
 +        final long last = LAST_GLOBAL_AUTOSAVE.get();
 +
 +        if (force || ((currTime - last) > periodNanos && LAST_GLOBAL_AUTOSAVE.compareAndSet(last, currTime))) {
 +
-+            // these 2 are the only safe global data ones besides maps,
-+            // however those are per-world and saved in world global tick
++            // needs
++            // pearls - our rewrite
++            // scoreboards
++            // stopwatches
++            // custom boss events
++            // world clocks - TODO - GlobalConfiguration.get().time.affectsAllWorlds
 +
 +            // we have to do this for the scoreboard system or else the scoreboard
 +            // system won't actually save. see MinecraftServer#saveGlobalData
@@ -327,6 +329,52 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
 +                net.minecraft.world.scores.ScoreboardSaveData.class,
 +                net.minecraft.world.Stopwatches.class,
 +                io.canvasmc.canvas.world.entity.EnderPearls.class
++                // TODO - custom boss events
++                // TODO - world clocks
++            );
++
++            // if sync we need to just join here. this shouldn't be done
++            // for autosave or every tick since this blocks waiting for completion
++
++            if (sync) {
++                future.join();
++            }
++        }
++    }
++
++    public void autosaveSafeWorldData(final boolean force, final boolean sync, final ServerLevel level) {
++        ensureGlobalTickThread("Cannot save global world data async");
++
++        final MinecraftServer server = MinecraftServer.getServer();
++
++        final int autoSavePeriod = server.autosavePeriod;
++        if (autoSavePeriod <= 0 && !force) return;
++        final long periodNanos = autoSavePeriod * TickRegionScheduler.getTimeBetweenTicks();
++        final long currTime = System.nanoTime();
++        final long last = level.lastMapAutoSave;
++
++        if (force || ((currTime - last) > periodNanos)) {
++            level.lastMapAutoSave = currTime;
++
++            // needs
++            // world clocks - TODO - GlobalConfiguration.get().time.affectsAllWorlds
++            // world border
++            // weather
++            // raids
++            // game rules
++            // dragon fight
++            // maps
++
++            java.util.concurrent.CompletableFuture<?> future = level.getDataStorage().saveSpecific(
++                // TODO - world clocks
++                // TODO - world border
++                // TODO - weather
++                // TODO - raids
++                // TODO - game rules
++                // TODO - dragon fight
++                // maps is represented in 2 data types, the index and the item
++                net.minecraft.world.level.saveddata.maps.MapItemSavedData.class,
++                net.minecraft.world.level.saveddata.maps.MapIndex.class
 +            );
 +
 +            // if sync we need to just join here. this shouldn't be done
@@ -341,7 +389,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
  
      private void tickPlayerSample() {
          final MinecraftServer mcServer = MinecraftServer.getServer();
-@@ -402,9 +471,14 @@ public final class RegionizedServer {
+@@ -402,9 +519,14 @@ public final class RegionizedServer {
              }
  
              if (isNotOwnedByGlobalRegion(conn)) {
@@ -359,7 +407,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
              }
  
              if (!conn.isConnected()) {
-@@ -435,6 +509,12 @@ public final class RegionizedServer {
+@@ -435,6 +557,12 @@ public final class RegionizedServer {
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final long tickCount) {
@@ -372,7 +420,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
          // needs
          // worldborder tick
          // advancing the weather cycle
-@@ -480,6 +560,7 @@ public final class RegionizedServer {
+@@ -480,6 +608,7 @@ public final class RegionizedServer {
      }
  
      private void advanceWeatherCycle(final ServerLevel world) {
@@ -380,7 +428,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
          world.advanceWeatherCycle();
      }
  
-@@ -492,11 +573,13 @@ public final class RegionizedServer {
+@@ -492,11 +621,13 @@ public final class RegionizedServer {
      }
  
      private void tickClocks() {
@@ -394,7 +442,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
                  level.clockManager().tick();
              }
          }
-@@ -504,6 +587,7 @@ public final class RegionizedServer {
+@@ -504,18 +635,14 @@ public final class RegionizedServer {
      }
  
      private void tickTime(final ServerLevel world, final long tickCount) {
@@ -402,6 +450,19 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..dfcae8bbf9b76726727b05bfc9bb9bbd
          if (world.tickTime) {
              world.serverLevelData.setGameTime(world.serverLevelData.getGameTime() + tickCount);
          }
+     }
+ 
+     private void autoSaveMaps(final ServerLevel world) {
+-        final int autoSavePeriod = net.minecraft.server.MinecraftServer.getServer().autosavePeriod;
+-        final long currTime = System.nanoTime();
+-        if (autoSavePeriod > 0 && (currTime - world.lastMapAutoSave) > (java.util.concurrent.TimeUnit.SECONDS.toNanos((long)autoSavePeriod) / 20L)) {
+-            world.lastMapAutoSave = currTime;
+-            world.getDataStorage().saveMaps();
+-        }
++        autosaveSafeWorldData(false, false, world); // Canvas - region threading
+     }
+ 
+     public static final record WorldLevelData(ServerLevel world, long nonRedstoneGameTime) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
 index 24514bc6091f1ae5a5cb70f1b95b53a7d3efb033..25f32887814078cd0c7c0692e1bd06540ad88e8e 100644
 --- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
@@ -4254,10 +4315,10 @@ index 2f6c0784126e1ab22ca7e138452325ebc425001c..032e0bc99a703c8bd5789fffcd99d9ce
      }
  }
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index 299991905c24a7018f8ac60d0c16e56fa43cd710..897432af08dd4978e313d2109fd9b7bb507e96ca 100644
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..0b2bd013684b006b6269f36a8693ab92096c2ee4 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -24,12 +24,74 @@ public class SaveAllCommand {
+@@ -24,12 +24,77 @@ public class SaveAllCommand {
      private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
@@ -4274,18 +4335,21 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..897432af08dd4978e313d2109fd9b7bb
 +        // - pearls
 +        // - regions
 +
-+        // scoreboards, stopwatches, maps
-+        io.papermc.paper.threadedregions.RegionizedServer.getInstance().scheduleToOrExecute(() -> {
-+            // by setting the last map autosave to 0 we can just force an autosave to occur
-+            for (final net.minecraft.server.level.ServerLevel world : io.papermc.paper.threadedregions.RegionizedServer.getInstance().worlds) {
-+                world.lastMapAutoSave = 0;
++        final io.papermc.paper.threadedregions.RegionizedServer regionizedServer = io.papermc.paper.threadedregions.RegionizedServer.getInstance();
++
++        regionizedServer.scheduleToOrExecute(() -> {
++
++            // we need to autosave all global data first. we can't just save
++            // everything though since that's dangerous and unsafe, so we use
++            // the autosave methods and trigger a forced and sync save so
++            // everything that IS safe to save is saved properly
++
++            regionizedServer.autosaveSafeGlobalData(true, true);
++
++            for (final net.minecraft.server.level.ServerLevel world : regionizedServer.worlds) {
++                regionizedServer.autosaveSafeWorldData(true, true, world);
 +            }
 +
-+            // as for scoreboards and stopwatches, those can only be written to on the global tick
-+            // meaning we need to pack/save on the global tick too, but we can't save everything
-+            // because not everything is infact thread-safe, so we force a global data autosave
-+
-+            io.papermc.paper.threadedregions.RegionizedServer.getInstance().autosaveSafeGlobalData(true, true);
 +            source.sendSuccess(() -> Component.literal("Saved global data"), true);
 +
 +            // regions next
@@ -8873,27 +8937,32 @@ index eb52accfdd16a07b2e59a2e65c1007e8920aea36..18c5121d24268cfa5fa7ed22b1dce93a
      public void postProcessGeneration(final ServerLevel level) {
          ChunkPos chunkPos = this.getPos();
 diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
-index 81c1541d8fa272e84316e87c3418ee727111a65c..0b99cf09d3abeb06ea4f653b63a96185c069eab6 100644
+index 81c1541d8fa272e84316e87c3418ee727111a65c..577a319dd6f6cc88deb990b5fbd9fb9b126c3893 100644
 --- a/net/minecraft/world/level/storage/SavedDataStorage.java
 +++ b/net/minecraft/world/level/storage/SavedDataStorage.java
-@@ -216,6 +216,52 @@ public class SavedDataStorage implements AutoCloseable {
-         }
+@@ -183,7 +183,15 @@ public class SavedDataStorage implements AutoCloseable {
      }
-     // Folia end - region threading
+ 
+     // Folia start - region threading
+-    public CompletableFuture<?> saveMaps() {
 +    // Canvas start - region threading
++
++    // completely change the old "saveMaps" function
++    // by using this we can be more specific on what
++    // we want to actually save
 +
 +    @SafeVarargs
 +    public final CompletableFuture<?> saveSpecific(final Class<? extends SavedData>... classTypes) {
-+        Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
-+        RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
-+        for (Map.Entry<SavedDataType<?>, Optional<SavedData>> entry : this.cache.entrySet()) {
-+            SavedDataType<?> key = entry.getKey();
-+            SavedData state = entry.getValue().orElse(null);
-+
-+            if (state == null || !state.isDirty()) {
-+                continue;
-+            }
-+
++    // Canvas end - region threading
+         Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
+         RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
+         for (Map.Entry<SavedDataType<?>, Optional<SavedData>> entry : this.cache.entrySet()) {
+@@ -194,7 +202,19 @@ public class SavedDataStorage implements AutoCloseable {
+                 continue;
+             }
+ 
+-            if (!(state instanceof net.minecraft.world.level.saveddata.maps.MapItemSavedData || state instanceof net.minecraft.world.level.saveddata.maps.MapIndex)) {
++            // Canvas start - region threading
 +            // check if the type passes, since we only want specific data to pass through
 +            // similar to how Folia does the saveMaps function
 +
@@ -8905,30 +8974,10 @@ index 81c1541d8fa272e84316e87c3418ee727111a65c..0b99cf09d3abeb06ea4f653b63a96185
 +                }
 +            }
 +            if (!pass) {
-+                continue;
-+            }
-+
-+            state.setDirty(false);
-+
-+            savedData.put(key, this.encodeUnchecked(key, state, registryOps));
-+        }
-+
-+        if (savedData.isEmpty()) {
-+            return CompletableFuture.completedFuture(null);
-+        } else {
-+            this.pendingWriteFuture = this.pendingWriteFuture
-+                .thenCompose(
-+                    v -> CompletableFuture.allOf(
-+                        savedData.entrySet().stream().map(entry -> CompletableFuture.runAsync(() -> tryWrite(entry.getKey(), entry.getValue()), Util.DIMENSION_DATA_IO_POOL)).toArray(CompletableFuture[]::new)
-+                    )
-+                );
-+            return this.pendingWriteFuture;
-+        }
-+    }
-+    // Canvas end - region threading
++            // Canvas end - region threading
+                 continue;
+             }
  
-     public CompletableFuture<?> scheduleSave() {
-         if (this.closed) {
 diff --git a/net/minecraft/world/scores/Objective.java b/net/minecraft/world/scores/Objective.java
 index 64ea4741b7ed58fe7914b9431353abd1f658a935..d4ddbdf895e19cf15929bc6ba4ea2258ab92d0da 100644
 --- a/net/minecraft/world/scores/Objective.java
