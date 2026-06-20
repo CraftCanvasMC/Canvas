@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.command.sub;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
+import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -23,6 +24,7 @@ import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
+import static net.minecraft.commands.Commands.literal;
 
 /**
  * Command for viewing or setting the view/simulation distance of a specific world. Usage examples:
@@ -43,13 +45,8 @@ public class WorldDistanceSubCommand implements SubCommand {
         Component.literal("Illegal type argument. Must be [\"view\", \"simulation\", \"v\", \"s\", or \"sim\"]")
     );
     private static final SimpleCommandExceptionType INVALID_DISTANCE = new SimpleCommandExceptionType(
-        Component.literal("New value must be above 1, or set to -1 to disable override")
+        Component.literal("New value must be above 0")
     );
-
-    private static int getAndReturnDistance(final CommandContext<CommandSourceStack> context, final ServerLevel level) throws CommandSyntaxException {
-        final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
-        return getAndReturnDistance(context, type, level);
-    }
 
     private static int getAndReturnDistance(final CommandContext<CommandSourceStack> context, final Type type, final ServerLevel level) {
         final int distance = type.get(level);
@@ -59,6 +56,41 @@ public class WorldDistanceSubCommand implements SubCommand {
             false
         );
         return distance;
+    }
+
+    private static int setDistance(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
+        final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
+        final int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE - 3);
+
+        if (distance <= 0) {
+            throw INVALID_DISTANCE.create();
+        }
+
+        applyOperation(type, level, distance);
+
+        GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + Util.getLevelName(level) + "\" to " + distance, GlobalConfiguration.INFO);
+        return distance;
+    }
+
+    private static void applyOperation(final Type type, final ServerLevel level, final int distance) {
+        // update the distance override that we can use later on
+        type.set(level, distance);
+
+        final PerWorldDistanceConfig state = level.serverLevelData.canvas$distanceConfig;
+        final int updated = Math.min(
+            (type.equals(Type.VIEW)
+                ? state.viewDistanceOrDefault()
+                : state.simulationDistanceOrDefault()),
+            MoonriseConstants.MAX_VIEW_DISTANCE - 3
+        );
+
+        switch (type) {
+            // we go straight through here because FeatureHooks hard-clamps at 32, which is technically wrong
+            // since it should abide by the MAX_VIEW_DISTANCE arg
+            case VIEW -> level.getChunkSource().chunkMap.setServerViewDistance(updated);
+            case SIMULATION -> level.getChunkSource().chunkMap.getDistanceManager().updateSimulationDistance(updated);
+        }
     }
 
     @Override
@@ -74,66 +106,26 @@ public class WorldDistanceSubCommand implements SubCommand {
     @Override
     public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
         return base.requires(stack -> stack.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command.worlddistance"))
-            .executes(context -> {
-                if (context.getSource().isPlayer()) {
-                    // assume we are getting from the player dimension
-                    final ServerLevel level = context.getSource().getPlayerOrException().level();
-                    return getAndReturnDistance(context, Type.VIEW, level) + getAndReturnDistance(context, Type.SIMULATION, level);
-                }
-                throw MUST_BE_PLAYER.create();
-            })
             .then(argument("type", StringArgumentType.word())
                 .suggests((_, builder) -> {
                     builder.suggest("view");
                     builder.suggest("simulation");
                     return builder.buildFuture();
                 })
-                .executes(context -> {
-                    if (context.getSource().isPlayer()) {
-                        // assume we are getting from the player dimension
-                        return getAndReturnDistance(context, context.getSource().getPlayerOrException().level());
-                    }
-                    throw MUST_BE_PLAYER.create();
-                })
                 .then(argument("dimension", DimensionArgument.dimension())
-                    .executes(context -> {
+                    .then(literal("set")
+                        .then(argument("distance", IntegerArgumentType.integer()).executes(WorldDistanceSubCommand::setDistance))
+                    ).then(literal("unset").executes(context -> {
+                        final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
+                        final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
+                        applyOperation(type, level, -1);
+                        return Command.SINGLE_SUCCESS;
+                    }))
+                    .then(literal("get").executes(context -> {
                         final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
                         final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
                         return getAndReturnDistance(context, type, level);
-                    })
-                    .then(argument("distance", IntegerArgumentType.integer())
-                        .executes(context -> {
-                            final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
-                            final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
-                            final int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE - 3);
-
-                            if (distance < -1 || distance == 0 || distance == 1) {
-                                throw INVALID_DISTANCE.create();
-                            }
-
-                            // update the distance override that we can use later on
-                            type.set(level, distance);
-
-                            final PerWorldDistanceConfig state = level.serverLevelData.canvas$distanceConfig;
-                            final int updated = Math.min(
-                                (type.equals(Type.VIEW)
-                                    ? state.viewDistanceOrDefault()
-                                    : state.simulationDistanceOrDefault()),
-                                MoonriseConstants.MAX_VIEW_DISTANCE - 3
-                            );
-
-                            switch (type) {
-                                // we go straight through here because FeatureHooks hard-clamps at 32, which is technically wrong
-                                // since it should abide by the MAX_VIEW_DISTANCE arg
-                                case VIEW -> level.getChunkSource().chunkMap.setServerViewDistance(updated);
-                                case SIMULATION ->
-                                    level.getChunkSource().chunkMap.getDistanceManager().updateSimulationDistance(updated);
-                            }
-
-                            GlobalConfiguration.broadcast("Set " + type.name.toLowerCase() + " distance of level \"" + Util.getLevelName(level) + "\" to " + distance, GlobalConfiguration.INFO);
-                            return distance;
-                        })
-                    )
+                    }))
                 )
             );
     }
@@ -144,12 +136,12 @@ public class WorldDistanceSubCommand implements SubCommand {
     public enum Type {
         VIEW(
             (world) -> world.serverLevelData.canvas$distanceConfig.viewDistanceOrDefault(),
-            (world, dist) -> world.serverLevelData.canvas$distanceConfig.viewDistance().set(dist),
+            (world, dist) -> world.serverLevelData.canvas$distanceConfig.setViewDistance(dist),
             "View"
         ),
         SIMULATION(
             (world) -> world.serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault(),
-            (world, dist) -> world.serverLevelData.canvas$distanceConfig.simulationDistance().set(dist),
+            (world, dist) -> world.serverLevelData.canvas$distanceConfig.setSimulationDistance(dist),
             "Simulation"
         );
 
