@@ -23,8 +23,8 @@ public class RegionizedRamBar extends RegionResourceBar {
     // we have this as an instance field because formats can be per-world
     private final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
 
-    public RegionizedRamBar(final @NonNull RegionizedWorldData worldData) {
-        super(worldData, () -> worldData.world.canvasConfig().regionBars.enableRamBar);
+    public RegionizedRamBar() {
+        super((worldData) -> worldData.world.canvasConfig().regionBars.enableRamBar);
     }
 
     @Override

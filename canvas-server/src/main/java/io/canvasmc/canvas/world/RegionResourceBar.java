@@ -9,7 +9,8 @@ import io.papermc.paper.threadedregions.RegionizedWorldData;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import io.papermc.paper.threadedregions.TickRegionScheduler;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
@@ -23,22 +24,20 @@ import org.jspecify.annotations.NonNull;
 public abstract class RegionResourceBar {
     protected static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
 
-    private final RegionizedWorldData worldData;
-    private final BooleanSupplier enabled;
+    private final Function<RegionizedWorldData, Boolean> enabled;
     private long nextTick = System.nanoTime();
 
-    public RegionResourceBar(final @NonNull RegionizedWorldData worldData, BooleanSupplier enabled) {
-        this.worldData = worldData;
+    public RegionResourceBar(final @NonNull Function<RegionizedWorldData, Boolean> enabled) {
         this.enabled = enabled;
     }
 
     public RegionizedWorldData getWorldData() {
-        return worldData;
+        return TickRegionScheduler.getCurrentRegionizedWorldData();
     }
 
     public void tick() {
         // use system nano time, more reliable with runtime tick rate changes
-        if (enabled.getAsBoolean() && this.nextTick <= System.nanoTime()) {
+        if (enabled.apply(getWorldData()) && this.nextTick <= System.nanoTime()) {
             // update maps and players
             long startTime = System.nanoTime();
             updatePlayerDisplaysAndTick(buildComponent());
