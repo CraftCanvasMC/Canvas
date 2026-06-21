@@ -215,7 +215,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..d63faa18568b80ad3ff170e053e60715
          LOGGER.info("Halting chunk systems...");
          for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2c662d6d8 100644
+index 918d58644ac028a1025811ebd459112ff6a0e78f..a3a5b003b04bed566089044e628848bffc44a4ea 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -31,7 +31,7 @@ import java.util.function.BooleanSupplier;
@@ -279,7 +279,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
  
          // tick player ping sample
          this.tickPlayerSample();
-@@ -362,7 +377,109 @@ public final class RegionizedServer {
+@@ -362,7 +377,144 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
@@ -300,6 +300,17 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
 +    //       due to specific design of these reimplementations. these are listed in the
 +    //       respective methods themselves
 +
++    // note: for server clock manager autosave
++    /*
++        we call "packState" in "ServerClockManager" in the codec, which
++        is a mapped version of all the clocks into their packed form
++        which the packed form takes the values from the unpacked form,
++        which is only mutated on the global tick and on load of the clock
++        which is at startup. the actual registered clocks are also
++        immutable after init of the clock manager instance, so we can be
++        sure that this won't encounter any odd exceptions.
++     */
++
 +    public void autosaveSafeGlobalData(final boolean force, final boolean sync) {
 +        ensureGlobalTickThread("Cannot save global data async");
 +
@@ -318,20 +329,34 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
 +            // scoreboards
 +            // stopwatches
 +            // custom boss events
-+            // world clocks - TODO - GlobalConfiguration.get().time.affectsAllWorlds
++            // world clocks - only if affects all worlds
 +
 +            // we have to do this for the scoreboard system or else the scoreboard
 +            // system won't actually save. see MinecraftServer#saveGlobalData
 +
 +            server.getScoreboard().storeToSaveDataIfDirty(server.getDataStorage().computeIfAbsent(net.minecraft.world.scores.ScoreboardSaveData.TYPE));
 +
-+            java.util.concurrent.CompletableFuture<?> future = server.getDataStorage().saveSpecific(
-+                net.minecraft.world.scores.ScoreboardSaveData.class,
-+                net.minecraft.world.Stopwatches.class,
-+                io.canvasmc.canvas.world.entity.EnderPearls.class,
-+                net.minecraft.server.bossevents.CustomBossEvents.class
-+                // TODO - world clocks
-+            );
++            java.util.concurrent.CompletableFuture<?> future = server.getDataStorage().saveSpecific(() -> {
++                final ArrayList<Class<? extends net.minecraft.world.level.saveddata.SavedData>>
++                    toSave = new ArrayList<>();
++
++                // both of these are SWMR, only mutatable on the global tick
++                toSave.add(net.minecraft.world.scores.ScoreboardSaveData.class);
++                toSave.add(net.minecraft.world.Stopwatches.class);
++
++                // our pearl rewrite is threadsafe
++                toSave.add(io.canvasmc.canvas.world.entity.EnderPearls.class);
++
++                // made threadsafe by Canvas
++                toSave.add(net.minecraft.server.bossevents.CustomBossEvents.class);
++
++                // only should be saved globally if affects all worlds
++                if (io.papermc.paper.configuration.GlobalConfiguration.get().time.affectsAllWorlds) {
++                    toSave.add(net.minecraft.world.clock.ServerClockManager.class);
++                }
++
++                return toSave;
++            });
 +
 +            // if sync we need to just join here. this shouldn't be done
 +            // for autosave or every tick since this blocks waiting for completion
@@ -365,17 +390,27 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
 +            // dragon fight
 +            // maps
 +
-+            java.util.concurrent.CompletableFuture<?> future = level.getDataStorage().saveSpecific(
-+                // TODO - world clocks
++            java.util.concurrent.CompletableFuture<?> future = level.getDataStorage().saveSpecific(() -> {
++                final ArrayList<Class<? extends net.minecraft.world.level.saveddata.SavedData>>
++                    toSave = new ArrayList<>();
++
++                // maps is represented in 2 data types, the index and the item
++                toSave.add(net.minecraft.world.level.saveddata.maps.MapItemSavedData.class);
++                toSave.add(net.minecraft.world.level.saveddata.maps.MapIndex.class);
++
++                // only should be autosaved here if worlds have independent time
++                if (!io.papermc.paper.configuration.GlobalConfiguration.get().time.affectsAllWorlds) {
++                    toSave.add(net.minecraft.world.clock.ServerClockManager.class);
++                }
++
 +                // TODO - world border
 +                // TODO - weather
 +                // TODO - raids
 +                // TODO - game rules
 +                // TODO - dragon fight
-+                // maps is represented in 2 data types, the index and the item
-+                net.minecraft.world.level.saveddata.maps.MapItemSavedData.class,
-+                net.minecraft.world.level.saveddata.maps.MapIndex.class
-+            );
++
++                return toSave;
++            });
 +
 +            // if sync we need to just join here. this shouldn't be done
 +            // for autosave or every tick since this blocks waiting for completion
@@ -389,7 +424,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
  
      private void tickPlayerSample() {
          final MinecraftServer mcServer = MinecraftServer.getServer();
-@@ -402,9 +519,14 @@ public final class RegionizedServer {
+@@ -402,9 +554,14 @@ public final class RegionizedServer {
              }
  
              if (isNotOwnedByGlobalRegion(conn)) {
@@ -407,7 +442,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
              }
  
              if (!conn.isConnected()) {
-@@ -435,6 +557,12 @@ public final class RegionizedServer {
+@@ -435,6 +592,12 @@ public final class RegionizedServer {
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final long tickCount) {
@@ -420,7 +455,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
          // needs
          // worldborder tick
          // advancing the weather cycle
-@@ -480,6 +608,7 @@ public final class RegionizedServer {
+@@ -480,6 +643,7 @@ public final class RegionizedServer {
      }
  
      private void advanceWeatherCycle(final ServerLevel world) {
@@ -428,7 +463,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
          world.advanceWeatherCycle();
      }
  
-@@ -492,11 +621,13 @@ public final class RegionizedServer {
+@@ -492,11 +656,13 @@ public final class RegionizedServer {
      }
  
      private void tickClocks() {
@@ -442,7 +477,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..baf9d282041ad839e2cbde4ffb3180f2
                  level.clockManager().tick();
              }
          }
-@@ -504,18 +635,14 @@ public final class RegionizedServer {
+@@ -504,18 +670,14 @@ public final class RegionizedServer {
      }
  
      private void tickTime(final ServerLevel world, final long tickCount) {
@@ -8446,6 +8481,62 @@ index 4fda3efe9eb24bdb1828078b3c296c497bd211d3..1ca622a587ac55ae893ff78b83ea8772
          boolean removed = this.stopwatches.remove(id) != null;
          if (removed) {
              this.setDirty();
+diff --git a/net/minecraft/world/clock/ServerClockManager.java b/net/minecraft/world/clock/ServerClockManager.java
+index 265dba2cfb0531a3786fb775af90b32c04b4eeba..b8b1a9f0d7d65f941aab214f48639f5438cc5e0a 100644
+--- a/net/minecraft/world/clock/ServerClockManager.java
++++ b/net/minecraft/world/clock/ServerClockManager.java
+@@ -57,6 +57,22 @@ public class ServerClockManager extends SavedData implements ClockManager {
+             ServerClockManager.ClockInstance instance = this.getInstance((Holder<WorldClock>)definition);
+             instance.loadFrom(state);
+         });
++        // Canvas start - region threading
++
++        // after init, technically Minecraft doesn't register anything else
++        // beyond that point except for during reload, which we disable
++
++        // as such, we set all of this to immutable collections to ensure
++        // that this does not change, making this thread-safe
++
++        // note: timelines are safe
++
++        this.clocks = com.google.common.collect.ImmutableMap.copyOf(this.clocks);
++
++        for (final ServerClockManager.ClockInstance value : this.clocks.values()) {
++            value.timeMarkers = com.google.common.collect.ImmutableMap.copyOf(value.timeMarkers);
++        }
++        // Canvas end - region threading
+     }
+ 
+     private void registerTimeMarker(final ResourceKey<ClockTimeMarker> timeMarkerId, final ClockTimeMarker timeMarker) {
+@@ -64,10 +80,12 @@ public class ServerClockManager extends SavedData implements ClockManager {
+     }
+ 
+     public PackedClockStates packState() {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot pack clocks async"); // Canvas - region threading
+         return new PackedClockStates(Util.mapValues(this.clocks, ServerClockManager.ClockInstance::packState));
+     }
+ 
+     public void tick() {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot tick clocks async"); // Canvas - region threading
+         boolean advanceTime = this.advanceTime(); // Paper - per-world time
+         if (advanceTime) {
+             this.clocks.values().forEach(ServerClockManager.ClockInstance::tick);
+@@ -126,6 +144,7 @@ public class ServerClockManager extends SavedData implements ClockManager {
+     }
+ 
+     private void modifyClock(final Holder<WorldClock> clock, final Consumer<? super ServerClockManager.ClockInstance> action) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify clock async"); // Canvas - region threading
+         ServerClockManager.ClockInstance instance = this.getInstance(clock);
+         action.accept(instance);
+         // Paper start - per-world time
+@@ -216,6 +235,7 @@ public class ServerClockManager extends SavedData implements ClockManager {
+         }
+ 
+         public void tick() {
++            io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot tick clock async"); // Canvas - region threading
+             if (!this.paused) {
+                 this.partialTick = this.partialTick + this.rate;
+                 int fullTicks = Mth.floor(this.partialTick);
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
 index 945b2f76ec47448c462df95ba64271eaf2567af1..5e34cf071e2ea33d4cbd733209029a6d62eb367a 100644
 --- a/net/minecraft/world/entity/Entity.java
@@ -9578,7 +9669,7 @@ index eb52accfdd16a07b2e59a2e65c1007e8920aea36..18c5121d24268cfa5fa7ed22b1dce93a
      public void postProcessGeneration(final ServerLevel level) {
          ChunkPos chunkPos = this.getPos();
 diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
-index 81c1541d8fa272e84316e87c3418ee727111a65c..577a319dd6f6cc88deb990b5fbd9fb9b126c3893 100644
+index 81c1541d8fa272e84316e87c3418ee727111a65c..b1aba6a06c7204536be634132e56b6fbeea9e9fe 100644
 --- a/net/minecraft/world/level/storage/SavedDataStorage.java
 +++ b/net/minecraft/world/level/storage/SavedDataStorage.java
 @@ -183,7 +183,15 @@ public class SavedDataStorage implements AutoCloseable {
@@ -9592,8 +9683,8 @@ index 81c1541d8fa272e84316e87c3418ee727111a65c..577a319dd6f6cc88deb990b5fbd9fb9b
 +    // by using this we can be more specific on what
 +    // we want to actually save
 +
-+    @SafeVarargs
-+    public final CompletableFuture<?> saveSpecific(final Class<? extends SavedData>... classTypes) {
++    public final CompletableFuture<?> saveSpecific(final java.util.function.Supplier<List<Class<? extends SavedData>>> classTypesSupplier) {
++        final List<Class<? extends SavedData>> classTypes = classTypesSupplier.get();
 +    // Canvas end - region threading
          Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
          RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
