@@ -215,7 +215,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..d63faa18568b80ad3ff170e053e60715
          LOGGER.info("Halting chunk systems...");
          for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62ffb43b076 100644
+index 918d58644ac028a1025811ebd459112ff6a0e78f..453ba109392bcf53e8a3b33e7a7a731da2707086 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -31,7 +31,7 @@ import java.util.function.BooleanSupplier;
@@ -279,7 +279,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
  
          // tick player ping sample
          this.tickPlayerSample();
-@@ -362,7 +377,154 @@ public final class RegionizedServer {
+@@ -362,7 +377,155 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
@@ -291,7 +291,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
 +        // scoreboards, stopwatches
 +        autosaveSafeGlobalData(false, false);
 +        // Canvas end - region threading
-+    }
+     }
 +    // Canvas start - region threading
 +
 +    private static final java.util.concurrent.atomic.AtomicLong LAST_GLOBAL_AUTOSAVE = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
@@ -405,14 +405,15 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
 +                    toSave.add(net.minecraft.world.clock.ServerClockManager.class);
 +                }
 +
-+                // TODO - world border
++                // TODO - world border - needs MASSIVE changes...
++                // TODO - raids - can we even do this?
 +
 +                // folia already only ticks this on the global tick and both canvas
 +                // and folia have thread checks against modifying this data async, so this is fine
 +                toSave.add(net.minecraft.world.level.saveddata.WeatherData.class);
-+
-+                // TODO - raids
-+                // TODO - game rules
++                // already made threadsafe from folia, just needed the codec adjusted to copy the
++                // backing map to prevent exceptions or torn read/write issues
++                toSave.add(net.minecraft.world.level.gamerules.GameRuleMap.class);
 +
 +                // note: the dragon fight is autosaved on the region owning the fight in question.
 +                //       this is because this is specific per-dimension and is also region-specific
@@ -429,12 +430,12 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
 +                future.join();
 +            }
 +        }
-     }
++    }
 +    // Canvas end - region threading
  
      private void tickPlayerSample() {
          final MinecraftServer mcServer = MinecraftServer.getServer();
-@@ -402,9 +564,14 @@ public final class RegionizedServer {
+@@ -402,9 +565,14 @@ public final class RegionizedServer {
              }
  
              if (isNotOwnedByGlobalRegion(conn)) {
@@ -452,7 +453,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
              }
  
              if (!conn.isConnected()) {
-@@ -435,6 +602,12 @@ public final class RegionizedServer {
+@@ -435,6 +603,12 @@ public final class RegionizedServer {
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final long tickCount) {
@@ -465,7 +466,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
          // needs
          // worldborder tick
          // advancing the weather cycle
-@@ -480,6 +653,7 @@ public final class RegionizedServer {
+@@ -480,6 +654,7 @@ public final class RegionizedServer {
      }
  
      private void advanceWeatherCycle(final ServerLevel world) {
@@ -473,7 +474,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
          world.advanceWeatherCycle();
      }
  
-@@ -492,11 +666,13 @@ public final class RegionizedServer {
+@@ -492,11 +667,13 @@ public final class RegionizedServer {
      }
  
      private void tickClocks() {
@@ -487,7 +488,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..01fb7536ff692d1b4ce5c2117874d62f
                  level.clockManager().tick();
              }
          }
-@@ -504,18 +680,14 @@ public final class RegionizedServer {
+@@ -504,18 +681,14 @@ public final class RegionizedServer {
      }
  
      private void tickTime(final ServerLevel world, final long tickCount) {
@@ -9746,6 +9747,30 @@ index 3ce10f02a531d791ec896c757f4f0654d1c4a7fd..a60bd4e827d8c264b61fc8f3d57ae7cd
  
      private void scanState() {
          LOGGER.info("Scanning for legacy world dragon fight...");
+diff --git a/net/minecraft/world/level/gamerules/GameRuleMap.java b/net/minecraft/world/level/gamerules/GameRuleMap.java
+index f5d9d66d51a42b954f02426461851bbd7f5ca843..293b5aad12fd30a689e830922bdf2cdcd0bc2529 100644
+--- a/net/minecraft/world/level/gamerules/GameRuleMap.java
++++ b/net/minecraft/world/level/gamerules/GameRuleMap.java
+@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
+ 
+ public final class GameRuleMap extends SavedData {
+     public static final Codec<GameRuleMap> CODEC = Codec.<GameRule<?>, Object>dispatchedMap(BuiltInRegistries.GAME_RULE.byNameCodec(), GameRule::valueCodec)
+-        .xmap(GameRuleMap::ofTrusted, GameRuleMap::map);
++        .xmap(GameRuleMap::ofTrusted, gameRuleMap -> copyOf(gameRuleMap).map()); // Canvas - region threading
+     public static final SavedDataType<GameRuleMap> TYPE = new SavedDataType<>(
+         Identifier.withDefaultNamespace("game_rules"), GameRuleMap::of, CODEC, DataFixTypes.SAVED_DATA_GAME_RULES
+     );
+@@ -78,8 +78,8 @@ public final class GameRuleMap extends SavedData {
+         return (T)this.map.remove(gameRule);
+     }
+ 
+-    public Set<GameRule<?>> keySet() {
+-        return this.map.keySet();
++    public synchronized Set<GameRule<?>> keySet() { // Canvas - region threading
++        return Set.copyOf(this.map.keySet()); // Canvas - region threading
+     }
+ 
+     public synchronized int size() { // Folia - region threading
 diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
 index 81c1541d8fa272e84316e87c3418ee727111a65c..b1aba6a06c7204536be634132e56b6fbeea9e9fe 100644
 --- a/net/minecraft/world/level/storage/SavedDataStorage.java
