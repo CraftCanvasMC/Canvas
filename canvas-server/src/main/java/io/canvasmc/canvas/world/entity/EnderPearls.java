@@ -107,16 +107,13 @@ public final class EnderPearls extends SavedData {
     }
 
     @Override
-    public boolean equals(Object obj) {
-        if (obj == this) return true;
-        if (obj == null || obj.getClass() != this.getClass()) return false;
-        var that = (EnderPearls) obj;
-        return Objects.equals(this.pearls, that.pearls);
+    public boolean equals(final Object obj) {
+        return obj == this || obj instanceof EnderPearls other && this.pearls.equals(other.pearls);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(pearls);
+        return pearls.hashCode();
     }
 
     @Override
