@@ -43,7 +43,8 @@ public class RegionProfiler {
             if (!SchedulerUtil.doesSupportRegionProfiler()) {
                 throw ERROR_NOT_SUPPORTED.create();
             }
-            if (!isProfiling()) {
+            final ProfilingState state = STATE.getAndSet(null);
+            if (state == null) {
                 // we aren't profiling, don't bother canceling
                 throw ERROR_NOT_PROFILING.create();
             }
@@ -51,7 +52,7 @@ public class RegionProfiler {
             // so we need this executed BEFORE scheduling.
             // if we unpin later it doesn't really matter
             unpinCallback.run();
-            STATE.getAndSet(null).handlePinner.unpin((_) -> {
+            state.handlePinner.unpin((_) -> {
                 // note: calling curr tick runner is safe here, since this callback is guaranteed to be run
                 //       on the schedule handle that is pinned, so we are on a tick runner
                 AffinitySchedulerThreadPool.TickThreadRunner threadRunner = ((AffinitySchedulerThreadPool) TickRegions.getScheduler().scheduler).getCurrentTickThreadRunner();

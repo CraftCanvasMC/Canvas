@@ -1,7 +1,6 @@
 package io.canvasmc.canvas.spark.plugin;
 
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
-import io.canvasmc.canvas.tick.SchedulerUtil;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
@@ -18,8 +17,9 @@ public class FoliaTickStatistics implements TickStatistics {
 
     private static double getTpsFor(TimeSpan span) {
         // we must include global tick, and all regions
-        if (isRunningIndependentRegion()) {
-            return getTpsFor(RegionProfiler.STATE.get().regionScheduleHandle(), span);
+        final RegionProfiler.ProfilingState profilingState = RegionProfiler.STATE.get();
+        if (profilingState != null) {
+            return getTpsFor(profilingState.regionScheduleHandle(), span);
         }
         DoubleArrayList tpsCounts = new DoubleArrayList();
         tpsCounts.add(getTpsFor(RegionizedServer.getGlobalTickData(), span));
@@ -53,10 +53,6 @@ public class FoliaTickStatistics implements TickStatistics {
         };
         if (d == null) return TickRegionScheduler.getTickRate();
         else return d;
-    }
-
-    private static boolean isRunningIndependentRegion() {
-        return SchedulerUtil.getHandle().isRunningRegionProfiler();
     }
 
     @Override

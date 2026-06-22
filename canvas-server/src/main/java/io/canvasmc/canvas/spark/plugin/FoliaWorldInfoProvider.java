@@ -48,10 +48,11 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
     @Override
     public CountsResult pollCounts() {
-        if (RegionProfiler.isProfiling()) {
+        final RegionProfiler.ProfilingState profilingState = RegionProfiler.STATE.get();
+        if (profilingState != null) {
             // we need tile entities, chunks, entities, and players
             // if this isn't a region pinner, this is the global tick
-            if (RegionProfiler.STATE.get().handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
+            if (profilingState.handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
                 final ServerLevel level = pinner.level();
                 final ChunkPos target = pinner.getCenter();
 
@@ -80,7 +81,10 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
                 try {
                     // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
                     return result.get(5, TimeUnit.SECONDS);
-                } catch (InterruptedException | TimeoutException | ExecutionException e) {
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Couldn't fetch localized world data", e);
+                } catch (TimeoutException | ExecutionException e) {
                     throw new RuntimeException("Couldn't fetch localized world data", e);
                 }
             }
@@ -110,8 +114,9 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
         ChunksResult<FoliaChunkInfo> data = new ChunksResult<>();
 
         // Note: if we are ending a profiler, this will be cached, otherwise this is current
-        if (RegionProfiler.isProfiling()) {
-            if (RegionProfiler.STATE.get().handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
+        final RegionProfiler.ProfilingState profilingState = RegionProfiler.STATE.get();
+        if (profilingState != null) {
+            if (profilingState.handlePinner() instanceof RegionScheduleHandlePinner.RegionPinner pinner) {
                 final ServerLevel level = pinner.level();
                 final ChunkPos target = pinner.getCenter();
                 final CompletableFuture<List<FoliaChunkInfo>> result = new CompletableFuture<>();
@@ -131,7 +136,10 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
                     // timeout 5 seconds like FoliaChunkInfo#getEntityCounts
                     data.put(level.getWorld().getName(), result.get(5, TimeUnit.SECONDS));
                     return data;
-                } catch (InterruptedException | TimeoutException | ExecutionException e) {
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Couldn't fetch localized world data", e);
+                } catch (TimeoutException | ExecutionException e) {
                     throw new RuntimeException("Couldn't fetch localized world data", e);
                 }
             }
