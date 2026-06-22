@@ -210,7 +210,7 @@ public final class EnderPearls extends SavedData {
         @Override
         public boolean equals(final Object o) {
             // if uuids match, same pearl
-            return o instanceof Pearl(UUID otherUuid, _) &&
+            return o == this || o instanceof Pearl(UUID otherUuid, _) &&
                 uuid.equals(otherUuid);
         }
 
