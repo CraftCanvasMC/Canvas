@@ -146,8 +146,8 @@ public class Util {
     /**
      * Gets the level name used internally by Canvas, this does not match Bukkit. This matches the
      * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
-     * part at the start of the string if the namespace is {@code minecraft}.
-     *
+     * part at the start of the string if the namespace is
+     * {@link net.minecraft.resources.Identifier#DEFAULT_NAMESPACE}.
      * @param level
      *     the level
      *

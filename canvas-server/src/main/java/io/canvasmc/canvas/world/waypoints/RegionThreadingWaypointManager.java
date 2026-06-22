@@ -69,7 +69,7 @@ public class RegionThreadingWaypointManager extends ServerWaypointManager {
     }
 
     public boolean isLocatorBarDisabled() {
-        return !level.getGameRules().get(GameRules.LOCATOR_BAR);
+        return !super.locatorBarEnabled;
     }
 
     @Override

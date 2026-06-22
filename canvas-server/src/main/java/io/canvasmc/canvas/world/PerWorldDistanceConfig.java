@@ -2,10 +2,11 @@ package io.canvasmc.canvas.world;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import io.canvasmc.canvas.util.Codecs;
-import java.util.concurrent.atomic.AtomicInteger;
+import io.canvasmc.canvas.util.LockedReference;
+import java.util.Optional;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
+import org.jspecify.annotations.NonNull;
 
 /**
  * Per world view and simulation distance override. When the value is <= 0, it uses the value from the server
@@ -16,30 +17,104 @@ import net.minecraft.server.dedicated.DedicatedServer;
  * @param simulationDistance
  *     the simulation distance override
  */
-public record PerWorldDistanceConfig(AtomicInteger viewDistance, AtomicInteger simulationDistance) {
-    private static final AtomicInteger DEFAULT_DISTANCE = new AtomicInteger(-1);
+public record PerWorldDistanceConfig(
+    LockedReference<Integer> viewDistance, LockedReference<Integer> simulationDistance
+) {
     public static final Codec<PerWorldDistanceConfig> CODEC = RecordCodecBuilder.create(
         instance -> instance.group(
-                Codecs.ATOMIC_INTEGER.fieldOf("ViewDistance").orElse(DEFAULT_DISTANCE).forGetter(PerWorldDistanceConfig::viewDistance),
-                Codecs.ATOMIC_INTEGER.fieldOf("SimulationDistance").orElse(DEFAULT_DISTANCE).forGetter(PerWorldDistanceConfig::simulationDistance)
+                Codec.INT.optionalFieldOf("ViewDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::viewDistanceAsOptional),
+                Codec.INT.optionalFieldOf("SimulationDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::simulationDistanceAsOptional)
             )
             .apply(instance, PerWorldDistanceConfig::new)
     );
-    public static PerWorldDistanceConfig DEFAULT = new PerWorldDistanceConfig(DEFAULT_DISTANCE, DEFAULT_DISTANCE);
+    public static PerWorldDistanceConfig DEFAULT = new PerWorldDistanceConfig(Optional.empty(), Optional.empty());
+
+    // this is for the codec, nothing much else
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+    public PerWorldDistanceConfig(final @NonNull Optional<Integer> view, final @NonNull Optional<Integer> simulation) {
+        this(
+            view.map(LockedReference::new).orElse(new LockedReference<>(null)),
+            simulation.map(LockedReference::new).orElse(new LockedReference<>(null))
+        );
+    }
+
+    public PerWorldDistanceConfig(
+        final @NonNull LockedReference<Integer> viewDistance,
+        final @NonNull LockedReference<Integer> simulationDistance
+    ) {
+
+        // for backwards compat with old system. we used to store
+        // the -1 value, so this is a good way to clean this up
+
+        Integer view = viewDistance.getValue();
+        Integer simulation = simulationDistance.getValue();
+
+        this.viewDistance = Integer.valueOf(-1).equals(view)
+            ? new LockedReference<>(null)
+            : viewDistance;
+
+        this.simulationDistance = Integer.valueOf(-1).equals(simulation)
+            ? new LockedReference<>(null)
+            : simulationDistance;
+    }
+
+    public int snapshotViewDistance() {
+        Integer raw = viewDistance().getValue();
+        if (raw == null) {
+            return -1;
+        }
+        return raw;
+    }
+
+    public int snapshotSimulationDistance() {
+        Integer raw = simulationDistance().getValue();
+        if (raw == null) {
+            return -1;
+        }
+        return raw;
+    }
+
+    public Optional<Integer> viewDistanceAsOptional() {
+        return viewDistance.asOptional();
+    }
+
+    public Optional<Integer> simulationDistanceAsOptional() {
+        return simulationDistance.asOptional();
+    }
 
     public int viewDistanceOrDefault() {
-        return this.viewDistance.get() <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().viewDistance.get() : this.viewDistance.get();
+        final int snapshot = snapshotViewDistance();
+        return snapshot <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().viewDistance.get() : snapshot;
     }
 
     public int simulationDistanceOrDefault() {
-        return this.simulationDistance.get() <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().simulationDistance.get() : this.simulationDistance.get();
+        final int snapshot = snapshotSimulationDistance();
+        return snapshot <= 0 ? ((DedicatedServer) MinecraftServer.getServer()).settings.getProperties().simulationDistance.get() : snapshot;
     }
 
     public boolean isViewDistanceOverridden() {
-        return this.viewDistance.get() > 0;
+        return this.viewDistance().isSet();
     }
 
     public boolean isSimulationDistanceOverridden() {
-        return this.simulationDistance.get() > 0;
+        return this.simulationDistance().isSet();
+    }
+
+    public void setViewDistance(final int distance) {
+        if (distance == -1) {
+            viewDistance().unset();
+        }
+        else {
+            viewDistance().swapValue(distance);
+        }
+    }
+
+    public void setSimulationDistance(final int distance) {
+        if (distance == -1) {
+            simulationDistance().unset();
+        }
+        else {
+            simulationDistance().swapValue(distance);
+        }
     }
 }

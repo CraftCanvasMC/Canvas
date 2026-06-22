@@ -69,14 +69,14 @@ public interface Codecs {
             aabb -> List.of(aabb.minX, aabb.minY, aabb.minZ, aabb.maxX, aabb.maxY, aabb.maxZ)
         );
 
-    static <T> Codec<List<T>> copyOnWriteArrayListCodec(@NonNull Codec<List<T>> innerCodec) {
+    static <T> Codec<List<T>> copyOnWriteArrayListCodec(final @NonNull Codec<List<T>> innerCodec) {
         return innerCodec.comapFlatMap(
             l -> DataResult.success(new CopyOnWriteArrayList<>(l)),
             (l) -> l
         );
     }
 
-    static <T> Codec<AtomicReference<T>> atomicReferenceCodec(@NonNull Codec<T> innerCodec) {
+    static <T> Codec<AtomicReference<T>> atomicReferenceCodec(final @NonNull Codec<T> innerCodec) {
         return innerCodec.comapFlatMap(
             t -> DataResult.success(new AtomicReference<>(t)),
             AtomicReference::get

@@ -27,8 +27,8 @@ public class RegionizedTpsBar extends RegionResourceBar {
     // we have this as an instance field because formats can be per-world
     private final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
 
-    public RegionizedTpsBar(final RegionizedWorldData worldData) {
-        super(worldData, () -> worldData.world.canvasConfig().regionBars.enableTpsBar);
+    public RegionizedTpsBar() {
+        super((worldData) -> worldData.world.canvasConfig().regionBars.enableTpsBar);
     }
 
     @Override
