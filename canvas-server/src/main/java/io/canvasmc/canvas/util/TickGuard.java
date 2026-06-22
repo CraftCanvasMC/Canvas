@@ -4,6 +4,7 @@ import ca.spottedleaf.moonrise.common.util.EntityUtil;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import ca.spottedleaf.moonrise.common.util.WorldUtil;
 import io.canvasmc.canvas.GlobalConfiguration;
+import io.papermc.paper.threadedregions.RegionShutdownThread;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
 import net.minecraft.core.BlockPos;
@@ -52,7 +53,12 @@ public class TickGuard {
         }
     }
 
+    // TODO - move this to Util when https://github.com/PaperMC/Paper/pull/13924 is merged
     public static void ensureGlobalOrStartup(final String reason) {
+        if (RegionShutdownThread.isShutdownThread()) {
+            // just pass, the shutdown thread owns all
+            return;
+        }
         if (TickRegions.started) {
             RegionizedServer.ensureGlobalTickThread(reason);
         }
