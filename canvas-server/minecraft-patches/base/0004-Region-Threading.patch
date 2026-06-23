@@ -19861,7 +19861,7 @@ index bb5f66c62c9541bb76a9faad9e9ee91c1466fc6a..66d7bb9418832638c220a08d06c01ef0
              return blockToFallLocation(blockState);
          } else {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a425178755a3936b 100644
+index 9609bed105c8ff5403aff7a62dabf43a4aba32db..252daeecc757ea59cd4ed8953178cc148b1b97f3 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -170,7 +170,7 @@ public abstract class Entity
@@ -20120,7 +20120,7 @@ index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a4251787
      }
  
      public int getDimensionChangingDelay() {
-@@ -4042,7 +4102,972 @@ public abstract class Entity
+@@ -4042,7 +4102,1000 @@ public abstract class Entity
          this.portalProcess = oldEntity.portalProcess;
      }
  
@@ -20963,8 +20963,9 @@ index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a4251787
 +                entity.canvas$ensureCanPortalAsync(to, true, true);
 +            }
 +        }
-+
-+        return true;
++        if (to != null && to.canvas$unloadTicket.isPresent()) {
++            throw new TeleportValidationException("Destination world is marked for unload");
++        }
 +    }
 +    // Canvas end - region threading
 +
@@ -20979,6 +20980,33 @@ index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a4251787
 +            canvas$ensureCanPortalAsync(destination, takePassengers);
 +        } catch (TeleportValidationException ignored) {
 +            return false;
++        } // else | we passed first go
++
++        // TODO - all portal events go here
++        // fire portal events
++        ServerLevel originWorld = (ServerLevel) this.level();
++
++        boolean shouldCallEvents =
++            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
++            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
++        if (shouldCallEvents) {
++            io.canvasmc.canvas.event.EntityPortalAsyncEvent portalAsyncEvent = new io.canvasmc.canvas.event.EntityPortalAsyncEvent(
++                this.getBukkitEntity(), originWorld.getWorld(), destination.getWorld(),
++                switch (type) {
++                    case END -> org.bukkit.PortalType.ENDER;
++                    case NETHER -> org.bukkit.PortalType.NETHER;
++                }
++            );
++
++            if (!portalAsyncEvent.callEvent()) {
++                return false;
++            }
++
++            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
++
++            // if a plugin did a stupid, kill
++            canvas$ensureCanPortalAsync(destination, takePassengers);
 +        }
 +        final ServerLevel finalDestination = destination;
 +        // Canvas end - region threading
@@ -21093,7 +21121,7 @@ index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a4251787
          // Paper start - Fix item duplication and teleport issues
          if ((!this.isAlive() || !this.valid) && (transition.newLevel() != this.level)) {
              LOGGER.warn("Illegal Entity Teleport {} to {}:{}", this, transition.newLevel(), transition.position(), new Throwable());
-@@ -4237,6 +5262,12 @@ public abstract class Entity
+@@ -4237,6 +5290,12 @@ public abstract class Entity
          }
      }
  
@@ -21106,19 +21134,7 @@ index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a4251787
      protected void removeAfterChangingDimensions() {
          this.setRemoved(Entity.RemovalReason.CHANGED_DIMENSION, null); // CraftBukkit - add Bukkit remove cause
          if (this instanceof Leashable leashable && leashable.isLeashed()) { // Paper - only call if it is leashed
-@@ -4273,8 +5304,9 @@ public abstract class Entity
-                 }
-             }
-         }
--
--        return true;
-+        if (to != null && to.canvas$unloadTicket.isPresent()) {
-+            throw new TeleportValidationException("Destination world is marked for unload");
-+        }
-     }
- 
-     public float getBlockExplosionResistance(
-@@ -4570,6 +5602,12 @@ public abstract class Entity
+@@ -4570,6 +5629,12 @@ public abstract class Entity
      }
  
      public void startSeenByPlayer(final ServerPlayer player) {
@@ -21131,7 +21147,7 @@ index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a4251787
      }
  
      public void stopSeenByPlayer(final ServerPlayer player) {
-@@ -4579,6 +5617,12 @@ public abstract class Entity
+@@ -4579,6 +5644,12 @@ public abstract class Entity
              new io.papermc.paper.event.player.PlayerUntrackEntityEvent(player.getBukkitEntity(), this.getBukkitEntity()).callEvent();
          }
          // Paper end - entity tracking events
@@ -21144,40 +21160,6 @@ index 9609bed105c8ff5403aff7a62dabf43a4aba32db..a01df0d7eb27f22728b2b9a5a4251787
      }
  
      public float rotate(final Rotation rotation) {
-@@ -4693,6 +5737,33 @@ public abstract class Entity
-     public boolean hasIndirectPassenger(final Entity entity) {
-         if (!entity.isPassenger()) {
-             return false;
-+        } // else | we passed first go
-+
-+        // TODO - all portal events go here
-+        // fire portal events
-+        ServerLevel originWorld = (ServerLevel) this.level();
-+
-+        boolean shouldCallEvents =
-+            // this is purely so we don't do unneeded event calls and we don't run checks twice for no reason
-+            // TODO - any other events should be added here too, that way we can properly verify validation of the event POST
-+            io.canvasmc.canvas.event.EntityPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0;
-+        if (shouldCallEvents) {
-+            io.canvasmc.canvas.event.EntityPortalAsyncEvent portalAsyncEvent = new io.canvasmc.canvas.event.EntityPortalAsyncEvent(
-+                this.getBukkitEntity(), originWorld.getWorld(), destination.getWorld(),
-+                switch (type) {
-+                    case END -> org.bukkit.PortalType.ENDER;
-+                    case NETHER -> org.bukkit.PortalType.NETHER;
-+                }
-+            );
-+
-+            if (!portalAsyncEvent.callEvent()) {
-+                return false;
-+            }
-+
-+            destination = ((org.bukkit.craftbukkit.CraftWorld) portalAsyncEvent.getTo()).getHandle();
-+
-+            // if a plugin did a stupid, kill
-+            canvas$ensureCanPortalAsync(destination, takePassengers);
-         }
- 
-         Entity ridden = entity.getVehicle();
 @@ -4986,7 +6057,8 @@ public abstract class Entity
              return;
          }
