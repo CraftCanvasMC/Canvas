@@ -22,6 +22,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
+import net.kyori.adventure.text.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -201,8 +202,8 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
     public Collection<DataPackInfo> pollDataPacks() {
         return this.server.getDatapackManager().getEnabledPacks().stream()
             .map(pack -> new DataPackInfo(
-                pack.getTitle().examinableName(),
-                pack.getDescription().examinableName(),
+                pack.getName(),
+                Component.text().append(pack.getDescription()).content(),
                 pack.getSource().toString().toLowerCase(Locale.ROOT).replace("_", "")
             ))
             .collect(Collectors.toList());

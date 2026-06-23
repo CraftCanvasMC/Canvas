@@ -4,7 +4,7 @@ import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
 import ca.spottedleaf.concurrentutil.set.LinkedSortedSet;
 import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
-import ca.spottedleaf.concurrentutil.util.TimeUtil;
+import ca.spottedleaf.common.util.TimeUtil;
 import io.canvasmc.canvas.util.collection.FastHeapPriorityQueue;
 import java.lang.invoke.VarHandle;
 import java.time.Duration;

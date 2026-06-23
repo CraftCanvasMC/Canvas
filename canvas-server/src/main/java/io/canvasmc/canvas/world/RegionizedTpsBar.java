@@ -1,9 +1,8 @@
 package io.canvasmc.canvas.world;
 
-import ca.spottedleaf.moonrise.common.time.TickData;
+import ca.spottedleaf.common.time.TickData;
 import com.mojang.datafixers.util.Pair;
 import io.canvasmc.canvas.WorldConfig;
-import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
