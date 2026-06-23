@@ -201,8 +201,8 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
     public Collection<DataPackInfo> pollDataPacks() {
         return this.server.getDatapackManager().getEnabledPacks().stream()
             .map(pack -> new DataPackInfo(
-                pack.getTitle().examinableName(),
-                pack.getDescription().examinableName(),
+                pack.getName(),
+                Component.text().append(pack.getDescription()).content(),
                 pack.getSource().toString().toLowerCase(Locale.ROOT).replace("_", "")
             ))
             .collect(Collectors.toList());
