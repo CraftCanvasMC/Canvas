@@ -370,12 +370,10 @@ public class GlobalConfiguration extends Part {
                         "which can overload the server and cause stuttering when generating new chunks.",
                         "Depending on the algorithm chosen, this can help reduce stutter and improve performance",
                         "when generating chunks"
-                    ).defineEnum(FluidPostProcessingMode.class, (mode) -> {
-                        return switch (mode) {
-                            case VANILLA -> "Normal post processing algorithm, everything is processed";
-                            case DISABLED -> "Disables fluid post processing entirely";
-                            case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
-                        };
+                    ).defineEnum(FluidPostProcessingMode.class, (mode) -> switch (mode) {
+                        case VANILLA -> "Normal post processing algorithm, everything is processed";
+                        case DISABLED -> "Disables fluid post processing entirely";
+                        case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
                     })
                 );
 
@@ -520,7 +518,6 @@ public class GlobalConfiguration extends Part {
 
     {
         option("serverModName").docs("The server mod name displayed in server listings and client info").word();
-        option("restoreVanillaEnderPearlBehavior").docs("Restores and fixes Vanilla Ender Pearl behavior, broken by Folia");
 
         option("displayWorldLoadScreenForPortaling")
             .docs(
@@ -540,7 +537,6 @@ public class GlobalConfiguration extends Part {
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
-    public boolean restoreVanillaEnderPearlBehavior = false;
     public boolean displayWorldLoadScreenForPortaling = true;
     public boolean displayWorldLoadScreenForTeleporting = true;
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;

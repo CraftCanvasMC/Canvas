@@ -43,11 +43,11 @@ public final class EnderPearls extends SavedData {
     public static final Codec<Pearl> PEARL_CODEC = CompoundTag.CODEC.comapFlatMap(
         (Function<CompoundTag, DataResult<Pearl>>) compoundTag -> DataResult.success(new Pearl(compoundTag)), pearl -> pearl.serialized
     );
-    public static final Codec<EnderPearls> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+    public static final Codec<EnderPearls> CODEC = RecordCodecBuilder.create(i -> i.group(
         Codec.unboundedMap(
             Codecs.UUID_CODEC, Codecs.copyOnWriteArrayListCodec(PEARL_CODEC.listOf())
         ).optionalFieldOf("Data", new ConcurrentHashMap<>()).forGetter(EnderPearls::pearls)
-    ).apply(instance, EnderPearls::new));
+    ).apply(i, EnderPearls::new));
 
     public static final SavedDataType<EnderPearls> TYPE = new SavedDataType<>(
         Identifier.fromNamespaceAndPath("canvas", "pearls"),
