@@ -32,7 +32,7 @@ for arg in "$@"; do
       ;;
     --gradle)
       gradle_run=true
-      echo "--gradle flag detected. Will run rebuildFoliaSingleFilePatches."
+      echo "--gradle flag detected. Will run single file patch rebuild."
       ;;
     --debug)
       debug=true
@@ -77,8 +77,6 @@ run_gradle_task() {
 
 process_changes "./paper-server/" "PaperServer"
 process_changes "./paper-api/" "PaperApi"
-process_changes "./folia-server/" "FoliaServer"
-process_changes "./folia-api/" "FoliaApi"
 process_changes "./canvas-server/src/minecraft/java" "Minecraft"
 
 gradle_rebuild_task=false
@@ -92,22 +90,18 @@ if $gradle_run || ! git diff --quiet "./canvas-api/build.gradle.kts" || ! git di
 fi
 
 if $gradle_rebuild_task || $gradle_run; then
-  gradle_tasks["rebuildFoliaSingleFilePatches"]="true"
+  gradle_tasks["rebuildPaperSingleFilePatches"]="true"
 fi
 
 echo "running fixup"
 run_gradle_task "fixupPaperApiFilePatches"
 run_gradle_task "fixupPaperServerFilePatches"
-run_gradle_task "fixupFoliaApiFilePatches"
-run_gradle_task "fixupFoliaServerFilePatches"
 run_gradle_task "fixupMinecraftFilePatches"
 
 echo "rebuilding"
 run_gradle_task "rebuildPaperApiFilePatches"
 run_gradle_task "rebuildPaperServerFilePatches"
-run_gradle_task "rebuildFoliaApiFilePatches"
-run_gradle_task "rebuildFoliaServerFilePatches"
 run_gradle_task "rebuildMinecraftFilePatches"
-run_gradle_task "rebuildFoliaSingleFilePatches"
+run_gradle_task "rebuildPaperSingleFilePatches"
 
 echo "done :)"
