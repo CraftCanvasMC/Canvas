@@ -82,8 +82,8 @@ public class RegionTickSubCommand implements SubCommand {
                     if (entityPlayer == null) {
                         throw MUST_BE_PLAYER.create();
                     }
-                    final int chunkX = (first.equalsIgnoreCase("~") ? entityPlayer.blockPosition.getX() : Integer.parseInt(first)) >> 4;
-                    final int chunkZ = (second.equalsIgnoreCase("~") ? entityPlayer.blockPosition.getZ() : Integer.parseInt(second)) >> 4;
+                    final int chunkX = (first.equalsIgnoreCase("~") ? entityPlayer.getBlockX() : Integer.parseInt(first)) >> 4;
+                    final int chunkZ = (second.equalsIgnoreCase("~") ? entityPlayer.getBlockZ() : Integer.parseInt(second)) >> 4;
                     final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
                         entityPlayer.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
                     if (region == null) {
