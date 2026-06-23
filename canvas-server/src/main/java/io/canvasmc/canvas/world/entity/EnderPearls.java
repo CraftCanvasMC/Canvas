@@ -210,7 +210,7 @@ public record EnderPearls(Map<UUID, List<Pearl>> pearls) {
 
                 Entity entity = EntityType.loadEntityRecursive(tagValueInput, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
                 if (entity != null) {
-                    level.canvas$loadOrRunAtChunksAsync(entity.blockPosition, 16, Priority.NORMAL, () -> {
+                    level.canvas$loadOrRunAtChunksAsync(entity.blockPosition(), 16, Priority.NORMAL, () -> {
                         level.addFreshEntityWithPassengers(entity);
                         ServerPlayer.placeEnderPearlTicket(level, entity.chunkPosition());
                         GlobalConfiguration.LOGGER.debug("Spawned saved pearl in level ({})", level.dimension().identifier());
