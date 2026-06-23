@@ -612,4 +612,18 @@ public class GlobalConfiguration extends Part {
         public long length = 30;
         public ChronoUnit unit = ChronoUnit.DAYS;
     }
+
+    public EnchantCommand enchantCommand = new EnchantCommand();
+    public static class EnchantCommand extends Part {
+
+        {
+            option("uncapMaxLevel").docs("Uncaps the max level, allowing you to enchant to any level, even beyond the max");
+            option("allowEnchantsOnUnsupportedItems").docs("Allows setting enchants on items that normally do not support that enchantment");
+            option("allowEnchantingWithIncompatibleEnchants").docs("Allows setting enchants on items with incompatible enchants. e.g. Protection & Blast Protection");
+        }
+
+        public boolean uncapMaxLevel = false;
+        public boolean allowEnchantsOnUnsupportedItems = false;
+        public boolean allowEnchantingWithIncompatibleEnchants = false;
+    }
 }
