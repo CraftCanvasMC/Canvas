@@ -22,6 +22,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import me.lucko.spark.paper.common.platform.world.CountMap;
 import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
+import net.kyori.adventure.text.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;

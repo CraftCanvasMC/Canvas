@@ -59,7 +59,7 @@ public class TickGuard {
             // just pass, the shutdown thread owns all
             return;
         }
-        if (TickRegions.started) {
+        if (TickRegions.hasStarted()) {
             RegionizedServer.ensureGlobalTickThread(reason);
         }
         else {
@@ -73,7 +73,7 @@ public class TickGuard {
     }
 
     public static void hardThrowIfStarted(final BooleanSupplier isTickThreadFor, final String reason) {
-        if (TickRegions.started && !isTickThreadFor.getAsBoolean()) {
+        if (TickRegions.hasStarted() && !isTickThreadFor.getAsBoolean()) {
             LOGGER.error("Thread failed main thread check: {}, context={}", reason, getThreadContext(), new Throwable());
             throw new IllegalStateException(reason);
         }

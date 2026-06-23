@@ -115,7 +115,7 @@ public class WorldConfig extends Part {
         );
 
         // on reload, if the server started, we need to swap out the configs
-        if (TickRegions.started) {
+        if (TickRegions.hasStarted()) {
             for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
 
                 // this will swap the config with the new patchable variant

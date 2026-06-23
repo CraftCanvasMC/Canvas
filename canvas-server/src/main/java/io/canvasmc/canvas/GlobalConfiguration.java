@@ -143,7 +143,7 @@ public class GlobalConfiguration extends Part {
         // validate the configuration so users don't end up doing a stupid
         Validator.validateObject(configuration);
 
-        if (TickRegions.started) {
+        if (TickRegions.hasStarted()) {
 
             // if this is a reload, we may have things that need to be taken into effect now
             // for example, 1.8 combat delay configs may be updated, so we conduct updates
@@ -196,7 +196,7 @@ public class GlobalConfiguration extends Part {
         final Path logsDirectoryPath = Path.of("logs");
 
         // start log cleaner, only at startup
-        if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath) && !TickRegions.started) {
+        if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath) && !TickRegions.hasStarted()) {
 
             final Instant now = Instant.now();
             final Instant adjustedInstantToThresh = now.minus(configuration.logs.length, configuration.logs.unit);
@@ -236,7 +236,7 @@ public class GlobalConfiguration extends Part {
     }
 
     public static void broadcast(String msg, int severity) {
-        if (TickRegions.started) {
+        if (TickRegions.hasStarted()) {
             final MutableComponent literal = Component.literal(msg);
 
             switch (severity) {
