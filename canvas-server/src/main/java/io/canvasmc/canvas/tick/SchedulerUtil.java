@@ -279,8 +279,9 @@ public class SchedulerUtil {
 
         @Override
         public boolean isRunningRegionProfilerOnThread(final long threadId, final String threadName) {
-            if (isRunningRegionProfiler()) {
-                AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state != null) {
+                AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
                 return threadRunner.getRunnerThread().getName().equalsIgnoreCase(threadName);
             }
             return false;
@@ -303,8 +304,9 @@ public class SchedulerUtil {
 
         @Override
         public void onRegionMerge(final TickRegions.TickRegionData from, final TickRegions.TickRegionData to, final ServerLevel level) {
-            if (!isRunningRegionProfiler()) return;
-            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state == null) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
             if (!threadRunner.isLinkedTo(from.tickHandle)) return;
             tryTransferPinningState(from.tickHandle, to.tickHandle);
         }
@@ -314,10 +316,11 @@ public class SchedulerUtil {
         //       because the global tick can't call split
         @Override
         public void onRegionSplit(final TickRegions.TickRegionData from, final Long2ReferenceOpenHashMap<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> into, final ServerLevel level) {
-            if (!isRunningRegionProfiler()) return;
-            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state == null) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
             if (!threadRunner.isLinkedTo(from.tickHandle)) return;
-            ChunkPos center = ((RegionScheduleHandlePinner.RegionPinner) RegionProfiler.STATE.get().handlePinner()).getCenter();
+            ChunkPos center = ((RegionScheduleHandlePinner.RegionPinner) state.handlePinner()).getCenter();
             tryTransferPinningState(from.tickHandle, into.get(center.longKey()).getData().tickHandle);
         }
 
@@ -334,8 +337,9 @@ public class SchedulerUtil {
 
         private void tryDestroyLink(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
             final TickRegions.TickRegionData data = region.getData();
-            if (!isRunningRegionProfiler()) return;
-            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = RegionProfiler.STATE.get().threadRunner();
+            final RegionProfiler.ProfilingState state = RegionProfiler.STATE.get();
+            if (state == null) return;
+            AffinitySchedulerThreadPool.TickThreadRunner threadRunner = state.threadRunner();
             if (data.tickHandle.state != null && threadRunner.isLinkedTo(data.tickHandle)) {
                 threadRunner.unlink();
             }
