@@ -184,7 +184,6 @@ public class WorldShutdownThread extends RegionShutdownThread {
 
         // now we save level data and force pearl data save
 
-        MinecraftServer.getServer().pearls.save(null);
         saveLevelData(this.level);
         this.level.getChunkSource().getDataStorage().close();
 

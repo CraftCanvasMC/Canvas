@@ -370,12 +370,10 @@ public class GlobalConfiguration extends Part {
                         "which can overload the server and cause stuttering when generating new chunks.",
                         "Depending on the algorithm chosen, this can help reduce stutter and improve performance",
                         "when generating chunks"
-                    ).defineEnum(FluidPostProcessingMode.class, (mode) -> {
-                        return switch (mode) {
-                            case VANILLA -> "Normal post processing algorithm, everything is processed";
-                            case DISABLED -> "Disables fluid post processing entirely";
-                            case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
-                        };
+                    ).defineEnum(FluidPostProcessingMode.class, (mode) -> switch (mode) {
+                        case VANILLA -> "Normal post processing algorithm, everything is processed";
+                        case DISABLED -> "Disables fluid post processing entirely";
+                        case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
                     })
                 );
 
@@ -445,11 +443,6 @@ public class GlobalConfiguration extends Part {
             //     }
             //     return null;
             // });
-            option("pearlDuplication")
-                .docs(
-                    "There is a Vanilla bug where in-flight pearls are duplicated at shutdown. This fixes that when",
-                    "the option \"restoreVanillaEnderPearlBehavior\" is enabled alongside this."
-                );
         }
 
         public boolean mc261810 = false;
@@ -469,7 +462,6 @@ public class GlobalConfiguration extends Part {
         public boolean mc30391 = false;
         public boolean mc183990 = false;
         public boolean mc136249 = false;
-        public boolean pearlDuplication = false;
     }
 
     public Networking networking = new Networking();
@@ -526,7 +518,6 @@ public class GlobalConfiguration extends Part {
 
     {
         option("serverModName").docs("The server mod name displayed in server listings and client info").word();
-        option("restoreVanillaEnderPearlBehavior").docs("Restores and fixes Vanilla Ender Pearl behavior, broken by Folia");
 
         option("displayWorldLoadScreenForPortaling")
             .docs(
@@ -546,7 +537,6 @@ public class GlobalConfiguration extends Part {
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
-    public boolean restoreVanillaEnderPearlBehavior = false;
     public boolean displayWorldLoadScreenForPortaling = true;
     public boolean displayWorldLoadScreenForTeleporting = true;
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
@@ -606,11 +596,14 @@ public class GlobalConfiguration extends Part {
             option("enableLogCleaner").docs("Auto-removes old log files from the \"logs\" directory");
             option("length").docs("The amount of the time unit until the log file is marked for deletion");
             option("unit").docs("The type of time unit to use when comparing how old the file is to the current time");
+            option("logEnderPearlRewriteActions").docs("Logs when a pearl is saved or loaded from Canvas' pearl save rewrite");
         }
 
         public boolean enableLogCleaner = false;
         public long length = 30;
         public ChronoUnit unit = ChronoUnit.DAYS;
+
+        public boolean logEnderPearlRewriteActions = true;
     }
 
     public EnchantCommand enchantCommand = new EnchantCommand();

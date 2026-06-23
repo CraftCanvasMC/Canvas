@@ -44,7 +44,7 @@ index e9ca1a15049b0211d10401cb78e953b93afaf6c7..88067a935b2de9c4763e5f8e3752e543
                  if (tick.handle instanceof TickRegions.ConcreteRegionTickHandle region) {
                      LOGGER.error(
 diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
-index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e0162087e3b546 100644
+index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..d63faa18568b80ad3ff170e053e60715cbcc2869 100644
 --- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
 +++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 @@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
@@ -88,7 +88,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
      }
  
      public void saveRegionChunks(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region,
-@@ -148,9 +150,110 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
+@@ -148,9 +150,113 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
              this.shuttingDown = null;
          }
      }
@@ -114,11 +114,12 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
 +            futures.add(future);
 +        }
 +
-+        // save pearls
++        // make sure the pearl map is fully set, so this can be picked
++        // up on the global data save later on during shutdown
++
 +        final org.apache.commons.lang3.mutable.MutableInt savedPearlCount = new org.apache.commons.lang3.mutable.MutableInt(0);
 +        final java.util.Map<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, List<com.mojang.datafixers.util.Pair<java.util.UUID, net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl>>>
 +            region2Pearls = com.google.common.collect.Maps.newHashMap();
-+        final boolean removeDuplicatePearl = io.canvasmc.canvas.GlobalConfiguration.getInstance().vanillaFixes.pearlDuplication;
 +
 +        for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().getPlayers()) {
 +            final java.util.UUID uuid = entityPlayer.getUUID();
@@ -157,9 +158,13 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
 +                center = region.getCenterChunk();
 +                for (final com.mojang.datafixers.util.Pair<java.util.UUID, net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl> pair : listOfPearls) {
 +                    MinecraftServer.getServer().pearls.addPearl(pair.getFirst(), pair.getSecond());
-+                    if (removeDuplicatePearl) {
-+                        pair.getSecond().setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
-+                    }
++
++                    // remove the pearl or else we end up with a bug in our system
++                    // that causes the pearl to be retained in the set until the next
++                    // login, since the entity UUID exists so it just adds to the
++                    // pearl set and then never gets removed so it gets caught on save
++
++                    pair.getSecond().setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, org.bukkit.event.entity.EntityRemoveEvent.Cause.PLAYER_QUIT);
 +                    savedPearlCount.increment();
 +                }
 +            } catch (Throwable thrown) {
@@ -187,8 +192,6 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
 +            }
 +        }
 +
-+        // wait for pearl save, then wait for connection shutdown
-+        MinecraftServer.getServer().pearls.save(null).join();
 +        MinecraftServer.getServer().getConnection().stop();
 +    }
 +    // Canvas end - region threading
@@ -199,7 +202,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
          // await scheduler termination
          LOGGER.info("Awaiting scheduler termination for 60s...");
          if (TickRegions.getScheduler().halt(true, TimeUnit.SECONDS.toNanos(60L))) {
-@@ -161,6 +264,11 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
+@@ -161,6 +267,11 @@ public class RegionShutdownThread extends ca.spottedleaf.moonrise.common.util.Ti
          }
  
          MinecraftServer.getServer().stopServer(); // stop part 1: most logic, kicking players, plugins, etc
@@ -212,7 +215,7 @@ index 0ce4643d526368b85ead19dd5d63aa41ec41afc6..8834c7fb6edff6c0a02231dd61e01620
          LOGGER.info("Halting chunk systems...");
          for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
-index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c86cf28254 100644
+index 918d58644ac028a1025811ebd459112ff6a0e78f..f2e8e19c4122aa32f1d2cbfbac20ae82bed37438 100644
 --- a/io/papermc/paper/threadedregions/RegionizedServer.java
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -31,7 +31,7 @@ import java.util.function.BooleanSupplier;
@@ -276,14 +279,11 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
  
          // tick player ping sample
          this.tickPlayerSample();
-@@ -362,7 +377,63 @@ public final class RegionizedServer {
+@@ -362,7 +377,154 @@ public final class RegionizedServer {
  
          // player list
          MinecraftServer.getServer().getPlayerList().tick();
 +        // Canvas start - region threading
-+
-+        // ender pearls
-+        MinecraftServer.getServer().pearls.autosave();
 +
 +        // gui tick
 +        net.minecraft.server.gui.PlayerListComponent.tick();
@@ -291,17 +291,26 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
 +        // scoreboards, stopwatches
 +        autosaveSafeGlobalData(false, false);
 +        // Canvas end - region threading
-+    }
+     }
 +    // Canvas start - region threading
 +
 +    private static final java.util.concurrent.atomic.AtomicLong LAST_GLOBAL_AUTOSAVE = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
 +
-+    // note: not everything is thread-safe, only a few things are thread-safe
-+    //       due to specific design of these reimplementations. those are:
-+    //  - scoreboards: from Canvas scoreboards rewrite
-+    //  - stopwatches: we made this SWMR fully, and only the global tick can
-+    //                 write to the backend map so this is safe to save here
-+    // note: this does not save maps at all, those are per-world
++    // note: not every saved data type is thread-safe, only a few things are thread-safe
++    //       due to specific design of these reimplementations. these are listed in the
++    //       respective methods themselves
++
++    // note: for server clock manager autosave
++    /*
++        we call "packState" in "ServerClockManager" in the codec, which
++        is a mapped version of all the clocks into their packed form
++        which the packed form takes the values from the unpacked form,
++        which is only mutated on the global tick and on load of the clock
++        which is at startup. the actual registered clocks are also
++        immutable after init of the clock manager instance, so we can be
++        sure that this won't encounter any odd exceptions.
++     */
++
 +    public void autosaveSafeGlobalData(final boolean force, final boolean sync) {
 +        ensureGlobalTickThread("Cannot save global data async");
 +
@@ -309,24 +318,45 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
 +
 +        final int autoSavePeriod = server.autosavePeriod;
 +        if (autoSavePeriod <= 0 && !force) return;
-+        final long periodNanos = autoSavePeriod * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks();
++        final long periodNanos = autoSavePeriod * TickRegionScheduler.getTimeBetweenTicks();
 +        final long currTime = System.nanoTime();
 +        final long last = LAST_GLOBAL_AUTOSAVE.get();
 +
 +        if (force || ((currTime - last) > periodNanos && LAST_GLOBAL_AUTOSAVE.compareAndSet(last, currTime))) {
 +
-+            // these 2 are the only safe global data ones besides maps,
-+            // however those are per-world and saved in world global tick
++            // needs
++            // pearls - our rewrite
++            // scoreboards
++            // stopwatches
++            // custom boss events
++            // world clocks - only if affects all worlds
 +
 +            // we have to do this for the scoreboard system or else the scoreboard
 +            // system won't actually save. see MinecraftServer#saveGlobalData
 +
 +            server.getScoreboard().storeToSaveDataIfDirty(server.getDataStorage().computeIfAbsent(net.minecraft.world.scores.ScoreboardSaveData.TYPE));
 +
-+            java.util.concurrent.CompletableFuture<?> future = server.getDataStorage().saveSpecific(
-+                net.minecraft.world.scores.ScoreboardSaveData.class,
-+                net.minecraft.world.Stopwatches.class
-+            );
++            java.util.concurrent.CompletableFuture<?> future = server.getDataStorage().saveSpecific(() -> {
++                final ArrayList<Class<? extends net.minecraft.world.level.saveddata.SavedData>>
++                    toSave = new ArrayList<>();
++
++                // both of these are SWMR, only mutatable on the global tick
++                toSave.add(net.minecraft.world.scores.ScoreboardSaveData.class);
++                toSave.add(net.minecraft.world.Stopwatches.class);
++
++                // our pearl rewrite is threadsafe
++                toSave.add(io.canvasmc.canvas.world.entity.EnderPearls.class);
++
++                // made threadsafe by Canvas
++                toSave.add(net.minecraft.server.bossevents.CustomBossEvents.class);
++
++                // only should be saved globally if affects all worlds
++                if (io.papermc.paper.configuration.GlobalConfiguration.get().time.affectsAllWorlds) {
++                    toSave.add(net.minecraft.world.clock.ServerClockManager.class);
++                }
++
++                return toSave;
++            });
 +
 +            // if sync we need to just join here. this shouldn't be done
 +            // for autosave or every tick since this blocks waiting for completion
@@ -335,12 +365,76 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
 +                future.join();
 +            }
 +        }
-     }
++    }
++
++    public void autosaveSafeWorldData(final boolean force, final boolean sync, final ServerLevel level) {
++        ensureGlobalTickThread("Cannot save global world data async");
++
++        final MinecraftServer server = MinecraftServer.getServer();
++
++        final int autoSavePeriod = server.autosavePeriod;
++        if (autoSavePeriod <= 0 && !force) return;
++        final long periodNanos = autoSavePeriod * TickRegionScheduler.getTimeBetweenTicks();
++        final long currTime = System.nanoTime();
++        final long last = level.lastMapAutoSave;
++
++        if (force || ((currTime - last) > periodNanos)) {
++            level.lastMapAutoSave = currTime;
++
++            // needs
++            // world clocks
++            // world border
++            // raids
++            // weather
++            // game rules
++            // maps
++
++            // note: wandering trader data is regionized now, can't autosave
++
++            java.util.concurrent.CompletableFuture<?> future = level.getDataStorage().saveSpecific(() -> {
++                final ArrayList<Class<? extends net.minecraft.world.level.saveddata.SavedData>>
++                    toSave = new ArrayList<>();
++
++                // maps is represented in 2 data types, the index and the item
++                toSave.add(net.minecraft.world.level.saveddata.maps.MapItemSavedData.class);
++                toSave.add(net.minecraft.world.level.saveddata.maps.MapIndex.class);
++
++                // only should be autosaved here if worlds have independent time
++                if (!io.papermc.paper.configuration.GlobalConfiguration.get().time.affectsAllWorlds) {
++                    toSave.add(net.minecraft.world.clock.ServerClockManager.class);
++                }
++
++                // TODO - world border - needs MASSIVE changes...
++                // TODO - raids - can we even do this?
++
++                // folia already only ticks this on the global tick and both canvas
++                // and folia have thread checks against modifying this data async, so this is fine
++                toSave.add(net.minecraft.world.level.saveddata.WeatherData.class);
++                // already made threadsafe from folia, just needed the codec adjusted to copy the
++                // backing map to prevent exceptions or torn read/write issues
++                toSave.add(net.minecraft.world.level.gamerules.GameRuleMap.class);
++
++                // note: the dragon fight is autosaved on the region owning the fight in question.
++                //       this is because this is specific per-dimension and is also region-specific
++                //       in that dimension to a single region, and is ticked there too, so no point
++                //       in saving here if we don't even own the data in question
++
++                return toSave;
++            });
++
++            // if sync we need to just join here. this shouldn't be done
++            // for autosave or every tick since this blocks waiting for completion
++
++            if (sync) {
++                future.join();
++            }
++        }
++    }
 +    // Canvas end - region threading
  
      private void tickPlayerSample() {
          final MinecraftServer mcServer = MinecraftServer.getServer();
-@@ -402,9 +473,14 @@ public final class RegionizedServer {
+@@ -402,9 +564,14 @@ public final class RegionizedServer {
              }
  
              if (isNotOwnedByGlobalRegion(conn)) {
@@ -358,7 +452,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
              }
  
              if (!conn.isConnected()) {
-@@ -435,6 +511,12 @@ public final class RegionizedServer {
+@@ -435,6 +602,12 @@ public final class RegionizedServer {
      // A global tick only updates things like weather / worldborder, basically anything in the world that is
      // NOT tied to a specific region, but rather shared amongst all of them.
      private void globalTick(final ServerLevel world, final long tickCount) {
@@ -371,7 +465,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
          // needs
          // worldborder tick
          // advancing the weather cycle
-@@ -480,6 +562,7 @@ public final class RegionizedServer {
+@@ -480,6 +653,7 @@ public final class RegionizedServer {
      }
  
      private void advanceWeatherCycle(final ServerLevel world) {
@@ -379,7 +473,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
          world.advanceWeatherCycle();
      }
  
-@@ -492,11 +575,13 @@ public final class RegionizedServer {
+@@ -492,11 +666,13 @@ public final class RegionizedServer {
      }
  
      private void tickClocks() {
@@ -393,7 +487,7 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
                  level.clockManager().tick();
              }
          }
-@@ -504,6 +589,7 @@ public final class RegionizedServer {
+@@ -504,18 +680,14 @@ public final class RegionizedServer {
      }
  
      private void tickTime(final ServerLevel world, final long tickCount) {
@@ -401,6 +495,19 @@ index 918d58644ac028a1025811ebd459112ff6a0e78f..54baa6300da3209c912a0405e23492c8
          if (world.tickTime) {
              world.serverLevelData.setGameTime(world.serverLevelData.getGameTime() + tickCount);
          }
+     }
+ 
+     private void autoSaveMaps(final ServerLevel world) {
+-        final int autoSavePeriod = net.minecraft.server.MinecraftServer.getServer().autosavePeriod;
+-        final long currTime = System.nanoTime();
+-        if (autoSavePeriod > 0 && (currTime - world.lastMapAutoSave) > (java.util.concurrent.TimeUnit.SECONDS.toNanos((long)autoSavePeriod) / 20L)) {
+-            world.lastMapAutoSave = currTime;
+-            world.getDataStorage().saveMaps();
+-        }
++        autosaveSafeWorldData(false, false, world); // Canvas - region threading
+     }
+ 
+     public static final record WorldLevelData(ServerLevel world, long nonRedstoneGameTime) {
 diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
 index 24514bc6091f1ae5a5cb70f1b95b53a7d3efb033..25f32887814078cd0c7c0692e1bd06540ad88e8e 100644
 --- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
@@ -1415,7 +1522,7 @@ index 585dcf881008e28aba077092943d4cbf4eb5f5b4..8f56122af431b8ed03f43da146c027b7
              SaveOnCommand.register(this.dispatcher);
              SetPlayerIdleTimeoutCommand.register(this.dispatcher);
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index b0da5a9fa114fe57f0f304d6763c655c081c60ab..e5907777c739a55f1dc5b91745634e97bfe075f5 100644
+index b0da5a9fa114fe57f0f304d6763c655c081c60ab..eca27cccc77d2c491cf0e5f089712f7ebed00512 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -208,7 +208,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -1452,14 +1559,14 @@ index b0da5a9fa114fe57f0f304d6763c655c081c60ab..e5907777c739a55f1dc5b91745634e97
  
      @Override
      public <V> CompletableFuture<V> submit(java.util.function.Supplier<V> task) {
-@@ -609,6 +609,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
-         Runtime.getRuntime().addShutdownHook(new org.bukkit.craftbukkit.util.ServerShutdownThread(this));
-         // CraftBukkit end
-         this.paperConfigurations = services.paper().configurations(); // Paper - add paper configuration files
-+        this.pearls = io.canvasmc.canvas.world.entity.EnderPearls.read(storageSource.getLevelPath(LevelResource.DATA)); // Canvas - region threading
-     }
- 
-     protected abstract boolean initServer() throws IOException;
+@@ -576,6 +576,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.clockManager = this.getDataStorage().computeIfAbsent(ServerClockManager.TYPE);
+         this.clockManager.init(this);
+         this.customBossEvents = this.savedDataStorage.computeIfAbsent(CustomBossEvents.TYPE);
++        this.pearls = this.savedDataStorage.computeIfAbsent(io.canvasmc.canvas.world.entity.EnderPearls.TYPE); // Canvas - region threading
+         // Paper - per-level scheduledEvents
+         // CraftBukkit start
+         this.options = options;
 @@ -1096,15 +1097,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              this.server.waitForAsyncTasksShutdown(); // Paper - Wait for Async Tasks during shutdown
          }
@@ -1605,6 +1712,14 @@ index b0da5a9fa114fe57f0f304d6763c655c081c60ab..e5907777c739a55f1dc5b91745634e97
              count++;
              // Paper end - Expand PlayerGameModeChangeEvent
          }
+@@ -2612,6 +2643,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+     // Paper start - per-level WeatherData
+     public void setWeatherParameters(final ServerLevel level, final int clearTime, final int rainTime, final boolean raining, final boolean thundering) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot set weather params async"); // Canvas - region threading
+         WeatherData weatherData = level.getWeatherData();
+         // Paper end - per-level WeatherData
+         weatherData.setClearWeatherTime(clearTime);
 diff --git a/net/minecraft/server/ReloadableServerResources.java b/net/minecraft/server/ReloadableServerResources.java
 index f233c2fea9e2008f0c15aa80eb07cae3bb68b005..09146997c3d82b96224b392862926a0ef0077592 100644
 --- a/net/minecraft/server/ReloadableServerResources.java
@@ -1783,31 +1898,274 @@ index eeb2f88723b37bb3cada04bf3098dd46f0ed7316..9a21de639f124e1450ee59b2aced7523
          this.setFrozen(this.previousIsFrozen);
          this.server.onTickRateChanged();
 diff --git a/net/minecraft/server/bossevents/CustomBossEvent.java b/net/minecraft/server/bossevents/CustomBossEvent.java
-index f55f22b3d3d765d790ac7bb85727846de01b57d6..cb7b9aff23353639b720f93a414041bfad9aafd4 100644
+index f55f22b3d3d765d790ac7bb85727846de01b57d6..703fae51a5185afaaf47503ac492325594fc9bf2 100644
 --- a/net/minecraft/server/bossevents/CustomBossEvent.java
 +++ b/net/minecraft/server/bossevents/CustomBossEvent.java
-@@ -20,7 +20,7 @@ import net.minecraft.world.BossEvent;
- public class CustomBossEvent extends ServerBossEvent {
-     private static final int DEFAULT_MAX = 100;
-     private final Identifier customId;
--    private final Set<UUID> players = Sets.newHashSet();
-+    private final Set<UUID> players = Sets.newConcurrentHashSet(); // Canvas - fix commands with region threading - TODO - do better
-     private int value;
-     private int max = 100;
-     private final Runnable dirtyCallback;
+@@ -40,6 +40,7 @@ public class CustomBossEvent extends ServerBossEvent {
+         this.dirtyCallback = dirtyCallback;
+         this.customId = customId;
+         this.setProgress(0.0F);
++        getBukkitEntity(); // Canvas - init this early
+     }
+ 
+     public Identifier customId() {
+@@ -48,27 +49,33 @@ public class CustomBossEvent extends ServerBossEvent {
+ 
+     @Override
+     public void addPlayer(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         super.addPlayer(player);
+         if (this.players.add(player.getUUID())) {
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     @Override
+     public void removePlayer(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         super.removePlayer(player);
+         if (this.players.remove(player.getUUID())) {
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     @Override
+     public void removeAllPlayers() {
++        synchronized (playerLock) { // Canvas - region threading
+         super.removeAllPlayers();
+         if (!this.players.isEmpty()) {
+             this.players.clear();
+             this.setDirty();
+         }
++        } // Canvas - region threading
+     }
+ 
+     public int value() {
+@@ -80,15 +87,19 @@ public class CustomBossEvent extends ServerBossEvent {
+     }
+ 
+     public void setValue(final int value) {
++        synchronized (playerLock) { // Canvas - region threading
+         this.value = value;
+         this.setProgress(Mth.clamp((float)value / this.max, 0.0F, 1.0F));
+         this.setDirty();
++        } // Canvas - region threading
+     }
+ 
+     public void setMax(final int max) {
++        synchronized (playerLock) { // Canvas - region threading
+         this.max = max;
+         this.setProgress(Mth.clamp((float)this.value / max, 0.0F, 1.0F));
+         this.setDirty();
++        } // Canvas - region threading
+     }
+ 
+     public final Component getDisplayName() {
+@@ -101,60 +112,21 @@ public class CustomBossEvent extends ServerBossEvent {
+     }
+ 
+     public boolean setPlayers(final Collection<ServerPlayer> players) {
+-        Set<UUID> toRemove = Sets.newHashSet();
+-        Set<ServerPlayer> toAdd = Sets.newHashSet();
++        // Canvas start - region threading
+ 
+-        for (UUID uuid : this.players) {
+-            boolean found = false;
++        // to be completely blunt, this doesn't matter. if anything,
++        // when this function is executed, it will flicker the bossbar
++        // once for any players in both the before and after sets
+ 
+-            for (ServerPlayer player : players) {
+-                if (player.getUUID().equals(uuid)) {
+-                    found = true;
+-                    break;
+-                }
++        synchronized (playerLock) {
++            this.removeAllPlayers();
++            for (final ServerPlayer player : players) {
++                addPlayer(player);
+             }
+-
+-            if (!found) {
+-                toRemove.add(uuid);
+-            }
+-        }
+-
+-        for (ServerPlayer player : players) {
+-            boolean found = false;
+-
+-            for (UUID uuid : this.players) {
+-                if (player.getUUID().equals(uuid)) {
+-                    found = true;
+-                    break;
+-                }
+-            }
+-
+-            if (!found) {
+-                toAdd.add(player);
+-            }
+-        }
+-
+-        for (UUID uuid : toRemove) {
+-            for (ServerPlayer player : this.getPlayers()) {
+-                if (player.getUUID().equals(uuid)) {
+-                    this.removePlayer(player);
+-                    break;
+-                }
+-            }
+-
+-            this.players.remove(uuid);
+-        }
+-
+-        for (ServerPlayer player : toAdd) {
+-            this.addPlayer(player);
+-        }
+-
+-        boolean playersChanged = !toRemove.isEmpty() || !toAdd.isEmpty();
+-        if (playersChanged) {
+-            this.setDirty();
+         }
+ 
+-        return playersChanged;
++        return true;
++        // Canvas end - region threading
+     }
+ 
+     public static CustomBossEvent load(final UUID id, final Identifier customId, final CustomBossEvent.Packed packed, final Runnable setDirty) {
+@@ -172,6 +144,7 @@ public class CustomBossEvent extends ServerBossEvent {
+     }
+ 
+     public CustomBossEvent.Packed pack() {
++        synchronized (playerLock) { // Canvas - region threading
+         return new CustomBossEvent.Packed(
+             this.getName(),
+             this.isVisible(),
+@@ -184,12 +157,15 @@ public class CustomBossEvent extends ServerBossEvent {
+             this.shouldCreateWorldFog(),
+             Set.copyOf(this.players)
+         );
++        } // Canvas - region threading
+     }
+ 
+     public void onPlayerConnect(final ServerPlayer player) {
++        synchronized (playerLock) { // Canvas - region threading
+         if (this.players.contains(player.getUUID())) {
+             this.addPlayer(player);
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void onPlayerDisconnect(final ServerPlayer player) {
 diff --git a/net/minecraft/server/bossevents/CustomBossEvents.java b/net/minecraft/server/bossevents/CustomBossEvents.java
-index fb55ed68a1f8470b551030a27ca2656555c93d9e..5756f7aca1a80782a88b0e82ef82a626172be539 100644
+index fb55ed68a1f8470b551030a27ca2656555c93d9e..b6c7c0a0fe21b3ed5d316dc8c5b8b813fd20e349 100644
 --- a/net/minecraft/server/bossevents/CustomBossEvents.java
 +++ b/net/minecraft/server/bossevents/CustomBossEvents.java
-@@ -26,7 +26,7 @@ public class CustomBossEvents extends SavedData {
+@@ -22,45 +22,98 @@ public class CustomBossEvents extends SavedData {
+         CustomBossEvents r = new CustomBossEvents();
+         events.forEach((id, packed) -> r.events.put(id, CustomBossEvent.load(UUID.randomUUID(), id, packed, r::setDirty)));
+         return r;
+-    }, c -> Util.mapValues(c.events, CustomBossEvent::pack));
++    }, c -> Util.mapValues(c.unmodifiableCopy(), CustomBossEvent::pack)); // Canvas - region threading
      public static final SavedDataType<CustomBossEvents> TYPE = new SavedDataType<>(
          Identifier.withDefaultNamespace("custom_boss_events"), CustomBossEvents::new, CODEC, DataFixTypes.SAVED_DATA_CUSTOM_BOSS_EVENTS
      );
--    private final Map<Identifier, CustomBossEvent> events = Maps.newHashMap();
-+    private final Map<Identifier, CustomBossEvent> events = Maps.newConcurrentMap(); // Canvas - fix commands with region threading - TODO - do better
+     private final Map<Identifier, CustomBossEvent> events = Maps.newHashMap();
++    // Canvas start - region threading
++    private final java.util.concurrent.locks.ReentrantReadWriteLock lock = new java.util.concurrent.locks.ReentrantReadWriteLock(true);
++
++    private Map<Identifier, CustomBossEvent> unmodifiableCopy() {
++        lock.readLock().lock();
++        try {
++            return com.google.common.collect.ImmutableMap.copyOf(events);
++        } finally {
++            lock.readLock().unlock();
++        }
++    }
++    // Canvas end - region threading
  
      public @Nullable CustomBossEvent get(final Identifier id) {
++        // Canvas start - region threading
++        lock.readLock().lock();
++        try {
++        // Canvas end - region threading
          return this.events.get(id);
++        // Canvas start - region threading
++        } finally {
++            lock.readLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public CustomBossEvent create(final RandomSource random, final Identifier id, final Component name) {
++        // Canvas start - region threading
++        lock.writeLock().lock();
++        try {
++        // Canvas end - region threading
+         CustomBossEvent result = new CustomBossEvent(Mth.createInsecureUUID(random), id, name, this::setDirty);
+         this.events.put(id, result);
+         this.setDirty();
+         return result;
++        // Canvas start - region threading
++        } finally {
++            lock.writeLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public void remove(final CustomBossEvent event) {
++        // Canvas start - region threading
++        lock.writeLock().lock();
++        try {
++        // Canvas end - region threading
+         if (this.events.remove(event.customId()) != null) {
+             this.setDirty();
+         }
++        // Canvas start - region threading
++        } finally {
++            lock.writeLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public Collection<Identifier> getIds() {
+-        return this.events.keySet();
++        // Canvas start - region threading
++        lock.readLock().lock();
++        try {
++        return new java.util.HashSet<>(this.events.keySet());
++        } finally {
++            lock.readLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public Collection<CustomBossEvent> getEvents() {
+-        return this.events.values();
++        // Canvas start - region threading
++        lock.readLock().lock();
++        try {
++        return new java.util.HashSet<>(this.events.values());
++        } finally {
++            lock.readLock().unlock();
++        }
++        // Canvas end - region threading
+     }
+ 
+     public void onPlayerConnect(final ServerPlayer player) {
+-        for (CustomBossEvent event : this.events.values()) {
++        for (CustomBossEvent event : getEvents()) { // Canvas - region threading
+             event.onPlayerConnect(player);
+         }
+     }
+ 
+     public void onPlayerDisconnect(final ServerPlayer player) {
+-        for (CustomBossEvent event : this.events.values()) {
++        for (CustomBossEvent event : getEvents()) { // Canvas - region threading
+             event.onPlayerDisconnect(player);
+         }
+     }
 diff --git a/net/minecraft/server/commands/AdvancementCommands.java b/net/minecraft/server/commands/AdvancementCommands.java
 index dfabf9b9870091087ab8b48634ecf9e2316b7f68..ffdf3e49d9366e89940a043907b2d83ab62b22ba 100644
 --- a/net/minecraft/server/commands/AdvancementCommands.java
@@ -4215,10 +4573,10 @@ index 2f6c0784126e1ab22ca7e138452325ebc425001c..032e0bc99a703c8bd5789fffcd99d9ce
      }
  }
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index 299991905c24a7018f8ac60d0c16e56fa43cd710..4e05380b283c804ffe791ad0c44d302d75faf68c 100644
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..cd6b908a59d0a1d0dae271971def0de5f6bb5281 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -24,12 +24,84 @@ public class SaveAllCommand {
+@@ -24,12 +24,82 @@ public class SaveAllCommand {
      private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
@@ -4235,29 +4593,27 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..4e05380b283c804ffe791ad0c44d302d
 +        // - pearls
 +        // - regions
 +
-+        // scoreboards, stopwatches, maps
-+        io.papermc.paper.threadedregions.RegionizedServer.getInstance().scheduleToOrExecute(() -> {
-+            // by setting the last map autosave to 0 we can just force an autosave to occur
-+            for (final net.minecraft.server.level.ServerLevel world : io.papermc.paper.threadedregions.RegionizedServer.getInstance().worlds) {
-+                world.lastMapAutoSave = 0;
++        final io.papermc.paper.threadedregions.RegionizedServer regionizedServer = io.papermc.paper.threadedregions.RegionizedServer.getInstance();
++
++        regionizedServer.scheduleToOrExecute(() -> {
++
++            // we need to autosave all global data first. we can't just save
++            // everything though since that's dangerous and unsafe, so we use
++            // the autosave methods and trigger a forced and sync save so
++            // everything that IS safe to save is saved properly
++
++            regionizedServer.autosaveSafeGlobalData(true, true);
++
++            for (final net.minecraft.server.level.ServerLevel world : regionizedServer.worlds) {
++                regionizedServer.autosaveSafeWorldData(true, true, world);
++
++                final net.minecraft.world.level.dimension.end.EnderDragonFight dragonFight = world.getDragonFight();
++                if (dragonFight != null) {
++                    dragonFight.forceSaveAttemptOnNextTick = true;
++                }
 +            }
 +
-+            // as for scoreboards and stopwatches, those can only be written to on the global tick
-+            // meaning we need to pack/save on the global tick too, but we can't save everything
-+            // because not everything is infact thread-safe, so we force a global data autosave
-+
-+            io.papermc.paper.threadedregions.RegionizedServer.getInstance().autosaveSafeGlobalData(true, true);
 +            source.sendSuccess(() -> Component.literal("Saved global data"), true);
-+
-+            // pearl save rewrite
-+            MinecraftServer.getServer().pearls.save((result) -> {
-+                if (result) {
-+                    source.sendSuccess(() -> Component.literal("Saved pearl data"), true);
-+                }
-+                else {
-+                    source.sendFailure(Component.literal("Failed to save pearl data, check console for details"));
-+                }
-+            }).join(); // synchronize this
 +
 +            // regions next
 +            final java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger(0);
@@ -6693,17 +7049,151 @@ index 084fb56f4fe06cc56f126269390027e277577b81..146079713998a01df67a4ad567a809a2
              this.updatePlayerStatus(player, false);
  
 diff --git a/net/minecraft/server/level/ServerBossEvent.java b/net/minecraft/server/level/ServerBossEvent.java
-index f1c8e45fdc4d7c70c4c5c6d4d6533364b74dba97..92ca314da1290ad75e61dab0a5a3122c23f9b11c 100644
+index f1c8e45fdc4d7c70c4c5c6d4d6533364b74dba97..062a19f4f3fb57ec1843d6e25af0b3ffd79b4d7c 100644
 --- a/net/minecraft/server/level/ServerBossEvent.java
 +++ b/net/minecraft/server/level/ServerBossEvent.java
-@@ -13,7 +13,7 @@ import net.minecraft.network.protocol.game.ClientboundBossEventPacket;
- import net.minecraft.world.BossEvent;
- 
+@@ -15,7 +15,8 @@ import net.minecraft.world.BossEvent;
  public class ServerBossEvent extends BossEvent {
--    private final Set<ServerPlayer> players = Sets.newHashSet();
-+    private final Set<ServerPlayer> players = Sets.newConcurrentHashSet(); // Canvas - fix commands with region threading
+     private final Set<ServerPlayer> players = Sets.newHashSet();
      private final Set<ServerPlayer> unmodifiablePlayers = Collections.unmodifiableSet(this.players);
-     private boolean visible = true;
+-    private boolean visible = true;
++    protected final Object playerLock = new Object(); // Canvas - region threading
++    private final java.util.concurrent.atomic.AtomicBoolean visible = new java.util.concurrent.atomic.AtomicBoolean(true); // Canvas - region threading
+ 
+     public ServerBossEvent(final UUID id, final Component name, final BossEvent.BossBarColor color, final BossEvent.BossBarOverlay overlay) {
+         super(id, name, color, overlay);
+@@ -23,8 +24,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setProgress(final float progress) {
+-        if (progress != this.progress) {
+-            super.setProgress(progress);
++        if (compareAndSetProgress(progress)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateProgressPacket);
+         }
+@@ -32,8 +32,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setColor(final BossEvent.BossBarColor color) {
+-        if (color != this.color) {
+-            super.setColor(color);
++        if (compareAndSetColor(color)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateStylePacket);
+         }
+@@ -41,8 +40,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setOverlay(final BossEvent.BossBarOverlay overlay) {
+-        if (overlay != this.overlay) {
+-            super.setOverlay(overlay);
++        if (compareAndSetOverlay(overlay)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateStylePacket);
+         }
+@@ -50,8 +48,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public BossEvent setDarkenScreen(final boolean darkenScreen) {
+-        if (darkenScreen != this.darkenScreen) {
+-            super.setDarkenScreen(darkenScreen);
++        if (compareAndSetDarkenScreen(darkenScreen)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -61,8 +58,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public BossEvent setPlayBossMusic(final boolean playBossMusic) {
+-        if (playBossMusic != this.playBossMusic) {
+-            super.setPlayBossMusic(playBossMusic);
++        if (compareAndSetPlayBossMusic(playBossMusic)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -72,8 +68,7 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public BossEvent setCreateWorldFog(final boolean createWorldFog) {
+-        if (createWorldFog != this.createWorldFog) {
+-            super.setCreateWorldFog(createWorldFog);
++        if (compareAndSetCreateWorldFog(createWorldFog)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdatePropertiesPacket);
+         }
+@@ -83,56 +78,64 @@ public class ServerBossEvent extends BossEvent {
+ 
+     @Override
+     public void setName(final Component name) {
+-        if (!Objects.equal(name, this.name)) {
+-            super.setName(name);
++        if (compareAndSetName(name)) { // Canvas - region threading
+             this.setDirty();
+             this.broadcast(ClientboundBossEventPacket::createUpdateNamePacket);
+         }
+     }
+ 
+     public void broadcast(final Function<BossEvent, ClientboundBossEventPacket> factory) {
+-        if (this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.visible.get()) { // Canvas - region threading
+             ClientboundBossEventPacket packet = factory.apply(this);
+ 
+             for (ServerPlayer player : this.players) {
+                 player.connection.send(packet);
+             }
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void addPlayer(final ServerPlayer player) {
+-        if (this.players.add(player) && this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.players.add(player) && this.visible.get()) { // Canvas - region threading
+             player.connection.send(ClientboundBossEventPacket.createAddPacket(this));
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void removePlayer(final ServerPlayer player) {
+-        if (this.players.remove(player) && this.visible) {
++        synchronized (playerLock) { // Canvas - region threading
++        if (this.players.remove(player) && this.visible.get()) { // Canvas - region threading
+             player.connection.send(ClientboundBossEventPacket.createRemovePacket(this.getId()));
+         }
++        } // Canvas - region threading
+     }
+ 
+     public void removeAllPlayers() {
++        synchronized (playerLock) { // Canvas - region threading
+         if (!this.players.isEmpty()) {
+             for (ServerPlayer player : Lists.newArrayList(this.players)) {
+                 this.removePlayer(player);
+             }
+         }
++        } // Canvas - region threading
+     }
+ 
+     public boolean isVisible() {
+-        return this.visible;
++        return this.visible.get(); // Canvas - region threading
+     }
+ 
+     public void setVisible(final boolean visible) {
+-        if (visible != this.visible) {
+-            this.visible = visible;
++        if (this.visible.compareAndSet(!visible, visible)) { // Canvas - region threading
+             this.setDirty();
+ 
++            synchronized (playerLock) { // Canvas - region threading
+             for (ServerPlayer player : this.players) {
+                 player.connection
+                     .send(visible ? ClientboundBossEventPacket.createAddPacket(this) : ClientboundBossEventPacket.createRemovePacket(this.getId()));
+             }
++            } // Canvas - region threading
+         }
+     }
  
 diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
 index 296d3c86aa83857190686fe28e98b452120dcd0d..3cfc0a9d45c0306b846daeb1b17be9484aebe8f7 100644
@@ -6728,7 +7218,7 @@ index 296d3c86aa83857190686fe28e98b452120dcd0d..3cfc0a9d45c0306b846daeb1b17be948
              }
  
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index 08b2748f3323650c563152da50fb36b63d0f8a41..38285ecfcb34a6daa2b2531a06ed438741fd0536 100644
+index 08b2748f3323650c563152da50fb36b63d0f8a41..7bc66e23f3aebc61eb3ab01066f60a5e497de0de 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -681,7 +681,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
@@ -6801,7 +7291,23 @@ index 08b2748f3323650c563152da50fb36b63d0f8a41..38285ecfcb34a6daa2b2531a06ed4387
                                  entity.checkDespawn();
                                  if (entity.isRemoved()) return; // Folia - region threading - if we despawned, DON'T TICK IT!
                                  if (true) { // Paper - rewrite chunk system
-@@ -1696,7 +1730,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -1262,6 +1296,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     }
+ 
+     public void advanceWeatherCycle() { // Folia - region threading - public
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot advance weather cycle async"); // Canvas - region threading
+         boolean wasRaining = this.isRaining();
+         if (this.canHaveWeather()) {
+             WeatherData weatherData = this.getWeatherData();
+@@ -1373,6 +1408,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+ 
+     @VisibleForTesting
+     public void resetWeatherCycle() {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot reset weather cycle async"); // Canvas - region threading
+         WeatherData weatherData = this.getWeatherData();
+         // CraftBukkit start
+         weatherData.setRaining(false, org.bukkit.event.weather.WeatherChangeEvent.Cause.SLEEP); // Paper - Add cause to Weather/ThunderChangeEvents
+@@ -1696,7 +1732,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
  
      // CraftBukkit start
      private boolean addEntity(final Entity entity, final org.bukkit.event.entity.CreatureSpawnEvent.@Nullable SpawnReason spawnReason) {
@@ -6810,7 +7316,7 @@ index 08b2748f3323650c563152da50fb36b63d0f8a41..38285ecfcb34a6daa2b2531a06ed4387
          entity.generation = false; // Paper - Don't fire sync event during generation; Reset flag if it was added during a ServerLevel generation process
          // Paper start - extra debug info
          if (entity.valid) {
-@@ -2897,7 +2931,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -2897,7 +2933,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
      }
  
      public boolean isCommandBlockEnabled() {
@@ -6820,7 +7326,7 @@ index 08b2748f3323650c563152da50fb36b63d0f8a41..38285ecfcb34a6daa2b2531a06ed4387
  
      public boolean isSpawnerBlockEnabled() {
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index 0abb26f6972b6355933992ffe24bb3bb599831f7..dbefc7bd4257286aabd6bcbb27acc0c5e00bda3e 100644
+index 0abb26f6972b6355933992ffe24bb3bb599831f7..15f34f15d23e256601d265b676c7ef496bb98dc3 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
 @@ -273,7 +273,40 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
@@ -7220,18 +7726,16 @@ index 0abb26f6972b6355933992ffe24bb3bb599831f7..dbefc7bd4257286aabd6bcbb27acc0c5
          } // else: do not bother teleporting to self
      }
      // Folia end - region threading
-@@ -3434,11 +3597,13 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -3434,11 +3597,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      }
  
      public void registerEnderPearl(final ThrownEnderpearl enderPearl) {
 -        //this.enderPearls.add(enderPearl); // Folia - region threading - do not track ender pearls
-+        if (!io.canvasmc.canvas.GlobalConfiguration.getInstance().restoreVanillaEnderPearlBehavior) return; // Canvas - restore vanilla ender pearl behavior
 +        this.enderPearls.add(enderPearl);
      }
  
      public void deregisterEnderPearl(final ThrownEnderpearl enderPearl) {
 -        //this.enderPearls.remove(enderPearl); // Folia - region threading - do not track ender pearls
-+        if (!io.canvasmc.canvas.GlobalConfiguration.getInstance().restoreVanillaEnderPearlBehavior) return; // Canvas - restore vanilla ender pearl behavior
 +        this.enderPearls.remove(enderPearl);
      }
  
@@ -7614,6 +8118,274 @@ index b455050c16946f54fc1d9893173777e39baf4290..ff28dfbc71e9935f67c02dbfc0e7a054
 +        // Canvas - region threading
      }
  }
+diff --git a/net/minecraft/world/BossEvent.java b/net/minecraft/world/BossEvent.java
+index 484f8da6c1b3f93088040899196ba017fc8fb7c7..7ea6227d6778d9f713569511445e542238532972 100644
+--- a/net/minecraft/world/BossEvent.java
++++ b/net/minecraft/world/BossEvent.java
+@@ -8,21 +8,34 @@ import net.minecraft.util.StringRepresentable;
+ 
+ public abstract class BossEvent {
+     private final UUID id;
+-    public Component name;
+-    protected float progress;
+-    public BossEvent.BossBarColor color;
+-    public BossEvent.BossBarOverlay overlay;
+-    protected boolean darkenScreen;
+-    protected boolean playBossMusic;
+-    protected boolean createWorldFog;
+-    public net.kyori.adventure.bossbar.BossBar adventure; // Paper
++    // Canvas start - region threading
++    public volatile net.kyori.adventure.bossbar.BossBar adventure; // Paper
++    public final io.canvasmc.canvas.util.LockedReference<VanillaBossData> vanillaBossData;
++
++    public record VanillaBossData(
++        Component name,
++        float progress,
++        BossBarColor color,
++        BossBarOverlay overlay,
++        boolean darkenScreen,
++        boolean playBossMusic,
++        boolean createWorldFog
++    ) {}
++    // Canvas end - region threading
+ 
+     public BossEvent(final UUID id, final Component name, final BossEvent.BossBarColor color, final BossEvent.BossBarOverlay overlay) {
+         this.id = id;
+-        this.name = name;
+-        this.color = color;
+-        this.overlay = overlay;
+-        this.progress = 1.0F;
++        // Canvas start - region threading
++        this.vanillaBossData = new io.canvasmc.canvas.util.LockedReference<>(new VanillaBossData(
++            name,
++            1.0F,
++            color,
++            overlay,
++            false,
++            false,
++            false
++        ));
++        // Canvas end - region threading
+     }
+ 
+     public UUID getId() {
+@@ -31,76 +44,202 @@ public abstract class BossEvent {
+ 
+     public Component getName() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.name()); // Paper
+-        return this.name;
++        return this.vanillaBossData.getValue().name(); // Canvas - region threading
+     }
+ 
+     public void setName(final Component name) {
+         if (this.adventure != null) this.adventure.name(io.papermc.paper.adventure.PaperAdventure.asAdventure(name)); // Paper
+-        this.name = name;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetName(final Component name) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (!com.google.common.base.Objects.equal(name, c.name)) {
++                changed.setTrue();
++                return new VanillaBossData(name, c.progress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public float getProgress() {
+         if (this.adventure != null) return this.adventure.progress(); // Paper
+-        return this.progress;
++        return this.vanillaBossData.getValue().progress(); // Canvas - region threading
+     }
+ 
+     public void setProgress(final float progress) {
+         if (this.adventure != null) this.adventure.progress(progress); // Paper
+-        this.progress = progress;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetProgress(final float newProgress) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.progress != newProgress) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, newProgress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public BossEvent.BossBarColor getColor() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.color()); // Paper
+-        return this.color;
++        return this.vanillaBossData.getValue().color(); // Canvas - region threading
+     }
+ 
+     public void setColor(final BossEvent.BossBarColor color) {
+         if (this.adventure != null) this.adventure.color(io.papermc.paper.adventure.PaperAdventure.asAdventure(color)); // Paper
+-        this.color = color;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, color, previous.overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetColor(final BossEvent.BossBarColor color) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.color != color) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, color, c.overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public BossEvent.BossBarOverlay getOverlay() {
+         if (this.adventure != null) return io.papermc.paper.adventure.PaperAdventure.asVanilla(this.adventure.overlay()); // Paper
+-        return this.overlay;
++        return this.vanillaBossData.getValue().overlay(); // Canvas - region threading
+     }
+ 
+     public void setOverlay(final BossEvent.BossBarOverlay overlay) {
+         if (this.adventure != null) this.adventure.overlay(io.papermc.paper.adventure.PaperAdventure.asAdventure(overlay)); // Paper
+-        this.overlay = overlay;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, overlay, previous.darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetOverlay(final BossEvent.BossBarOverlay overlay) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.overlay != overlay) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, overlay, c.darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public boolean shouldDarkenScreen() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.DARKEN_SCREEN); // Paper
+-        return this.darkenScreen;
++        return this.vanillaBossData.getValue().darkenScreen(); // Canvas - region threading
+     }
+ 
+     public BossEvent setDarkenScreen(final boolean darkenScreen) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.DARKEN_SCREEN, darkenScreen); // Paper
+-        this.darkenScreen = darkenScreen;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, darkenScreen, previous.playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetDarkenScreen(final boolean darkenScreen) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.darkenScreen != darkenScreen) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, darkenScreen, c.playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public boolean shouldPlayBossMusic() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.PLAY_BOSS_MUSIC); // Paper
+-        return this.playBossMusic;
++        return this.vanillaBossData.getValue().playBossMusic(); // Canvas - region threading
+     }
+ 
+     public BossEvent setPlayBossMusic(final boolean playBossMusic) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.PLAY_BOSS_MUSIC, playBossMusic); // Paper
+-        this.playBossMusic = playBossMusic;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, playBossMusic, previous.createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
++    // Canvas start - region threading
++
++    public boolean compareAndSetPlayBossMusic(final boolean playBossMusic) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.playBossMusic != playBossMusic) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, c.darkenScreen, playBossMusic, c.createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
++    }
++    // Canvas end - region threading
+ 
+     public BossEvent setCreateWorldFog(final boolean createWorldFog) {
+         if (this.adventure != null) io.papermc.paper.adventure.PaperAdventure.setFlag(this.adventure, net.kyori.adventure.bossbar.BossBar.Flag.CREATE_WORLD_FOG, createWorldFog); // Paper
+-        this.createWorldFog = createWorldFog;
++        // Canvas start - region threading
++        this.vanillaBossData.swapValue((previous) ->
++            new VanillaBossData(previous.name, previous.progress, previous.color, previous.overlay, previous.darkenScreen, previous.playBossMusic, createWorldFog)
++        );
++        // Canvas end - region threading
+         return this;
+     }
+ 
+     public boolean shouldCreateWorldFog() {
+         if (this.adventure != null) return this.adventure.hasFlag(net.kyori.adventure.bossbar.BossBar.Flag.CREATE_WORLD_FOG); // Paper
+-        return this.createWorldFog;
++        return this.vanillaBossData.getValue().createWorldFog(); // Canvas - region threading
++    }
++    // Canvas start - region threading
++
++    public boolean compareAndSetCreateWorldFog(final boolean createWorldFog) {
++        final org.apache.commons.lang3.mutable.MutableBoolean changed = new org.apache.commons.lang3.mutable.MutableBoolean(false);
++        this.vanillaBossData.swapValue((c) -> {
++            if (c.createWorldFog != createWorldFog) {
++                changed.setTrue();
++                return new VanillaBossData(c.name, c.progress, c.color, c.overlay, c.darkenScreen, c.playBossMusic, createWorldFog);
++            }
++            return c;
++        });
++        return changed.isTrue();
+     }
++    // Canvas end - region threading
+ 
+     public enum BossBarColor implements StringRepresentable {
+         PINK("pink", ChatFormatting.RED),
 diff --git a/net/minecraft/world/Stopwatches.java b/net/minecraft/world/Stopwatches.java
 index 4fda3efe9eb24bdb1828078b3c296c497bd211d3..1ca622a587ac55ae893ff78b83ea87725062f171 100644
 --- a/net/minecraft/world/Stopwatches.java
@@ -7665,6 +8437,62 @@ index 4fda3efe9eb24bdb1828078b3c296c497bd211d3..1ca622a587ac55ae893ff78b83ea8772
          boolean removed = this.stopwatches.remove(id) != null;
          if (removed) {
              this.setDirty();
+diff --git a/net/minecraft/world/clock/ServerClockManager.java b/net/minecraft/world/clock/ServerClockManager.java
+index e928fd280db1779c3b9c6625795bae6d648f3f9e..35fcdc983da33142890d1fb2f6123d391608706d 100644
+--- a/net/minecraft/world/clock/ServerClockManager.java
++++ b/net/minecraft/world/clock/ServerClockManager.java
+@@ -57,6 +57,22 @@ public class ServerClockManager extends SavedData implements ClockManager {
+             ServerClockManager.ClockInstance instance = this.getInstance((Holder<WorldClock>)definition);
+             instance.loadFrom(state);
+         });
++        // Canvas start - region threading
++
++        // after init, technically Minecraft doesn't register anything else
++        // beyond that point except for during reload, which we disable
++
++        // as such, we set all of this to immutable collections to ensure
++        // that this does not change, making this thread-safe
++
++        // note: timelines are safe
++
++        this.clocks = com.google.common.collect.ImmutableMap.copyOf(this.clocks);
++
++        for (final ServerClockManager.ClockInstance value : this.clocks.values()) {
++            value.timeMarkers = com.google.common.collect.ImmutableMap.copyOf(value.timeMarkers);
++        }
++        // Canvas end - region threading
+     }
+ 
+     private void registerTimeMarker(final ResourceKey<ClockTimeMarker> timeMarkerId, final ClockTimeMarker timeMarker) {
+@@ -64,10 +80,12 @@ public class ServerClockManager extends SavedData implements ClockManager {
+     }
+ 
+     public PackedClockStates packState() {
++        io.canvasmc.canvas.util.TickGuard.ensureGlobalOrStartup("Cannot pack clocks async"); // Canvas - region threading
+         return new PackedClockStates(Util.mapValues(this.clocks, ServerClockManager.ClockInstance::packState));
+     }
+ 
+     public void tick() {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot tick clocks async"); // Canvas - region threading
+         boolean advanceTime = this.advanceTime(); // Paper - per-world time
+         if (advanceTime) {
+             this.clocks.values().forEach(ServerClockManager.ClockInstance::tick);
+@@ -126,6 +144,7 @@ public class ServerClockManager extends SavedData implements ClockManager {
+     }
+ 
+     private void modifyClock(final Holder<WorldClock> clock, final Consumer<? super ServerClockManager.ClockInstance> action) {
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify clock async"); // Canvas - region threading
+         ServerClockManager.ClockInstance instance = this.getInstance(clock);
+         action.accept(instance);
+         // Paper start - per-world time
+@@ -216,6 +235,7 @@ public class ServerClockManager extends SavedData implements ClockManager {
+         }
+ 
+         public void tick() {
++            io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot tick clock async"); // Canvas - region threading
+             if (!this.paused) {
+                 this.partialTick = this.partialTick + this.rate;
+                 int fullTicks = Mth.floor(this.partialTick);
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
 index e2dbb8102d727d7c7ad235a4819fff3746dc746e..418ee3103d303d82de5f46a5c2073524c4dcc3c9 100644
 --- a/net/minecraft/world/entity/Entity.java
@@ -8783,28 +9611,96 @@ index eb52accfdd16a07b2e59a2e65c1007e8920aea36..18c5121d24268cfa5fa7ed22b1dce93a
  
      public void postProcessGeneration(final ServerLevel level) {
          ChunkPos chunkPos = this.getPos();
-diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
-index 81c1541d8fa272e84316e87c3418ee727111a65c..0b99cf09d3abeb06ea4f653b63a96185c069eab6 100644
---- a/net/minecraft/world/level/storage/SavedDataStorage.java
-+++ b/net/minecraft/world/level/storage/SavedDataStorage.java
-@@ -216,6 +216,52 @@ public class SavedDataStorage implements AutoCloseable {
+diff --git a/net/minecraft/world/level/dimension/end/EnderDragonFight.java b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+index 3ce10f02a531d791ec896c757f4f0654d1c4a7fd..a60bd4e827d8c264b61fc8f3d57ae7cdef5661a7 100644
+--- a/net/minecraft/world/level/dimension/end/EnderDragonFight.java
++++ b/net/minecraft/world/level/dimension/end/EnderDragonFight.java
+@@ -223,7 +223,34 @@ public class EnderDragonFight extends SavedData {
+         } else {
+             this.level.getChunkSource().removeTicketWithRadius(TicketType.DRAGON, new ChunkPos(0, 0), 9);
          }
++        autosaveTick(); // Canvas - region threading
      }
-     // Folia end - region threading
 +    // Canvas start - region threading
++    private long lastDragonFightSave = System.nanoTime();
++    public volatile boolean forceSaveAttemptOnNextTick = false;
 +
-+    @SafeVarargs
-+    public final CompletableFuture<?> saveSpecific(final Class<? extends SavedData>... classTypes) {
-+        Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
-+        RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
-+        for (Map.Entry<SavedDataType<?>, Optional<SavedData>> entry : this.cache.entrySet()) {
-+            SavedDataType<?> key = entry.getKey();
-+            SavedData state = entry.getValue().orElse(null);
++    private void autosaveTick() {
++        final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
 +
-+            if (state == null || !state.isDirty()) {
-+                continue;
++        final int autoSavePeriod = server.autosavePeriod;
++        if (!forceSaveAttemptOnNextTick && autoSavePeriod <= 0) return;
++        final long periodNanos = autoSavePeriod * io.papermc.paper.threadedregions.TickRegionScheduler.getTimeBetweenTicks();
++        final long currTime = System.nanoTime();
++        final long last = lastDragonFightSave;
++
++        if (forceSaveAttemptOnNextTick || ((currTime - last) > periodNanos)) {
++            lastDragonFightSave = currTime;
++            forceSaveAttemptOnNextTick = false;
++
++            if (!isDirty()) {
++                return;
 +            }
 +
++            LOGGER.info("Auto saving dirty dragon fight data");
++            level.getDataStorage().saveSpecific(() -> List.of(EnderDragonFight.class));
++        }
++    }
++    // Canvas end - region threading
+ 
+     private void scanState() {
+         LOGGER.info("Scanning for legacy world dragon fight...");
+diff --git a/net/minecraft/world/level/gamerules/GameRuleMap.java b/net/minecraft/world/level/gamerules/GameRuleMap.java
+index f5d9d66d51a42b954f02426461851bbd7f5ca843..293b5aad12fd30a689e830922bdf2cdcd0bc2529 100644
+--- a/net/minecraft/world/level/gamerules/GameRuleMap.java
++++ b/net/minecraft/world/level/gamerules/GameRuleMap.java
+@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
+ 
+ public final class GameRuleMap extends SavedData {
+     public static final Codec<GameRuleMap> CODEC = Codec.<GameRule<?>, Object>dispatchedMap(BuiltInRegistries.GAME_RULE.byNameCodec(), GameRule::valueCodec)
+-        .xmap(GameRuleMap::ofTrusted, GameRuleMap::map);
++        .xmap(GameRuleMap::ofTrusted, gameRuleMap -> copyOf(gameRuleMap).map()); // Canvas - region threading
+     public static final SavedDataType<GameRuleMap> TYPE = new SavedDataType<>(
+         Identifier.withDefaultNamespace("game_rules"), GameRuleMap::of, CODEC, DataFixTypes.SAVED_DATA_GAME_RULES
+     );
+@@ -78,8 +78,8 @@ public final class GameRuleMap extends SavedData {
+         return (T)this.map.remove(gameRule);
+     }
+ 
+-    public Set<GameRule<?>> keySet() {
+-        return this.map.keySet();
++    public synchronized Set<GameRule<?>> keySet() { // Canvas - region threading
++        return Set.copyOf(this.map.keySet()); // Canvas - region threading
+     }
+ 
+     public synchronized int size() { // Folia - region threading
+diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
+index 81c1541d8fa272e84316e87c3418ee727111a65c..b1aba6a06c7204536be634132e56b6fbeea9e9fe 100644
+--- a/net/minecraft/world/level/storage/SavedDataStorage.java
++++ b/net/minecraft/world/level/storage/SavedDataStorage.java
+@@ -183,7 +183,15 @@ public class SavedDataStorage implements AutoCloseable {
+     }
+ 
+     // Folia start - region threading
+-    public CompletableFuture<?> saveMaps() {
++    // Canvas start - region threading
++
++    // completely change the old "saveMaps" function
++    // by using this we can be more specific on what
++    // we want to actually save
++
++    public final CompletableFuture<?> saveSpecific(final java.util.function.Supplier<List<Class<? extends SavedData>>> classTypesSupplier) {
++        final List<Class<? extends SavedData>> classTypes = classTypesSupplier.get();
++    // Canvas end - region threading
+         Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
+         RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
+         for (Map.Entry<SavedDataType<?>, Optional<SavedData>> entry : this.cache.entrySet()) {
+@@ -194,7 +202,19 @@ public class SavedDataStorage implements AutoCloseable {
+                 continue;
+             }
+ 
+-            if (!(state instanceof net.minecraft.world.level.saveddata.maps.MapItemSavedData || state instanceof net.minecraft.world.level.saveddata.maps.MapIndex)) {
++            // Canvas start - region threading
 +            // check if the type passes, since we only want specific data to pass through
 +            // similar to how Folia does the saveMaps function
 +
@@ -8816,30 +9712,10 @@ index 81c1541d8fa272e84316e87c3418ee727111a65c..0b99cf09d3abeb06ea4f653b63a96185
 +                }
 +            }
 +            if (!pass) {
-+                continue;
-+            }
-+
-+            state.setDirty(false);
-+
-+            savedData.put(key, this.encodeUnchecked(key, state, registryOps));
-+        }
-+
-+        if (savedData.isEmpty()) {
-+            return CompletableFuture.completedFuture(null);
-+        } else {
-+            this.pendingWriteFuture = this.pendingWriteFuture
-+                .thenCompose(
-+                    v -> CompletableFuture.allOf(
-+                        savedData.entrySet().stream().map(entry -> CompletableFuture.runAsync(() -> tryWrite(entry.getKey(), entry.getValue()), Util.DIMENSION_DATA_IO_POOL)).toArray(CompletableFuture[]::new)
-+                    )
-+                );
-+            return this.pendingWriteFuture;
-+        }
-+    }
-+    // Canvas end - region threading
++            // Canvas end - region threading
+                 continue;
+             }
  
-     public CompletableFuture<?> scheduleSave() {
-         if (this.closed) {
 diff --git a/net/minecraft/world/scores/Objective.java b/net/minecraft/world/scores/Objective.java
 index 64ea4741b7ed58fe7914b9431353abd1f658a935..d4ddbdf895e19cf15929bc6ba4ea2258ab92d0da 100644
 --- a/net/minecraft/world/scores/Objective.java
