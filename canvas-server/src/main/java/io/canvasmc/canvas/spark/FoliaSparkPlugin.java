@@ -6,7 +6,7 @@ import io.canvasmc.canvas.spark.plugin.FoliaPlayerPingProvider;
 import io.canvasmc.canvas.spark.plugin.FoliaServerConfigProvider;
 import io.canvasmc.canvas.spark.plugin.FoliaTickStatistics;
 import io.canvasmc.canvas.spark.plugin.FoliaWorldInfoProvider;
-import io.canvasmc.canvas.spark.profiler.RegionThreadDumper;
+import io.canvasmc.canvas.threadedregions.profiler.RegionThreadDumper;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;

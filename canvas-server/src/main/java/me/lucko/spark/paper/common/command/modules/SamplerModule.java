@@ -21,8 +21,8 @@
 package me.lucko.spark.paper.common.command.modules;
 
 import com.google.common.collect.Iterables;
-import io.canvasmc.canvas.spark.profiler.ByNameThreadGrouper;
-import io.canvasmc.canvas.spark.profiler.RegionProfiler;
+import io.canvasmc.canvas.threadedregions.profiler.ByNameThreadGrouper;
+import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
 import io.canvasmc.canvas.threadedregions.SchedulerUtil;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -37,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
+import io.canvasmc.canvas.threadedregions.profiler.RegionScheduleHandlePinner;
 import me.lucko.spark.paper.common.SparkPlatform;
 import me.lucko.spark.paper.common.activitylog.Activity;
 import me.lucko.spark.paper.common.command.Arguments;
@@ -385,7 +386,7 @@ public class SamplerModule implements CommandModule {
             RegionProfiler.computeProfilePin(
                 (str) -> resp.replyPrefixed(text(str)),
                 (str) -> resp.replyPrefixed(text(str, RED)),
-                new io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner.RegionPinner(
+                new RegionScheduleHandlePinner.RegionPinner(
                     new net.minecraft.server.level.ColumnPos(minBlockX, minBlockZ), // min
                     new net.minecraft.server.level.ColumnPos(maxBlockX, maxBlockZ), // max
                     ((org.bukkit.craftbukkit.entity.CraftPlayer) player).getHandle().level()
@@ -397,7 +398,7 @@ public class SamplerModule implements CommandModule {
             RegionProfiler.computeProfilePin(
                 (str) -> resp.replyPrefixed(text(str)),
                 (str) -> resp.replyPrefixed(text(str, RED)),
-                new io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner.GlobalTickPinner(),
+                new RegionScheduleHandlePinner.GlobalTickPinner(),
                 pinCallback
             );
         } else pinCallback.run();

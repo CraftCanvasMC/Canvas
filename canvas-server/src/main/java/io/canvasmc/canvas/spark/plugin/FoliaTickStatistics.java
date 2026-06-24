@@ -1,6 +1,6 @@
 package io.canvasmc.canvas.spark.plugin;
 
-import io.canvasmc.canvas.spark.profiler.RegionProfiler;
+import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;

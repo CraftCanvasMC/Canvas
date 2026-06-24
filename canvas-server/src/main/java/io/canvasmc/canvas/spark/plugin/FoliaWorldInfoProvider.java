@@ -2,8 +2,8 @@ package io.canvasmc.canvas.spark.plugin;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
 import io.canvasmc.canvas.spark.FoliaSparkPlugin;
-import io.canvasmc.canvas.spark.profiler.RegionProfiler;
-import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
+import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
+import io.canvasmc.canvas.threadedregions.profiler.RegionScheduleHandlePinner;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
