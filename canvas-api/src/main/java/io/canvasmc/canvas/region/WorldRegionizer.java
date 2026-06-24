@@ -24,7 +24,7 @@ public interface WorldRegionizer {
      * @param forEach
      *     The consumer to apply to each {@link ChunkRegion}.
      */
-    void computeForAllChunkRegions(Consumer<ChunkRegion> forEach);
+    void computeForAllChunkRegions(final Consumer<ChunkRegion> forEach);
 
     /**
      * Iterates over all chunk regions without synchronization.
@@ -35,7 +35,7 @@ public interface WorldRegionizer {
      * @param forEach
      *     The consumer to apply to each {@link ChunkRegion}.
      */
-    void computeForAllChunkRegionsUnsynchronized(Consumer<ChunkRegion> forEach);
+    void computeForAllChunkRegionsUnsynchronized(final Consumer<ChunkRegion> forEach);
 
     /**
      * Returns the bit shift used to map chunk coordinates to section (region) coordinates.
@@ -173,6 +173,37 @@ public interface WorldRegionizer {
          * @return The regionizer managing this region.
          */
         WorldRegionizer getRegionizer();
+
+        /**
+         * Gets the averaged MSPT in the time frame provided
+         *
+         * @param timeFrame
+         *     the frame to return
+         *
+         * @return the MSPT of the region
+         */
+        double getMSPT(final Frame timeFrame);
+
+        /**
+         * Gets the averaged TPS in the time frame provided
+         *
+         * @param timeFrame
+         *     the frame to return
+         *
+         * @return the TPS of the region
+         */
+        double getTPS(final Frame timeFrame);
+
+        /**
+         * Represents a time frame
+         */
+        enum Frame {
+            _5_SECONDS,
+            _15_SECONDS,
+            _1_MINUTE,
+            _5_MINUTES,
+            _15_MINUTES
+        }
 
         /**
          * Represents the lifecycle state of a {@link ChunkRegion}.
