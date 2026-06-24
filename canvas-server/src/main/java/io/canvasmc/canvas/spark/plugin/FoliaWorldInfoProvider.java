@@ -63,7 +63,7 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
                 RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
                     level, target.x(), target.z(), () -> {
                         // we are scheduled to the region here, fetch localized information
-                        RegionizedWorldData localWorldData = level.getCurrentWorldData();
+                        final RegionizedWorldData localWorldData = level.getCurrentWorldData();
 
                         int players = localWorldData.getPlayerCount();
                         int entities = localWorldData.getEntityCount();
@@ -124,8 +124,8 @@ public class FoliaWorldInfoProvider implements WorldInfoProvider {
 
                 RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
                     level, target.x(), target.z(), () -> {
-                        List<FoliaChunkInfo> chunks = new ArrayList<>();
-                        RegionizedWorldData worldData = level.getCurrentWorldData();
+                        final List<FoliaChunkInfo> chunks = new ArrayList<>();
+                        final RegionizedWorldData worldData = level.getCurrentWorldData();
                         for (final LevelChunk nms : worldData.getChunks()) {
                             chunks.add(new FoliaChunkInfo(new CraftChunk(nms), level.getWorld(), this.plugin));
                         }
