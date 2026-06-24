@@ -4,8 +4,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
 [![GitHub forks](https://img.shields.io/github/forks/CraftCanvasMC/Canvas)](https://github.com/CraftCanvasMC/Canvas)  
 
-CanvasMC is a high performance fork of Folia aiming to provide a stable and consistent region threading environment, alongside tons
-of optimizations and performance features for large scale servers.
+CanvasMC is a high performance fork of Folia aiming to provide a stable and consistent region threading environment, alongside tons of optimizations and performance features for large scale servers.
 
 ---
 [![bStats Graph Data](https://bstats.org/signatures/server-implementation/Canvas.svg)](https://bstats.org/plugin/server-implementation/Canvas)
