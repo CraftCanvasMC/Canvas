@@ -195,6 +195,18 @@ public interface WorldRegionizer {
         double getTPS(final Frame timeFrame);
 
         /**
+         * Gets the averaged CPU utilization in the time frame provided
+         *
+         * @param timeFrame
+         *     the frame to return
+         *
+         * @return the CPU utilization of the region
+         *
+         * @implNote The returned {@code double} is always between {code 0} and {@code 1}
+         */
+        double getUtilization(final Frame timeFrame);
+
+        /**
          * Represents a time frame
          */
         enum Frame {
