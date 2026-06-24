@@ -32,7 +32,7 @@ public interface RegionThreadingTickManager {
      * @throws java.lang.NullPointerException
      *     if there is no region loaded at the provided chunk
      */
-    RegionHandle getHandleAt(Chunk chunk);
+    RegionHandle getHandleAt(final Chunk chunk);
 
     /**
      * Gets the global region tick handle With that, you can post actions to modify the tick state
@@ -85,7 +85,7 @@ public interface RegionThreadingTickManager {
          * @param ticks
          *     the amount of ticks to sprint
          */
-        void sprint(int ticks);
+        void sprint(final int ticks);
 
         /**
          * Gets if the region should be running game elements currently.

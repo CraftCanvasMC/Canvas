@@ -49,7 +49,7 @@ public interface RegionTickData {
      *
      * @return the fetched or created regionized data
      */
-    <T> T getOrCreateFromIRegionizedData(IRegionizedData<T> regionizedData);
+    <T> T getOrCreateFromIRegionizedData(final IRegionizedData<T> regionizedData);
 
     /**
      * Gets the tick state manager for this region
@@ -82,7 +82,7 @@ public interface RegionTickData {
          *
          * @return A new instance of the data for the specified region.
          */
-        T createValue(RegionTickData tickData);
+        T createValue(final RegionTickData tickData);
 
         /**
          * Returns the merge/split callback
