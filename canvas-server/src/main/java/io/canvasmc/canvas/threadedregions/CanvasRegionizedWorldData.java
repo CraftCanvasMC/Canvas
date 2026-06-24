@@ -1,7 +1,10 @@
-package io.canvasmc.canvas.world;
+package io.canvasmc.canvas.threadedregions;
 
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.region.RegionTickData;
+import io.canvasmc.canvas.world.RegionResourceBar;
+import io.canvasmc.canvas.world.RegionizedRamBar;
+import io.canvasmc.canvas.world.RegionizedTpsBar;
 import io.canvasmc.canvas.world.chunk.NatureSpawnChunkMap;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;

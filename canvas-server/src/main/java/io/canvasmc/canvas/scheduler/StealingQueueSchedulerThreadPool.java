@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.tick;
+package io.canvasmc.canvas.scheduler;
 
 import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
 import ca.spottedleaf.concurrentutil.scheduler.Scheduler;

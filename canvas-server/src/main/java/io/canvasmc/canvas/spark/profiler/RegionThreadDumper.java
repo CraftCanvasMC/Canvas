@@ -1,6 +1,6 @@
 package io.canvasmc.canvas.spark.profiler;
 
-import io.canvasmc.canvas.tick.SchedulerUtil;
+import io.canvasmc.canvas.threadedregions.SchedulerUtil;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.util.HashMap;

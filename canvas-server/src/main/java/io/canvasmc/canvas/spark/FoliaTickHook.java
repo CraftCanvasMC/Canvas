@@ -1,6 +1,6 @@
 package io.canvasmc.canvas.spark;
 
-import io.canvasmc.canvas.tick.SchedulerUtil;
+import io.canvasmc.canvas.threadedregions.SchedulerUtil;
 import me.lucko.spark.paper.common.tick.AbstractTickHook;
 import me.lucko.spark.paper.common.tick.TickHook;
 

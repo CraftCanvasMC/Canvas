@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.command.execution;
+package io.canvasmc.canvas.threadedregions.commands;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
 import ca.spottedleaf.moonrise.common.util.TickThread;

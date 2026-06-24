@@ -15,7 +15,7 @@ import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import io.canvasmc.canvas.command.SubCommand;
-import io.canvasmc.canvas.tick.ScheduledHandleTickState;
+import io.canvasmc.canvas.threadedregions.ScheduledHandleTickState;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;

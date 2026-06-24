@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.world.waypoints;
+package io.canvasmc.canvas.threadedregions.waypoints;
 
 import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -9,7 +9,6 @@ import java.util.Set;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.waypoints.ServerWaypointManager;
-import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.waypoints.WaypointTransmitter;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;

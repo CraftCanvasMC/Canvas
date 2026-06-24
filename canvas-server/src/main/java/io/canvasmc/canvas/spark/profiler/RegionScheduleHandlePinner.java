@@ -7,7 +7,7 @@ import ca.spottedleaf.moonrise.common.util.TickThread;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.Dynamic2CommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
-import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
+import io.canvasmc.canvas.scheduler.AffinitySchedulerThreadPool;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;

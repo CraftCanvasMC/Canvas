@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.world.entity;
+package io.canvasmc.canvas.threadedregions.entities;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.MoverType;

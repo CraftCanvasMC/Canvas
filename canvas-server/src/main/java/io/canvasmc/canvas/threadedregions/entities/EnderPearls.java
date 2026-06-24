@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.world.entity;
+package io.canvasmc.canvas.threadedregions.entities;
 
 import ca.spottedleaf.concurrentutil.util.Priority;
 import com.mojang.logging.LogUtils;
@@ -11,7 +11,6 @@ import io.canvasmc.canvas.util.Util;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;

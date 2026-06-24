@@ -23,7 +23,7 @@ package me.lucko.spark.paper.common.command.modules;
 import com.google.common.collect.Iterables;
 import io.canvasmc.canvas.spark.profiler.ByNameThreadGrouper;
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
-import io.canvasmc.canvas.tick.SchedulerUtil;
+import io.canvasmc.canvas.threadedregions.SchedulerUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

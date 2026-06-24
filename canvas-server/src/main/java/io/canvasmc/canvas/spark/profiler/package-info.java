@@ -125,7 +125,7 @@
  * <p>
  * Utilizing our spark plugin internals, we create an interchangeable system that swaps
  * between REGEX pattern-based matching and thread name matching, since
- * {@link io.canvasmc.canvas.spark.profiler.RegionProfiler#STATE} can provide us with the {@link io.canvasmc.canvas.tick.AffinitySchedulerThreadPool.TickThreadRunner}
+ * {@link io.canvasmc.canvas.spark.profiler.RegionProfiler#STATE} can provide us with the {@link io.canvasmc.canvas.scheduler.AffinitySchedulerThreadPool.TickThreadRunner}
  * we are actively profiling. When there are no regions pinned, the system defaults to
  * the standard REGEX pattern, {@code "Region Scheduler Thread #\d+"}.
  * </p>

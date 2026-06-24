@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.world.scores;
+package io.canvasmc.canvas.threadedregions.scores;
 
 import net.minecraft.network.chat.numbers.NumberFormat;
 import net.minecraft.world.scores.ReadOnlyScoreInfo;

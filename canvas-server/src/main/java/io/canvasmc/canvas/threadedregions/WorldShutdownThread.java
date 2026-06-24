@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.world;
+package io.canvasmc.canvas.threadedregions;
 
 import com.google.common.base.Preconditions;
 import com.mojang.logging.LogUtils;

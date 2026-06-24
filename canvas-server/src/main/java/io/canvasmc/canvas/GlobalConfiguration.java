@@ -7,7 +7,7 @@ import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
-import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
+import io.canvasmc.canvas.scheduler.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;

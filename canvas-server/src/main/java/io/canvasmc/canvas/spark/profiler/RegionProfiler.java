@@ -2,8 +2,8 @@ package io.canvasmc.canvas.spark.profiler;
 
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
-import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
-import io.canvasmc.canvas.tick.SchedulerUtil;
+import io.canvasmc.canvas.scheduler.AffinitySchedulerThreadPool;
+import io.canvasmc.canvas.threadedregions.SchedulerUtil;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
 import io.papermc.paper.util.MCUtil;

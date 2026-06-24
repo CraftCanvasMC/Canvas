@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.command.execution;
+package io.canvasmc.canvas.threadedregions.commands;
 
 import java.util.function.Function;
 import org.jetbrains.annotations.Contract;

@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.tick;
+package io.canvasmc.canvas.threadedregions;
 
 import io.canvasmc.canvas.region.RegionThreadingTickManager;
 import io.papermc.paper.threadedregions.RegionizedServer;

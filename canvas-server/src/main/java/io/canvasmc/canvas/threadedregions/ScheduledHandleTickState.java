@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.tick;
+package io.canvasmc.canvas.threadedregions;
 
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.papermc.paper.threadedregions.RegionizedServer;
@@ -13,7 +13,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import org.jspecify.annotations.NonNull;
 
-// Note: if anything is Long.MIN_VALUE, it isn't set
+// note: if anything is Long.MIN_VALUE, it isn't set
 public final class ScheduledHandleTickState {
     public static final long UNSET = Long.MIN_VALUE;
 

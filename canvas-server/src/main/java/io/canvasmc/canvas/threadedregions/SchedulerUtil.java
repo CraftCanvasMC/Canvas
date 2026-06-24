@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.tick;
+package io.canvasmc.canvas.threadedregions;
 
 import ca.spottedleaf.concurrentutil.numa.OSNuma;
 import ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool;
@@ -8,6 +8,7 @@ import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.spark.profiler.RegionProfiler;
 import io.canvasmc.canvas.spark.profiler.RegionScheduleHandlePinner;
+import io.canvasmc.canvas.scheduler.AffinitySchedulerThreadPool;
 import io.papermc.paper.threadedregions.ThreadedRegionizer;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import io.papermc.paper.threadedregions.TickRegions;
@@ -158,10 +159,10 @@ public class SchedulerUtil {
     /**
      * The scheduler handle for the server. This is for region profiler hooks to try and help with injection points
      * <p>
-     * The only valid implementations of this are {@link io.canvasmc.canvas.tick.SchedulerUtil.NullHandler} and
-     * {@link io.canvasmc.canvas.tick.SchedulerUtil.AffinityHandler}. The null handler is for schedulers that do not
+     * The only valid implementations of this are {@link SchedulerUtil.NullHandler} and
+     * {@link SchedulerUtil.AffinityHandler}. The null handler is for schedulers that do not
      * support region profiling, the affinity handler is specifically for the
-     * {@link io.canvasmc.canvas.tick.AffinitySchedulerThreadPool affinity scheduler}, which does support region
+     * {@link io.canvasmc.canvas.scheduler.AffinitySchedulerThreadPool affinity scheduler}, which does support region
      * profiling
      */
     public sealed interface SchedulerHandler permits NullHandler, AffinityHandler {
