@@ -41,6 +41,34 @@ public class Util {
     private static final ThreadLocal<XoroshiroRandomSource> xoroshiro = ThreadLocal.withInitial(() -> new XoroshiroRandomSource(0L, 0L));
     private static final ThreadLocal<SingleThreadedRandomSource> simple = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));
 
+    private static @NonNull String scale(long nanos) {
+        if (nanos < 1_000L)
+            return nanos + "ns";
+
+        if (nanos < 1_000_000_000L) {
+            long ms = nanos / 1_000_000L;
+            return ms + "ms";
+        }
+
+        final long seconds = nanos / 1_000_000_000L;
+
+        if (seconds < 60)
+            return seconds + "s";
+
+        if (seconds < 3_600)
+            return plural(seconds / 60, "minute");
+
+        if (seconds < 86_400)
+            return plural(seconds / 3_600, "hour");
+
+        return plural(seconds / 86_400, "day");
+    }
+
+    @Contract(pure = true)
+    private static @NonNull String plural(long value, String unit) {
+        return value + " " + unit + (value == 1 ? "" : "s");
+    }
+
     public static void derive(PositionalRandomFactory deriver, RandomSource random, int x, int y, int z) {
         if (deriver instanceof final XoroshiroRandomSource.XoroshiroPositionalRandomFactory deriver1) {
             final Xoroshiro128PlusPlus implementation = ((XoroshiroRandomSource) random).randomNumberGenerator;
@@ -148,6 +176,7 @@ public class Util {
      * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
      * part at the start of the string if the namespace is
      * {@link net.minecraft.resources.Identifier#DEFAULT_NAMESPACE}.
+     *
      * @param level
      *     the level
      *
@@ -220,6 +249,15 @@ public class Util {
         }
 
         return result.toString();
+    }
+
+    public static @NonNull String formatScheduled(long currentNanos, long targetNanos) {
+        final long diffNanos = targetNanos - currentNanos;
+        final boolean past = diffNanos < 0;
+        final long abs = Math.abs(diffNanos);
+        final String amount = scale(abs);
+
+        return past ? amount + " ago" : "in " + amount;
     }
 
     public static final class Gradient {

@@ -945,10 +945,10 @@ index 15568f598b8c61cf92563b6a7f8cae526b84484e..8d2518600ad518999b75124f0a87db9e
                  if (chunk == null) {
 diff --git a/io/canvasmc/canvas/threadedregions/ScheduledHandleTickState.java b/io/canvasmc/canvas/threadedregions/ScheduledHandleTickState.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..4ad20c0ed2ef0725d0f3517ad3f18a3fce4b4165
+index 0000000000000000000000000000000000000000..d2c6036352cda8bcaac36a4093d2853997292517
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/ScheduledHandleTickState.java
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,188 @@
 +package io.canvasmc.canvas.threadedregions;
 +
 +import io.canvasmc.canvas.GlobalConfiguration;
@@ -1101,6 +1101,7 @@ index 0000000000000000000000000000000000000000..4ad20c0ed2ef0725d0f3517ad3f18a3f
 +            "tickCountToSprintTo=" + tickCountToSprintTo +
 +            ", startSprintNanos=" + startSprintNanos +
 +            ", scheduleHandle=" + getString() +
++            ", runsGameElements=" + runsGameElements +
 +            "}";
 +    }
 +
@@ -1138,10 +1139,10 @@ index 0000000000000000000000000000000000000000..4ad20c0ed2ef0725d0f3517ad3f18a3f
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/SchedulerUtil.java b/io/canvasmc/canvas/threadedregions/SchedulerUtil.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f01c983d6627585a3d2e116c48b7a57c1c51c188
+index 0000000000000000000000000000000000000000..9cd3b82a1d5ecc3f84d577b9f12a97647a6582c8
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/SchedulerUtil.java
-@@ -0,0 +1,349 @@
+@@ -0,0 +1,361 @@
 +package io.canvasmc.canvas.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.numa.OSNuma;
@@ -1153,6 +1154,7 @@ index 0000000000000000000000000000000000000000..f01c983d6627585a3d2e116c48b7a57c
 +import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
 +import io.canvasmc.canvas.threadedregions.profiler.RegionScheduleHandlePinner;
 +import io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool;
++import io.canvasmc.canvas.util.CanonicalReference;
 +import io.papermc.paper.threadedregions.ThreadedRegionizer;
 +import io.papermc.paper.threadedregions.TickRegionScheduler;
 +import io.papermc.paper.threadedregions.TickRegions;
@@ -1175,7 +1177,12 @@ index 0000000000000000000000000000000000000000..f01c983d6627585a3d2e116c48b7a57c
 + * @author dueris
 + */
 +public class SchedulerUtil {
++    private static final CanonicalReference<SchedulerInfo> SCHEDULER_INFO = new CanonicalReference<>();
 +    private static SchedulerHandler HANDLER;
++
++    public static SchedulerInfo getSchedulerInfo() {
++        return SCHEDULER_INFO.value();
++    }
 +
 +    /**
 +     * Gets the scheduler handle for region profiler hooks
@@ -1248,55 +1255,50 @@ index 0000000000000000000000000000000000000000..f01c983d6627585a3d2e116c48b7a57c
 +     * @return the constructed scheduler
 +     */
 +    public static @NonNull Scheduler decideScheduler(final TickRegionScheduler.@NonNull SchedulerType schedulerType, final int initialThreads, final ThreadFactory threadFactory) {
-+        switch (schedulerType) {
-+            case EDF: {
-+                HANDLER = new NullHandler();
-+                return new EDFSchedulerThreadPool(initialThreads, threadFactory);
++        try {
++            switch (schedulerType) {
++                case EDF: {
++                    HANDLER = new NullHandler();
++                    return new EDFSchedulerThreadPool(initialThreads, threadFactory);
++                }
++                case WORK_STEALING: {
++                    StealingScheduledThreadPool scheduler = new StealingScheduledThreadPool(
++                        threadFactory, MoonriseConstants.NUMA_ENABLE ? OSNuma.getNativeInstance() : OSNuma.NoOp.INSTANCE
++                    );
++                    scheduler.setFlags(StealingScheduledThreadPool.FLAG_SCHEDULE_EVENLY);
++                    HANDLER = new NullHandler();
++                    return scheduler;
++                }
++                case AFFINITY: {
++                    final GlobalConfiguration.RegionScheduler.AffinityScheduler affinityConfig = GlobalConfiguration.getInstance().regionScheduler.affinityScheduler;
++
++                    long runBufferNanos = (long) (affinityConfig.runTasksBufferMillis * 1_000_000L);
++                    long stealThresh = affinityConfig.stealThresholdMillis * 1_000_000L;
++                    boolean enableStealing = affinityConfig.enableWorkStealing;
++                    boolean enableAffinity = affinityConfig.enableAffinitySchedulerCpuAffinity;
++                    boolean enableIntermediateTasks = affinityConfig.enableMidTickTasks;
++
++                    HANDLER = new AffinityHandler();
++
++                    return new AffinitySchedulerThreadPool(
++                        initialThreads,
++                        threadFactory,
++                        runBufferNanos,
++                        stealThresh,
++                        SchedulerUtil::doesSupportRegionProfiler,
++                        enableStealing,
++                        enableAffinity,
++                        enableIntermediateTasks
++                    );
++                }
++                default: {
++                    throw new IllegalStateException("Unknown scheduler type: " + schedulerType);
++                }
 +            }
-+            case WORK_STEALING: {
-+                StealingScheduledThreadPool scheduler = new StealingScheduledThreadPool(
-+                    threadFactory, MoonriseConstants.NUMA_ENABLE ? OSNuma.getNativeInstance() : OSNuma.NoOp.INSTANCE
-+                );
-+                scheduler.setFlags(StealingScheduledThreadPool.FLAG_SCHEDULE_EVENLY);
-+                HANDLER = new NullHandler();
-+                return scheduler;
-+            }
-+            case AFFINITY: {
-+                final GlobalConfiguration.RegionScheduler.AffinityScheduler affinityConfig = GlobalConfiguration.getInstance().regionScheduler.affinityScheduler;
-+
-+                long runBufferNanos = (long) (affinityConfig.runTasksBufferMillis * 1_000_000L);
-+                long stealThresh = affinityConfig.stealThresholdMillis * 1_000_000L;
-+                boolean enableStealing = affinityConfig.enableWorkStealing;
-+                boolean enableAffinity = affinityConfig.enableAffinitySchedulerCpuAffinity;
-+                boolean enableIntermediateTasks = affinityConfig.enableMidTickTasks;
-+
-+                HANDLER = new AffinityHandler();
-+
-+                return new AffinitySchedulerThreadPool(
-+                    initialThreads, threadFactory, runBufferNanos, stealThresh, SchedulerUtil::doesSupportRegionProfiler, enableStealing, enableAffinity, enableIntermediateTasks,
-+                    (thrown) -> {
-+                        TickRegionScheduler.LOGGER.error("Uncaught exception in scheduler internals", thrown);
-+
-+                        CrashReport crashReport = CrashReport.forThrowable(thrown, "Scheduler Internal Exception");
-+                        MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
-+                        Path path = MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
-+                        if (crashReport.saveToFile(path, ReportType.CRASH)) {
-+                            TickRegionScheduler.LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
-+                        }
-+                        else {
-+                            TickRegionScheduler.LOGGER.error("We were unable to save this crash report to disk.");
-+                        }
-+                        // prevent further ticks from occurring
-+                        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-+                        TickRegions.getScheduler().scheduler.halt();
-+
-+                        MinecraftServer.getServer().stopServer();
-+                    }
-+                );
-+            }
-+            default: {
-+                throw new IllegalStateException("Unknown scheduler type: " + schedulerType);
-+            }
++        } catch (final Throwable thrown) {
++            throw new ConfigurationException("Unable to decide and init defined region scheduler \"" + schedulerType + "\"", thrown);
++        } finally {
++            SCHEDULER_INFO.setValue(new SchedulerInfo(initialThreads, schedulerType));
 +        }
 +    }
 +
@@ -1304,10 +1306,10 @@ index 0000000000000000000000000000000000000000..f01c983d6627585a3d2e116c48b7a57c
 +     * The scheduler handle for the server. This is for region profiler hooks to try and help with injection points
 +     * <p>
 +     * The only valid implementations of this are {@link SchedulerUtil.NullHandler} and
-+     * {@link SchedulerUtil.AffinityHandler}. The null handler is for schedulers that do not
-+     * support region profiling, the affinity handler is specifically for the
-+     * {@link io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool affinity scheduler}, which does support region
-+     * profiling
++     * {@link SchedulerUtil.AffinityHandler}. The null handler is for schedulers that do not support region profiling,
++     * the affinity handler is specifically for the
++     * {@link io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool affinity scheduler}, which does
++     * support region profiling
 +     */
 +    public sealed interface SchedulerHandler permits NullHandler, AffinityHandler {
 +        /**
@@ -1380,6 +1382,17 @@ index 0000000000000000000000000000000000000000..f01c983d6627585a3d2e116c48b7a57c
 +         *     the region now being marked as inactive
 +         */
 +        void onRegionInactive(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region);
++    }
++
++    public record SchedulerInfo(
++        int initialThreads,
++        TickRegionScheduler.SchedulerType schedulerType
++    ) {}
++
++    private static final class ConfigurationException extends RuntimeException {
++        ConfigurationException(final String reason, final Throwable thrown) {
++            super(reason, thrown);
++        }
 +    }
 +
 +    public static final class NullHandler implements SchedulerHandler {
@@ -3246,10 +3259,10 @@ index 0000000000000000000000000000000000000000..074fe7a907b0bdfbf44cd94d8307e9b4
 +import java.util.function.Consumer;
 diff --git a/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..2cdd1a26d25a44cf883608221fc5b70943330af0
+index 0000000000000000000000000000000000000000..57f84a35852a86a6f2dc796baaa130168b33fa94
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
-@@ -0,0 +1,705 @@
+@@ -0,0 +1,702 @@
 +package io.canvasmc.canvas.threadedregions.scheduler;
 +
 +import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
@@ -3324,7 +3337,6 @@ index 0000000000000000000000000000000000000000..2cdd1a26d25a44cf883608221fc5b709
 +    private final BooleanSupplier linkingSupported;
 +    private final boolean enableWorkStealing;
 +    private final boolean enableIntermediateTasks;
-+    private final Consumer<Throwable> onException;
 +
 +    private final java.util.concurrent.atomic.AtomicInteger nextSteal = new java.util.concurrent.atomic.AtomicInteger(0);
 +
@@ -3338,15 +3350,13 @@ index 0000000000000000000000000000000000000000..2cdd1a26d25a44cf883608221fc5b709
 +        BooleanSupplier linkingSupported,
 +        boolean enableWorkStealing,
 +        boolean enableAffinity,
-+        boolean enableIntermediateTasks,
-+        Consumer<Throwable> onException
++        boolean enableIntermediateTasks
 +    ) {
 +        this.runTaskBuff = runTaskBuff;
 +        this.stealThresh = stealThresh;
 +        this.linkingSupported = linkingSupported;
 +        this.enableWorkStealing = enableWorkStealing;
 +        this.enableIntermediateTasks = enableIntermediateTasks;
-+        this.onException = onException;
 +        final BitSet idleThreads = new BitSet(threads);
 +        for (int i = 0; i < threads; ++i) {
 +            idleThreads.set(i);
@@ -3896,8 +3906,8 @@ index 0000000000000000000000000000000000000000..2cdd1a26d25a44cf883608221fc5b709
 +                            throw new IllegalStateException("Unknown state: " + startState);
 +                        }
 +                    }
-+                } catch (Throwable thrown) {
-+                    scheduler.onException.accept(thrown);
++                } catch (final Throwable thrown) {
++                    getRunnerThread().getUncaughtExceptionHandler().uncaughtException(getRunnerThread(), thrown);
 +                    return;
 +                }
 +            }
@@ -5540,10 +5550,10 @@ index 8e03419df1469c6fecfaa82fcb319a58635b39f3..b3c466fd7cb6810995f95bed66a86f2b
          // If 'k' has the highest level of all neighbors, then the power level of this
 diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..af4d8f2a8cc8aedb52b3650d2379bc4251230a8f
+index 0000000000000000000000000000000000000000..317ad5d89dcc508a757704973b81507ff4ba2448
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,103 @@
 +package io.papermc.paper.threadedregions;
 +
 +import com.mojang.logging.LogUtils;
@@ -5584,7 +5594,7 @@ index 0000000000000000000000000000000000000000..af4d8f2a8cc8aedb52b3650d2379bc42
 +        super("Folia Watchdog Thread");
 +        this.setDaemon(true);
 +        this.setUncaughtExceptionHandler((final Thread thread, final Throwable throwable) -> {
-+            LOGGER.error("Uncaught exception in thread '" + thread.getName() + "'", throwable);
++            LOGGER.error("Uncaught exception in thread '{}'", thread.getName(), throwable);
 +        });
 +    }
 +
@@ -5619,13 +5629,12 @@ index 0000000000000000000000000000000000000000..af4d8f2a8cc8aedb52b3650d2379bc42
 +                final String totalElapsedS = String.format("%.2f", (now - tick.start) / 1.0E9); // Canvas - region threading
 +
 +                if (tick.handle instanceof TickRegions.ConcreteRegionTickHandle region) {
-+                    LOGGER.error(
-+                        "Tick region located in world '" + region.region.world.getWorld().getName() + "' around chunk '"
-+                            + region.region.region.getCenterChunk() + "' has not responded in " + totalElapsedS + "s:"
++                    LOGGER.error("Tick region located in world '{}' around chunk '{}' has not responded in {}s:",
++                        region.region.world.getWorld().getName(), region.region.region.getCenterChunk(), totalElapsedS
 +                    );
 +                } else {
 +                    // assume global
-+                    LOGGER.error("Global region has not responded in " + totalElapsedS + "s:");
++                    LOGGER.error("Global region has not responded in {}s:", totalElapsedS);
 +                }
 +
 +                WatchdogThread.dumpThread(
@@ -5650,7 +5659,7 @@ index 0000000000000000000000000000000000000000..af4d8f2a8cc8aedb52b3650d2379bc42
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc0fa0985d
+index 0000000000000000000000000000000000000000..219bba360dcde783109c30a988f235fc222d74ca
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 @@ -0,0 +1,340 @@
@@ -5713,7 +5722,7 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +        try {
 +            world.saveLevelData(true);
 +        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to save level data for " + world.getWorld().getName(), thrown);
++            LOGGER.error("Failed to save level data for {}", world.getWorld().getName(), thrown);
 +        }
 +    }
 +
@@ -5726,9 +5735,9 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +                return false; // Canvas - region threading
 +            }
 +            final ChunkPos center = region.getCenterChunk();
-+            LOGGER.info("Completing " + pendingTeleports.size() + " pending teleports in region around chunk " + center + " in world '" + region.regioniser.world.getWorld().getName() + "'");
++            LOGGER.info("Completing {} pending teleports in region around chunk {} in world '{}'", pendingTeleports.size(), center, region.regioniser.world.getWorld().getName());
 +            for (final ServerLevel.PendingTeleport pendingTeleport : pendingTeleports) {
-+                LOGGER.info("Completing teleportation to target position " + pendingTeleport.to());
++                LOGGER.info("Completing teleportation to target position {}", pendingTeleport.to());
 +
 +                // first, add entities to entity chunk so that they will be saved
 +                for (final Entity.EntityTreeNode node : pendingTeleport.rootVehicle().getFullTree()) {
@@ -5742,7 +5751,7 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +                pendingTeleport.rootVehicle().restore();
 +
 +                // now we are finished
-+                LOGGER.info("Completed teleportation to target position " + pendingTeleport.to());
++                LOGGER.info("Completed teleportation to target position {}", pendingTeleport.to());
 +            }
 +        } catch (final Throwable thrown) {
 +            LOGGER.error("Failed to complete pending teleports", thrown);
@@ -5758,10 +5767,10 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +        try {
 +            this.shuttingDown = region;
 +            center = region.getCenterChunk();
-+            LOGGER.info("Saving chunks around region around chunk " + center + " in world '" + region.regioniser.world.getWorld().getName() + "'");
++            LOGGER.info("Saving chunks around region around chunk {} in world '{}'", center, region.regioniser.world.getWorld().getName());
 +            region.regioniser.world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(true, true, false, last, false);
 +        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to save chunks for region around chunk " + center + " in world '" + region.regioniser.world.getWorld().getName() + "'", thrown);
++            LOGGER.error("Failed to save chunks for region around chunk {} in world '{}'", center, region.regioniser.world.getWorld().getName(), thrown);
 +        } finally {
 +            this.shuttingDown = null;
 +        }
@@ -5771,7 +5780,7 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +        try {
 +            world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(false, true, true, false, false);
 +        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to halt chunk system for world '" + world.getWorld().getName() + "'", thrown);
++            LOGGER.error("Failed to halt chunk system for world '{}'", world.getWorld().getName(), thrown);
 +        }
 +    }
 +
@@ -5797,11 +5806,11 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +                        player.drop(carried, false);
 +                    }
 +                } catch (final Throwable thrown) {
-+                    LOGGER.error("Failed to close player inventory for player: " + player, thrown);
++                    LOGGER.error("Failed to close player inventory for player: {}", player, thrown);
 +                }
 +            }
 +        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to close player inventories for region around chunk " + center + " in world '" + region.regioniser.world.getWorld().getName() + "'", thrown);
++            LOGGER.error("Failed to close player inventories for region around chunk {} in world '{}'", center, region.regioniser.world.getWorld().getName(), thrown);
 +        } finally {
 +            this.shuttingDown = null;
 +        }
@@ -5882,7 +5891,7 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +                    savedPearlCount.increment();
 +                }
 +            } catch (final Throwable thrown) {
-+                LOGGER.error("Failed to save pearls for region around chunk " + center + " in level '" + region.regioniser.world.getWorld().getName() + "'", thrown);
++                LOGGER.error("Failed to save pearls for region around chunk {} in level '{}'", center, region.regioniser.world.getWorld().getName(), thrown);
 +            } finally {
 +                this.shuttingDown = null;
 +            }
@@ -5934,7 +5943,7 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +            try {
 +                world.moonrise$getChunkTaskScheduler().halt(false, 0L);
 +            } catch (final Throwable thrown) {
-+                LOGGER.error("Failed to soft halt chunk system for world '" + world.getWorld().getName() + "'", thrown);
++                LOGGER.error("Failed to soft halt chunk system for world '{}'", world.getWorld().getName(), thrown);
 +            }
 +        }
 +        for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
@@ -5948,15 +5957,15 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +                regions = new ArrayList<>();
 +            world.regioniser.computeForAllRegionsUnsynchronised(regions::add);
 +
-+            for (int i = 0, len = regions.size(); i < len; ++i) {
-+                this.finishTeleportations(regions.get(i), world);
++            for (ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++                this.finishTeleportations(region, world);
 +            }
 +        }
 +        LOGGER.info("Finished pending teleports");
 +
 +        LOGGER.info("Saving all worlds");
 +        for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
-+            LOGGER.info("Saving world data for world '" + WorldUtil.getWorldName(world) + "'");
++            LOGGER.info("Saving world data for world '{}'", WorldUtil.getWorldName(world));
 +
 +            final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
 +                regions = new ArrayList<>();
@@ -5978,7 +5987,7 @@ index 0000000000000000000000000000000000000000..97b69ffa16056fc03894a843d38aabbc
 +            this.saveLevelData(world);
 +            LOGGER.info("Saved level data");
 +
-+            LOGGER.info("Saved world data for world '" + WorldUtil.getWorldName(world) + "'");
++            LOGGER.info("Saved world data for world '{}'", WorldUtil.getWorldName(world));
 +        }
 +        LOGGER.info("Saved all worlds");
 +
@@ -8570,10 +8579,10 @@ index 0000000000000000000000000000000000000000..f3dfc96129040f4d375b358bc5070aff
 +}
 diff --git a/io/papermc/paper/threadedregions/ThreadedRegionizer.java b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..196e3ad94d5f857dc9d4b1b9e3944de1515cfcda
+index 0000000000000000000000000000000000000000..4ba97e9a0bc49f676711e62d0b4ac87ead8d0943
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
-@@ -0,0 +1,1522 @@
+@@ -0,0 +1,1526 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.map.SWMRLong2ObjectHashTable;
@@ -9016,7 +9025,7 @@ index 0000000000000000000000000000000000000000..196e3ad94d5f857dc9d4b1b9e3944de1
 +                }
 +            }
 +        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to add chunk (" + chunkX + "," + chunkZ + ")", thrown);
++            LOGGER.error("Failed to add chunk ({},{})", chunkX, chunkZ, thrown);
 +            SneakyThrow.sneaky(thrown);
 +            return; // unreachable
 +        } finally {
@@ -9063,7 +9072,7 @@ index 0000000000000000000000000000000000000000..196e3ad94d5f857dc9d4b1b9e3944de1
 +                }
 +            }
 +        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to add chunk (" + chunkX + "," + chunkZ + ")", thrown);
++            LOGGER.error("Failed to add chunk ({},{})", chunkX, chunkZ, thrown);
 +            SneakyThrow.sneaky(thrown);
 +            return; // unreachable
 +        } finally {
@@ -9691,11 +9700,15 @@ index 0000000000000000000000000000000000000000..196e3ad94d5f857dc9d4b1b9e3944de1
 +            final StringBuilder ret = new StringBuilder(128);
 +
 +            ret.append("ThreadedRegion{");
-+            ret.append("state=").append(this.state).append(',');
-+            // To avoid recursion in toString, maybe fix later?
-+            //ret.append("mergeIntoLater=").append(this.mergeIntoLater).append(',');
-+            //ret.append("expectingMergeFrom=").append(this.expectingMergeFrom).append(',');
++            ret.append("state=").append(getState()).append(','); // Canvas - use more readable state for crash reports
++            // to avoid recursion in toString, maybe fix later?
++            // ret.append("mergeIntoLater=").append(this.mergeIntoLater).append(',');
++            // ret.append("expectingMergeFrom=").append(this.expectingMergeFrom).append(',');
 +
++            // Canvas start - more debug info
++            ret.append("is_merging=").append(this.mergeIntoLater != null).append(',');
++            ret.append("expecting_merge_from=").append(this.expectingMergeFrom != null).append(',');
++            // Canvas end - more debug info
 +            ret.append("sectionCount=").append(this.sectionByKey.size()).append(',');
 +            ret.append("sections=[");
 +            for (final Iterator<ThreadedRegionSection<R, S>> iterator = this.sectionByKey.values().iterator(); iterator.hasNext();) {
@@ -10098,10 +10111,10 @@ index 0000000000000000000000000000000000000000..196e3ad94d5f857dc9d4b1b9e3944de1
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568cd575662a
+index 0000000000000000000000000000000000000000..7841213646a0273bd99ea1ec2b3278fb9062c304
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -0,0 +1,639 @@
+@@ -0,0 +1,709 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.numa.OSNuma;
@@ -10116,19 +10129,27 @@ index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568c
 +import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.threadedregions.SchedulerUtil;
 +import io.papermc.paper.util.TraceUtil;
 +import it.unimi.dsi.fastutil.ints.Int2IntLinkedOpenHashMap;
++import net.minecraft.CrashReport;
++import net.minecraft.CrashReportCategory;
++import net.minecraft.ReportType;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;
++import net.minecraft.util.Util;
 +import net.minecraft.world.level.ChunkPos;
++import org.apache.commons.lang3.mutable.MutableInt;
 +import org.slf4j.Logger;
 +import java.lang.management.ManagementFactory;
 +import java.lang.management.ThreadMXBean;
++import java.nio.file.Path;
 +import java.util.concurrent.ThreadFactory;
 +import java.util.concurrent.TimeUnit;
 +import java.util.concurrent.atomic.AtomicBoolean;
 +import java.util.concurrent.atomic.AtomicInteger;
 +import java.util.function.BooleanSupplier;
++import java.util.function.Consumer;
 +
 +public final class TickRegionScheduler {
 +
@@ -10228,7 +10249,7 @@ index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568c
 +                threadAllocation = new Int2IntLinkedOpenHashMap();
 +                threadAllocation.put(0, threads);
 +
-+                LOGGER.info("Folia is using " + threads + " tick threads");
++                LOGGER.info("Folia is using {} tick threads", threads);
 +            } else {
 +                final int nodes = stealingScheduledThreadPool.getNuma().getTotalNumaNodes();
 +
@@ -10239,7 +10260,7 @@ index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568c
 +                    threadAllocation.put(i, threadsPerNode);
 +                }
 +
-+                LOGGER.info("Folia is using " + threadsPerNode + " tick threads per NUMA node, with " + nodes + " NUMA nodes detected");
++                LOGGER.info("Folia is using {} tick threads per NUMA node, with {} NUMA nodes detected", threadsPerNode, nodes);
 +            }
 +
 +            stealingScheduledThreadPool.setThreadAllocation(threadAllocation, stealThresholdNS, taskTimeSliceNS);
@@ -10369,20 +10390,56 @@ index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568c
 +    public void setHasTasks(final RegionScheduleHandle region) {
 +        this.scheduler.notifyTasks(region);
 +    }
++    // Canvas start - region threading
++
++    private void generateCrashReport(
++        final Throwable thrown, final String title, final /*TODO - nullable*/ Consumer<CrashReport> reportFiller
++    ) {
++        final CrashReport crashReport = CrashReport.forThrowable(thrown, title);
++        final MinecraftServer server = MinecraftServer.getServer();
++        final Path reportSavePath = server.getServerDirectory()
++            .resolve("crash-reports")
++            .resolve("crash-" + Util.getFilenameFormattedDateTime() + "-server.txt");
++
++        if (reportFiller != null) {
++            reportFiller.accept(crashReport);
++        }
++        server.fillSystemReport(crashReport.getSystemReport());
++
++        if (crashReport.saveToFile(reportSavePath, ReportType.CRASH)) {
++            LOGGER.error("This crash report has been saved to: {}", reportSavePath.toAbsolutePath());
++        }
++        else {
++            LOGGER.error("Unable to save crash report to disk.");
++        }
++    }
++    // Canvas end - region threading
 +
 +    private void uncaughtException(final Thread thread, final Throwable thr) {
-+        LOGGER.error("Uncaught exception in tick thread \"" + thread.getName() + "\"", thr);
-+
 +        // Canvas start - region threading
-+        net.minecraft.CrashReport crashReport = net.minecraft.CrashReport.forThrowable(thr, "Region Crash");
-+        net.minecraft.server.MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
-+        java.nio.file.Path path = net.minecraft.server.MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + net.minecraft.util.Util.getFilenameFormattedDateTime() + "-server.txt");
-+        if (crashReport.saveToFile(path, net.minecraft.ReportType.CRASH)) {
-+            LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
-+        } else {
-+            LOGGER.error("We were unable to save this crash report to disk.");
-+        }
++        generateCrashReport(thr, "Uncaught scheduler exception", (report) -> {
++            final CrashReportCategory schedulerInfo = report.addCategory("Region Scheduler Info");
++
++            schedulerInfo.setDetail("initial_threads", SchedulerUtil.getSchedulerInfo().initialThreads());
++            schedulerInfo.setDetail("scheduler_type", SchedulerUtil.getSchedulerInfo().schedulerType());
++
++            final CrashReportCategory regionizerInfo = report.addCategory("Regionizer Info");
++            final MutableInt regionCount = new MutableInt(0);
++
++            for (final ServerLevel world : RegionizedServer.getInstance().worlds) {
++                world.regioniser.computeForAllRegions((region) -> {
++                    regionizerInfo.setDetail(io.canvasmc.canvas.util.Util.getLevelName(world) + "-region-" + regionCount.incrementAndGet(), region.toString());
++                });
++            }
++
++            if (regionCount.intValue() == 0) {
++                regionizerInfo.setDetail("regions", "no regions loaded");
++            }
++        });
++
++        LOGGER.error("Uncaught exception scheduler internal thread \"{}\"", thread.getName(), thr);
 +        // Canvas end - region threading
++
 +        // prevent further ticks from occurring
 +        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
 +        this.scheduler.halt();
@@ -10394,18 +10451,44 @@ index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568c
 +        // when a region fails, we need to shut down the server gracefully
 +
 +        // Canvas start - region threading
-+        net.minecraft.CrashReport crashReport = net.minecraft.CrashReport.forThrowable(thr, "Region Crash");
-+        net.minecraft.server.MinecraftServer.getServer().fillSystemReport(crashReport.getSystemReport());
-+        net.minecraft.CrashReportCategory crashReportCategory = crashReport.addCategory("Region Context");
-+        crashReportCategory.setDetail("Executing Tasks", () -> String.valueOf(executingTasks));
-+        crashReportCategory.setDetail("RegionScheduleHandle", handle.region == null ? "Not available" : handle.region.region);
-+        java.nio.file.Path path = net.minecraft.server.MinecraftServer.getServer().getServerDirectory().resolve("crash-reports").resolve("crash-" + net.minecraft.util.Util.getFilenameFormattedDateTime() + "-server.txt");
-+        if (crashReport.saveToFile(path, net.minecraft.ReportType.CRASH)) {
-+            LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
-+        } else {
-+            LOGGER.error("We were unable to save this crash report to disk.");
-+        }
++        generateCrashReport(thr, "Region Failure", (report) -> {
++            final CrashReportCategory schedulerInfo = report.addCategory("Region Scheduler Info");
++
++            schedulerInfo.setDetail("initial_threads", SchedulerUtil.getSchedulerInfo().initialThreads());
++            schedulerInfo.setDetail("scheduler_type", SchedulerUtil.getSchedulerInfo().schedulerType());
++
++            final CrashReportCategory regionSpecificInfo = report.addCategory("Related Region Info");
++            final long current = System.nanoTime();
++
++            regionSpecificInfo.setDetail("current_tick", handle.currentTick);
++            regionSpecificInfo.setDetail("next_scheduled_start", io.canvasmc.canvas.util.Util.formatScheduled(current, handle.scheduledStart));
++            regionSpecificInfo.setDetail("tick_manager", handle.tickManager.toString());
++            regionSpecificInfo.setDetail("id", handle.id);
++            regionSpecificInfo.setDetail("marked_non_schedulable", handle.isMarkedAsNonSchedulable());
++            regionSpecificInfo.setDetail("has_intermediate_tasks", handle.hasTasks());
++
++            if (handle instanceof TickRegions.ConcreteRegionTickHandle concrete) {
++                regionSpecificInfo.setDetail("region", concrete.region.region.toString());
++            }
++            else if (handle instanceof RegionizedServer.GlobalTickTickHandle) {
++                regionSpecificInfo.setDetail("is_global", true);
++            }
++
++            final CrashReportCategory regionizerInfo = report.addCategory("Regionizer Info");
++            final MutableInt regionCount = new MutableInt(0);
++
++            for (final ServerLevel world : RegionizedServer.getInstance().worlds) {
++                world.regioniser.computeForAllRegions((region) -> {
++                    regionizerInfo.setDetail(io.canvasmc.canvas.util.Util.getLevelName(world) + "-region-" + regionCount.incrementAndGet(), region.toString());
++                });
++            }
++
++            if (regionCount.intValue() == 0) {
++                regionizerInfo.setDetail("regions", "no regions loaded");
++            }
++        });
 +        // Canvas end - region threading
++
 +        // prevent further ticks from occurring
 +        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
 +        this.scheduler.halt();
@@ -10413,7 +10496,7 @@ index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568c
 +        final ChunkPos center = handle.region == null ? null : handle.region.region.getCenterChunk();
 +        final ServerLevel world = handle.region == null ? null : handle.region.world;
 +
-+        LOGGER.error("Region #" + (handle.region == null ? -1L : handle.region.id) + " centered at chunk " + center + " in world '" + (world == null ? "null" : world.getWorld().getName()) + "' failed to " + (executingTasks ? "execute tasks" : "tick") + ":", thr);
++        LOGGER.error("Region #{} centered at chunk {} in world '{}' failed to {}:", handle.region == null ? -1L : handle.region.id, center, world == null ? "null" : world.getWorld().getName(), executingTasks ? "execute tasks" : "tick", thr);
 +
 +        MinecraftServer.getServer().stopServer();
 +    }
@@ -10742,7 +10825,7 @@ index 0000000000000000000000000000000000000000..21f594536b492b8cf7ea15241453568c
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 8424cf9d4617b4732d44cc460d25b04481068989..45a4d0ad57d7ddc32ace087eaea4b905bd56a093 100644
+index 8424cf9d4617b4732d44cc460d25b04481068989..ec5f4a6a9703d09d48818d3324023e7ddd1496b9 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -1,10 +1,554 @@
@@ -10825,7 +10908,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..45a4d0ad57d7ddc32ace087eaea4b905
 +        gridExponent = Math.min(31, gridExponent);
 +        regionShift = gridExponent;
 +        scheduler = new TickRegionScheduler(config.scheduler, tickThreads);
-+        LOGGER.info("Initialised " + config.scheduler + " Folia scheduler with initial " + tickThreads + " target thread(s)");
++        LOGGER.info("Initialised {} Folia scheduler with initial {} target thread(s)", config.scheduler, tickThreads);
 +    }
 +
 +    public static void start() {
