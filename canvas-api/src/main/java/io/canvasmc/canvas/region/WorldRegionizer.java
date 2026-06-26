@@ -175,49 +175,6 @@ public interface WorldRegionizer {
         WorldRegionizer getRegionizer();
 
         /**
-         * Gets the averaged MSPT in the time frame provided
-         *
-         * @param timeFrame
-         *     the frame to return
-         *
-         * @return the MSPT of the region
-         */
-        double getMSPT(final Frame timeFrame);
-
-        /**
-         * Gets the averaged TPS in the time frame provided
-         *
-         * @param timeFrame
-         *     the frame to return
-         *
-         * @return the TPS of the region
-         */
-        double getTPS(final Frame timeFrame);
-
-        /**
-         * Gets the averaged CPU utilization in the time frame provided
-         *
-         * @param timeFrame
-         *     the frame to return
-         *
-         * @return the CPU utilization of the region
-         *
-         * @implNote The returned {@code double} is always between {code 0} and {@code 1}
-         */
-        double getUtilization(final Frame timeFrame);
-
-        /**
-         * Represents a time frame
-         */
-        enum Frame {
-            _5_SECONDS,
-            _15_SECONDS,
-            _1_MINUTE,
-            _5_MINUTES,
-            _15_MINUTES
-        }
-
-        /**
          * Represents the lifecycle state of a {@link ChunkRegion}.
          */
         enum State {

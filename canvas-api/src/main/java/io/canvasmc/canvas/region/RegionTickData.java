@@ -2,6 +2,7 @@ package io.canvasmc.canvas.region;
 
 import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
+import java.util.concurrent.CompletableFuture;
 import org.bukkit.World;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -57,6 +58,69 @@ public interface RegionTickData {
      * @return the tick manager
      */
     RegionThreadingTickManager.RegionHandle getTickManager();
+
+    /**
+     * Gets the averaged MSPT in the time frame provided
+     *
+     * @param timeFrame
+     *     the frame to return
+     *
+     * @return the MSPT of the region
+     */
+    double getMSPT(final Frame timeFrame);
+
+    /**
+     * Gets the averaged TPS in the time frame provided
+     *
+     * @param timeFrame
+     *     the frame to return
+     *
+     * @return the TPS of the region
+     */
+    double getTPS(final Frame timeFrame);
+
+    /**
+     * Gets the averaged CPU utilization in the time frame provided
+     *
+     * @param timeFrame
+     *     the frame to return
+     *
+     * @return the CPU utilization of the region
+     *
+     * @implNote The returned {@code double} is always between {code 0} and {@code 1}
+     */
+    double getUtilization(final Frame timeFrame);
+
+    /**
+     * Gets the current tick of the region in question
+     *
+     * @return the current tick
+     */
+    long getCurrentTick();
+
+    /**
+     * Propagates the save-all ticket to this region, making the region save at the start of the next tick, and then
+     * completing the returned future
+     *
+     * @param flush
+     *     if the server should flush or not
+     *
+     * @return a future that is completed when the save is finished
+     *
+     * @apiNote <b>DO NOT BLOCK ON THIS, THAT COULD CAUSE DEADLOCKS</b>
+     */
+    CompletableFuture<Void> propagateSaveAllTicket(final boolean flush);
+
+    /**
+     * Represents a time frame
+     */
+    enum Frame {
+        _5_SECONDS,
+        _15_SECONDS,
+        _1_MINUTE,
+        _5_MINUTES,
+        _15_MINUTES
+    }
 
     /**
      * Represents a type of region-local data that can be attached to a region through the {@link RegionTickData}
