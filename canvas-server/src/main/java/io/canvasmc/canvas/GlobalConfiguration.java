@@ -620,4 +620,6 @@ public class GlobalConfiguration extends Part {
         public boolean allowEnchantsOnUnsupportedItems = false;
         public boolean allowEnchantingWithIncompatibleEnchants = false;
     }
+
+    public boolean disableLocatorBarInAllWorlds = false;
 }
