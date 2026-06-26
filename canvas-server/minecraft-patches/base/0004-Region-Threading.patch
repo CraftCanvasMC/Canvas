@@ -5463,10 +5463,10 @@ index 0000000000000000000000000000000000000000..b35b3a20dc2af5d378470e8fa2f21f76
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..6d132615cb027adbd36a5c3d777595fb9f65bbfb
+index 0000000000000000000000000000000000000000..d36b57b2776db177b6204bb919709b5c1b90ca73
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -0,0 +1,599 @@
+@@ -0,0 +1,605 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
@@ -5734,7 +5734,8 @@ index 0000000000000000000000000000000000000000..6d132615cb027adbd36a5c3d777595fb
 +        // connection tick
 +        // ender pearls
 +        // gui tick
-+        // scoreboard, stopwatches
++        // global tick autosave
++        // management protocol tick
 +
 +        // tick player ping sample
 +        this.tickPlayerSample();
@@ -5754,8 +5755,13 @@ index 0000000000000000000000000000000000000000..6d132615cb027adbd36a5c3d777595fb
 +        // gui tick
 +        net.minecraft.server.gui.PlayerListComponent.tick();
 +
-+        // scoreboards, stopwatches
++        // global tick autosave
 +        autosaveSafeGlobalData(false, false);
++
++        // management protocol tick
++        if (minecraftServer.jsonRpcServer != null) {
++            minecraftServer.jsonRpcServer.tick();
++        }
 +        // Canvas end - region threading
 +    }
 +    // Canvas start - region threading
@@ -15928,10 +15934,10 @@ index 8bacd793822528f2b96387b2264dbf42fab5d8f7..1081ea65a23c1a4ecf53c84a078a3df7
      }
  }
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index 299991905c24a7018f8ac60d0c16e56fa43cd710..cd6b908a59d0a1d0dae271971def0de5f6bb5281 100644
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..9a6ccadeb1da2f73a61a44b79075ca47774ee9a3 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -24,12 +24,82 @@ public class SaveAllCommand {
+@@ -24,12 +24,93 @@ public class SaveAllCommand {
      private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
@@ -15941,7 +15947,12 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..cd6b908a59d0a1d0dae271971def0de5
 -        }
  
 -        source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
-+        // Canvas start - region threading
++        triggerSaveEverything(source, server, flush); // Canvas - region threading
+         return Command.SINGLE_SUCCESS;
+     }
++    // Canvas start - region threading
++
++    public static void triggerSaveEverything(final CommandSourceStack source, final MinecraftServer server, final boolean flush) {
 +
 +        // we are going to order this in a chain-like fashion:
 +        // - global data
@@ -15975,6 +15986,13 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..cd6b908a59d0a1d0dae271971def0de5
 +            final java.util.concurrent.atomic.AtomicInteger total = new java.util.concurrent.atomic.AtomicInteger(0);
 +            final Runnable callback = () -> {
 +                if (count.decrementAndGet() <= 0) {
++
++                    // copied from MinecraftServer#warnOnLowDiskSpace, this is run after saving is done
++                    if (server.storageSource.checkForLowDiskSpace()) {
++                        server.sendLowDiskSpaceWarning();
++                    }
++
++                    // now we have warned, so we can send success
 +                    source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
 +                }
 +            };
@@ -16015,9 +16033,8 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..cd6b908a59d0a1d0dae271971def0de5
 +                source.sendSuccess(() -> Component.literal("Saving " + total.get() + " regions"), true);
 +            }
 +        });
-+        // Canvas end - region threading
-         return Command.SINGLE_SUCCESS;
-     }
++    }
++    // Canvas end - region threading
  }
 diff --git a/net/minecraft/server/commands/ScoreboardCommand.java b/net/minecraft/server/commands/ScoreboardCommand.java
 index 1e8f4cb55851b89ee2272917fd440e2f8749442f..2c87024a105ad4cb5899bc2dfb637cbcd6b5e630 100644
@@ -18215,25 +18232,32 @@ index f2c5a6ce769d8a5fdb4b836eae6a61a4da91cb3f..92d87596a52c239080f5e29d12ae43a1
      @Override
      public void setData(final CompoundTag tag) throws CommandSyntaxException {
 diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
-index d75ed50c2611de75a922940c151c37d454593dc9..3f383646a3ccee552c4b3c002fd3441eb4072f0b 100644
+index 4d08dcdea36f75e232eea071711d033ef8779b11..936a55ecd5b49128b958c33a2b20ab5e7a892d83 100644
 --- a/net/minecraft/server/dedicated/DedicatedServer.java
 +++ b/net/minecraft/server/dedicated/DedicatedServer.java
-@@ -400,8 +400,12 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+@@ -400,11 +400,16 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
      }
  
      @Override
 -    protected void tickServer(final BooleanSupplier haveTime) {
 -        super.tickServer(haveTime);
+-        if (this.jsonRpcServer != null) {
+-            this.jsonRpcServer.tick();
+-        }
 +    // Folia start - region threading
 +    public void tickServer(final long startTime, final long scheduledEnd, final long targetBuffer,
 +                           final io.papermc.paper.threadedregions.TickRegions.TickRegionData region) {
 +        super.tickServer(startTime, scheduledEnd, targetBuffer, region);
 +    // Folia end - region threading
-+        // TODO - Canvas - WTF to do about this?
-         if (this.jsonRpcServer != null) {
-             this.jsonRpcServer.tick();
-         }
-@@ -527,7 +531,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
++        // Canvas start - region threading - moved to global tick
++        // if (this.jsonRpcServer != null) {
++        //     this.jsonRpcServer.tick();
++        // }
++        // Canvas end - region threading - moved to global tick
+     }
+ 
+     @Override
+@@ -527,7 +532,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
      @Override
      protected void tickConnection() {
          super.tickConnection();
@@ -18242,7 +18266,7 @@ index d75ed50c2611de75a922940c151c37d454593dc9..3f383646a3ccee552c4b3c002fd3441e
      }
  
      private static final java.util.concurrent.atomic.AtomicInteger ASYNC_DEBUG_CHUNKS_COUNT = new java.util.concurrent.atomic.AtomicInteger(); // Paper - rewrite chunk system
-@@ -890,7 +894,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+@@ -890,7 +895,7 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
          if (command.isBlank()) return ""; // Paper - Do not process empty rcon commands
  
          rconConsoleSource.prepareForCommand();
@@ -18251,7 +18275,7 @@ index d75ed50c2611de75a922940c151c37d454593dc9..3f383646a3ccee552c4b3c002fd3441e
              CommandSourceStack wrapper = rconConsoleSource.createCommandSourceStack();
              org.bukkit.event.server.RemoteServerCommandEvent event = new org.bukkit.event.server.RemoteServerCommandEvent(rconConsoleSource.getBukkitSender(wrapper), command);
              this.server.getPluginManager().callEvent(event);
-@@ -898,7 +902,17 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+@@ -898,7 +903,17 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
                  return;
              }
              this.getCommands().performPrefixedCommand(wrapper, event.getCommand());
@@ -18309,6 +18333,46 @@ index 37c9f983ae89c497f44a1b7967d741abf909e0a0..258296543a5225091d1f65e26e5b6a29
      }
 +    // Canvas end - region threading
  }
+diff --git a/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java b/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
+index 81d21b23932fb7b4887cfcc16381d348385a3bf8..5baf9488a1ae78081dfe2c5494abe6bb28fc5557 100644
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
+@@ -19,11 +19,11 @@ public class MinecraftExecutorServiceImpl implements MinecraftExecutorService {
+ 
+     @Override
+     public <V> CompletableFuture<V> submit(final Supplier<V> supplier) {
+-        return this.server().submit(supplier);
++        return CompletableFuture.supplyAsync(supplier, io.papermc.paper.threadedregions.RegionizedServer.getInstance()::scheduleToOrExecute); // Canvas - region threading
+     }
+ 
+     @Override
+     public CompletableFuture<Void> submit(final Runnable runnable) {
+-        return this.server().submit(runnable);
++        return CompletableFuture.runAsync(runnable, io.papermc.paper.threadedregions.RegionizedServer.getInstance()::scheduleToOrExecute); // Canvas - region threading
+     }
+ }
+diff --git a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
+index be6db3be2353a97d66c1cafc4e98032610220d28..cec2fc7f45d9a1372f7432005120c0dfe96b6999 100644
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
+@@ -34,7 +34,16 @@ public class MinecraftServerStateServiceImpl implements MinecraftServerStateServ
+     @Override
+     public boolean saveEverything(final boolean suppressLogs, final boolean flush, final boolean force, final ClientInfo clientInfo) {
+         this.jsonrpcLogger.log(clientInfo, "Save everything. SuppressLogs: {}, flush: {}, force: {}", suppressLogs, flush, force);
+-        return this.server().saveEverything(suppressLogs, flush, force);
++        // Canvas start - region threading
++        net.minecraft.server.commands.SaveAllCommand.triggerSaveEverything(
++            MinecraftServer.getServer().createCommandSourceStack(),
++            MinecraftServer.getServer(),
++            flush
++        );
++        // just assume success, the trigger is run on multiple different thread contexts
++        // so the actual result is unpredictable, so just assume we didn't fail
++        return true;
++        // Canvas end - region threading
+     }
+ 
+     @Override
 diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
 index 8f2360048c35254c3a6e57ef163a86004b029bdd..75bbfbf5392704af4387db79733372d6d7a6b5a5 100644
 --- a/net/minecraft/server/level/ChunkMap.java
