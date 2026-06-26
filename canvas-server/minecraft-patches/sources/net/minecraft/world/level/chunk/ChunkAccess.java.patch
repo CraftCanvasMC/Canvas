@@ -1,6 +1,6 @@
 --- a/net/minecraft/world/level/chunk/ChunkAccess.java
 +++ b/net/minecraft/world/level/chunk/ChunkAccess.java
-@@ -73,10 +_,170 @@
+@@ -73,10 +_,272 @@
      protected final @Nullable BlendingData blendingData;
      public final Map<Heightmap.Types, Heightmap> heightmaps = Maps.newEnumMap(Heightmap.Types.class);
      // Paper - rewrite chunk system
@@ -16,7 +16,7 @@
 +      When the chunk has a lot of block entities, this is much faster
 +      to use than the previous 'Map<BlockPos, BlockEntity> blockEntities'
 +     */
-+    // public final Map<BlockPos, BlockEntity> blockEntities = new Object2ObjectOpenHashMap<>();
++    public final Map<BlockPos, BlockEntity> blockEntities = new CanvasBlockEntityMapView();
 +    private static final BlockEntity[] EMPTY_ARRAY = new BlockEntity[0];
 +    private static final int SECTION_SIZE = 16 * 16;
 +    protected final BlockEntity[][] canvas$blockEntitySections;
@@ -46,7 +46,7 @@
 +    private Map<BlockPos, BlockEntity> canvas$cachedBlockEntityMap = null;
 +
 +    @Nullable
-+    // Note: if removing a block entity, don't use this, use remove method. The block entity is expected non-null
++    // note: if removing a block entity, don't use this, use remove method. The block entity is expected non-null
 +    public BlockEntity canvas$setBlockEntityInBuckets(final int globalX, final int y, final int globalZ, final BlockEntity blockEntity) {
 +        if (y < this.canvas$minY || y > this.canvas$maxY) return null;
 +        int sectionIndex = canvas$toSectionIndex(y);
@@ -170,6 +170,108 @@
 +            blockEntities.put(blockEntity.getBlockPos(), blockEntity);
 +        });
 +        return this.canvas$cachedBlockEntityMap = java.util.Collections.unmodifiableMap(blockEntities);
++    }
++
++    private final class CanvasBlockEntityMapView extends java.util.AbstractMap<BlockPos, BlockEntity> {
++        @Override
++        public @Nullable BlockEntity get(final Object key) {
++            if (!(key instanceof BlockPos pos)) return null;
++            return canvas$getFromBuckets(pos.getX(), pos.getY(), pos.getZ());
++        }
++
++        @Override
++        public boolean containsKey(final Object key) {
++            if (!(key instanceof BlockPos pos)) return false;
++            return canvas$containsPos(pos);
++        }
++
++        @Override
++        public @Nullable BlockEntity put(final BlockPos key, final BlockEntity value) {
++            return canvas$setBlockEntityInBuckets(key.getX(), key.getY(), key.getZ(), value);
++        }
++
++        @Override
++        public @Nullable BlockEntity remove(final Object key) {
++            if (!(key instanceof BlockPos pos)) return null;
++            return canvas$removeFromBuckets(pos.getX(), pos.getY(), pos.getZ());
++        }
++
++        @Override
++        public int size() {
++            return canvas$getBlockEntitiesCount();
++        }
++
++        @Override
++        public boolean isEmpty() {
++            for (final BlockEntity[] bucket : canvas$blockEntitySections) {
++                if (bucket == null) continue;
++                for (final BlockEntity blockEntity : bucket) {
++                    if (blockEntity != null) return false;
++                }
++            }
++            return true;
++        }
++
++        @Override
++        public void clear() {
++            canvas$removeAll();
++        }
++
++        @Override
++        public void forEach(final java.util.function.BiConsumer<? super BlockPos, ? super BlockEntity> action) {
++            canvas$iterateOverBlockEntities((blockEntity) -> action.accept(blockEntity.getBlockPos(), blockEntity));
++        }
++
++        @Override
++        public Set<Entry<BlockPos, BlockEntity>> entrySet() {
++            return new java.util.AbstractSet<>() {
++                @Override
++                public int size() {
++                    return canvas$getBlockEntitiesCount();
++                }
++
++                @Override
++                public void clear() {
++                    canvas$removeAll();
++                }
++
++                @Override
++                public java.util.Iterator<Entry<BlockPos, BlockEntity>> iterator() {
++                    BlockEntity[] snapshot = canvas$getAllBlockEntities();
++                    return new java.util.Iterator<>() {
++                        int index = 0;
++                        BlockEntity lastReturned = null;
++
++                        @Override
++                        public boolean hasNext() {
++                            return this.index < snapshot.length;
++                        }
++
++                        @Override
++                        public Entry<BlockPos, BlockEntity> next() {
++                            if (this.index >= snapshot.length) throw new java.util.NoSuchElementException();
++                            this.lastReturned = snapshot[this.index++];
++                            BlockPos key = this.lastReturned.getBlockPos();
++                            return new java.util.AbstractMap.SimpleEntry<>(key, this.lastReturned) {
++                                @Override
++                                public BlockEntity setValue(final BlockEntity newValue) {
++                                    canvas$setBlockEntityInBuckets(key.getX(), key.getY(), key.getZ(), newValue);
++                                    return super.setValue(newValue);
++                                }
++                            };
++                        }
++
++                        @Override
++                        public void remove() {
++                            if (this.lastReturned == null) throw new IllegalStateException();
++                            BlockPos pos = this.lastReturned.getBlockPos();
++                            canvas$removeFromBuckets(pos.getX(), pos.getY(), pos.getZ());
++                            this.lastReturned = null;
++                        }
++                    };
++                }
++            };
++        }
 +    }
 +    // Canvas end - optimize block entity fetching
      protected final LevelHeightAccessor levelHeightAccessor;
