@@ -304,15 +304,13 @@ public class WorldConfig extends Part {
             option("entityCollisionMode")
                 .docs(
                     Style.wrap("The entity collision mode for the server")
-                        .defineEnum(EntityCollisionMode.class, (mode) -> {
-                            return switch (mode) {
-                                case VANILLA -> "Default, all entities have collisions";
-                                case ONLY_PUSHABLE_PLAYERS_SMALL ->
-                                    "Only players are pushable by entities, searching in a small radius";
-                                case ONLY_PUSHABLE_PLAYERS_LARGE ->
-                                    "Only players are pushable by entities, searching in the normal radius";
-                                case NO_COLLISIONS -> "Disables entity collisions entirely";
-                            };
+                        .defineEnum(EntityCollisionMode.class, (mode) -> switch (mode) {
+                            case VANILLA -> "Default, all entities have collisions";
+                            case ONLY_PUSHABLE_PLAYERS_SMALL ->
+                                "Only players are pushable by entities, searching in a small radius";
+                            case ONLY_PUSHABLE_PLAYERS_LARGE ->
+                                "Only players are pushable by entities, searching in the normal radius";
+                            case NO_COLLISIONS -> "Disables entity collisions entirely";
                         })
                 );
         }
@@ -566,6 +564,8 @@ public class WorldConfig extends Part {
     public boolean enableSuffocationOptimization = false;
 
     public Sleeping sleeping = new Sleeping();
+
+    @SuppressWarnings("FieldMayBeFinal")
     public static class Sleeping extends Part {
 
         // the following options are based of PurpurMC:
