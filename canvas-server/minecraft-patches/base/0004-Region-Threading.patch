@@ -1140,10 +1140,10 @@ index 0000000000000000000000000000000000000000..2b35dcdb0699012745ef1abd85d8753a
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/SchedulerUtil.java b/io/canvasmc/canvas/threadedregions/SchedulerUtil.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..c21db91d951878cce33fed4727db18eb0a785769
+index 0000000000000000000000000000000000000000..9117dcfd4cdb5bbe3faa1cd3087cf9d0afdca2cd
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/SchedulerUtil.java
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,351 @@
 +package io.canvasmc.canvas.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.numa.OSNuma;
@@ -1269,23 +1269,17 @@ index 0000000000000000000000000000000000000000..c21db91d951878cce33fed4727db18eb
 +                case AFFINITY: {
 +                    final GlobalConfiguration.RegionScheduler.AffinityScheduler affinityConfig = GlobalConfiguration.getInstance().regionScheduler.affinityScheduler;
 +
-+                    long runBufferNanos = (long) (affinityConfig.runTasksBufferMillis * 1_000_000L);
-+                    long stealThresh = affinityConfig.stealThresholdMillis * 1_000_000L;
-+                    boolean enableStealing = affinityConfig.enableWorkStealing;
-+                    boolean enableAffinity = affinityConfig.enableAffinitySchedulerCpuAffinity;
-+                    boolean enableIntermediateTasks = affinityConfig.enableMidTickTasks;
-+
 +                    HANDLER = new AffinityHandler();
 +
 +                    return new AffinitySchedulerThreadPool(
 +                        initialThreads,
 +                        threadFactory,
-+                        runBufferNanos,
-+                        stealThresh,
++                        (long) (affinityConfig.runTasksBufferMillis * 1_000_000L),
++                        affinityConfig.stealThresholdMillis * 1_000_000L,
 +                        SchedulerUtil::doesSupportRegionProfiler,
-+                        enableStealing,
-+                        enableAffinity,
-+                        enableIntermediateTasks
++                        affinityConfig.enableWorkStealing,
++                        affinityConfig.enableAffinitySchedulerCpuAffinity,
++                        affinityConfig.enableMidTickTasks
 +                    );
 +                }
 +                default: {
@@ -1604,10 +1598,10 @@ index 0000000000000000000000000000000000000000..8f62811e6a26d98cfcdf80ae96f65267
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..ca6d106fffa48bd3ed853261412c42c6848a7b35
+index 0000000000000000000000000000000000000000..dbd9283ca99b1338e6127faab176d8fdc660ae5a
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
-@@ -0,0 +1,200 @@
+@@ -0,0 +1,199 @@
 +package io.canvasmc.canvas.threadedregions;
 +
 +import com.google.common.base.Preconditions;
@@ -1697,7 +1691,6 @@ index 0000000000000000000000000000000000000000..ca6d106fffa48bd3ed853261412c42c6
 +        // - process players
 +
 +        // - save chunks
-+        // - save pearls
 +        // - save level data
 +        // - close saved data storage
 +        // - remove world from maps
@@ -4764,10 +4757,10 @@ index 8e03419df1469c6fecfaa82fcb319a58635b39f3..b3c466fd7cb6810995f95bed66a86f2b
          // If 'k' has the highest level of all neighbors, then the power level of this
 diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..317ad5d89dcc508a757704973b81507ff4ba2448
+index 0000000000000000000000000000000000000000..a9c8d6af422d5945bb64620726cdc8277c47ea3e
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,107 @@
 +package io.papermc.paper.threadedregions;
 +
 +import com.mojang.logging.LogUtils;
@@ -4819,7 +4812,11 @@ index 0000000000000000000000000000000000000000..317ad5d89dcc508a757704973b81507f
 +                Thread.sleep(1000L);
 +            } catch (final InterruptedException _) {}
 +
-+            if (MinecraftServer.getServer() == null || MinecraftServer.getServer().hasStopped()) {
++            if (RegionShutdownThread.canvas$isShutdown()) {
++                return;
++            }
++
++            if (!TickRegions.hasStarted()) {
 +                continue;
 +            }
 +
@@ -9294,7 +9291,7 @@ index 0000000000000000000000000000000000000000..ce32be7dc14cc01cd15497651e995573
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..6152af128ecdaf7c15f744151ab800fb5a80e4a5
+index 0000000000000000000000000000000000000000..9d084dadc5fb0c1a2f84f8a2fc634aa0005c797a
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 @@ -0,0 +1,719 @@
@@ -9354,8 +9351,8 @@ index 0000000000000000000000000000000000000000..6152af128ecdaf7c15f744151ab800fb
 +    private static final float DEFAULT_TICK_RATE = io.canvasmc.canvas.GlobalConfiguration.getInstance().regionScheduler.defaultTickRate;
 +    private static final long DEFAULT_TICK_TIME_NANOS = (long) (1_000_000_000 / DEFAULT_TICK_RATE);
 +
-+    private static float CURRENT_TICK_RATE = DEFAULT_TICK_RATE;
-+    private static long CURRENT_TIME_BETWEEN_TICKS = DEFAULT_TICK_TIME_NANOS;
++    private static volatile float CURRENT_TICK_RATE = DEFAULT_TICK_RATE;
++    private static volatile long CURRENT_TIME_BETWEEN_TICKS = DEFAULT_TICK_TIME_NANOS;
 +
 +    // note: used for setting new tick time nanos, not really for anything else, utility method
 +    //       this is fine for decimal rates, as we round it so if anything, we are like 1 nanosecond off... which isn't bad
