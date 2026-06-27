@@ -15,6 +15,7 @@ import io.canvasmc.canvas.world.PerWorldDistanceConfig;
 import java.util.Locale;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.network.chat.Component;
@@ -104,7 +105,7 @@ public class WorldDistanceSubCommand implements SubCommand {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         return base.requires(stack -> stack.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command.worlddistance"))
             .then(argument("type", StringArgumentType.word())
                 .suggests((_, builder) -> {

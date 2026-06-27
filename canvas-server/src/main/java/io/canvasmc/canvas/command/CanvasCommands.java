@@ -12,6 +12,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.function.Predicate;
 import net.kyori.adventure.text.format.TextColor;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.permissions.Permissions;
 import org.jspecify.annotations.NullMarked;
@@ -49,7 +50,7 @@ public class CanvasCommands {
         return source -> source.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command." + node);
     }
 
-    public void build(CommandDispatcher<CommandSourceStack> dispatcher) {
+    public void build(final CommandDispatcher<CommandSourceStack> dispatcher, final CommandBuildContext context) {
         LiteralArgumentBuilder<CommandSourceStack> base = literal("canvas")
             .requires(source -> {
                 // the "base" is just the root command, "help" is builtin, so we need these hard coded
@@ -73,14 +74,14 @@ public class CanvasCommands {
             String name = sub.getName();
 
             base.then(sub.construct(literal(name)
-                .requires(hasPermission(name))));
+                .requires(hasPermission(name)), context));
 
             if (sub.isAllowedSelfCommand()) {
                 dispatcher.register(sub.construct(literal(name)
-                    .requires(hasPermission(name))));
+                    .requires(hasPermission(name)), context));
 
                 dispatcher.register(sub.construct(literal("canvas:" + name)
-                    .requires(hasPermission(name))));
+                    .requires(hasPermission(name)), context));
             }
         }
 

@@ -27,6 +27,7 @@ import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -111,7 +112,7 @@ public class RegionTickSubCommand implements SubCommand {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         return base
             .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(0.0F)).executes((context) -> {
                 float newTickRate = context.getArgument("rate", Float.class);

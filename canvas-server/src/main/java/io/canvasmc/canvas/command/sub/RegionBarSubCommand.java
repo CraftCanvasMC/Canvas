@@ -7,6 +7,7 @@ import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import io.canvasmc.canvas.command.SubCommand;
 import io.canvasmc.canvas.world.RegionResourceBar;
 import java.util.Collection;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
@@ -86,7 +87,7 @@ public class RegionBarSubCommand implements SubCommand {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         return base
             .then(argument("type", StringArgumentType.word())
                 .suggests((_, builder) -> {

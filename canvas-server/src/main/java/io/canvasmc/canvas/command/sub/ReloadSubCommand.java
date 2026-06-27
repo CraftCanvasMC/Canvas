@@ -5,6 +5,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.WorldConfig;
 import io.canvasmc.canvas.command.SubCommand;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
@@ -34,7 +35,7 @@ public class ReloadSubCommand implements SubCommand {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         return base.executes(context -> {
             context.getSource().sendSystemMessage(
                 Component.literal("Some configuration options cannot be changed at runtime or may work incorrectly after reloading.")

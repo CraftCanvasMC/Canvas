@@ -2,6 +2,7 @@ package io.canvasmc.canvas.command;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import java.util.function.Predicate;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -10,7 +11,7 @@ import org.jspecify.annotations.Nullable;
  * Represents a subcommand that can be registered under the Canvas command system.
  * <p>
  * Implementations define their name, description, and Brigadier command structure via the
- * {@link #construct(LiteralArgumentBuilder)} method.
+ * {@link #construct(LiteralArgumentBuilder,CommandBuildContext)} method.
  * </p>
  */
 public interface SubCommand {
@@ -49,7 +50,7 @@ public interface SubCommand {
      *
      * @return the fully constructed {@link LiteralArgumentBuilder} for registration
      */
-    LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base);
+    LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext context);
 
     /**
      * Gets if the command can be registered on its own and not as a subcommand of `/canvas`

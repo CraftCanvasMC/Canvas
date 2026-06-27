@@ -7,6 +7,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.command.SubCommand;
 import io.papermc.paper.threadedregions.RegionizedServer;
+import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
@@ -49,7 +50,7 @@ public class SetMaxPlayersSubCommand implements SubCommand {
     }
 
     @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base) {
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         return base.then(argument("count", IntegerArgumentType.integer(0))
             .executes(context -> execute(
                 IntegerArgumentType.getInteger(context, "count"), false))
