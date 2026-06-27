@@ -5,6 +5,7 @@ import io.canvasmc.canvas.configuration.validation.StringValidation;
 import io.canvasmc.canvas.util.CanonicalReference;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -77,6 +78,13 @@ public class Part {
         definitionOverrides.put(target, def);
 
         return def;
+    }
+
+    public String writeToString() {
+        if (getYamlNode() == null) throw new IllegalArgumentException("Cannot serialize this instance. Yaml is null");
+        final StringWriter stringWriter = new StringWriter();
+        ConfigurationProvider.serialize(getYamlNode(), stringWriter);
+        return stringWriter.toString();
     }
 
     public void serializeInternalNode(final Path path) {

@@ -7,6 +7,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -223,8 +224,12 @@ public class ConfigurationProvider {
         // now that we wrote the header, write to file
         Files.createDirectories(pathAbsolute.getParent());
         try (FileWriter fw = new FileWriter(pathAbsolute.toFile())) {
-            YAML.serialize(representation, fw);
+            serialize(representation, fw);
         }
+    }
+
+    protected static void serialize(final Node representation, final Writer fw) {
+        YAML.serialize(representation, fw);
     }
 
     public static <C extends Part> void buildSolidConfiguration(
