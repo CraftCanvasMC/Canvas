@@ -57,7 +57,13 @@ public class GlobalConfiguration extends Part {
     private static boolean ENABLE_FASTER_RANDOM = true;
 
     static {
-        reload();
+        try {
+            reload();
+        } catch (final Throwable thrown) {
+            // just need to make sure this is logged at least
+            LOGGER.error("Couldn't load Canvas global configuration", thrown);
+            throw thrown;
+        }
     }
 
     public static void reload() {
@@ -259,6 +265,13 @@ public class GlobalConfiguration extends Part {
             case WARN -> LOGGER.warn(msg);
             case ERROR -> LOGGER.error(msg);
         }
+    }
+
+    /**
+     * Saves the existing configuration from memory to disk
+     */
+    public void save() {
+        save(CONFIG_PATH);
     }
 
     public RegionScheduler regionScheduler = new RegionScheduler();

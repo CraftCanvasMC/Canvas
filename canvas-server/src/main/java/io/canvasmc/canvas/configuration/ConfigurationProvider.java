@@ -11,6 +11,7 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,7 +142,7 @@ public class ConfigurationProvider {
 
         try {
             write(pathAbsolute, representation, header, false);
-        } catch (IOException ioe) {
+        } catch (final IOException ioe) {
             throw new RuntimeException("Couldn't save config", ioe);
         }
 
@@ -149,19 +150,20 @@ public class ConfigurationProvider {
         if (resolver != null) {
             // resolver CAN be null, the only time this happens is when the
             // caller wants to handle this themsleves
-            resolver.onFinishLoad(injectNode(defaultObj, representation));
+            resolver.onFinishLoad(defaultObj);
         }
 
         // we don't have to do anything about trying to patch this, no file was present, return
     }
 
-    @Contract("_, _ -> param1")
-    private static <C extends Part> @NonNull C injectNode(final @NonNull C defaultObj, final Node node) {
-        defaultObj.node.setValue(node);
-        return defaultObj;
+    @NonNull
+    static Node represent(final @NonNull Part part) {
+        final Node node = YAML.represent(part);
+        node.setTag(Tag.MAP);
+        return node;
     }
 
-    private static void mergeNodes(
+    static void mergeNodes(
         final @NonNull MappingNode baseMapping,
         final @NonNull MappingNode patchMapping,
         final @NonNull String prefix
@@ -208,7 +210,7 @@ public class ConfigurationProvider {
         // the user may have edited or removed it intentionally, so we never touch it
         if (!alreadyExisted && header != null) {
             // the header is special, it can define its own lines and its own formatting
-            List<CommentLine> lines = new ArrayList<>();
+            final List<CommentLine> lines = new LinkedList<>();
             for (final String str : header) {
                 if (str == null)
                     throw new IllegalArgumentException("Line in header must not be null. If you want a blank line, use an empty string");
@@ -218,6 +220,10 @@ public class ConfigurationProvider {
             }
             // add blank line so that it's kinda separated from the other comments
             lines.add(new CommentLine(null, null, "", CommentType.BLANK_LINE));
+            // don't want to override existing comments completely
+            if (representation.getBlockComments() != null) {
+                lines.addAll(representation.getBlockComments());
+            }
             representation.setBlockComments(lines);
         }
 
@@ -255,7 +261,7 @@ public class ConfigurationProvider {
             //       configured our constructor/representer, so for new comments we should just
             //       take the object representation and tokenize it, pull the added configs,
             //       and then inject those comments into the new file representation nodes
-            Node fileRepresentation = YAML.compose(new FileReader(pathAbsolute.toFile()));
+            Node fileRepresentation = composeFileNode(pathAbsolute);
             Node objectRepresentation = YAML.represent(defaultObj);
 
             // file representation can be null if the user completely empties the config
@@ -278,7 +284,7 @@ public class ConfigurationProvider {
 
             try {
                 write(pathAbsolute, fileRepresentation, header, true);
-            } catch (IOException ioe) {
+            } catch (final IOException ioe) {
                 throw new RuntimeException("Couldn't save config", ioe);
             }
 
@@ -289,10 +295,14 @@ public class ConfigurationProvider {
             C userMade = (C) YAML.loadAs(new FileReader(pathAbsolute.toFile()), defaultObj.getClass());
 
             // finished load, call resolver and return
-            resolver.onFinishLoad(injectNode(userMade, fileRepresentation));
-        } catch (FileNotFoundException e) {
-            throw new IllegalStateException("File wasn't found?", e);
+            resolver.onFinishLoad(userMade);
+        } catch (final FileNotFoundException fnfe) {
+            throw new IllegalStateException("File wasn't found?", fnfe);
         }
+    }
+
+    static Node composeFileNode(final @NonNull Path absolutePath) throws FileNotFoundException {
+        return YAML.compose(new FileReader(absolutePath.toFile()));
     }
 
     public static <C extends Part> void buildPatchableConfiguration(
@@ -315,8 +325,8 @@ public class ConfigurationProvider {
         try {
             //noinspection unchecked
             base = (C) YAML.loadAs(new FileReader(baseAbsolute.toFile()), defaultSupplier.get().getClass());
-        } catch (FileNotFoundException e) {
-            throw new IllegalStateException("Base config disappeared between existence check and load", e);
+        } catch (final FileNotFoundException fnfe) {
+            throw new IllegalStateException("Base config disappeared between existence check and load", fnfe);
         }
 
         // check if the patch exists. if not, flood
@@ -331,7 +341,7 @@ public class ConfigurationProvider {
                     }
                     fw.write("\n");
                 }
-            } catch (IOException ioe) {
+            } catch (final IOException ioe) {
                 throw new RuntimeException("Couldn't write patch file", ioe);
             }
 
@@ -344,7 +354,7 @@ public class ConfigurationProvider {
         // are defined in the patch, we just return the default. otherwise, we patch the values
 
         try {
-            Node patchNode = YAML.compose(new FileReader(patchAbsolute.toFile()));
+            Node patchNode = composeFileNode(patchAbsolute);
 
             // null or non-mapping means the patch is empty, just return base
             if (patchNode == null) {
@@ -374,8 +384,8 @@ public class ConfigurationProvider {
             //noinspection unchecked
             C merged = (C) YAML.loadAs(new StringReader(sw.toString()), defaultSupplier.get().getClass());
 
-            resolver.onFinishLoad(injectNode(merged, baseNode));
-        } catch (FileNotFoundException fnfe) {
+            resolver.onFinishLoad(merged);
+        } catch (final FileNotFoundException fnfe) {
             throw new RuntimeException("Unable to find patch file", fnfe);
         }
     }

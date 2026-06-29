@@ -56,7 +56,13 @@ public class WorldConfig extends Part {
         //noinspection ResultOfMethodCallIgnored
         GlobalConfiguration.getInstance(); // preload global
 
-        reload();
+        try {
+            reload();
+        } catch (final Throwable thrown) {
+            // we at least need to make sure this is logged
+            LOGGER.error("Couldn't load Canvas worlds default configuration", thrown);
+            throw thrown;
+        }
     }
 
     public static void reload() {

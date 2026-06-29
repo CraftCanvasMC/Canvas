@@ -5,7 +5,6 @@ import io.canvasmc.canvas.configuration.validation.StringValidation;
 import io.canvasmc.canvas.util.CanonicalReference;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import java.io.IOException;
-import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,14 +12,14 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import net.minecraft.util.FileUtil;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
+import org.yaml.snakeyaml.nodes.MappingNode;
 import org.yaml.snakeyaml.nodes.Node;
 
-public class Part {
+public abstract class Part {
 
-    // whenever the reference is null, the yaml is empty
-    final CanonicalReference<Node> node = new CanonicalReference<>();
     final CanonicalReference<Function<String, @Nullable OptionDefinition>> processor = new CanonicalReference<>();
     // we don't need or care about this being linked tbh
     final Object2ObjectOpenHashMap<String, OptionDefinition> definitionOverrides = new Object2ObjectOpenHashMap<>();
@@ -54,10 +53,6 @@ public class Part {
         }
     }
 
-    public Node getYamlNode() {
-        return node.valueSafe();
-    }
-
     public void stream(final Function<String, @Nullable OptionDefinition> processor) {
         this.processor.setValue(processor);
     }
@@ -80,21 +75,34 @@ public class Part {
         return def;
     }
 
-    public String writeToString() {
-        if (getYamlNode() == null) throw new IllegalArgumentException("Cannot serialize this instance. Yaml is null");
-        final StringWriter stringWriter = new StringWriter();
-        ConfigurationProvider.serialize(getYamlNode(), stringWriter);
-        return stringWriter.toString();
-    }
-
-    public void serializeInternalNode(final Path path) {
-        if (getYamlNode() == null) throw new IllegalArgumentException("Cannot serialize this instance. Yaml is null");
+    protected void save(final @NonNull Path path) {
         try {
-            ConfigurationProvider.write(
-                path, getYamlNode(), null, Files.exists(path)
-            );
+            if (path.getParent() != null) {
+                FileUtil.createDirectoriesSafe(path.getParent());
+            }
+            if (!Files.exists(path)) {
+                throw new IllegalArgumentException("Unable to save because save target doesn't exist. Deleted?");
+            }
+
+            final Node fileNode = ConfigurationProvider.composeFileNode(path.toAbsolutePath());
+            if (fileNode == null) {
+                throw new IllegalStateException("Cannot save: no file node is present. Was this Part loaded via buildSolidConfiguration?");
+            }
+
+            // represent the live object so we have active values in node form
+            // we don't care about comments, we don't change those
+            final Node freshNode = ConfigurationProvider.represent(this);
+
+            // we just need to push the values in memory to the file node, that's it
+            // so we don't need to modify ANYTHING else
+            if (fileNode instanceof MappingNode fileMapping
+                && freshNode instanceof MappingNode freshMapping) {
+                ConfigurationProvider.mergeNodes(fileMapping, freshMapping, "");
+            }
+
+            ConfigurationProvider.write(path, fileNode, null, true);
         } catch (IOException ioe) {
-            throw new RuntimeException("Couldn't serialize internal node", ioe);
+            throw new RuntimeException("Could not save Part to " + path, ioe);
         }
     }
 
