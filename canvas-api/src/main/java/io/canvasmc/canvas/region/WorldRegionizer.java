@@ -175,6 +175,19 @@ public interface WorldRegionizer {
         WorldRegionizer getRegionizer();
 
         /**
+         * Returns the {@code long} id associated with this region.
+         * <p>
+         * The id is immutable upon creation of the region in question, and is unique per threaded region object
+         * created. It is not recommended to try and predict these values, however it can be useful for if you are
+         * trying to track regions. It is worth noting that region splits would discard the existing region object and
+         * create new region objects for each new split area, and merge operations would only discard one of the region
+         * objects in question, generating a new id per new region created.
+         *
+         * @return the {@code long} id
+         */
+        long getId();
+
+        /**
          * Represents the lifecycle state of a {@link ChunkRegion}.
          */
         enum State {
