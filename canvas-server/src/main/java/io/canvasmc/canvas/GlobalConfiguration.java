@@ -503,22 +503,6 @@ public class GlobalConfiguration extends Part {
                     "This makes protocol switching asynchronous during login, which reduces global region blocking",
                     "and can improve login and configuration phase performance during player join"
                 );
-
-            option("maximumPacketBytes")
-                .docs(
-                    "The maximum bytes that can be sent by the server in a single packet to a player before kicking them"
-                ).greaterThan(0.0F);
-            option("disablePaperPacketOverflowContainerFix")
-                .docs(
-                    "This disables Papers overflow fallback for large container packets being sent to the client. This means",
-                    "that if the container data is too large, it will kick the player if they attempt to open a container",
-                    "with contents larger than the max packet byte size"
-                );
-            option("packetTooLargeDisconnectReason")
-                .docs(
-                    "The disconnect reason sent to the client when the server attempted to send a packet that",
-                    "exceeded the max packet size"
-                );
         }
 
         public boolean filterVelocityPacket = false;
@@ -526,9 +510,6 @@ public class GlobalConfiguration extends Part {
         public boolean alternativePlayerListTick = false;
         public int playerInfoSendInterval = 600;
         public boolean asyncProtocolSwitch = false;
-        public int maximumPacketBytes = 8388608;
-        public boolean disablePaperPacketOverflowContainerFix = false;
-        public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
         public boolean purpurAlternativeKeepalive = false;
     }
 
