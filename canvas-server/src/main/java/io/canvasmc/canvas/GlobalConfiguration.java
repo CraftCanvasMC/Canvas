@@ -9,6 +9,7 @@ import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
+import io.canvasmc.canvas.util.TimeSpan;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.threadedregions.RegionizedServer;
@@ -17,7 +18,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.concurrent.CompletableFuture;
 import java.util.random.RandomGeneratorFactory;
 import net.minecraft.ChatFormatting;
@@ -195,38 +195,35 @@ public class GlobalConfiguration extends Part {
                 LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
                 LOGGER.warn("Debug: Java: {}, test run: {}", System.getProperty("java.version"), SIMDDetection.testRun);
             }
+
+            final Path logsDirectoryPath = Path.of("logs");
+
+            // start log cleaner, only at startup
+            if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath)) {
+                final MutableInt amountRemoved = new MutableInt(0);
+
+                Util.removeDirectoryContentsIf(logsDirectoryPath.toFile(), (path) -> {
+                    try {
+                        final Instant lastModified = Files.getLastModifiedTime(path).toInstant();
+                        if (lastModified.isBefore(TimeSpan.parse(configuration.logs.cleanerTimeSpan).inPast()) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
+                            // the time the log file was modified is before the
+                            // thresh, meaning it is older than the thresh set
+                            amountRemoved.increment();
+                            return true;
+                        }
+                    } catch (final IOException ioe) {
+                        broadcast("Unable to determine if file " + path.getFileName() + " should be removed because: " + ioe.getMessage(), ERROR);
+                    }
+                    return false;
+                });
+
+                if (amountRemoved.intValue() > 0) {
+                    broadcast("Log cleaner removed " + amountRemoved.intValue() + " old log files", INFO);
+                }
+            }
         }
 
         broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
-
-        final Path logsDirectoryPath = Path.of("logs");
-
-        // start log cleaner, only at startup
-        if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath) && !TickRegions.hasStarted()) {
-
-            final Instant now = Instant.now();
-            final Instant adjustedInstantToThresh = now.minus(configuration.logs.length, configuration.logs.unit);
-            final MutableInt amountRemoved = new MutableInt(0);
-
-            Util.removeDirectoryContentsIf(logsDirectoryPath.toFile(), (path) -> {
-                try {
-                    final Instant lastModified = Files.getLastModifiedTime(path).toInstant();
-                    if (lastModified.isBefore(adjustedInstantToThresh) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
-                        // the time the log file was modified is before the
-                        // thresh, meaning it is older than the thresh set
-                        amountRemoved.increment();
-                        return true;
-                    }
-                } catch (IOException ioe) {
-                    broadcast("Unable to determine if file " + path.getFileName() + " should be removed because: " + ioe.getMessage(), ERROR);
-                }
-                return false;
-            });
-
-            if (amountRemoved.intValue() > 0) {
-                broadcast("Log cleaner removed " + amountRemoved.intValue() + " old log files", INFO);
-            }
-        }
     }
 
     public static GlobalConfiguration getInstance() {
@@ -604,19 +601,17 @@ public class GlobalConfiguration extends Part {
     }
 
     public Logs logs = new Logs();
+    @SuppressWarnings("FieldMayBeFinal")
     public static class Logs extends Part {
 
         {
             option("enableLogCleaner").docs("Auto-removes old log files from the \"logs\" directory");
-            option("length").docs("The amount of the time unit until the log file is marked for deletion");
-            option("unit").docs("The type of time unit to use when comparing how old the file is to the current time");
+            option("cleanerTimeSpan").docs("The amount of the time since the log file was last edited until it will be deleted");
             option("logEnderPearlRewriteActions").docs("Logs when a pearl is saved or loaded from Canvas' pearl save rewrite");
         }
 
-        public boolean enableLogCleaner = false;
-        public long length = 30;
-        public ChronoUnit unit = ChronoUnit.DAYS;
-
+        private boolean enableLogCleaner = false;
+        private String cleanerTimeSpan = "30d";
         public boolean logEnderPearlRewriteActions = true;
     }
 
