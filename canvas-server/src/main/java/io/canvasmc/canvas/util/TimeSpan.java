@@ -74,10 +74,16 @@ public class TimeSpan {
 
     private final ChronoUnit chronoUnit;
     private final long count;
+    private final String asString;
 
     private TimeSpan(final ChronoUnit unit, final long count) {
         this.chronoUnit = unit;
         this.count = count;
+        this.asString = count + UNIT_ALIASES.entrySet().stream()
+            .filter(entry -> entry.getValue() == chronoUnit)
+            .map(Map.Entry::getKey)
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("No alias for unit: " + chronoUnit));
     }
 
     @NonNull
@@ -121,5 +127,10 @@ public class TimeSpan {
     public Instant inFuture() {
         final Instant now = Instant.now();
         return now.plus(count, chronoUnit);
+    }
+
+    @Override
+    public String toString() {
+        return asString;
     }
 }

@@ -5473,10 +5473,10 @@ index 0000000000000000000000000000000000000000..ccfbec958e65b8cccabd5d6421ab9de5
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..9d46130b72ada11d1c95a3abcd6c3f5d8fc4a5b5
+index 0000000000000000000000000000000000000000..9e257025ed11ffde496a85dc52c1202adf34f092
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -0,0 +1,619 @@
+@@ -0,0 +1,634 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.common.util.TimeUtil;
@@ -5814,10 +5814,11 @@ index 0000000000000000000000000000000000000000..9d46130b72ada11d1c95a3abcd6c3f5d
 +        ensureGlobalTickThread("Cannot save global data async");
 +
 +        final MinecraftServer server = MinecraftServer.getServer();
++        final io.canvasmc.canvas.GlobalConfiguration.Autosave autosaveConfig =
++            io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave;
 +
-+        final int autoSavePeriod = server.autosavePeriod;
-+        if (autoSavePeriod <= 0 && !force) return;
-+        final long periodNanos = autoSavePeriod * TickRegionScheduler.getTimeBetweenTicks();
++        final long periodNanos = io.canvasmc.canvas.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
++        if (periodNanos <= 0 && !force) return;
 +        final long currTime = System.nanoTime();
 +        final long last = LAST_GLOBAL_AUTOSAVE.get();
 +
@@ -5839,17 +5840,25 @@ index 0000000000000000000000000000000000000000..9d46130b72ada11d1c95a3abcd6c3f5d
 +                final ArrayList<Class<? extends SavedData>> toSave = new ArrayList<>();
 +
 +                // both of these are SWMR, only mutatable on the global tick
-+                toSave.add(ScoreboardSaveData.class);
-+                toSave.add(Stopwatches.class);
++                if (autosaveConfig.autosaveScoreboards) {
++                    toSave.add(ScoreboardSaveData.class);
++                }
++                if (autosaveConfig.autosaveStopwatches) {
++                    toSave.add(Stopwatches.class);
++                }
 +
 +                // our pearl rewrite is threadsafe
-+                toSave.add(EnderPearls.class);
++                if (autosaveConfig.autosavePearls) {
++                    toSave.add(EnderPearls.class);
++                }
 +
 +                // made threadsafe by Canvas
-+                toSave.add(CustomBossEvents.class);
++                if (autosaveConfig.autosaveCustomBossEvents) {
++                    toSave.add(CustomBossEvents.class);
++                }
 +
 +                // only should be saved globally if affects all worlds
-+                if (GlobalConfiguration.get().time.affectsAllWorlds) {
++                if (autosaveConfig.autosaveTime && GlobalConfiguration.get().time.affectsAllWorlds) {
 +                    toSave.add(ServerClockManager.class);
 +                }
 +
@@ -5868,11 +5877,11 @@ index 0000000000000000000000000000000000000000..9d46130b72ada11d1c95a3abcd6c3f5d
 +    public void autosaveSafeWorldData(final boolean force, final boolean sync, final ServerLevel level) {
 +        ensureGlobalTickThread("Cannot save global world data async");
 +
-+        final MinecraftServer server = MinecraftServer.getServer();
++        final io.canvasmc.canvas.GlobalConfiguration.Autosave autosaveConfig =
++            io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave;
 +
-+        final int autoSavePeriod = server.autosavePeriod;
-+        if (autoSavePeriod <= 0 && !force) return;
-+        final long periodNanos = autoSavePeriod * TickRegionScheduler.getTimeBetweenTicks();
++        final long periodNanos = io.canvasmc.canvas.GlobalConfiguration.AUTOSAVE_SPAN.getValue().asNanoSpan();
++        if (periodNanos <= 0 && !force) return;
 +        final long currTime = System.nanoTime();
 +        final long last = level.lastMapAutoSave;
 +
@@ -5893,11 +5902,13 @@ index 0000000000000000000000000000000000000000..9d46130b72ada11d1c95a3abcd6c3f5d
 +                final ArrayList<Class<? extends SavedData>> toSave = new ArrayList<>();
 +
 +                // maps is represented in 2 data types, the index and the item
-+                toSave.add(MapItemSavedData.class);
-+                toSave.add(MapIndex.class);
++                if (autosaveConfig.autosaveMaps) {
++                    toSave.add(MapItemSavedData.class);
++                    toSave.add(MapIndex.class);
++                }
 +
 +                // only should be autosaved here if worlds have independent time
-+                if (!GlobalConfiguration.get().time.affectsAllWorlds) {
++                if (autosaveConfig.autosaveTime && !GlobalConfiguration.get().time.affectsAllWorlds) {
 +                    toSave.add(ServerClockManager.class);
 +                }
 +
@@ -5906,10 +5917,14 @@ index 0000000000000000000000000000000000000000..9d46130b72ada11d1c95a3abcd6c3f5d
 +
 +                // folia already only ticks this on the global tick and both canvas
 +                // and folia have thread checks against modifying this data async, so this is fine
-+                toSave.add(WeatherData.class);
++                if (autosaveConfig.autosaveWeather) {
++                    toSave.add(WeatherData.class);
++                }
 +                // already made threadsafe from folia, just needed the codec adjusted to copy the
 +                // backing map to prevent exceptions or torn read/write issues
-+                toSave.add(GameRuleMap.class);
++                if (autosaveConfig.autosaveGamerules) {
++                    toSave.add(GameRuleMap.class);
++                }
 +
 +                // note: the dragon fight is autosaved on the region owning the fight in question.
 +                //       this is because this is specific per-dimension and is also region-specific
@@ -12556,7 +12571,7 @@ index 144c18c08bf8f03d907b97f968aa171a9fbf997f..be9fdca704391f8d77b87b4d75e67bb6
          }
      }
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 5044a4221f2946026c3a03b9d3a4719d7c532b45..e5a62fc04ead4b012aa4c3a641ab44b7028ce122 100644
+index 5044a4221f2946026c3a03b9d3a4719d7c532b45..8bea36b4f71164a5be1cfb969816ae59b4c02839 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -208,7 +208,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -13076,7 +13091,8 @@ index 5044a4221f2946026c3a03b9d3a4719d7c532b45..e5a62fc04ead4b012aa4c3a641ab44b7
 +        final boolean fullSave = this.autosavePeriod > 0 && io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() % this.autosavePeriod == 0; // Folia - region threading
          try {
              this.isSaving = true;
-             if (playerSaveInterval > 0) {
+-            if (playerSaveInterval > 0) {
++            if (io.canvasmc.canvas.GlobalConfiguration.getInstance().autosave.autosavePlayers && playerSaveInterval > 0) { // Canvas - region threading
                  this.playerList.saveAll(playerSaveInterval);
              }
 -            if (fullSave) {
@@ -29869,7 +29885,7 @@ index 6f24eb34e0ecc2b03371c585a9538e9337a2295a..0dc70356eba5ea022e0991a81e11c9fe
          private LevelStorageAccess(final String levelId, final Path path) throws IOException {
              this.levelId = levelId;
 diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
-index f359e53024019f35aaa5cd8477da708bda2fc57a..b2ede5da90eba150e2afa89350274e8b2f7850e4 100644
+index f359e53024019f35aaa5cd8477da708bda2fc57a..65bb86910f333ee41aec2347a1a9ce87dc644ffc 100644
 --- a/net/minecraft/world/level/storage/SavedDataStorage.java
 +++ b/net/minecraft/world/level/storage/SavedDataStorage.java
 @@ -40,7 +40,7 @@ import org.slf4j.Logger;
@@ -29969,7 +29985,7 @@ index f359e53024019f35aaa5cd8477da708bda2fc57a..b2ede5da90eba150e2afa89350274e8b
      }
  
      public CompoundTag readTagFromDisk(final Path dataFile, final DataFixTypes type, final int newVersion) throws IOException {
-@@ -143,6 +182,61 @@ public class SavedDataStorage implements AutoCloseable {
+@@ -143,6 +182,64 @@ public class SavedDataStorage implements AutoCloseable {
          return gzip;
      }
  
@@ -29982,6 +29998,9 @@ index f359e53024019f35aaa5cd8477da708bda2fc57a..b2ede5da90eba150e2afa89350274e8b
 +
 +    public final CompletableFuture<?> saveSpecific(final java.util.function.Supplier<List<Class<? extends SavedData>>> classTypesSupplier) {
 +        final List<Class<? extends SavedData>> classTypes = classTypesSupplier.get();
++        if (classTypes.isEmpty()) {
++            return CompletableFuture.completedFuture(null);
++        }
 +    // Canvas end - region threading
 +        Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
 +        RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
@@ -30031,7 +30050,7 @@ index f359e53024019f35aaa5cd8477da708bda2fc57a..b2ede5da90eba150e2afa89350274e8b
      public CompletableFuture<?> scheduleSave() {
          if (this.closed) {
              throw new IllegalStateException("Trying to schedule save when SavedDataStorage is already closed");
-@@ -189,8 +283,9 @@ public class SavedDataStorage implements AutoCloseable {
+@@ -189,8 +286,9 @@ public class SavedDataStorage implements AutoCloseable {
          Map<SavedDataType<?>, CompoundTag> tagsToSave = new Object2ObjectArrayMap<>();
          RegistryOps<Tag> ops = this.registries.createSerializationContext(NbtOps.INSTANCE);
          this.cache.forEach((type, optional) -> optional.filter(SavedData::isDirty).ifPresent(data -> {
@@ -30042,7 +30061,7 @@ index f359e53024019f35aaa5cd8477da708bda2fc57a..b2ede5da90eba150e2afa89350274e8b
          }));
          return tagsToSave;
      }
-@@ -198,7 +293,9 @@ public class SavedDataStorage implements AutoCloseable {
+@@ -198,7 +296,9 @@ public class SavedDataStorage implements AutoCloseable {
      private <T extends SavedData> CompoundTag encodeUnchecked(final SavedDataType<T> type, final SavedData data, final RegistryOps<Tag> ops) {
          Codec<T> codec = type.codec();
          CompoundTag tag = new CompoundTag();

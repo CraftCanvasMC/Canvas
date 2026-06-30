@@ -9,6 +9,7 @@ import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
+import io.canvasmc.canvas.util.LockedReference;
 import io.canvasmc.canvas.util.TimeSpan;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
@@ -47,6 +48,7 @@ public class GlobalConfiguration extends Part {
     protected static final int CHAR_LIM = 90;
 
     public static final Logger LOGGER = LoggerFactory.getLogger("CanvasMC");
+    public static final LockedReference<TimeSpan> AUTOSAVE_SPAN = new LockedReference<>(null);
 
     public static final int INFO = 0;
     public static final int WARN = 1;
@@ -136,7 +138,8 @@ public class GlobalConfiguration extends Part {
                 ).endLine()
                 .blank()
                 .wordWrap(
-                    "If you have questions about certain configuration options please reach out in our discord"
+                    "If you have questions about certain configuration options please reach out in our discord. As a",
+                    "general rule, if you don't know what a certain option does, DO NOT TOUCH IT."
                 ).endLine()
                 .literal("https://canvasmc.io/discord")
                 .compile(60)
@@ -223,6 +226,9 @@ public class GlobalConfiguration extends Part {
             }
         }
 
+        AUTOSAVE_SPAN.swapValue((_) -> TimeSpan.parse(configuration.autosave.autosaveFrequency));
+
+        broadcast("Server will autosave enabled selection every " + configuration.autosave.autosaveFrequency, INFO);
         broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
     }
 
@@ -234,7 +240,8 @@ public class GlobalConfiguration extends Part {
         return BUILD_STATUS;
     }
 
-    public static @NonNull RandomSource createFastRandom() {
+    @NonNull
+    public static RandomSource createFastRandom() {
         return ENABLE_FASTER_RANDOM ? new FasterRandomSource(RandomSupport.generateUniqueSeed()) : new SimpleThreadUnsafeRandom(RandomSupport.generateUniqueSeed());
     }
 
@@ -372,7 +379,6 @@ public class GlobalConfiguration extends Part {
     public static class ChunkSystem extends Part {
 
         {
-            option("threadPriority").between(Thread.MIN_PRIORITY, Thread.MAX_PRIORITY);
             option("fluidPostProcessingAlgorithm")
                 .docs(
                     Style.wrap(
@@ -553,7 +559,8 @@ public class GlobalConfiguration extends Part {
     public boolean tileEntitySnapshotCreation = false;
     public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
 
-    public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
+    @NonNull
+    public static ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
         return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
     }
 
@@ -600,6 +607,7 @@ public class GlobalConfiguration extends Part {
     }
 
     public Logs logs = new Logs();
+
     @SuppressWarnings("FieldMayBeFinal")
     public static class Logs extends Part {
 
@@ -629,15 +637,33 @@ public class GlobalConfiguration extends Part {
     }
 
     public boolean disableLocatorBarInAllWorlds = false;
-    // TODO
-    // {
-    //     option("autosave").docs(
-    //         "Folia breaks a lot of autosave features. Canvas restores these,",
-    //         "and this section allows more specific configuration of autosave functionalities"
-    //     );
-    // }
-    //
-    // public Autosave autosave = new Autosave();
-    // public static class Autosave {
-    // }
+
+    {
+        option("autosave").docs(
+            "Folia breaks a lot of autosave features. Canvas restores these,",
+            "and this section allows more specific configuration of autosave functionalities"
+        );
+    }
+
+    public Autosave autosave = new Autosave();
+
+    @SuppressWarnings("FieldMayBeFinal")
+    public static class Autosave extends Part {
+
+        {
+            option("autosaveFrequency").docs("The time frequency of how often to autosave the enabled selection. Default is 5 minutes to match upstream");
+        }
+
+        private String autosaveFrequency = "5m";
+
+        public boolean autosaveScoreboards = true;
+        public boolean autosaveStopwatches = true;
+        public boolean autosavePearls = true;
+        public boolean autosaveCustomBossEvents = true;
+        public boolean autosaveTime = true;
+        public boolean autosaveMaps = true;
+        public boolean autosaveWeather = true;
+        public boolean autosaveGamerules = true;
+        public boolean autosavePlayers = true;
+    }
 }
