@@ -399,7 +399,6 @@ public class GlobalConfiguration extends Part {
             );
         }
 
-        public int threadPriority = Thread.NORM_PRIORITY;
         public FluidPostProcessingMode fluidPostProcessingAlgorithm = FluidPostProcessingMode.VANILLA;
 
         public enum FluidPostProcessingMode {
@@ -630,4 +629,15 @@ public class GlobalConfiguration extends Part {
     }
 
     public boolean disableLocatorBarInAllWorlds = false;
+    // TODO
+    // {
+    //     option("autosave").docs(
+    //         "Folia breaks a lot of autosave features. Canvas restores these,",
+    //         "and this section allows more specific configuration of autosave functionalities"
+    //     );
+    // }
+    //
+    // public Autosave autosave = new Autosave();
+    // public static class Autosave {
+    // }
 }
