@@ -50,7 +50,7 @@ public interface SubCommand {
      *
      * @return the fully constructed {@link LiteralArgumentBuilder} for registration
      */
-    LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext context);
+    LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext);
 
     /**
      * Gets if the command can be registered on its own and not as a subcommand of `/canvas`
