@@ -42,33 +42,21 @@ public class Util {
     private static final ThreadLocal<SingleThreadedRandomSource> SIMPLE = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));
 
     @NonNull
-    private static String scale(long nanos) {
-        if (nanos < 1_000L)
-            return nanos + "ns";
-
-        if (nanos < 1_000_000_000L) {
-            long ms = nanos / 1_000_000L;
-            return ms + "ms";
-        }
-
-        final long seconds = nanos / 1_000_000_000L;
-
-        if (seconds < 60)
-            return seconds + "s";
-
-        if (seconds < 3_600)
-            return plural(seconds / 60, "minute");
-
-        if (seconds < 86_400)
-            return plural(seconds / 3_600, "hour");
-
-        return plural(seconds / 86_400, "day");
+    @Contract(pure = true)
+    private static String pluralDecimal(final double value, final String unit) {
+        return truncateToSecondDecimal(value) + " " + unit + (value == 1 ? "" : "s");
     }
 
     @NonNull
     @Contract(pure = true)
-    private static String plural(long value, String unit) {
+    private static String pluralWhole(final long value, final String unit) {
         return value + " " + unit + (value == 1 ? "" : "s");
+    }
+
+    @NonNull
+    @Contract(pure = true)
+    private static String truncateToSecondDecimal(final double value) {
+        return String.format("%.2f", value);
     }
 
     public static void derive(PositionalRandomFactory deriver, RandomSource random, int x, int y, int z) {
@@ -262,9 +250,57 @@ public class Util {
         final long diffNanos = targetNanos - currentNanos;
         final boolean past = diffNanos < 0;
         final long abs = Math.abs(diffNanos);
-        final String amount = scale(abs);
+        final String amount = formatNanosToLargestWholeUnit(abs);
 
         return past ? amount + " ago" : "in " + amount;
+    }
+
+    @NonNull
+    public static String formatNanosToLargestDecimalUnit(final long nanos) {
+        if (nanos < 1_000L)
+            return truncateToSecondDecimal(nanos) + "ns";
+
+        if (nanos < 1_000_000_000L) {
+            double ms = nanos / 1_000_000D;
+            return truncateToSecondDecimal(ms) + "ms";
+        }
+
+        final double seconds = nanos / 1_000_000_000D;
+
+        if (seconds < 60)
+            return truncateToSecondDecimal(seconds) + "s";
+
+        if (seconds < 3_600)
+            return pluralDecimal(seconds / 60, "minute");
+
+        if (seconds < 86_400)
+            return pluralDecimal(seconds / 3_600, "hour");
+
+        return pluralDecimal(seconds / 86_400, "day");
+    }
+
+    @NonNull
+    public static String formatNanosToLargestWholeUnit(final long nanos) {
+        if (nanos < 1_000L)
+            return nanos + "ns";
+
+        if (nanos < 1_000_000_000L) {
+            long ms = nanos / 1_000_000L;
+            return ms + "ms";
+        }
+
+        final long seconds = nanos / 1_000_000_000L;
+
+        if (seconds < 60)
+            return seconds + "s";
+
+        if (seconds < 3_600)
+            return pluralWhole(seconds / 60, "minute");
+
+        if (seconds < 86_400)
+            return pluralWhole(seconds / 3_600, "hour");
+
+        return pluralWhole(seconds / 86_400, "day");
     }
 
     public static final class Gradient {

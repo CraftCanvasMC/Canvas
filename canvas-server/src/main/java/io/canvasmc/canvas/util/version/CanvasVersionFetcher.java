@@ -105,7 +105,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
 
         builder.append(text(buildInfo.gitBranch().orElse("(Unknown Git Branch)"), SECONDARY));
 
-        if (buildInfo.buildNumber().isPresent() && buildInfo.buildNumber().getAsInt() > 0) {
+        if (buildInfo.buildNumber().isPresent()) {
             builder.append(text("#", HEADER));
             builder.append(text(buildInfo.buildNumber().getAsInt(), SECONDARY));
             builder.append(text(" [", HEADER));
@@ -206,7 +206,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
         final ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
         final OptionalInt buildNumber = buildInfo.buildNumber();
 
-        if (buildNumber.isEmpty() || buildNumber.getAsInt() == -1) {
+        if (buildNumber.isEmpty()) {
             return new LocalStatus();
         }
 
