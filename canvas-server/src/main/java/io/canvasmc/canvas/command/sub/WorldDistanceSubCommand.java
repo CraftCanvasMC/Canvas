@@ -21,27 +21,12 @@ import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.permissions.Permissions;
-import org.jspecify.annotations.NullMarked;
-import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 
-/**
- * Command for viewing or setting the view/simulation distance of a specific world. Usage examples:
- * <ul>
- *     <li><code>/canvas worlddistance view minecraft:overworld</code></li>
- *     <li><code>/canvas worlddistance simulation minecraft:the_nether 10</code></li>
- *     <li><code>/worlddistance view minecraft:the_end</code></li>
- *     <li><code>/canvas:worlddistance simulation minecraft:overworld 8</code></li>
- * </ul>
- */
-@NullMarked
 public class WorldDistanceSubCommand implements SubCommand {
 
-    private static final SimpleCommandExceptionType MUST_BE_PLAYER = new SimpleCommandExceptionType(
-        Component.literal("Must be player to get from current player world")
-    );
     private static final SimpleCommandExceptionType ILLEGAL_TYPE_ARG = new SimpleCommandExceptionType(
         Component.literal("Illegal type argument. Must be [\"view\", \"simulation\", \"v\", \"s\", or \"sim\"]")
     );
@@ -49,18 +34,40 @@ public class WorldDistanceSubCommand implements SubCommand {
         Component.literal("New value must be above 0")
     );
 
-    private static int getAndReturnDistance(final CommandContext<CommandSourceStack> context, final Type type, final ServerLevel level) {
-        final int distance = type.get(level);
+    @Override
+    public String getDescription() {
+        return "Gets or sets the view/simulation distance for a specific world.";
+    }
 
-        context.getSource().sendSuccess(
-            () -> Component.literal(type.name + " distance of level \"" + Util.getLevelName(level) + "\" is " + distance),
-            false
-        );
-        return distance;
+    @Override
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
+        return base.requires(stack -> stack.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command.worlddistance"))
+            .then(argument("type", StringArgumentType.word())
+                .suggests((_, builder) -> {
+                    builder.suggest("view");
+                    builder.suggest("simulation");
+                    return builder.buildFuture();
+                })
+                .then(argument("dimension", DimensionArgument.dimension())
+                    .then(literal("set")
+                        .then(argument("distance", IntegerArgumentType.integer()).executes(WorldDistanceSubCommand::setDistance))
+                    ).then(literal("unset").executes(context -> {
+                        final Type type = Type.from(StringArgumentType.getString(context, "type").toUpperCase(Locale.ROOT));
+                        final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
+                        applyOperation(type, level, -1);
+                        return Command.SINGLE_SUCCESS;
+                    }))
+                    .then(literal("get").executes(context -> {
+                        final Type type = Type.from(StringArgumentType.getString(context, "type").toUpperCase(Locale.ROOT));
+                        final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
+                        return getAndReturnDistance(context, type, level);
+                    }))
+                )
+            );
     }
 
     private static int setDistance(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
+        final Type type = Type.from(StringArgumentType.getString(context, "type").toUpperCase(Locale.ROOT));
         final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
         final int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE - 3);
 
@@ -94,41 +101,19 @@ public class WorldDistanceSubCommand implements SubCommand {
         }
     }
 
+    private static int getAndReturnDistance(final CommandContext<CommandSourceStack> context, final Type type, final ServerLevel level) {
+        final int distance = type.get(level);
+
+        context.getSource().sendSuccess(
+            () -> Component.literal(type.name + " distance of level \"" + Util.getLevelName(level) + "\" is " + distance),
+            false
+        );
+        return distance;
+    }
+
     @Override
     public String getName() {
         return "worlddistance";
-    }
-
-    @Override
-    public @Nullable String getDescription() {
-        return "Gets or sets the view/simulation distance for a specific world.";
-    }
-
-    @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
-        return base.requires(stack -> stack.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command.worlddistance"))
-            .then(argument("type", StringArgumentType.word())
-                .suggests((_, builder) -> {
-                    builder.suggest("view");
-                    builder.suggest("simulation");
-                    return builder.buildFuture();
-                })
-                .then(argument("dimension", DimensionArgument.dimension())
-                    .then(literal("set")
-                        .then(argument("distance", IntegerArgumentType.integer()).executes(WorldDistanceSubCommand::setDistance))
-                    ).then(literal("unset").executes(context -> {
-                        final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
-                        final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
-                        applyOperation(type, level, -1);
-                        return Command.SINGLE_SUCCESS;
-                    }))
-                    .then(literal("get").executes(context -> {
-                        final Type type = Type.from(context.getArgument("type", String.class).toUpperCase(Locale.ROOT));
-                        final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
-                        return getAndReturnDistance(context, type, level);
-                    }))
-                )
-            );
     }
 
     /**

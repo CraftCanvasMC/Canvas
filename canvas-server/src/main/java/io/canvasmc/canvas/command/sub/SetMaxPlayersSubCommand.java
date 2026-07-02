@@ -12,13 +12,27 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.dedicated.DedicatedServerProperties;
-import org.jspecify.annotations.NullMarked;
-import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
 
-@NullMarked
 public class SetMaxPlayersSubCommand implements SubCommand {
+
+    @Override
+    public String getDescription() {
+        return "Sets the maximum number of players allowed on this server.";
+    }
+
+    @Override
+    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
+        return base.then(argument("count", IntegerArgumentType.integer(0))
+            .executes(context -> execute(
+                IntegerArgumentType.getInteger(context, "count"), false)
+            ).then(argument("persist", BoolArgumentType.bool())
+                .executes(context -> execute(
+                    IntegerArgumentType.getInteger(context, "count"),
+                    BoolArgumentType.getBool(context, "persist")
+                ))));
+    }
 
     private static int execute(final int newSize, final boolean persist) {
         RegionizedServer.getInstance().scheduleToOrExecute(() -> {
@@ -42,21 +56,5 @@ public class SetMaxPlayersSubCommand implements SubCommand {
     @Override
     public String getName() {
         return "setmaxplayers";
-    }
-
-    @Override
-    public @Nullable String getDescription() {
-        return "Sets the maximum number of players allowed on this server.";
-    }
-
-    @Override
-    public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
-        return base.then(argument("count", IntegerArgumentType.integer(0))
-            .executes(context -> execute(
-                IntegerArgumentType.getInteger(context, "count"), false))
-            .then(argument("persist", BoolArgumentType.bool())
-                .executes(context -> execute(
-                    IntegerArgumentType.getInteger(context, "count"),
-                    BoolArgumentType.getBool(context, "persist")))));
     }
 }

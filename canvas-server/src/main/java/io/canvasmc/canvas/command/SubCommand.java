@@ -4,28 +4,16 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import java.util.function.Predicate;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Represents a subcommand that can be registered under the Canvas command system.
  * <p>
  * Implementations define their name, description, and Brigadier command structure via the
- * {@link #construct(LiteralArgumentBuilder,CommandBuildContext)} method.
+ * {@link #construct(LiteralArgumentBuilder, CommandBuildContext)} method.
  * </p>
  */
 public interface SubCommand {
-
-    /**
-     * Gets the unique name of this subcommand.
-     * <p>
-     * This is used as the command literal, e.g. {@code /canvas <name>}.
-     * </p>
-     *
-     * @return the subcommand name (never {@code null})
-     */
-    @NonNull
-    String getName();
 
     /**
      * Gets a short, human-readable description of this command.
@@ -81,6 +69,16 @@ public interface SubCommand {
      * @return the constructed predicate
      */
     default Predicate<CommandSourceStack> check(final String node) {
-        return CanvasCommands.hasPermission(getName() + "." + node);
+        return CanvasCommands.permission(getName() + "." + node);
     }
+
+    /**
+     * Gets the unique name of this subcommand.
+     * <p>
+     * This is used as the command literal, e.g. {@code /canvas <name>}.
+     * </p>
+     *
+     * @return the subcommand name (never {@code null})
+     */
+    String getName();
 }

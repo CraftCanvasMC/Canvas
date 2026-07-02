@@ -31,7 +31,6 @@ import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Unmodifiable;
-import org.jspecify.annotations.NonNull;
 
 import static io.canvasmc.canvas.command.CanvasCommands.ACCENT;
 import static io.canvasmc.canvas.command.CanvasCommands.HEADER;
@@ -44,29 +43,61 @@ import static net.minecraft.commands.Commands.literal;
 
 public class HelpCommand {
 
-    private static final Boolean USE_LEGACY = Boolean.getBoolean("Canvas.LegacyHelpCommand");
-
-    // odd workaround for when the server gives permission to the help command but doesn't give
-    // full "admin"/"operator" status. when the player doesn't have that, then Minecraft asks the
-    // player "are you sure?" every time the "Go back" button is clicked, which is annoying
-
     public static final ClickCallback<Audience> GO_BACK_ACTION = (audience) -> {
         if (
-            audience instanceof Player bukkitPlayer &&
-                CanvasCommands.hasPermission("help").test(((CraftPlayer) bukkitPlayer).getHandle().createCommandSourceStack())
+            audience instanceof CraftPlayer craftPlayer && CanvasCommands.permission("help").test(craftPlayer.getHandle().createCommandSourceStack())
         ) {
             // audience is a player and has "help" permissions
-            bukkitPlayer.performCommand("canvas help");
+            craftPlayer.performCommand("canvas help");
         }
         else {
             audience.sendMessage(Component.text("You do not have the required permissions to run this command", NamedTextColor.RED));
         }
     };
 
+    // odd workaround for when the server gives permission to the help command but doesn't give
+    // full "admin"/"operator" status. when the player doesn't have that, then Minecraft asks the
+    // player "are you sure?" every time the "Go back" button is clicked, which is annoying
+    private static final Boolean USE_LEGACY = Boolean.getBoolean("Canvas.LegacyHelpCommand");
+
+    static void constructHelpSystem(
+        final LiteralArgumentBuilder<CommandSourceStack> base,
+        final Supplier<List<SubCommand>> commands
+    ) {
+        base.then(literal("help").requires(CanvasCommands.permission("help"))
+            .executes(context -> executeHelp(commands, context)));
+    }
+
+    @SuppressWarnings("SameReturnValue")
+    private static int executeHelp(
+        final Supplier<List<SubCommand>> commands,
+        final CommandContext<CommandSourceStack> context
+    ) {
+        final CommandSender bukkitCommandSender = context.getSource().getBukkitSender();
+
+        // if sender isn't a player, we use raw text, same if we do legacy output
+        if (!(bukkitCommandSender instanceof Player bukkitPlayer) || USE_LEGACY) {
+            TextComponent.Builder builder = Component.text();
+            appendConsoleOutput(commands, bukkitCommandSender, builder);
+            bukkitCommandSender.sendMessage(builder.build());
+            return Command.SINGLE_SUCCESS;
+        }
+
+        ((CraftPlayer) bukkitPlayer).taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+            final CraftPlayer craftPlayer = entityPlayer.getBukkitEntity();
+            final Dialog dialog = constructMainMenu(commands.get(), context);
+
+            // show main menu
+            craftPlayer.showDialog(dialog);
+        });
+
+        return Command.SINGLE_SUCCESS;
+    }
+
     private static void appendConsoleOutput(
-        final @NonNull Supplier<List<SubCommand>> commands,
+        final Supplier<List<SubCommand>> commands,
         final CommandSender bukkitSender,
-        final TextComponent.@NonNull Builder builder
+        final TextComponent.Builder builder
     ) {
         builder.append(Component.text("----", SECONDARY, TextDecoration.BOLD))
             .append(Component.text("Canvas Commands", HEADER, TextDecoration.BOLD))
@@ -99,66 +130,8 @@ public class HelpCommand {
         }
     }
 
-    private static @NonNull Component buildTextOut(final @NonNull SubCommand subCommand) {
-        final String name = subCommand.getName();
-        final String description = subCommand.getDescription();
-        final boolean selfCmd = subCommand.isAllowedSelfCommand();
-
-        final TextComponent.Builder builder = Component.text()
-            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
-            .append(Component.text("/canvas " + name, HEADER, TextDecoration.BOLD))
-            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
-            .appendNewline()
-            .appendNewline();
-
-        builder.append(Component.text("  Description  ", MUTED).decorate(TextDecoration.BOLD))
-            .append(Component.text(description != null ? description : "No description provided.", ACCENT))
-            .appendNewline();
-
-        builder.append(Component.text("  Permission   ", MUTED).decorate(TextDecoration.BOLD))
-            .append(Component.text("canvas.command." + name, ACCENT))
-            .appendNewline();
-
-        builder.append(Component.text("  Standalone   ", MUTED).decorate(TextDecoration.BOLD))
-            .append(selfCmd
-                ? Component.text("Yes ", TextColor.color(100, 220, 140)).append(Component.text("(/" + name + ", /canvas:" + name + ")", INFORMATION))
-                : Component.text("No", TextColor.color(220, 100, 100)))
-            .appendNewline()
-            .appendNewline();
-
-        builder.append(Component.text("-".repeat(16 + name.length() - 1), SECONDARY, TextDecoration.BOLD));
-
-        return builder.append(Component.text("-----------------------", SECONDARY, TextDecoration.BOLD)).build();
-    }
-
-    @SuppressWarnings("SameReturnValue")
-    private static int executeHelp(
-        final Supplier<List<SubCommand>> commands,
-        final @NonNull CommandContext<CommandSourceStack> context
-    ) {
-        final CommandSender bukkitCommandSender = context.getSource().getBukkitSender();
-
-        // if sender isn't a player, we use raw text, same if we do legacy output
-        if (!(bukkitCommandSender instanceof Player bukkitPlayer) || USE_LEGACY) {
-            TextComponent.Builder builder = Component.text();
-            appendConsoleOutput(commands, bukkitCommandSender, builder);
-            bukkitCommandSender.sendMessage(builder.build());
-            return Command.SINGLE_SUCCESS;
-        }
-
-        ((CraftPlayer) bukkitPlayer).taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
-            final CraftPlayer craftPlayer = entityPlayer.getBukkitEntity();
-            final Dialog dialog = constructMainMenu(commands.get(), context);
-
-            // show main menu
-            craftPlayer.showDialog(dialog);
-        });
-
-        return Command.SINGLE_SUCCESS;
-    }
-
-    private static @NonNull Dialog constructMainMenu(
-        final @NonNull List<SubCommand> subCommands,
+    private static Dialog constructMainMenu(
+        final List<SubCommand> subCommands,
         final CommandContext<CommandSourceStack> context
     ) {
         final List<ActionButton> subCommandsAsButtons = buildSubCommandsButtons(subCommands, context);
@@ -209,24 +182,41 @@ public class HelpCommand {
         );
     }
 
-    private static @NonNull ActionButton getLink(final String name, final String link, final String description) {
-        return ActionButton.builder(Component.text(name, TextColor.color(0xFF82E5FF), TextDecoration.UNDERLINED))
-            .width(80)
-            .action(DialogAction.staticAction(ClickEvent.openUrl(link)))
-            .tooltip(Component.text(description))
-            .build();
+    private static Component buildTextOut(final SubCommand subCommand) {
+        final String name = subCommand.getName();
+        final String description = subCommand.getDescription();
+        final boolean selfCmd = subCommand.isAllowedSelfCommand();
+
+        final TextComponent.Builder builder = Component.text()
+            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
+            .append(Component.text("/canvas " + name, HEADER, TextDecoration.BOLD))
+            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
+            .appendNewline()
+            .appendNewline();
+
+        builder.append(Component.text("  Description  ", MUTED).decorate(TextDecoration.BOLD))
+            .append(Component.text(description != null ? description : "No description provided.", ACCENT))
+            .appendNewline();
+
+        builder.append(Component.text("  Permission   ", MUTED).decorate(TextDecoration.BOLD))
+            .append(Component.text("canvas.command." + name, ACCENT))
+            .appendNewline();
+
+        builder.append(Component.text("  Standalone   ", MUTED).decorate(TextDecoration.BOLD))
+            .append(selfCmd
+                ? Component.text("Yes ", TextColor.color(100, 220, 140)).append(Component.text("(/" + name + ", /canvas:" + name + ")", INFORMATION))
+                : Component.text("No", TextColor.color(220, 100, 100)))
+            .appendNewline()
+            .appendNewline();
+
+        builder.append(Component.text("-".repeat(16 + name.length() - 1), SECONDARY, TextDecoration.BOLD));
+
+        return builder.append(Component.text("-----------------------", SECONDARY, TextDecoration.BOLD)).build();
     }
 
-    private static @NonNull Component getGradientForCanvasTitled(final String textContent) {
-        return Util.gradient(
-            "CanvasMC - " + textContent,
-            style -> style.decorate(TextDecoration.BOLD),
-            TextColor.color(0xFF635BFF), TextColor.color(0xFFFF5CCF)
-        );
-    }
-
-    private static @NonNull @Unmodifiable List<ActionButton> buildSubCommandsButtons(
-        final @NonNull List<SubCommand> subCommands,
+    @Unmodifiable
+    private static List<ActionButton> buildSubCommandsButtons(
+        final List<SubCommand> subCommands,
         final CommandContext<CommandSourceStack> context
     ) {
         return subCommands.stream().map((subCommand) -> {
@@ -236,7 +226,7 @@ public class HelpCommand {
             final String permission = "canvas.command." + name;
 
             // if source doesn't have permission, don't show
-            if (!CanvasCommands.hasPermission(name).test(context.getSource())) {
+            if (!CanvasCommands.permission(name).test(context.getSource())) {
                 return null;
             }
 
@@ -273,7 +263,7 @@ public class HelpCommand {
                                 createCommandActions(
                                     baseCommand,
                                     subCommand.hasExtraArgs(),
-                                    CanvasCommands.hasPermission(name).test(context.getSource()),
+                                    CanvasCommands.permission(name).test(context.getSource()),
                                     permission
                                 )
                             ).columns(2).build()
@@ -284,8 +274,30 @@ public class HelpCommand {
         }).filter(Objects::nonNull).toList();
     }
 
+    private static Component getGradientForCanvasTitled(final String textContent) {
+        return Util.gradient(
+            "CanvasMC - " + textContent,
+            style -> style.decorate(TextDecoration.BOLD),
+            TextColor.color(0xFF635BFF), TextColor.color(0xFFFF5CCF)
+        );
+    }
+
+    private static ActionButton getLink(final String name, final String link, final String description) {
+        return ActionButton.builder(Component.text(name, TextColor.color(0xFF82E5FF), TextDecoration.UNDERLINED))
+            .width(80)
+            .action(DialogAction.staticAction(ClickEvent.openUrl(link)))
+            .tooltip(Component.text(description))
+            .build();
+    }
+
+    @Contract("_ -> new")
+    private static Component getTitleForCommand(final SubCommand subCommand) {
+        return Component.text(Util.capitalize(Util.snakeToCamel(subCommand.getName())) + " Command");
+    }
+
+    @Unmodifiable
     @Contract("_,_,_,_ -> new")
-    private static @NonNull @Unmodifiable List<ActionButton> createCommandActions(
+    private static List<ActionButton> createCommandActions(
         final String baseCommand,
         final boolean hasExtraArgs,
         final boolean sourceHasPermission,
@@ -325,18 +337,5 @@ public class HelpCommand {
         }
 
         return buttons;
-    }
-
-    @Contract("_ -> new")
-    private static @NonNull Component getTitleForCommand(final @NonNull SubCommand subCommand) {
-        return Component.text(Util.capitalize(Util.snakeToCamel(subCommand.getName())) + " Command");
-    }
-
-    static void constructHelpSystem(
-        final @NonNull LiteralArgumentBuilder<CommandSourceStack> base,
-        final Supplier<List<SubCommand>> commands
-    ) {
-        base.then(literal("help").requires(CanvasCommands.hasPermission("help"))
-            .executes(context -> executeHelp(commands, context)));
     }
 }

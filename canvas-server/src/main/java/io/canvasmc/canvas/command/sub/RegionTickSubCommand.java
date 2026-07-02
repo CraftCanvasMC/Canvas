@@ -38,14 +38,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
 import static net.minecraft.commands.SharedSuggestionProvider.matchesSubStr;
 
-@NullMarked
 public class RegionTickSubCommand implements SubCommand {
 
     private static final SimpleCommandExceptionType TOO_MANY_ARGUMENTS = new SimpleCommandExceptionType(
@@ -61,53 +59,8 @@ public class RegionTickSubCommand implements SubCommand {
         Component.literal("No region exists at the specified block coordinates")
     );
 
-    private static void postActionTo(final String arg, final @Nullable ServerPlayer entityPlayer, final Consumer<TickRegionScheduler.RegionScheduleHandle> action) throws CommandSyntaxException {
-        String[] parts = arg.split("\\s+");
-        if (parts.length == 0) throw UNKNOWN_ARGUMENTS.create();
-        String first = parts[0].toLowerCase();
-        switch (first) {
-            case "global" -> {
-                action.accept(RegionizedServer.getGlobalTickData());
-                return;
-            }
-            case "server" -> {
-                action.accept(RegionizedServer.getGlobalTickData());
-                for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
-                    level.regioniser.computeForAllRegionsUnsynchronised((region) -> action.accept(region.getData().tickHandle));
-                }
-                return;
-            }
-            default -> {
-                if (parts.length == 2) {
-                    String second = parts[1];
-                    if (entityPlayer == null) {
-                        throw MUST_BE_PLAYER.create();
-                    }
-                    final int chunkX = (first.equalsIgnoreCase("~") ? entityPlayer.getBlockX() : Integer.parseInt(first)) >> 4;
-                    final int chunkZ = (second.equalsIgnoreCase("~") ? entityPlayer.getBlockZ() : Integer.parseInt(second)) >> 4;
-                    final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
-                        entityPlayer.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
-                    if (region == null) {
-                        throw NO_REGION_EXISTS.create();
-                    }
-                    action.accept(region.getData().tickHandle);
-                    return;
-                }
-                else if (parts.length > 2) {
-                    throw TOO_MANY_ARGUMENTS.create();
-                }
-            }
-        }
-        throw UNKNOWN_ARGUMENTS.create();
-    }
-
     @Override
-    public String getName() {
-        return "tick";
-    }
-
-    @Override
-    public @Nullable String getDescription() {
+    public String getDescription() {
         return "Allows modifying the server-wide, or schedule handle specific tick states";
     }
 
@@ -115,18 +68,19 @@ public class RegionTickSubCommand implements SubCommand {
     public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         return base
             .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(0.0F)).executes((context) -> {
-                float newTickRate = context.getArgument("rate", Float.class);
-                TickRegionScheduler.setTickRate(newTickRate);
+                TickRegionScheduler.setTickRate(FloatArgumentType.getFloat(context, "rate"));
                 return Command.SINGLE_SUCCESS;
             })))
             // we cap it at 100k ticks to sprint, because yes... people do this... and it causes issues
-            .then(literal("sprint").then(argument("ticks", LongArgumentType.longArg(0, 100_000L))
+            .then(literal("sprint").then(argument("ticks", LongArgumentType.longArg(0L, 100_000L))
                 .then(argument("handle", StringArgumentType.greedyString()).suggests(new HandleSuggestionProvider()).executes(context -> {
-                    long ticksToSprint = context.getArgument("ticks", Long.class);
-                    postActionTo(context.getArgument("handle", String.class), context.getSource().getPlayer(), (scheduleHandle) -> {
+                    final long ticksToSprint = LongArgumentType.getLong(context, "ticks");
+
+                    postActionTo(StringArgumentType.getString(context, "handle"), context.getSource().getPlayer(), (scheduleHandle) -> {
                         scheduleHandle.getTickManager().postAction(new ScheduledHandleTickState.Action.StartSprinting(ticksToSprint));
                     });
                     context.getSource().sendSuccess(() -> Component.literal(String.format("Posted to marked schedule handles to sprint for %s ticks", ticksToSprint)), true);
+
                     return Command.SINGLE_SUCCESS;
                 }))
             ))
@@ -158,12 +112,59 @@ public class RegionTickSubCommand implements SubCommand {
                 })));
     }
 
+    private static void postActionTo(
+        final String arg, final @Nullable ServerPlayer entityPlayer, final Consumer<TickRegionScheduler.RegionScheduleHandle> action
+    ) throws CommandSyntaxException {
+        final String[] parts = arg.split("\\s+");
+        if (parts.length == 0) throw UNKNOWN_ARGUMENTS.create();
+        final String first = parts[0].toLowerCase();
+        switch (first) {
+            case "global" -> {
+                action.accept(RegionizedServer.getGlobalTickData());
+                return;
+            }
+            case "server" -> {
+                action.accept(RegionizedServer.getGlobalTickData());
+                for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
+                    level.regioniser.computeForAllRegionsUnsynchronised((region) -> action.accept(region.getData().tickHandle));
+                }
+                return;
+            }
+            default -> {
+                if (parts.length == 2) {
+                    final String second = parts[1];
+                    if (entityPlayer == null) {
+                        throw MUST_BE_PLAYER.create();
+                    }
+                    final int chunkX = (first.equalsIgnoreCase("~") ? entityPlayer.getBlockX() : Integer.parseInt(first)) >> 4;
+                    final int chunkZ = (second.equalsIgnoreCase("~") ? entityPlayer.getBlockZ() : Integer.parseInt(second)) >> 4;
+                    final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
+                        entityPlayer.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
+                    if (region == null) {
+                        throw NO_REGION_EXISTS.create();
+                    }
+                    action.accept(region.getData().tickHandle);
+                    return;
+                }
+                else if (parts.length > 2) {
+                    throw TOO_MANY_ARGUMENTS.create();
+                }
+            }
+        }
+        throw UNKNOWN_ARGUMENTS.create();
+    }
+
+    @Override
+    public String getName() {
+        return "tick";
+    }
+
     private static final class HandleSuggestionProvider implements SuggestionProvider<CommandSourceStack> {
         public static final SimpleCommandExceptionType ERROR_NOT_COMPLETE = new SimpleCommandExceptionType(Component.translatable("argument.pos2d.incomplete"));
 
         @Contract(pure = true)
         @Override
-        public CompletableFuture<Suggestions> getSuggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) throws CommandSyntaxException {
+        public CompletableFuture<Suggestions> getSuggestions(final CommandContext<CommandSourceStack> context, final SuggestionsBuilder builder) {
             String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
             for (String id : List.of("global", "server")) {
                 if (remaining.isEmpty()
