@@ -1,5 +1,5 @@
 /**
- * All commands provided by Canvas
+ * All command implementations provided by Canvas
  */
 @NullMarked
 package io.canvasmc.canvas.command.sub;
