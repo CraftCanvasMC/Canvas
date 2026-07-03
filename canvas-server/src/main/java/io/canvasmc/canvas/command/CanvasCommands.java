@@ -46,6 +46,10 @@ public class CanvasCommands {
         INSTANCE.register(command);
     }
 
+    public static Predicate<CommandSourceStack> permission(final String node) {
+        return source -> source.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command." + node);
+    }
+
     public void register(final Class<? extends SubCommand> command) {
         try {
             if (command.getDeclaredConstructor().getParameterCount() != 0) {
@@ -97,9 +101,5 @@ public class CanvasCommands {
 
         HelpCommand.constructHelpSystem(base, () -> this.subCommands);
         dispatcher.register(base);
-    }
-
-    public static Predicate<CommandSourceStack> permission(final String node) {
-        return source -> source.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command." + node);
     }
 }

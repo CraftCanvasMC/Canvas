@@ -112,6 +112,11 @@ public class RegionTickSubCommand implements SubCommand {
                 })));
     }
 
+    @Override
+    public String getName() {
+        return "tick";
+    }
+
     private static void postActionTo(
         final String arg, final @Nullable ServerPlayer entityPlayer, final Consumer<TickRegionScheduler.RegionScheduleHandle> action
     ) throws CommandSyntaxException {
@@ -152,11 +157,6 @@ public class RegionTickSubCommand implements SubCommand {
             }
         }
         throw UNKNOWN_ARGUMENTS.create();
-    }
-
-    @Override
-    public String getName() {
-        return "tick";
     }
 
     private static final class HandleSuggestionProvider implements SuggestionProvider<CommandSourceStack> {

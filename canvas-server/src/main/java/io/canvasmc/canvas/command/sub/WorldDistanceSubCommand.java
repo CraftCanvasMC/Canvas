@@ -66,6 +66,11 @@ public class WorldDistanceSubCommand implements SubCommand {
             );
     }
 
+    @Override
+    public String getName() {
+        return "worlddistance";
+    }
+
     private static int setDistance(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         final Type type = Type.from(StringArgumentType.getString(context, "type").toUpperCase(Locale.ROOT));
         final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
@@ -109,11 +114,6 @@ public class WorldDistanceSubCommand implements SubCommand {
             false
         );
         return distance;
-    }
-
-    @Override
-    public String getName() {
-        return "worlddistance";
     }
 
     /**

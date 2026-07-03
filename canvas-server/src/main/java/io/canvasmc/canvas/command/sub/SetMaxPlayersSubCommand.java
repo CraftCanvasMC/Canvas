@@ -34,6 +34,11 @@ public class SetMaxPlayersSubCommand implements SubCommand {
                 ))));
     }
 
+    @Override
+    public String getName() {
+        return "setmaxplayers";
+    }
+
     private static int execute(final int newSize, final boolean persist) {
         RegionizedServer.getInstance().scheduleToOrExecute(() -> {
             setMaxPlayers(newSize, persist);
@@ -51,10 +56,5 @@ public class SetMaxPlayersSubCommand implements SubCommand {
             properties.properties.setProperty("max-players", String.valueOf(max));
             dedicatedServer.settings.forceSave();
         }
-    }
-
-    @Override
-    public String getName() {
-        return "setmaxplayers";
     }
 }
