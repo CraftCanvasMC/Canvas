@@ -1,21 +1,24 @@
 package io.canvasmc.canvas.world.block;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * Derived from the Lithium sleeping block entity optimization
+ */
 public interface SleepingBlockEntity {
 
-    LevelChunk.RebindableTickingBlockEntityWrapper lithium$getTickWrapper();
+    LevelChunk.@Nullable RebindableTickingBlockEntityWrapper lithium$getTickWrapper();
 
-    void lithium$setTickWrapper(LevelChunk.@Nullable RebindableTickingBlockEntityWrapper tickWrapper);
+    void lithium$setTickWrapper(final LevelChunk.@Nullable RebindableTickingBlockEntityWrapper tickWrapper);
 
+    @Nullable
     TickingBlockEntity lithium$getSleepingTicker();
 
-    void lithium$setSleepingTicker(@Nullable TickingBlockEntity sleepingTicker);
+    void lithium$setSleepingTicker(final @Nullable TickingBlockEntity sleepingTicker);
 
     default void onChange() {}
 
@@ -24,38 +27,17 @@ public interface SleepingBlockEntity {
             return;
         }
 
-        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
+        final LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
         if (tickWrapper == null) {
             return;
         }
+
         this.lithium$setSleepingTicker(tickWrapper.ticker);
         tickWrapper.rebind(new SleepingTicker(this));
     }
 
-    default void sleepOnlyCurrentTick() {
-        TickingBlockEntity sleepingTicker = this.lithium$getSleepingTicker();
-        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
-        if (sleepingTicker == null) {
-            sleepingTicker = tickWrapper.ticker;
-        }
-        Level world = ((BlockEntity) this).getLevel();
-        tickWrapper.rebind(new SleepUntilTimeBlockEntityTickInvoker((BlockEntity) this, world.getRedstoneGameTime() + 1, sleepingTicker));
-        this.lithium$setSleepingTicker(null);
-    }
-
-    default void sleepFor(int ticks) {
-        TickingBlockEntity sleepingTicker = this.lithium$getSleepingTicker();
-        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
-        if (sleepingTicker == null) {
-            sleepingTicker = tickWrapper.ticker;
-        }
-        Level world = ((BlockEntity) this).getLevel();
-        tickWrapper.rebind(new SleepUntilTimeBlockEntityTickInvoker((BlockEntity) this, world.getRedstoneGameTime() + ticks, sleepingTicker));
-        this.lithium$setSleepingTicker(null);
-    }
-
     default void wakeUpNow() {
-        TickingBlockEntity sleepingTicker = this.lithium$getSleepingTicker();
+        final TickingBlockEntity sleepingTicker = this.lithium$getSleepingTicker();
         if (sleepingTicker == null) {
             return;
         }
@@ -63,8 +45,8 @@ public interface SleepingBlockEntity {
         this.lithium$setSleepingTicker(null);
     }
 
-    default void setTicker(TickingBlockEntity delegate) {
-        LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
+    default void setTicker(final TickingBlockEntity delegate) {
+        final LevelChunk.RebindableTickingBlockEntityWrapper tickWrapper = this.lithium$getTickWrapper();
         if (tickWrapper == null) {
             return;
         }
@@ -78,7 +60,7 @@ public interface SleepingBlockEntity {
     class SleepingTicker implements TickingBlockEntity {
         private final SleepingBlockEntity sleepingBlockEntity;
 
-        public SleepingTicker(SleepingBlockEntity sleepingBlockEntity) {
+        public SleepingTicker(final SleepingBlockEntity sleepingBlockEntity) {
             this.sleepingBlockEntity = sleepingBlockEntity;
         }
 

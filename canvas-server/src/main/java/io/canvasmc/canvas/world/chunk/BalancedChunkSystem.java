@@ -13,7 +13,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,13 +49,13 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    public Thread @NonNull [] getAliveThreads() {
+    public Thread[] getAliveThreads() {
         final WorkerThread[] threads = this.aliveThreads.getArray();
 
         return Arrays.copyOf(threads, threads.length, Thread[].class);
     }
 
-    public Thread @NonNull [] getCoreThreads() {
+    public Thread[] getCoreThreads() {
         final WorkerThread[] threads = this.threads.getArray();
 
         return Arrays.copyOf(threads, threads.length, Thread[].class);
@@ -121,6 +121,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         final long nsToWait = TimeUnit.MILLISECONDS.toNanos(msToWait);
         final long start = System.nanoTime();
         final long deadline = start + nsToWait;
+
         boolean interrupted = false;
         try {
             for (final BalancedChunkSystem.WorkerThread thread : this.aliveThreads.getArray()) {
@@ -136,9 +137,9 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                         else {
                             thread.thread.join();
                         }
-                    } catch (final InterruptedException ex) {
+                    } catch (final InterruptedException ie) {
                         if (interruptible) {
-                            throw ex;
+                            throw ie;
                         }
                         interrupted = true;
                     }
@@ -224,11 +225,11 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    public BalancedChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup() {
+    public BalancedChunkSystem.OrderedStreamGroup createChunkOrderedStreamGroup() {
         return this.createChunkOrderedStreamGroup(new AtomicLong());
     }
 
-    public BalancedChunkSystem.@NonNull OrderedStreamGroup createChunkOrderedStreamGroup(final AtomicLong subOrderGenerate) {
+    public BalancedChunkSystem.OrderedStreamGroup createChunkOrderedStreamGroup(final AtomicLong ignored) {
         synchronized (this) {
             if (this.shutdown) {
                 throw new IllegalStateException("Queue is shutdown");
@@ -260,7 +261,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
 
         public boolean executeTask() {
-            for (; ; ) {
+            for (;;) {
                 final PrioritisedExecutor.PrioritisedTask task = this.peekTask();
                 if (task == null) {
                     return false;
@@ -271,7 +272,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             }
         }
 
-        public PrioritisedExecutor.PrioritisedTask peekTask() {
+        public PrioritisedExecutor.@Nullable PrioritisedTask peekTask() {
             PrioritisedExecutor.PrioritisedTask highestTask = null;
             PrioritisedExecutor.PriorityState highestPriority = null;
             for (final Queue wrapper : this.queues.getArray()) {
@@ -281,7 +282,8 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
                 // handle race condition where first entry is executed as we peek it
                 // note: entry.getPriorityState() == null implies queue.peekFirst() != entry
-                while ((first = queue.peekFirst()) != null && (state = first.getPriorityState()) == null) ;
+                //noinspection StatementWithEmptyBody
+                while ((first = queue.peekFirst()) != null && (state = first.getPriorityState()) == null);
 
                 if (first != null) {
                     if (highestPriority == null || state.compareTo(highestPriority) < 0) {
@@ -298,7 +300,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             return highestTask;
         }
 
-        public @NonNull Queue createExecutor() {
+        public Queue createExecutor() {
             synchronized (BalancedChunkSystem.this) {
                 if (BalancedChunkSystem.this.shutdown) {
                     throw new IllegalStateException("Queue is shutdown");
@@ -375,19 +377,19 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
 
             @Contract("_ -> new")
             @Override
-            public @NonNull PrioritisedTask createTask(final Runnable task) {
+            public PrioritisedTask createTask(final Runnable task) {
                 return this.createTask(task, Priority.NORMAL);
             }
 
             @Contract("_, _ -> new")
             @Override
-            public @NonNull PrioritisedTask createTask(final Runnable task, final Priority priority) {
+            public PrioritisedTask createTask(final Runnable task, final Priority priority) {
                 return this.createTask(task, priority, this.generateNextSubOrder(), 0L);
             }
 
             @Contract("_, _, _, _ -> new")
             @Override
-            public @NonNull PrioritisedTask createTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
+            public PrioritisedTask createTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
                 return new Task(this.wrapped.createTask(() -> {
                     Queue.this.executors.getAndIncrement();
                     try {
@@ -399,21 +401,21 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             }
 
             @Override
-            public @NonNull PrioritisedTask queueTask(final Runnable task) {
+            public PrioritisedTask queueTask(final Runnable task) {
                 final PrioritisedTask ret = this.createTask(task);
                 ret.queue();
                 return ret;
             }
 
             @Override
-            public @NonNull PrioritisedTask queueTask(final Runnable task, final Priority priority) {
+            public PrioritisedTask queueTask(final Runnable task, final Priority priority) {
                 final PrioritisedTask ret = this.createTask(task, priority);
                 ret.queue();
                 return ret;
             }
 
             @Override
-            public @NonNull PrioritisedTask queueTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
+            public PrioritisedTask queueTask(final Runnable task, final Priority priority, final long subOrder, final long stream) {
                 final PrioritisedTask ret = this.createTask(task, priority, subOrder, stream);
                 ret.queue();
                 return ret;
@@ -545,7 +547,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                     if (!BalancedChunkSystem.this.stream.executeTask()) break;
                     ret = true;
                 } catch (final Throwable thrown) {
-                    LOGGER.error("Exception thrown from thread '" + this.thread.getName(), thrown);
+                    LOGGER.error("Exception thrown from thread '{}", this.thread.getName(), thrown);
                 }
             } while (System.nanoTime() - deadline <= 0L);
             return ret;

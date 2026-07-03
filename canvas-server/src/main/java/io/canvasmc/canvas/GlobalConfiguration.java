@@ -36,10 +36,12 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.RandomSupport;
 import org.apache.commons.lang3.mutable.MutableInt;
-import org.jspecify.annotations.NonNull;
+import org.jetbrains.annotations.UnknownNullability;
+import org.jspecify.annotations.NullMarked;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@NullMarked
 public class GlobalConfiguration extends Part {
 
     private static final Path CONFIG_PATH = Path.of("config/canvas-server.yml").toAbsolutePath().normalize();
@@ -54,6 +56,7 @@ public class GlobalConfiguration extends Part {
     public static final int WARN = 1;
     public static final int ERROR = 2;
 
+    @UnknownNullability
     private static GlobalConfiguration INSTANCE;
     private static ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN;
     private static boolean ENABLE_FASTER_RANDOM = true;
@@ -91,18 +94,20 @@ public class GlobalConfiguration extends Part {
                     postLoad(instance);
 
                     CompletableFuture.supplyAsync(() -> {
+                        final ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
+                        final int buildNum = buildInfo.buildNumber().orElse(-1);
+
                         ClientV2.BuildStatus buildStatus = ClientV2.BuildStatus.UNKNOWN;
-                        ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
-                        int buildNum = buildInfo.buildNumber().orElse(-1);
                         if (buildNum == -1) {
                             buildStatus = ClientV2.BuildStatus.LOCAL;
                         }
                         else {
                             try {
                                 buildStatus = Util.CANVAS_CLIENT.getBuild(buildNum).buildStatus();
-                            } catch (Throwable ignored) {
+                            } catch (final Throwable ignored) {
                             }
                         }
+
                         return buildStatus;
                     }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
                         BUILD_STATUS = buildStatus;
@@ -185,8 +190,8 @@ public class GlobalConfiguration extends Part {
             // SIMD actions
             try {
                 SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
-            } catch (NoClassDefFoundError | Exception ignored) {
-                ignored.printStackTrace();
+            } catch (final Throwable thrown) {
+                LOGGER.warn("Couldn't enable SIMD", thrown);
             }
 
             if (SIMDDetection.isEnabled) {
@@ -240,12 +245,11 @@ public class GlobalConfiguration extends Part {
         return BUILD_STATUS;
     }
 
-    @NonNull
     public static RandomSource createFastRandom() {
         return ENABLE_FASTER_RANDOM ? new FasterRandomSource(RandomSupport.generateUniqueSeed()) : new SimpleThreadUnsafeRandom(RandomSupport.generateUniqueSeed());
     }
 
-    public static void broadcast(String msg, int severity) {
+    public static void broadcast(final String msg, final int severity) {
         if (TickRegions.hasStarted()) {
             final MutableComponent literal = Component.literal(msg);
 
@@ -354,12 +358,10 @@ public class GlobalConfiguration extends Part {
                 .docs(
                     Style.wrap(
                         "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
-                    ).defineEnum(GuardSeverity.class, (severity) -> {
-                        return switch (severity) {
-                            case LOG -> "Just logs a warning in console, but continues the operation";
-                            case THROW -> "Throws an exception, can crash the server. Good for ensuring correctness";
-                            case SILENT -> "Doesn't say anything or do anything";
-                        };
+                    ).defineEnum(GuardSeverity.class, (severity) -> switch (severity) {
+                        case LOG -> "Just logs a warning in console, but continues the operation";
+                        case THROW -> "Throws an exception, can crash the server. Good for ensuring correctness";
+                        case SILENT -> "Doesn't say anything or do anything";
                     })
                 );
         }
@@ -540,8 +542,7 @@ public class GlobalConfiguration extends Part {
     public boolean tileEntitySnapshotCreation = false;
     public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
 
-    @NonNull
-    public static ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
+    public static ResourceKey<Level> fetchRespawnDimensionKey() {
         return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
     }
 

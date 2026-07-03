@@ -7,7 +7,6 @@ import net.minecraft.world.level.block.LayeredCauldronBlock;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FlowingFluid;
-import org.jetbrains.annotations.NotNull;
 
 public final class BlockTags {
     public static final int RANDOMLY_TICKING = 0x01; // TODO - should we use this ever
@@ -18,7 +17,7 @@ public final class BlockTags {
 
     public static final int FLUID = WATER | LAVA;
 
-    public static int init(final @NotNull BlockState state) {
+    public static int init(final BlockState state) {
         int i = 0;
         i |= state.getFluidState().is(FluidTags.WATER) ? WATER : 0;
         i |= state.getFluidState().is(FluidTags.LAVA) ? LAVA : 0;

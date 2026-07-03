@@ -11,7 +11,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.TextColor;
 import net.minecraft.server.level.ServerPlayer;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import static io.papermc.paper.threadedregions.commands.CommandUtil.SPRINTING_COLOR;
 
@@ -24,24 +24,10 @@ public class RegionizedTpsBar extends RegionResourceBar {
     private static final String[] KEYS = {"tps", "mspt", "util", "players"};
 
     // we have this as an instance field because formats can be per-world
-    private final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
+    private final AtomicReference<@Nullable FormatEntry> cachedFormat = new AtomicReference<>(null);
 
     public RegionizedTpsBar() {
         super((worldData) -> worldData.world.canvasConfig().regionBars.enableTpsBar);
-    }
-
-    @Override
-    String getDefaultFormat() {
-        return WorldConfig.DEFAULT_TPSBAR_FORMAT;
-    }
-
-    @Override
-    String normalize(final @NonNull String input) {
-        return input
-            .replace("%tps%", "<tps>")
-            .replace("%mspt%", "<mspt>")
-            .replace("%util%", "<util>")
-            .replace("%players%", "<players>");
     }
 
     @Override
@@ -53,12 +39,7 @@ public class RegionizedTpsBar extends RegionResourceBar {
         }
     }
 
-    @Override
-    String[] getKeys() {
-        return KEYS;
-    }
-
-    @NonNull Pair<Component, Float> buildComponent() {
+    Pair<Component, Float> buildComponent() {
         final TickData.TickReportData tickReportData = getWorldData().regionData.getRegionSchedulingHandle().getTickReport5s(System.nanoTime());
         final TickData.SegmentedAverage tpsAverage = tickReportData.tpsData();
         final TickData.SegmentedAverage msptAverage = tickReportData.timePerTickData();
@@ -103,6 +84,25 @@ public class RegionizedTpsBar extends RegionResourceBar {
             }
         }
         return new Pair<>(builder.build(), (float) utilPercent / 100);
+    }
+
+    @Override
+    String normalize(final String input) {
+        return input
+            .replace("%tps%", "<tps>")
+            .replace("%mspt%", "<mspt>")
+            .replace("%util%", "<util>")
+            .replace("%players%", "<players>");
+    }
+
+    @Override
+    String getDefaultFormat() {
+        return WorldConfig.DEFAULT_TPSBAR_FORMAT;
+    }
+
+    @Override
+    String[] getKeys() {
+        return KEYS;
     }
 
 }

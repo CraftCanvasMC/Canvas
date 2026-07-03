@@ -23,10 +23,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@NullMarked
 public class WorldConfig extends Part {
 
     // all constants for configurations go here
@@ -132,14 +134,13 @@ public class WorldConfig extends Part {
         }
     }
 
-    public static WorldConfig buildForLevel(final @NonNull ServerLevel level, final ResourceKey<Level> dimension) {
+    public static WorldConfig buildForLevel(final ServerLevel level, final ResourceKey<Level> dimension) {
 
         // we build it as a patch here, and from here we can set the level properly
         final WorldConfig[] result = new WorldConfig[1];
 
         ConfigurationProvider.buildPatchableConfiguration(
-            MinecraftServer.getServer().storageSource.getDimensionPath(dimension)
-                .resolve("canvas-patch.yml"),
+            MinecraftServer.getServer().storageSource.getDimensionPath(dimension).resolve("canvas-patch.yml"),
             BASE_FILE,
             WorldConfig::new,
             instance -> {
@@ -167,7 +168,7 @@ public class WorldConfig extends Part {
         return result[0];
     }
 
-    private void onLoad(final @NonNull ServerLevel level) {
+    private void onLoad(final ServerLevel level) {
 
         // validate the object here too, because some users may do
         // something stupid in the patch variant
@@ -619,6 +620,7 @@ public class WorldConfig extends Part {
             return sleepNotPossible.isBlank();
         }
 
+        @Nullable
         public Component getSleepSkippingNight() {
             if (sleepSkippingNightDisabled()) {
                 return null;
@@ -635,6 +637,7 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Nullable
         public Component getSleepingPlayersPercent(int amountSleeping, int sleepersNeeded) {
             if (sleepingPlayersPercentDisabled()) {
                 return null;
@@ -653,6 +656,7 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Nullable
         public Component getSleepNotPossible() {
             if (sleepNotPossibleDisabled()) {
                return null;
