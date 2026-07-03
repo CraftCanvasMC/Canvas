@@ -10,28 +10,28 @@ import org.jspecify.annotations.Nullable;
  *     the type of object it is
  */
 public class CanonicalReference<T> {
-    private T v;
+    private T val;
 
     public CanonicalReference() {
         this(null);
     }
 
     public CanonicalReference(T val) {
-        this.v = val;
+        this.val = val;
     }
 
     public T setValue(final T value) {
-        if (this.v != null) throw new IllegalStateException("Value already set");
-        return this.v = value;
+        if (this.val != null) throw new IllegalStateException("Value already set");
+        return this.val = value;
     }
 
     public T value() {
-        if (this.v == null) throw new IllegalStateException("Value not set");
-        return v;
+        if (this.val == null) throw new IllegalStateException("Value not set");
+        return val;
     }
 
     public @Nullable T valueSafe() {
-        return v;
+        return val;
     }
 
     public T getOrSet(Supplier<T> empty) {

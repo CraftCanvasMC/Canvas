@@ -18,6 +18,7 @@ import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 import oshi.SystemInfo;
 
@@ -30,6 +31,7 @@ import static net.kyori.adventure.text.Component.text;
  *
  * @author dueris
  */
+@NullMarked
 public class CanvasVersionFetcher implements VersionFetcher {
 
     private static final TextColor RED = TextColor.color(0xFF5300);
@@ -44,39 +46,22 @@ public class CanvasVersionFetcher implements VersionFetcher {
 
     private static final AtomicBoolean USE_CACHE = new AtomicBoolean(true);
 
-    private static @NonNull TextComponent formatList(final @NonNull List<String> inputArguments) {
-        final TextComponent.Builder builder = text();
-
-        builder.append(text("[", LIST));
-        for (int i = 0; i < inputArguments.size(); i++) {
-            final String arg = inputArguments.get(i);
-            builder.append(text(arg, INFORMATION));
-            if (i != (inputArguments.size() - 1)) {
-                builder.append(text(", ", SECONDARY));
-            }
-        }
-        builder.append(text("]", LIST));
-
-        return builder.build();
-    }
-
     @Override
     public long getCacheTime() {
         if (!USE_CACHE.get()) {
-            return Long.MAX_VALUE;
+            return Long.MIN_VALUE;
         }
         return 720000;
     }
 
     @Override
-    public @NonNull Component getVersionMessage() {
+    public Component getVersionMessage() {
         return Component.empty();
     }
 
-    // TODO - online mode and uptime?
-
+    @Nullable
     @Override
-    public @Nullable Component getFullOutMessage() {
+    public Component getFullOutMessage() {
         final TextComponent.Builder builder = text();
         final ServerBuildInfoImpl buildInfo = (ServerBuildInfoImpl) ServerBuildInfo.buildInfo();
 
@@ -185,6 +170,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
 
         builder.append(text(">> ", LIST, TextDecoration.BOLD));
         builder.append(text("Mem ", PRIMARY));
+
         final long maxMem = Runtime.getRuntime().maxMemory();
         if (maxMem == Long.MAX_VALUE) {
             builder.append(text("MAX-UNDEFINED", INFORMATION));
@@ -193,6 +179,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
             builder.append(text(String.format("%.1f", maxMem / (1024.0 * 1024.0 * 1024.0)), INFORMATION));
             builder.append(text("GB ", PRIMARY));
         }
+
         builder.append(text("CPU ", PRIMARY));
         builder.append(text(new SystemInfo().getHardware().getProcessor().getProcessorIdentifier().getName(), SECONDARY));
         builder.append(text(" (", PRIMARY));
@@ -202,7 +189,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
         return builder.build();
     }
 
-    private @NonNull Status computeStatus() {
+    private Status computeStatus() {
         final ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
         final OptionalInt buildNumber = buildInfo.buildNumber();
 
@@ -227,6 +214,22 @@ public class CanvasVersionFetcher implements VersionFetcher {
         }
     }
 
+    private static TextComponent formatList(final List<String> inputArguments) {
+        final TextComponent.Builder builder = text();
+
+        builder.append(text("[", LIST));
+        for (int i = 0; i < inputArguments.size(); i++) {
+            final String arg = inputArguments.get(i);
+            builder.append(text(arg, INFORMATION));
+            if (i != (inputArguments.size() - 1)) {
+                builder.append(text(", ", SECONDARY));
+            }
+        }
+        builder.append(text("]", LIST));
+
+        return builder.build();
+    }
+
     private interface Status {
         Component getStatus();
 
@@ -236,7 +239,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
     private static class ErrorStatus implements Status {
         @Contract(value = " -> new", pure = true)
         @Override
-        public @NonNull Component getStatus() {
+        public Component getStatus() {
             return text("ERROR", RED, TextDecoration.BOLD);
         }
 
@@ -249,7 +252,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
     private static class LocalStatus implements Status {
         @Contract(value = " -> new", pure = true)
         @Override
-        public @NonNull Component getStatus() {
+        public Component getStatus() {
             return text("DEV", RED, TextDecoration.BOLD);
         }
 
@@ -262,7 +265,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
     private record BetaStatus(int distance) implements Status {
         @Contract(value = " -> new", pure = true)
         @Override
-        public @NonNull Component getStatus() {
+        public Component getStatus() {
             TextComponent base = text("BETA", YELLOW, TextDecoration.BOLD);
             if (distance > 0) {
                 base = base.hoverEvent(HoverEvent.showText(text("You are " + distance + " builds out of date, please update ASAP!", YELLOW)));
@@ -282,7 +285,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
     private record StableStatus(int distance) implements Status {
         @Contract(value = " -> new", pure = true)
         @Override
-        public @NonNull Component getStatus() {
+        public Component getStatus() {
             TextComponent base = text("STABLE", GREEN, TextDecoration.BOLD);
             if (distance > 0) {
                 base = base.hoverEvent(HoverEvent.showText(text("You are " + distance + " builds out of date, please update ASAP!", YELLOW)));

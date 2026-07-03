@@ -292,7 +292,7 @@ public class HelpCommand {
 
     @Contract("_ -> new")
     private static Component getTitleForCommand(final SubCommand subCommand) {
-        return Component.text(Util.capitalize(Util.snakeToCamel(subCommand.getName())) + " Command");
+        return Component.text(Util.capitalize(Util.snakeToCamelCase(subCommand.getName())) + " Command");
     }
 
     @Unmodifiable

@@ -38,6 +38,11 @@ public class FasterRandomSource implements BitRandomSource {
     }
 
     @Override
+    public final double nextGaussian() {
+        return rng.nextGaussian();
+    }
+
+    @Override
     public final int next(int bits) {
         return (int) (nextLong() >>> (64 - bits));
     }
@@ -72,23 +77,11 @@ public class FasterRandomSource implements BitRandomSource {
         return rng.nextDouble();
     }
 
-    @Override
-    public final double nextGaussian() {
-        return rng.nextGaussian();
-    }
-
     public static class FasterRandomSourcePositionalRandomFactory implements PositionalRandomFactory {
         private final long seed;
 
         public FasterRandomSourcePositionalRandomFactory(long seed) {
             this.seed = seed;
-        }
-
-        @Override
-        public RandomSource at(int x, int y, int z) {
-            long l = Mth.getSeed(x, y, z);
-            long m = l ^ this.seed;
-            return new FasterRandomSource(m);
         }
 
         @Override
@@ -100,6 +93,14 @@ public class FasterRandomSource implements BitRandomSource {
         @Override
         public RandomSource fromSeed(long seed) {
             return new FasterRandomSource(seed);
+        }
+
+        @Override
+        public RandomSource at(int x, int y, int z) {
+            //noinspection deprecation
+            long l = Mth.getSeed(x, y, z);
+            long m = l ^ this.seed;
+            return new FasterRandomSource(m);
         }
 
         @VisibleForTesting

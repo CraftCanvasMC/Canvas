@@ -6,8 +6,18 @@ import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.regex.Pattern;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
+import org.jetbrains.annotations.Nullable;
 
+/**
+ * Represents a span of time stored as a specific whole number amount of a chrono unit. This is utilized to store time
+ * spans and estimate frequencies of events in a more generic fashion in comparison to using ticks for everything,
+ * especially given the tick rate can change at runtime as of {@code 1.20.3}.
+ * <p>
+ * Utilization of this class is intended to be more specific and consistent about time frames rather than relying on
+ * ticks always running 20 times per second
+ *
+ * @author dueris
+ */
 public class TimeSpan {
     private static final Pattern PATTERN = Pattern.compile("^(\\d+)\\s*([a-zA-Z]+)$");
     private static final Map<String, ChronoUnit> UNIT_ALIASES;
@@ -86,15 +96,31 @@ public class TimeSpan {
             .orElseThrow(() -> new IllegalStateException("No alias for unit: " + chronoUnit));
     }
 
-    @NonNull
+    /**
+     * Constructs a new time span from a chrono unit and the amount of said unit type
+     *
+     * @param unit
+     *     the type of unit
+     * @param count
+     *     the amount of the specified unit
+     *
+     * @return the constructed time span
+     */
     @Contract(value = "_, _ -> new", pure = true)
     public static TimeSpan of(final ChronoUnit unit, final long count) {
         return new TimeSpan(unit, count);
     }
 
-    @NonNull
+    /**
+     * Parses a new time span instance from a raw nullable string, allowing for more generic and lenient input
+     *
+     * @param str
+     *     the string to parse
+     *
+     * @return the compiled time span
+     */
     @Contract("null -> fail")
-    public static TimeSpan parse(final String str) {
+    public static TimeSpan parse(final @Nullable String str) {
         if (str == null) {
             throw new IllegalArgumentException("Input string cannot be null");
         }
@@ -115,20 +141,42 @@ public class TimeSpan {
         return new TimeSpan(unit, count);
     }
 
+    /**
+     * Converts the time unit and the count to nanoseconds
+     *
+     * @return the time span in nanos
+     */
     public long asNanoSpan() {
         return chronoUnit.getDuration().multipliedBy(count).toNanos();
     }
 
+    /**
+     * Creates a new {@link java.time.Instant} of the current instant minus the time span, creating an instant targeting
+     * the past
+     *
+     * @return the current instant minus the time span instance
+     */
     public Instant inPast() {
         final Instant now = Instant.now();
         return now.minus(count, chronoUnit);
     }
 
+    /**
+     * Creates a new {@link java.time.Instant} of the current instant plus the time span, creating an instant targeting
+     * the future
+     *
+     * @return the current instant plus the time span instance
+     */
     public Instant inFuture() {
         final Instant now = Instant.now();
         return now.plus(count, chronoUnit);
     }
 
+    /**
+     * Gets the current time span as a serializable string in minimal form
+     *
+     * @return the minimal serialized string
+     */
     @Override
     public String toString() {
         return asString;

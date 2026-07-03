@@ -4,84 +4,168 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Iterator;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A list that returns itself for methods that modify the backing set
+ * A list that returns itself for methods that modify the backing set, similar in style to a builder-like object
  *
  * @param <T>
- *     the type
+ *     the generic type
  *
  * @author dueris
+ * @implNote This is not thread-safe, as the delegate backing this list is not thread-safe
  */
 public class CollectingList<T> {
-    private final ObjectArrayList<T> backing = new ObjectArrayList<>();
+    private final ObjectArrayList<T> delegate = new ObjectArrayList<>();
 
+    /**
+     * Get the size of the list
+     *
+     * @return the size
+     */
     public int size() {
-        return this.backing.size();
+        return this.delegate.size();
     }
 
+    /**
+     * Get if the list is empty or not
+     *
+     * @return {@code true} if the list has no elements, {@code false} otherwise
+     */
     public boolean isEmpty() {
-        return this.backing.isEmpty();
+        return this.delegate.isEmpty();
     }
 
-    public @NonNull Iterator<T> iterator() {
-        return this.backing.iterator();
+    /**
+     * Gets the iterator for this list
+     *
+     * @return the iterator instance for the list
+     */
+    public Iterator<T> iterator() {
+        return this.delegate.iterator();
     }
 
+    /**
+     * Copies and returns the delegating list
+     *
+     * @return a copy of the backing list
+     */
     public Collection<T> copyOf() {
-        return new ObjectArrayList<>(this.backing);
+        return new ObjectArrayList<>(this.delegate);
     }
 
-    public <N> CollectingList<N> castAllTo(@NonNull Class<N> nClass) {
-        return new CollectingList<N>().addAll(this.backing.stream().map(nClass::cast).toList());
+    /**
+     * Casts all values in the list to the specified class type
+     *
+     * @param castTo
+     *     the type of class to be cast to
+     * @param <N>
+     *     the new generic type
+     *
+     * @return a new list with all values cast to the new class type
+     *
+     * @implNote This does not return the same object as {@code this}, and will return a new {@link CollectingList}
+     *     object
+     */
+    public <N> CollectingList<N> castAllTo(final Class<N> castTo) {
+        return new CollectingList<N>().addAll(this.delegate.stream().map(castTo::cast).toList());
     }
 
-    public CollectingList<T> addAllNotPresent(final @NonNull Collection<T> tCollection) {
-        for (final T t : tCollection) {
-            if (this.backing.contains(t)) {
+    /**
+     * Adds all the elements in the provided collection if the backing list in this collection does not contain the
+     * element already
+     *
+     * @param toAdd
+     *     the collection of elements to attempt to add to this list
+     */
+    public CollectingList<T> addAllNotPresent(final Collection<T> toAdd) {
+        for (final T element : toAdd) {
+            if (this.delegate.contains(element)) {
                 continue;
             }
-            this.backing.add(t);
+            this.delegate.add(element);
         }
         return this;
     }
 
-    public CollectingList<T> addAll(final Collection<T> tCollection) {
-        this.backing.addAll(tCollection);
+    /**
+     * Adds all the elements in the provided collection to the backing list, equivalent to
+     * {@link java.util.List#addAll(java.util.Collection)}
+     *
+     * @param toAdd
+     *     the collection of elements to add to this list
+     */
+    public CollectingList<T> addAll(final Collection<T> toAdd) {
+        this.delegate.addAll(toAdd);
         return this;
     }
 
-    public CollectingList<T> add(final T t) {
-        this.backing.add(t);
+    /**
+     * Adds the provided element to the collection
+     *
+     * @param element
+     *     the element to add
+     */
+    public CollectingList<T> add(final T element) {
+        this.delegate.add(element);
         return this;
     }
 
-    public CollectingList<T> remove(final T t) {
-        this.backing.remove(t);
+    /**
+     * Removes the element provided from the collection
+     *
+     * @param element
+     *     the element to remove
+     */
+    public CollectingList<T> remove(final T element) {
+        this.delegate.remove(element);
         return this;
     }
 
-    public CollectingList<T> sort(@Nullable final Comparator<? super T> c) {
-        this.backing.sort(c);
+    /**
+     * Sorts the list governed on the comparator provided
+     *
+     * @param comparator
+     *     the comparator to sort with
+     */
+    public CollectingList<T> sort(final @Nullable Comparator<? super T> comparator) {
+        this.delegate.sort(comparator);
         return this;
     }
 
+    /**
+     * Clears the collection of all elements
+     */
     public CollectingList<T> clear() {
-        this.backing.clear();
+        this.delegate.clear();
         return this;
     }
 
+    /**
+     * Gets the element at the specified position in the list
+     *
+     * @param index
+     *     the position in the list
+     */
     public T get(final int index) {
-        return this.backing.get(index);
+        return this.delegate.get(index);
     }
 
+    /**
+     * Gets the first element in the list
+     *
+     * @return the head element
+     */
     public T getFirst() {
-        return this.backing.getFirst();
+        return this.delegate.getFirst();
     }
 
+    /**
+     * Gets the last element in the list
+     *
+     * @return the tail element
+     */
     public T getLast() {
-        return this.backing.getLast();
+        return this.delegate.getLast();
     }
 }
