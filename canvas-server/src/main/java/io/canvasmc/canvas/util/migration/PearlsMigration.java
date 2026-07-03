@@ -22,16 +22,25 @@ public class PearlsMigration implements Migration {
             // create directories first or else we throw
             Files.createDirectories(newPath.getParent());
 
-            final CompoundTag oldData = NbtIo.readCompressed(OLD_PATH, NbtAccounter.unlimitedHeap());
-            NbtIo.writeCompressed(migratePearlsTag(oldData), newPath);
-            Files.delete(OLD_PATH);
+            if (Files.exists(newPath)) {
+                migratePearlsFile(newPath);
+            } else {
+                final CompoundTag oldData = NbtIo.readCompressed(OLD_PATH, NbtAccounter.unlimitedHeap());
+                NbtIo.writeCompressed(migratePearlsTag(oldData), newPath);
+                Files.delete(OLD_PATH);
+            }
         } catch (final IOException ioe) {
             throw new RuntimeException("Couldn't conduct pearl migration", ioe);
         }
     }
 
+    public static void migratePearlsFile(final Path path) throws IOException {
+        final CompoundTag oldData = NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
+        NbtIo.writeCompressed(migratePearlsTag(oldData), path);
+    }
+
     public static CompoundTag migratePearlsTag(final CompoundTag oldData) {
-        if (oldData.contains("data")) {
+        if (isModernPearlsTag(oldData)) {
             return oldData;
         }
 
@@ -51,14 +60,31 @@ public class PearlsMigration implements Migration {
         return oldData;
     }
 
+    public static boolean isModernPearlsTag(final CompoundTag tag) {
+        return tag.get("data") instanceof CompoundTag;
+    }
+
+    public static boolean needsMigration(final Path path) {
+        if (!Files.exists(path)) {
+            return false;
+        }
+
+        try {
+            return !isModernPearlsTag(NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap()));
+        } catch (final IOException ioe) {
+            throw new RuntimeException("Couldn't read pearl data for migration", ioe);
+        }
+    }
+
     @Override
     public boolean hasOldData(final WorldMigrationContext context) {
-        return Files.exists(OLD_PATH); // pre-26.1 path
+        return Files.exists(OLD_PATH) || needsMigration(resolveNewPath(context)); // pre-26.1 path or pre-release 26.2 data shape
     }
 
     @Override
     public boolean hasNewData(final WorldMigrationContext context) {
-        return Files.exists(resolveNewPath(context));
+        final Path newPath = resolveNewPath(context);
+        return Files.exists(newPath) && !needsMigration(newPath);
     }
 
     private static Path resolveNewPath(final WorldMigrationContext context) {
