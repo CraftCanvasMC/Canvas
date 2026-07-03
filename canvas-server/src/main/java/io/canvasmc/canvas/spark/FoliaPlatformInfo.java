@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.spark.plugin;
+package io.canvasmc.canvas.spark;
 
 import me.lucko.spark.paper.common.platform.PlatformInfo;
 import org.bukkit.Server;
@@ -16,6 +16,7 @@ public record FoliaPlatformInfo(Server server) implements PlatformInfo {
     @Contract(pure = true)
     @Override
     public String getName() {
+        // TODO - should we change this to "Canvas"? We have an entirely custom implementation, may be worth it
         return "Folia";
     }
 

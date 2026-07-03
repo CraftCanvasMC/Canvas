@@ -216,7 +216,7 @@ public class Util {
         if (text.isEmpty()) {
             return text;
         }
-        return Character.toUpperCase(text.charAt(0)) + text.substring(1).toLowerCase();
+        return Character.toUpperCase(text.charAt(0)) + text.substring(1);
     }
 
     /**

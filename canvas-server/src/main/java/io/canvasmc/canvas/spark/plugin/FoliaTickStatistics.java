@@ -10,50 +10,9 @@ import java.util.function.Consumer;
 import me.lucko.spark.api.statistic.misc.DoubleAverageInfo;
 import me.lucko.spark.paper.common.monitor.tick.TickStatistics;
 import net.minecraft.server.level.ServerLevel;
-import org.jspecify.annotations.NonNull;
 
 public class FoliaTickStatistics implements TickStatistics {
     private static final AverageInfo EMPTY_AVERAGE_INFO = new AverageInfo();
-
-    private static double getTpsFor(TimeSpan span) {
-        // we must include global tick, and all regions
-        final RegionProfiler.ProfilingState profilingState = RegionProfiler.STATE.get();
-        if (profilingState != null) {
-            return getTpsFor(profilingState.regionScheduleHandle(), span);
-        }
-        DoubleArrayList tpsCounts = new DoubleArrayList();
-        tpsCounts.add(getTpsFor(RegionizedServer.getGlobalTickData(), span));
-        final Consumer<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> threadedRegionConsumer = (region) -> tpsCounts.add(getTpsFor(region.getData().getRegionSchedulingHandle(), span));
-        for (final ServerLevel level : RegionizedServer.getInstance().worlds) {
-            level.regioniser.computeForAllRegionsUnsynchronised(threadedRegionConsumer);
-        }
-
-        if (tpsCounts.isEmpty()) {
-            // well if we use 0 then it shows the server DYING... no likey, just make it -1
-            return -1.0D;
-        }
-
-        double sum = 0.0D;
-        for (int i = 0; i < tpsCounts.size(); i++) {
-            sum += tpsCounts.getDouble(i);
-        }
-
-        return sum / tpsCounts.size();
-    }
-
-    private static double getTpsFor(final TickRegionScheduler.RegionScheduleHandle scheduleHandle, final @NonNull TimeSpan span) {
-        final long interval = TickRegionScheduler.getTimeBetweenTicks();
-        Double d = switch (span) {
-            case TPS_1_MIN -> scheduleHandle.tickTimes1m.getTPSAverage(null, interval);
-            case TPS_5_MIN -> scheduleHandle.tickTimes5m.getTPSAverage(null, interval);
-            case TPS_5_SEC -> scheduleHandle.tickTimes5s.getTPSAverage(null, interval);
-            case TPS_10_SEC -> // CLOSE ENOUGH!!
-                scheduleHandle.tickTimes15s.getTPSAverage(null, interval);
-            case TPS_15_MIN -> scheduleHandle.tickTimes15m.getTPSAverage(null, interval);
-        };
-        if (d == null) return TickRegionScheduler.getTickRate();
-        else return d;
-    }
 
     @Override
     public double tps5Sec() {
@@ -98,6 +57,55 @@ public class FoliaTickStatistics implements TickStatistics {
     @Override
     public DoubleAverageInfo duration5Min() {
         return EMPTY_AVERAGE_INFO;
+    }
+
+    private static double getTpsFor(final TimeSpan span) {
+        // check for a profiling region first
+        final RegionProfiler.ProfilingState profilingState = RegionProfiler.STATE.get();
+        if (profilingState != null) {
+            return getTpsFor(profilingState.regionScheduleHandle(), span);
+        }
+
+        // if not profiling a specific region, we should average all handles
+        final DoubleArrayList tpsCounts = new DoubleArrayList();
+        final Consumer<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> forEachRegion =
+            (region) -> tpsCounts.add(getTpsFor(region.getData().getRegionSchedulingHandle(), span));
+
+        // global tick should be included
+        tpsCounts.add(getTpsFor(RegionizedServer.getGlobalTickData(), span));
+
+        for (final ServerLevel level : RegionizedServer.getInstance().worlds) {
+            level.regioniser.computeForAllRegionsUnsynchronised(forEachRegion);
+        }
+
+        if (tpsCounts.isEmpty()) {
+            // if the tps counts are empty, we should just return
+            // the default rate for now
+            return TickRegionScheduler.getTickRate();
+        }
+
+        // return the average TPS from the collected counts
+        return tpsCounts.doubleStream().sum() / tpsCounts.size();
+    }
+
+    private static double getTpsFor(final TickRegionScheduler.RegionScheduleHandle scheduleHandle, final TimeSpan span) {
+        final long interval = TickRegionScheduler.getTimeBetweenTicks();
+        final Double tpsAverage = switch (span) {
+            case TPS_1_MIN -> scheduleHandle.tickTimes1m.getTPSAverage(null, interval);
+            case TPS_5_MIN -> scheduleHandle.tickTimes5m.getTPSAverage(null, interval);
+            case TPS_5_SEC -> scheduleHandle.tickTimes5s.getTPSAverage(null, interval);
+            case TPS_10_SEC -> // we don't have a 15s tick time, close enough
+                scheduleHandle.tickTimes15s.getTPSAverage(null, interval);
+            case TPS_15_MIN -> scheduleHandle.tickTimes15m.getTPSAverage(null, interval);
+        };
+
+        // if tpsAverage is null, the time data is empty,
+        // just return the default rate in this case
+        if (tpsAverage == null) {
+            return TickRegionScheduler.getTickRate();
+        }
+
+        return tpsAverage;
     }
 
     private enum TimeSpan {

@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.spark.plugin;
+package io.canvasmc.canvas.spark.provider;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -9,7 +9,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializer;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -27,7 +26,6 @@ import org.bukkit.World;
 import org.bukkit.configuration.MemorySection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.jetbrains.annotations.Unmodifiable;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 public class FoliaServerConfigProvider extends ServerConfigProvider {
@@ -42,7 +40,7 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
     private static final Collection<String> HIDDEN_PATHS;
 
     static {
-        ImmutableMap.Builder<String, ConfigParser> files = ImmutableMap.<String, ConfigParser>builder()
+        final ImmutableMap.Builder<String, ConfigParser> files = ImmutableMap.<String, ConfigParser>builder()
             .put("server.properties", PropertiesConfigParser.INSTANCE)
             .put("bukkit.yml", YamlConfigParser.INSTANCE)
             .put("spigot.yml", YamlConfigParser.INSTANCE)
@@ -52,11 +50,11 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
             .put("purpur.yml", YamlConfigParser.INSTANCE)
             .put("pufferfish.yml", YamlConfigParser.INSTANCE);
 
-        for (String config : getSystemPropertyList("spark.serverconfigs.extra")) {
+        for (final String config : getSystemPropertyList("spark.serverconfigs.extra")) {
             files.put(config, YamlConfigParser.INSTANCE);
         }
 
-        ImmutableSet.Builder<String> hiddenPaths = ImmutableSet.<String>builder()
+        final ImmutableSet.Builder<String> hiddenPaths = ImmutableSet.<String>builder()
             .add("database")
             .add("settings.bungeecord-addresses")
             .add("settings.velocity-support.secret")
@@ -78,23 +76,25 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
         HIDDEN_PATHS = hiddenPaths.build();
     }
 
-    private static @NonNull @Unmodifiable List<String> getTimingsHiddenConfigs() {
-        return Collections.emptyList();
-    }
-
     public FoliaServerConfigProvider() {
         super(FILES, HIDDEN_PATHS);
     }
 
-    private static class YamlConfigParser implements ConfigParser {
-        protected static final Gson GSON = new GsonBuilder()
-            .registerTypeAdapter(MemorySection.class, (JsonSerializer<MemorySection>) (obj, type, ctx) -> ctx.serialize(obj.getValues(false)))
-            .create();
-        public static final YamlConfigParser INSTANCE = new YamlConfigParser();
+    @Unmodifiable
+    private static List<String> getTimingsHiddenConfigs() {
+        return Collections.emptyList();
+    }
 
+    private static class YamlConfigParser implements ConfigParser {
+        public static final YamlConfigParser INSTANCE = new YamlConfigParser();
+        protected static final Gson GSON = new GsonBuilder()
+            .registerTypeAdapter(MemorySection.class, (JsonSerializer<MemorySection>) (obj, _, ctx) -> ctx.serialize(obj.getValues(false)))
+            .create();
+
+        @Nullable
         @Override
-        public JsonElement load(String file, ExcludedConfigFilter filter) throws IOException {
-            Map<String, Object> values = this.parse(Paths.get(file));
+        public JsonElement load(final String file, final ExcludedConfigFilter filter) throws IOException {
+            final Map<String, Object> values = this.parse(Paths.get(file));
             if (values == null) {
                 return null;
             }
@@ -103,64 +103,30 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
         }
 
         @Override
-        public Map<String, Object> parse(BufferedReader reader) throws IOException {
-            YamlConfiguration config = YamlConfiguration.loadConfiguration(reader);
+        public Map<String, Object> parse(final BufferedReader reader) {
+            final YamlConfiguration config = YamlConfiguration.loadConfiguration(reader);
             return config.getValues(false);
-        }
-    }
-
-    private static class Json5YamlParser implements ConfigParser {
-        private static final Json5YamlParser INSTANCE = new Json5YamlParser();
-        protected static final Gson GSON = new GsonBuilder()
-            .registerTypeAdapter(MemorySection.class, (JsonSerializer<MemorySection>) (obj, type, ctx) ->
-                ctx.serialize(obj.getValues(false)))
-            .create();
-
-        @Override
-        public @Nullable JsonElement load(String file, ExcludedConfigFilter filter) throws IOException {
-            Map<String, Object> values = parse(file);
-            if (values == null) return null;
-            return filter.apply(GSON.toJsonTree(values));
-        }
-
-        public Map<String, Object> parse(String file) throws IOException {
-            try (Reader reader = Files.newBufferedReader(Paths.get(file))) {
-                return GSON.fromJson(reader, Map.class);
-            }
-        }
-
-        public Map<String, Object> parse(BufferedReader reader) throws IOException {
-            return GSON.fromJson(reader, Map.class);
         }
     }
 
     private static class CanvasSplitParser extends YamlConfigParser {
         public static final CanvasSplitParser INSTANCE = new CanvasSplitParser();
 
-        private static @NonNull Map<String, Path> getNestedFiles(@NonNull Path configDir) {
-            Map<String, Path> files = new LinkedHashMap<>();
-            files.put("canvas-server.yml", configDir.resolve("canvas-server.yml"));
-            files.put("world-defaults.yml", configDir.resolve("canvas-worlds.yml"));
-            for (World world : Bukkit.getWorlds()) {
-                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve("canvas-patch.yml"));
-            }
-            return files;
-        }
-
+        @Nullable
         @Override
-        public @Nullable JsonElement load(@NonNull String group, ExcludedConfigFilter filter) throws IOException {
-            Path configDir = Paths.get("config");
+        public JsonElement load(final String group, final ExcludedConfigFilter filter) throws IOException {
+            final Path configDir = Paths.get("config");
             if (!Files.exists(configDir)) {
                 return null;
             }
 
-            JsonObject root = new JsonObject();
+            final JsonObject root = new JsonObject();
 
-            for (Map.Entry<String, Path> entry : getNestedFiles(configDir).entrySet()) {
-                String fileName = entry.getKey();
-                Path path = entry.getValue();
+            for (final Map.Entry<String, Path> entry : getNestedFiles(configDir).entrySet()) {
+                final String fileName = entry.getKey();
+                final Path path = entry.getValue();
 
-                Map<String, Object> values = this.parse(path);
+                final Map<String, Object> values = this.parse(path);
                 if (values == null) {
                     continue;
                 }
@@ -170,6 +136,16 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
             }
 
             return root;
+        }
+
+        private static Map<String, Path> getNestedFiles(final Path configDir) {
+            final Map<String, Path> files = new LinkedHashMap<>();
+            files.put("canvas-server.yml", configDir.resolve("canvas-server.yml"));
+            files.put("world-defaults.yml", configDir.resolve("canvas-worlds.yml"));
+            for (final World world : Bukkit.getWorlds()) {
+                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve("canvas-patch.yml"));
+            }
+            return files;
         }
     }
 
@@ -177,32 +153,23 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
     private static class SplitYamlConfigParser extends YamlConfigParser {
         public static final SplitYamlConfigParser INSTANCE = new SplitYamlConfigParser();
 
-        private static @NonNull Map<String, Path> getNestedFiles(@NonNull Path configDir, String prefix) {
-            Map<String, Path> files = new LinkedHashMap<>();
-            files.put("global.yml", configDir.resolve(prefix + "-global.yml"));
-            files.put("world-defaults.yml", configDir.resolve(prefix + "-world-defaults.yml"));
-            for (World world : Bukkit.getWorlds()) {
-                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve(prefix + "-world.yml"));
-            }
-            return files;
-        }
-
+        @Nullable
         @Override
-        public @Nullable JsonElement load(@NonNull String group, ExcludedConfigFilter filter) throws IOException {
-            String prefix = group.replace("/", "");
+        public JsonElement load(final String group, final ExcludedConfigFilter filter) throws IOException {
+            final String prefix = group.replace("/", "");
+            final Path configDir = Paths.get("config");
 
-            Path configDir = Paths.get("config");
             if (!Files.exists(configDir)) {
                 return null;
             }
 
-            JsonObject root = new JsonObject();
+            final JsonObject root = new JsonObject();
 
-            for (Map.Entry<String, Path> entry : getNestedFiles(configDir, prefix).entrySet()) {
-                String fileName = entry.getKey();
-                Path path = entry.getValue();
+            for (final Map.Entry<String, Path> entry : getNestedFiles(configDir, prefix).entrySet()) {
+                final String fileName = entry.getKey();
+                final Path path = entry.getValue();
 
-                Map<String, Object> values = this.parse(path);
+                final Map<String, Object> values = this.parse(path);
                 if (values == null) {
                     continue;
                 }
@@ -212,6 +179,16 @@ public class FoliaServerConfigProvider extends ServerConfigProvider {
             }
 
             return root;
+        }
+
+        private static Map<String, Path> getNestedFiles(final Path configDir, final String prefix) {
+            final Map<String, Path> files = new LinkedHashMap<>();
+            files.put("global.yml", configDir.resolve(prefix + "-global.yml"));
+            files.put("world-defaults.yml", configDir.resolve(prefix + "-world-defaults.yml"));
+            for (final World world : Bukkit.getWorlds()) {
+                files.put(world.getName() + ".yml", world.getWorldFolder().toPath().resolve(prefix + "-world.yml"));
+            }
+            return files;
         }
     }
 
