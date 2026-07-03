@@ -398,7 +398,24 @@ public class GlobalConfiguration extends Part {
                     "Enabling this turns fluid post processing into a scheduled tick, which hopefully",
                     "helps to mitigate MSPT spiking issues during chunk generation"
                 );
-            option("endBiomeCacheSize").greaterThan(0.0F);
+            option("optimizeAquifer").docs(
+                "Optimizes the noise-based aquifer used during world generation, ported from C2ME.",
+                "This precomputes and packs the aquifer sampling data to reduce the work done per",
+                "block position while generating chunks"
+            );
+            option("useEndBiomeCache").docs(
+                "Enables a per-thread cache of End biome lookups to avoid recomputing biomes for",
+                "positions that have already been sampled while generating End chunks"
+            );
+            option("endBiomeCacheSize").docs(
+                "The maximum number of End biome entries cached per thread when \"useEndBiomeCache\"",
+                "is enabled. Once this limit is exceeded, the oldest entries are evicted"
+            ).greaterThan(0.0F);
+            option("optimizeBeardifier").docs(
+                "Optimizes the beardifier, which carves terrain around structure pieces and jigsaw",
+                "junctions, ported from C2ME. This skips positions outside the affected area early",
+                "and avoids repeated list lookups to reduce world generation overhead"
+            );
             option("structureOptimizations").docs(
                 "These options are ported from the mod StructureLayoutOptimizer, https://modrinth.com/mod/structure-layout-optimizer",
                 "which optimizes the generation of Jigsaw Structures and NBT pieces"
