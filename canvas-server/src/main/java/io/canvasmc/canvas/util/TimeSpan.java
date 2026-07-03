@@ -121,12 +121,12 @@ public class TimeSpan {
 
     public Instant inPast() {
         final Instant now = Instant.now();
-        return now.minus(count, chronoUnit);
+        return now.minus(chronoUnit.getDuration().multipliedBy(count));
     }
 
     public Instant inFuture() {
         final Instant now = Instant.now();
-        return now.plus(count, chronoUnit);
+        return now.plus(chronoUnit.getDuration().multipliedBy(count));
     }
 
     @Override
