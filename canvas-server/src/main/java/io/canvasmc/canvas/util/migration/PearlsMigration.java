@@ -46,7 +46,7 @@ public class PearlsMigration implements Migration {
 
         final CompoundTag wrappedData = new CompoundTag();
         for (final String key : new ArrayList<>(oldData.keySet())) {
-            if ("DataVersion".equals(key)) {
+            if (key.equals("DataVersion")) {
                 continue;
             }
 
