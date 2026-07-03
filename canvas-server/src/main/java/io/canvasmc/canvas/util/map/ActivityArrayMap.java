@@ -200,7 +200,11 @@ public final class ActivityArrayMap<V> implements Map<Activity, V> {
     public int hashCode() {
         int hash = 0;
         for (int i = 0; i < size; i++) {
-            hash += Objects.hashCode(k[i]) ^ Objects.hashCode(v[i]);
+            // Map.hashCode is the sum of entry hashes, where an entry hash is
+            // key.hashCode() ^ value.hashCode(). The key is the Activity, not its
+            // raw registry id, so hash the Activity to stay consistent with equals()
+            // (which compares against arbitrary Activity-keyed maps).
+            hash += BuiltInRegistries.ACTIVITY.byIdOrThrow(k[i]).hashCode() ^ Objects.hashCode(v[i]);
         }
         return hash;
     }
