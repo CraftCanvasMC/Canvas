@@ -1,5 +1,6 @@
 package io.canvasmc.canvas.configuration;
 
+import java.lang.annotation.Annotation;
 import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Field;
 import java.lang.reflect.Type;
@@ -9,9 +10,10 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.yaml.snakeyaml.error.YAMLException;
 import org.yaml.snakeyaml.introspector.BeanAccess;
 import org.yaml.snakeyaml.introspector.FieldProperty;
@@ -22,20 +24,23 @@ import org.yaml.snakeyaml.introspector.PropertyUtils;
 public class FieldOrderPropertyUtils extends PropertyUtils {
 
     public FieldOrderPropertyUtils() {
-        setBeanAccess(BeanAccess.FIELD);
+        super.setBeanAccess(BeanAccess.FIELD);
     }
 
-    static String toKebabCase(final String camel) {
-        if (camel == null || camel.isEmpty()) return camel;
+    public static String toKebabCase(final String camel) {
+        Objects.requireNonNull(camel);
 
-        StringBuilder sb = new StringBuilder(camel.length() + 4);
-        char[] chars = camel.toCharArray();
+        // if camel-case version is empty, nothing to convert
+        if (camel.isEmpty()) return camel;
+
+        final StringBuilder sb = new StringBuilder(camel.length() + 4);
+        final char[] chars = camel.toCharArray();
 
         for (int i = 0; i < chars.length; i++) {
-            char c = chars[i];
+            final char c = chars[i];
             if (Character.isUpperCase(c)) {
-                boolean prevIsLower = i > 0 && !Character.isUpperCase(chars[i - 1]);
-                boolean nextIsLower = i + 1 < chars.length && Character.isLowerCase(chars[i + 1]);
+                final boolean prevIsLower = i > 0 && !Character.isUpperCase(chars[i - 1]);
+                final boolean nextIsLower = i + 1 < chars.length && Character.isLowerCase(chars[i + 1]);
                 if (i > 0 && (prevIsLower || nextIsLower)) {
                     sb.append('-');
                 }
@@ -49,13 +54,16 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
         return sb.toString();
     }
 
-    static String fromKebabCase(final String kebab) {
-        if (kebab == null || !kebab.contains("-")) return kebab;
+    public static String toCamelCase(final String kebab) {
+        Objects.requireNonNull(kebab);
 
-        StringBuilder sb = new StringBuilder(kebab.length());
+        // if this doesn't contain a dash, the output is always the same
+        if (!kebab.contains("-")) return kebab;
+
+        final StringBuilder sb = new StringBuilder(kebab.length());
         boolean nextUpper = false;
 
-        for (char c : kebab.toCharArray()) {
+        for (final char c : kebab.toCharArray()) {
             if (c == '-') {
                 nextUpper = true;
             }
@@ -72,24 +80,24 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
     }
 
     @Override
-    protected Set<Property> createPropertySet(Class<?> type, BeanAccess bAccess) {
+    protected Set<Property> createPropertySet(final Class<?> type, final BeanAccess bAccess) {
         // get the default property set from snakeyaml
-        Collection<Property> properties = super.createPropertySet(type, bAccess);
+        final Collection<Property> properties = super.createPropertySet(type, bAccess);
 
         // build a declaration-order index from reflection
         // getDeclaredFields returns fields in declaration order per the JVM spec
         // we walk the hierarchy too so nested/inherited fields sort correctly
 
         // filter out any fields declared in Part itself
-        Set<String> partFields = Arrays.stream(Part.class.getDeclaredFields())
+        final Set<String> partFields = Arrays.stream(Part.class.getDeclaredFields())
             .map(Field::getName)
             .collect(Collectors.toSet());
 
-        List<String> declarationOrder = new ArrayList<>();
+        final List<String> declarationOrder = new ArrayList<>();
         Class<?> current = type;
         while (current != null && current != Object.class) {
             Arrays.stream(current.getDeclaredFields())
-                .filter(f -> !f.accessFlags().contains(AccessFlag.STATIC))
+                .filter(field -> !field.accessFlags().contains(AccessFlag.STATIC))
                 .map(Field::getName)
                 .filter(name -> !partFields.contains(name))
                 .forEach(declarationOrder::add);
@@ -97,37 +105,38 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
         }
 
         return properties.stream()
-            .filter(p -> {
+            .filter(abstractProperty -> {
                 // the initial filter should filter anything final
-                if (p instanceof FieldProperty fieldProperty) {
+                if (abstractProperty instanceof FieldProperty fieldProperty) {
                     try {
-                        Field fieldToGetTheFieldObjectOfTheFieldProperty = FieldProperty.class.getDeclaredField("field");
-                        fieldToGetTheFieldObjectOfTheFieldProperty.setAccessible(true);
-                        Field field = (Field) fieldToGetTheFieldObjectOfTheFieldProperty.get(fieldProperty);
+                        // get the field from the "field" field in the field property
+                        final Field storedFieldField = FieldProperty.class.getDeclaredField("field");
+                        storedFieldField.setAccessible(true);
+                        final Field storedField = (Field) storedFieldField.get(fieldProperty);
 
                         // fields with final modifiers should be ignored from the configurations
-                        if (field.accessFlags().contains(AccessFlag.FINAL)) {
+                        if (storedField.accessFlags().contains(AccessFlag.FINAL)) {
                             return false;
                         }
-                    } catch (NoSuchFieldException nsfe) {
-                        throw new RuntimeException("field field not found? Where the field field go?", nsfe);
-                    } catch (IllegalAccessException iae) {
-                        throw new RuntimeException("Illegal access to field :(", iae);
+                    } catch (final NoSuchFieldException nsfe) {
+                        throw new RuntimeException("Field was not found", nsfe);
+                    } catch (final IllegalAccessException iae) {
+                        throw new RuntimeException("Unable to access field", iae);
                     }
                 }
                 // the field shouldn't be final, or not field property! yippeee :)
                 return true;
             })
-            .filter(p -> !partFields.contains(
-                p instanceof KebabCaseProperty kcp ? fromKebabCase(kcp.getName()) : p.getName()
+            .filter(abstractProperty -> !partFields.contains(
+                abstractProperty instanceof KebabCaseProperty kcp ? toCamelCase(kcp.getName()) : abstractProperty.getName()
             ))
-            .sorted((a, b) -> {
+            .sorted((first, second) -> {
                 // names are still camelCase at this point, KebabCaseProperty
                 // wraps them after sorting, so sort on the original name
-                String aName = a instanceof KebabCaseProperty kcp
-                    ? fromKebabCase(kcp.getName()) : a.getName();
-                String bName = b instanceof KebabCaseProperty kcp
-                    ? fromKebabCase(kcp.getName()) : b.getName();
+                final String aName = first instanceof KebabCaseProperty kcp
+                    ? toCamelCase(kcp.getName()) : first.getName();
+                final String bName = second instanceof KebabCaseProperty kcp
+                    ? toCamelCase(kcp.getName()) : second.getName();
                 int ai = declarationOrder.indexOf(aName);
                 int bi = declarationOrder.indexOf(bName);
                 // unknown fields go to the end
@@ -135,17 +144,16 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
                 if (bi == -1) bi = Integer.MAX_VALUE;
                 return Integer.compare(ai, bi);
             })
-            .map(p -> p instanceof KebabCaseProperty ? p : new KebabCaseProperty(p))
+            .map(abstractProperty -> abstractProperty instanceof KebabCaseProperty ? abstractProperty : new KebabCaseProperty(abstractProperty))
             .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     @Override
-    public Property getProperty(Class<?> type, String name) {
-        Map<String, Property> properties = getPropertiesMap(type, BeanAccess.FIELD);
-        Property property = properties.get(fromKebabCase(name));
+    public Property getProperty(final Class<?> type, final String name) {
+        final Map<String, Property> properties = getPropertiesMap(type, BeanAccess.FIELD);
+        final Property property = properties.get(toCamelCase(name));
         if (property == null) {
-            throw new YAMLException(
-                "Unable to find property '" + name + "' on class: " + type.getName());
+            throw new YAMLException("Unable to find property '" + name + "' on class: " + type.getName());
         }
         return property;
     }
@@ -158,46 +166,47 @@ public class FieldOrderPropertyUtils extends PropertyUtils {
             try {
                 GENERIC_TYPE_FIELD = GenericProperty.class.getDeclaredField("genType");
                 GENERIC_TYPE_FIELD.setAccessible(true);
-            } catch (NoSuchFieldException e) {
-                throw new ExceptionInInitializerError(e);
+            } catch (final NoSuchFieldException nsfe) {
+                throw new ExceptionInInitializerError(nsfe);
             }
         }
 
         private final Property delegate;
 
-        private static Type resolveGenericType(final Property delegate) {
-            if (delegate instanceof GenericProperty) {
-                try {
-                    return (Type) GENERIC_TYPE_FIELD.get(delegate);
-                } catch (IllegalAccessException ignored) {
-                }
-            }
-            return null;
-        }
-
-        KebabCaseProperty(final @NonNull Property delegate) {
+        KebabCaseProperty(final Property delegate) {
             super(toKebabCase(delegate.getName()), delegate.getType(), resolveGenericType(delegate));
             this.delegate = delegate;
         }
 
         @Override
-        public void set(Object object, Object value) throws Exception {
+        public void set(final Object object, final Object value) throws Exception {
             delegate.set(object, value);
         }
 
         @Override
-        public Object get(Object object) {
+        public Object get(final Object object) {
             return delegate.get(object);
         }
 
         @Override
-        public List<java.lang.annotation.Annotation> getAnnotations() {
+        public List<Annotation> getAnnotations() {
             return delegate.getAnnotations();
         }
 
         @Override
-        public <A extends java.lang.annotation.Annotation> A getAnnotation(Class<A> annotationType) {
+        public <A extends Annotation> A getAnnotation(final Class<A> annotationType) {
             return delegate.getAnnotation(annotationType);
+        }
+
+        @Nullable
+        private static Type resolveGenericType(final Property delegate) {
+            if (delegate instanceof GenericProperty) {
+                try {
+                    return (Type) GENERIC_TYPE_FIELD.get(delegate);
+                } catch (final IllegalAccessException ignored) {
+                }
+            }
+            return null;
         }
     }
 }

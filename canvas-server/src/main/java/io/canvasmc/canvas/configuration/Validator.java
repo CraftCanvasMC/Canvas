@@ -4,16 +4,37 @@ import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.util.Map;
-import org.jspecify.annotations.NonNull;
 
 public class Validator {
 
     @SuppressWarnings("unchecked")
+    public static void validateObject(final Object object) {
+        final Class<?> objectClass = object.getClass();
+
+        if (!Part.class.isAssignableFrom(objectClass)) {
+            throw new IllegalArgumentException(
+                "Object of class '" + objectClass.getName() + "' does not extend Part"
+            );
+        }
+
+        final Map<String, Part.OptionDefinition> harvested =
+            Part.harvest((Class<? extends Part>) objectClass);
+
+        for (final Field declaredField : objectClass.getDeclaredFields()) {
+            try {
+                validateField(declaredField, objectClass, object, harvested);
+            } catch (final IllegalAccessException iae) {
+                throw new RuntimeException("Unable to access field '" + declaredField.getName() + "'", iae);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     private static void validateField(
-        final @NonNull Field declaredField,
-        final @NonNull Class<?> classInsideOf,
-        final @NonNull Object obj,
-        final @NonNull Map<String, Part.OptionDefinition> partDefinitions
+        final Field declaredField,
+        final Class<?> classInsideOf,
+        final Object obj,
+        final Map<String, Part.OptionDefinition> partDefinitions
     ) throws IllegalAccessException {
         // skip any final fields
         if (declaredField.accessFlags().contains(AccessFlag.FINAL)) {
@@ -23,19 +44,19 @@ public class Validator {
         // make accessible just in case
         declaredField.setAccessible(true);
 
-        Class<?> fieldType = declaredField.getType();
+        final Class<?> fieldType = declaredField.getType();
 
         // recurse into nested classes that extend Part
-        for (Class<?> nested : classInsideOf.getDeclaredClasses()) {
+        for (final Class<?> nested : classInsideOf.getDeclaredClasses()) {
             if (nested.equals(fieldType) && Part.class.isAssignableFrom(nested)) {
-                Object nestedObj = declaredField.get(obj);
+                final Object nestedObj = declaredField.get(obj);
                 if (nestedObj == null) break;
 
-                Map<String, Part.OptionDefinition> nestedPartDefs =
+                final Map<String, Part.OptionDefinition> harvested =
                     Part.harvest((Class<? extends Part>) nested);
 
-                for (Field nestedField : nested.getDeclaredFields()) {
-                    validateField(nestedField, nested, nestedObj, nestedPartDefs);
+                for (final Field nestedField : nested.getDeclaredFields()) {
+                    validateField(nestedField, nested, nestedObj, harvested);
                 }
 
                 break;
@@ -62,39 +83,17 @@ public class Validator {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void runPartValidations(
-        final Part.@NonNull OptionDefinition definition,
-        final @NonNull String fieldName,
+        final Part.OptionDefinition definition,
+        final String fieldName,
         final Object value
     ) {
         for (final Part.Validation validation : definition.validations) {
             try {
                 validation.validate(value);
-            } catch (Throwable thrown) {
+            } catch (final Throwable thrown) {
                 throw new RuntimeException(
                     "Validation failed for field '" + fieldName + "': " + thrown.getMessage(), thrown
                 );
-            }
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    public static void validateObject(final @NonNull Object obj) {
-        Class<?> oClazz = obj.getClass();
-
-        if (!Part.class.isAssignableFrom(oClazz)) {
-            throw new IllegalArgumentException(
-                "Object of class '" + oClazz.getName() + "' does not extend Part"
-            );
-        }
-
-        Map<String, Part.OptionDefinition> partDefinitions =
-            Part.harvest((Class<? extends Part>) oClazz);
-
-        for (final Field declaredField : oClazz.getDeclaredFields()) {
-            try {
-                validateField(declaredField, oClazz, obj, partDefinitions);
-            } catch (IllegalAccessException iae) {
-                throw new RuntimeException("Unable to access field '" + declaredField.getName() + "'", iae);
             }
         }
     }

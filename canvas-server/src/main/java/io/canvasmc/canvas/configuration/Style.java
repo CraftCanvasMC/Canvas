@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
 
 public class Style {
 
@@ -14,7 +13,7 @@ public class Style {
     }
 
     @Contract(" -> new")
-    public static @NonNull Style create() {
+    public static Style create() {
         return new Style();
     }
 
@@ -22,12 +21,12 @@ public class Style {
         return create().wordWrap(wrap).endLine();
     }
 
-    public Style literal(String text) {
+    public Style literal(final String text) {
         instructions.add(new Literal(text));
         return this;
     }
 
-    public Style wordWrap(String... parts) {
+    public Style wordWrap(final String... parts) {
         instructions.add(new WordWrap(String.join(" ", parts)));
         return this;
     }
@@ -37,7 +36,7 @@ public class Style {
         return this;
     }
 
-    public <E extends Enum<E>> Style defineEnum(Class<E> enumClass, Function<E, String> descriptor) {
+    public <E extends Enum<E>> Style defineEnum(final Class<E> enumClass, final Function<E, String> descriptor) {
         instructions.add(new EnumDoc<>(enumClass, descriptor));
         return this;
     }
@@ -47,27 +46,32 @@ public class Style {
         return this;
     }
 
-    public String[] compile(int charLimit) {
-        List<String> lines = new ArrayList<>();
+    public String[] compile(final int characterLimit) {
+        final List<String> lines = new ArrayList<>();
 
         // each "current line" is built by accumulating literals/wordwraps until
         // an EndLine flushes it. we track whether we're mid-line.
-        StringBuilder currentLine = new StringBuilder();
+        final StringBuilder currentLine = new StringBuilder();
 
-        for (Comment instruction : instructions) {
+        for (final Comment instruction : instructions) {
             switch (instruction) {
                 case Literal(String text) -> currentLine.append(text);
 
                 case WordWrap(String text) -> {
-                    // append word-wrapped text to current line, respecting charLimit
-                    String[] words = text.split("\\s+");
-                    for (String word : words) {
-                        if (word.isEmpty()) continue;
-                        boolean hasContent = !currentLine.isEmpty();
-                        int projected = hasContent
+                    // append word-wrapped text to current line, respecting characterLimit
+                    final String[] words = text.split("\\s+");
+
+                    for (final String word : words) {
+                        if (word.isEmpty()) {
+                            continue;
+                        }
+
+                        final boolean hasContent = !currentLine.isEmpty();
+                        final int projected = hasContent
                             ? currentLine.length() + 1 + word.length()
                             : word.length();
-                        if (hasContent && projected > charLimit) {
+
+                        if (hasContent && projected > characterLimit) {
                             lines.add(currentLine.toString());
                             currentLine.setLength(0);
                             currentLine.append(word);
@@ -113,13 +117,13 @@ public class Style {
         return lines.toArray(new String[0]);
     }
 
-    @SuppressWarnings("unchecked")
-    private <E extends Enum<E>> void compileEnum(EnumDoc<?> raw, @NonNull List<String> lines) {
-        EnumDoc<E> doc = (EnumDoc<E>) raw;
-        E[] constants = doc.enumClass().getEnumConstants();
+    private <E extends Enum<E>> void compileEnum(final EnumDoc<?> raw, final List<String> lines) {
+        //noinspection unchecked
+        final EnumDoc<E> doc = (EnumDoc<E>) raw;
+        final E[] constants = doc.enumClass().getEnumConstants();
         lines.add("Possible values(can be lowercase):");
-        for (E constant : constants) {
-            String description = doc.descriptor().apply(constant);
+        for (final E constant : constants) {
+            final String description = doc.descriptor().apply(constant);
             lines.add(" - " + constant.name() + " - " + description);
         }
     }

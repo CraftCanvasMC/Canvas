@@ -11,9 +11,9 @@ import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import net.minecraft.util.FileUtil;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.yaml.snakeyaml.nodes.MappingNode;
 import org.yaml.snakeyaml.nodes.Node;
@@ -28,13 +28,12 @@ public abstract class Part {
         definitionOverrides.defaultReturnValue(new OptionDefinition());
     }
 
-    static @NonNull Map<String, OptionDefinition> harvest(Class<? extends Part> clazz) {
+    static Map<String, OptionDefinition> harvest(final Class<? extends Part> clazz) {
         try {
+            final Part temp = clazz.getDeclaredConstructor().newInstance();
+            final Function<String, @Nullable OptionDefinition> resolver = temp.processor.valueSafe();
 
-            Part temp = clazz.getDeclaredConstructor().newInstance();
-            Function<String, @Nullable OptionDefinition> resolver = temp.processor.valueSafe();
-
-            Object2ObjectOpenHashMap<String, OptionDefinition> result = new Object2ObjectOpenHashMap<>();
+            final Object2ObjectOpenHashMap<String, OptionDefinition> result = new Object2ObjectOpenHashMap<>();
             result.defaultReturnValue(new OptionDefinition());
 
             for (final Field field : clazz.getDeclaredFields()) {
@@ -48,7 +47,7 @@ public abstract class Part {
             }
 
             return result;
-        } catch (Throwable thrown) {
+        } catch (final Throwable thrown) {
             throw new RuntimeException("Could not instantiate Part subclass " + clazz.getName() + ", ensure it has a public no-arg constructor", thrown);
         }
     }
@@ -57,13 +56,13 @@ public abstract class Part {
         this.processor.setValue(processor);
     }
 
-    public OptionDefinition option(String target) {
+    public OptionDefinition option(final String target) {
 
         // target must exist or we throw
 
         try {
             getClass().getDeclaredField(target);
-        } catch (NoSuchFieldException e) {
+        } catch (final NoSuchFieldException nsfe) {
             throw new IllegalArgumentException("Target '" + target + "' doesn't exist");
         }
 
@@ -75,7 +74,7 @@ public abstract class Part {
         return def;
     }
 
-    protected void save(final @NonNull Path path) {
+    protected void save(final Path path) {
         try {
             if (path.getParent() != null) {
                 FileUtil.createDirectoriesSafe(path.getParent());
@@ -84,10 +83,9 @@ public abstract class Part {
                 throw new IllegalArgumentException("Unable to save because save target doesn't exist. Deleted?");
             }
 
-            final Node fileNode = ConfigurationProvider.composeFileNode(path.toAbsolutePath());
-            if (fileNode == null) {
-                throw new IllegalStateException("Cannot save: no file node is present. Was this Part loaded via buildSolidConfiguration?");
-            }
+            // shouldn't be null... realistically
+            final Node fileNode = ConfigurationProvider.composeFromFile(path.toAbsolutePath());
+            Objects.requireNonNull(fileNode, "Composed file cannot be null. Did someone empty the config contents?");
 
             // represent the live object so we have active values in node form
             // we don't care about comments, we don't change those
@@ -100,58 +98,62 @@ public abstract class Part {
                 ConfigurationProvider.mergeNodes(fileMapping, freshMapping, "");
             }
 
-            ConfigurationProvider.write(path, fileNode, null, true);
-        } catch (IOException ioe) {
+            ConfigurationProvider.write(path, fileNode, true);
+        } catch (final IOException ioe) {
             throw new RuntimeException("Could not save Part to " + path, ioe);
         }
     }
 
     public interface Validation<T> {
-        void validate(T t);
+        void validate(@Nullable T t);
     }
 
+    @SuppressWarnings({"UnusedReturnValue", "unused"})
     public static class OptionDefinition {
-        protected final List<Validation<?>> validations = new LinkedList<>();
-        private Style style;
 
-        public @Nullable Style commentStyle() {
+        @Nullable
+        private Style style = null;
+        protected final List<Validation<?>> validations = new LinkedList<>();
+
+        @Nullable
+        public Style commentStyle() {
             return this.style;
         }
 
-        public OptionDefinition docs(Style style) {
+        public OptionDefinition docs(final Style style) {
             this.style = style;
             return this;
         }
 
-        public OptionDefinition docs(String... toBeWrapped) {
+        public OptionDefinition docs(final String... toBeWrapped) {
             return docs(Style.wrap(toBeWrapped));
         }
 
-        public OptionDefinition docs(String toBeWrapped) {
+        public OptionDefinition docs(final String toBeWrapped) {
             return docs(Style.wrap(toBeWrapped));
         }
 
-        public OptionDefinition greaterThan(float val) {
+        public OptionDefinition greaterThan(final float val) {
             return validation(new NumberComparison(NumberComparison.Type.GREATER_THAN, val));
         }
 
-        public OptionDefinition greaterThanOrEqualTo(float val) {
+        public OptionDefinition greaterThanOrEqualTo(final float val) {
             return validation(new NumberComparison(NumberComparison.Type.GREATER_THAN_OR_EQUAL_TO, val));
         }
 
-        public OptionDefinition lessThan(float val) {
+        public OptionDefinition lessThan(final float val) {
             return validation(new NumberComparison(NumberComparison.Type.LESS_THAN, val));
         }
 
-        public OptionDefinition lessThanOrEqualTo(float val) {
+        public OptionDefinition lessThanOrEqualTo(final float val) {
             return validation(new NumberComparison(NumberComparison.Type.LESS_THAN_OR_EQUAL_TO, val));
         }
 
-        public OptionDefinition equals(float val) {
+        public OptionDefinition equals(final float val) {
             return validation(new NumberComparison(NumberComparison.Type.EQUAL, val));
         }
 
-        public OptionDefinition between(float min, float max) {
+        public OptionDefinition between(final float min, final float max) {
             return validation(new NumberComparison(NumberComparison.Type.BETWEEN, min, max));
         }
 
@@ -167,7 +169,7 @@ public abstract class Part {
             return validation(new StringValidation(StringValidation.StringType.SINGLE_WORD));
         }
 
-        public OptionDefinition validation(Validation<?> validation) {
+        public OptionDefinition validation(final Validation<?> validation) {
             validations.add(validation);
             return this;
         }

@@ -1,11 +1,11 @@
 package io.canvasmc.canvas.configuration;
 
 public interface Resolver<C> {
-    default void onDiffAdd(String fullyQualifiedName) {
+    default void onDiffAdd(final String fullyQualifiedName) {
     }
 
-    default void onDiffRemove(String fullyQualifiedName) {
+    default void onDiffRemove(final String fullyQualifiedName) {
     }
 
-    void onFinishLoad(C instance);
+    void onFinishLoad(final C instance);
 }
