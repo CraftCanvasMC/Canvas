@@ -11,14 +11,8 @@ import java.util.Objects;
 import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.schedule.Activity;
-import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
-/**
- * Implementation taken from <a href="https://github.com/Winds-Studio/Leaf">Leaf</a>.
- * Licensed under the <a href="https://opensource.org/license/MIT">MIT</a> license.
- */
-@NullMarked
 public final class ActivityArrayMap<V> implements Map<Activity, V> {
 
     public int[] k;
