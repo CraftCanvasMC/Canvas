@@ -78,7 +78,7 @@ public class PearlsMigration implements Migration {
 
     @Override
     public boolean hasOldData(final WorldMigrationContext context) {
-        return Files.exists(OLD_PATH) || needsMigration(resolveNewPath(context)); // pre-26.1 path or pre-release 26.2 data shape
+        return Files.exists(OLD_PATH) || needsMigration(resolveNewPath(context)); // pre-26.1 path or pre-merger 26.2 data shape
     }
 
     @Override
