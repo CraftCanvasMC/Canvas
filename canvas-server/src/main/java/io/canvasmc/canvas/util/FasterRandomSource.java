@@ -86,8 +86,8 @@ public class FasterRandomSource implements BitRandomSource {
 
         @Override
         public RandomSource fromHashOf(String seed) {
-            int i = seed.hashCode();
-            return new FasterRandomSource((long) i ^ this.seed);
+            long i = (long) seed.hashCode() & 0xFFFFFFFFL;
+            return new FasterRandomSource(i ^ this.seed);
         }
 
         @Override
