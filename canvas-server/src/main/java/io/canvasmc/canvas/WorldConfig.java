@@ -697,6 +697,12 @@ public class WorldConfig extends Part {
                     "MOST_CHUNKS: Keeps the weather of the region with the most chunks",
                     "WEATHER_PRIORITY: Keeps the weather of the region with the highest priority"
                 );
+            option("commandGetClear")
+                .docs("The message sent to the player when they use the /weather get clear command");
+            option("commandGetRain")
+                .docs("The message sent to the player when they use the /weather get rain command");
+            option("commandGetThunder")
+                .docs("The message sent to the player when they use the /weather get thunder command");
         }
         public boolean perRegion = false;
 
@@ -719,6 +725,10 @@ public class WorldConfig extends Part {
             MOST_CHUNKS,
             WEATHER_PRIORITY
         }
+
+        public String commandGetClear = "The weather is clear";
+        public String commandGetRain = "The weather is rainy";
+        public String commandGetThunder = "The weather is thundering";
     }
 
 }
