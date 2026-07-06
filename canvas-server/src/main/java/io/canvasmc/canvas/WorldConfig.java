@@ -692,7 +692,7 @@ public class WorldConfig extends Part {
             option("mergeStrategy")
                 .docs(
                     "The strategy for merging weather when perRegion is enabled. This is only used when perRegion is enabled",
-                    "KEEP_INTO: Keeps the weather of the region with the most players",
+                    "KEEP_INTO: Randomly merges the weather of the region",
                     "MOST_PLAYERS: Keeps the weather of the region with the most players",
                     "MOST_CHUNKS: Keeps the weather of the region with the most chunks",
                     "WEATHER_PRIORITY: Keeps the weather of the region with the highest priority"
