@@ -4,12 +4,15 @@ import io.papermc.paper.threadedregions.RegionizedWorldData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Per-region weather engine, called each tick from the region's tick loop.
  * Advances the clear/rain/thunder timers, fades the intensity levels and
  * syncs the result to the players inside the region.
  */
+@NullMarked
 public class WeatherServer {
 
     /**
@@ -18,7 +21,7 @@ public class WeatherServer {
     private static final float LEVEL_STEP = 0.01f;
 
     public void tickRegion(ServerLevel level, RegionizedWorldData worldData) {
-        final RegionizedWorldData.RegionalWeatherState weatherState = worldData.weatherRegional;
+        final RegionizedWorldData.@Nullable RegionalWeatherState weatherState = worldData.weatherRegional;
         if (weatherState == null) return;
 
         initIfNeeded(level, worldData, weatherState);
