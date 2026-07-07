@@ -10,13 +10,14 @@ import org.jspecify.annotations.Nullable;
  *     the type of object it is
  */
 public class CanonicalReference<T> {
+    @Nullable
     private T val;
 
     public CanonicalReference() {
         this(null);
     }
 
-    public CanonicalReference(T val) {
+    public CanonicalReference(final @Nullable T val) {
         this.val = val;
     }
 
@@ -30,7 +31,8 @@ public class CanonicalReference<T> {
         return val;
     }
 
-    public @Nullable T valueSafe() {
+    @Nullable
+    public T valueSafe() {
         return val;
     }
 
