@@ -5,6 +5,12 @@ understanding said source has been moved to [here](https://docs.canvasmc.io/canv
 
 This page is specifically for PRing guidelines
 
+## Policies
+
+This has been split off into the `/policies` directory of our repository.
+Please review those alongside this for guidelines on how to contribute to
+the CanvasMC organization
+
 ## Guidelines
 
 For starters, we have the general expectation that your code is tested
