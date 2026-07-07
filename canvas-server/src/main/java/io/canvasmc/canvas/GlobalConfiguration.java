@@ -41,6 +41,7 @@ import org.jspecify.annotations.NullMarked;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings({"FieldMayBeFinal", "unused"})
 @NullMarked
 public class GlobalConfiguration extends Part {
 
@@ -62,13 +63,13 @@ public class GlobalConfiguration extends Part {
     private static boolean ENABLE_FASTER_RANDOM = true;
 
     static {
-        try {
-            reload();
-        } catch (final Throwable thrown) {
-            // just need to make sure this is logged at least
-            LOGGER.error("Couldn't load Canvas global configuration", thrown);
-            throw thrown;
-        }
+        // if we surround this in try-catch and do any logging we
+        // actually just drown any error in log4j errors too
+        reload();
+    }
+
+    public static void init() {
+        // no-op, just for static load from reload()
     }
 
     public static void reload() {
@@ -182,7 +183,7 @@ public class GlobalConfiguration extends Part {
 
             try {
                 RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
-            } catch (Throwable throwable) {
+            } catch (final Throwable ignored) {
                 broadcast("Canvas' faster random impl is not supported by your VM, falling back to legacy random", WARN);
                 ENABLE_FASTER_RANDOM = false;
             }
@@ -213,7 +214,9 @@ public class GlobalConfiguration extends Part {
                 Util.removeDirectoryContentsIf(logsDirectoryPath.toFile(), (path) -> {
                     try {
                         final Instant lastModified = Files.getLastModifiedTime(path).toInstant();
-                        if (lastModified.isBefore(TimeSpan.parse(configuration.logs.cleanerTimeSpan).inPast()) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
+                        // accept large units because servers may specify units larger than days
+                        final TimeSpan loggerTimeSpan = TimeSpan.parse(configuration.logs.cleanerTimeSpan).acceptLargeUnits();
+                        if (lastModified.isBefore(loggerTimeSpan.inPast()) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
                             // the time the log file was modified is before the
                             // thresh, meaning it is older than the thresh set
                             amountRemoved.increment();
@@ -231,7 +234,9 @@ public class GlobalConfiguration extends Part {
             }
         }
 
-        AUTOSAVE_SPAN.swapValue((_) -> TimeSpan.parse(configuration.autosave.autosaveFrequency));
+        // we do not want to allow larger unit values, nobody should autosave in units larger than
+        // days, like who tf would use time units like "1 week"??
+        AUTOSAVE_SPAN.swapValue((_) -> TimeSpan.parse(configuration.autosave.autosaveFrequency).verifyIsntLargeUnit());
 
         broadcast("Server will autosave enabled selection every " + configuration.autosave.autosaveFrequency, INFO);
         broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
@@ -590,7 +595,6 @@ public class GlobalConfiguration extends Part {
 
     public Logs logs = new Logs();
 
-    @SuppressWarnings("FieldMayBeFinal")
     public static class Logs extends Part {
 
         {
@@ -629,7 +633,6 @@ public class GlobalConfiguration extends Part {
 
     public Autosave autosave = new Autosave();
 
-    @SuppressWarnings("FieldMayBeFinal")
     public static class Autosave extends Part {
 
         {

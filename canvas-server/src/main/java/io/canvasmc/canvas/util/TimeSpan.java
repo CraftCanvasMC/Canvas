@@ -3,6 +3,7 @@ package io.canvasmc.canvas.util;
 import com.google.common.collect.ImmutableMap;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.UnsupportedTemporalTypeException;
 import java.util.Map;
 import java.util.regex.Pattern;
 import org.jetbrains.annotations.Contract;
@@ -86,6 +87,8 @@ public class TimeSpan {
     private final long count;
     private final String asString;
 
+    private volatile boolean acceptLargeUnits = false;
+
     private TimeSpan(final ChronoUnit unit, final long count) {
         this.chronoUnit = unit;
         this.count = count;
@@ -158,6 +161,11 @@ public class TimeSpan {
      */
     public Instant inPast() {
         final Instant now = Instant.now();
+        if (acceptLargeUnits) {
+            // use alternative instant modification to avoid
+            // unsupported temporal type exceptions
+            return now.minusNanos(asNanoSpan());
+        }
         return now.minus(count, chronoUnit);
     }
 
@@ -169,7 +177,30 @@ public class TimeSpan {
      */
     public Instant inFuture() {
         final Instant now = Instant.now();
+        if (acceptLargeUnits) {
+            // use alternative instant modification to avoid
+            // unsupported temporal type exceptions
+            return now.plusNanos(asNanoSpan());
+        }
         return now.plus(count, chronoUnit);
+    }
+
+    /**
+     * Marks the time span object to allow usage of chrono units larger than days. e.g. weeks, months, years, etc
+     */
+    public TimeSpan acceptLargeUnits() {
+        this.acceptLargeUnits = true;
+        return this;
+    }
+
+    /**
+     * Verifies the chrono unit isn't a large timespan unit(a greater unit than {@link java.time.temporal.ChronoUnit#DAYS}
+     */
+    public TimeSpan verifyIsntLargeUnit() {
+        return switch (chronoUnit) {
+            case NANOS, MICROS, MINUTES, SECONDS, MILLIS, HOURS, HALF_DAYS, DAYS -> this;
+            default -> throw new UnsupportedTemporalTypeException("Unit too large: " + chronoUnit);
+        };
     }
 
     /**
