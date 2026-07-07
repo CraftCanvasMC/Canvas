@@ -37,7 +37,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
     public BalancedChunkSystem(final long groupTimeSliceNS, final int workerThreadCount, final ThreadFactory threadInitializer, final String name) {
         super(groupTimeSliceNS, threadInitializer);
         LOGGER = LoggerFactory.getLogger("TheChunkSystem/" + name);
-        LOGGER.info("Initialized new LS ChunkSystem '{}' with {} allocated threads", name, workerThreadCount);
+        LOGGER.info("Initialized new LS ChunkSystem \"{}\" with {} allocated threads", name, workerThreadCount);
         this.adjustThreadCount(workerThreadCount);
     }
 
@@ -547,7 +547,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                     if (!BalancedChunkSystem.this.stream.executeTask()) break;
                     ret = true;
                 } catch (final Throwable thrown) {
-                    LOGGER.error("Exception thrown from thread '{}'", this.thread.getName(), thrown);
+                    LOGGER.error("Exception thrown from thread \"{}\"", this.thread.getName(), thrown);
                 }
             } while (System.nanoTime() - deadline <= 0L);
             return ret;
