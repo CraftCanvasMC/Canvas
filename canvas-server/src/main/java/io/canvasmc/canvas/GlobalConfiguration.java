@@ -57,7 +57,7 @@ public class GlobalConfiguration extends Part {
     public static final int WARN = 1;
     public static final int ERROR = 2;
 
-    @UnknownNullability("NonNull after reload is called")
+    @UnknownNullability("nonnull after reload is called")
     private static GlobalConfiguration INSTANCE;
     private static ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN;
     private static boolean ENABLE_FASTER_RANDOM = true;
@@ -447,6 +447,17 @@ public class GlobalConfiguration extends Part {
             public boolean deduplicateShuffledTemplatePoolElementList = false;
             public boolean enable = false;
         }
+
+        {
+            option("optimizeTreasureMapLocating")
+                .docs(
+                    "Treasure map locating is a very expensive operation, leading to most production servers",
+                    "disabling it. This option tries to optimize the treasure map initial search to make this",
+                    "less expensive on item creation"
+                );
+        }
+
+        public boolean optimizeTreasureMapLocating = false;
     }
 
     // TODO - check these on minecraft updates
