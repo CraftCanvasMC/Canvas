@@ -547,7 +547,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
                     if (!BalancedChunkSystem.this.stream.executeTask()) break;
                     ret = true;
                 } catch (final Throwable thrown) {
-                    LOGGER.error("Exception thrown from thread '{}", this.thread.getName(), thrown);
+                    LOGGER.error("Exception thrown from thread '{}'", this.thread.getName(), thrown);
                 }
             } while (System.nanoTime() - deadline <= 0L);
             return ret;
