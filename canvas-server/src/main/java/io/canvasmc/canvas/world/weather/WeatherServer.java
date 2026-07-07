@@ -5,85 +5,117 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.RandomSource;
 
+/**
+ * Per-region weather engine, called each tick from the region's tick loop.
+ * Advances the clear/rain/thunder timers, fades the intensity levels and
+ * syncs the result to the players inside the region.
+ */
 public class WeatherServer {
 
+    /**
+     * Level change per tick (~5s fade from 0 to 1).
+     */
     private static final float LEVEL_STEP = 0.01f;
 
     public void tickRegion(ServerLevel level, RegionizedWorldData worldData) {
-        final RegionizedWorldData.RegionalWeatherState st = worldData.weatherRegional;
-        if (st == null) return;
+        final RegionizedWorldData.RegionalWeatherState weatherState = worldData.weatherRegional;
+        if (weatherState == null) return;
 
-        initIfNeeded(level, worldData, st);
-        tickTimers(level, st);
+        initIfNeeded(level, worldData, weatherState);
+        tickTimers(level, weatherState);
 
-        st.oRainLevel = st.rainLevel;
-        st.oThunderLevel = st.thunderLevel;
-
-        st.rainLevel = approach(st.rainLevel, st.raining ? 1.0f : 0.0f, LEVEL_STEP);
-        st.thunderLevel = approach(st.thunderLevel, st.thundering ? 1.0f : 0.0f, LEVEL_STEP);
+        // keep previous levels for client-side interpolation, then fade toward target
+        weatherState.oRainLevel = weatherState.rainLevel;
+        weatherState.oThunderLevel = weatherState.thunderLevel;
+        weatherState.rainLevel = approach(weatherState.rainLevel, weatherState.raining ? 1.0f : 0.0f, LEVEL_STEP);
+        weatherState.thunderLevel = approach(weatherState.thunderLevel, weatherState.thundering ? 1.0f : 0.0f, LEVEL_STEP);
 
         final var players = worldData.getLocalPlayers();
         if (!players.isEmpty()) {
             for (final ServerPlayer player : players) {
-                player.canvas$syncRegionalWeather(st);
+                player.canvas$syncRegionalWeather(weatherState);
             }
         }
     }
 
-    private void initIfNeeded(ServerLevel level, RegionizedWorldData worldData, RegionizedWorldData.RegionalWeatherState st) {
-        if (st.initialized) return;
+    /**
+     * Seeds the state from the world's current weather on first tick.
+     */
+    private void initIfNeeded(ServerLevel level, RegionizedWorldData worldData, RegionizedWorldData.RegionalWeatherState weatherState) {
+        if (weatherState.initialized) return;
 
-        st.regionSeed = level.getSeed() ^ worldData.regionData.id;
-        st.raining = level.isRaining();
-        st.thundering = level.isThundering();
-        st.clearTime = 6000;
-        st.rainTime = 6000;
-        st.thunderTime = 6000;
-        st.rainLevel = st.raining ? 1.0f : 0.0f;
-        st.thunderLevel = st.thundering ? 1.0f : 0.0f;
-        st.initialized = true;
+        weatherState.regionSeed = level.getSeed() ^ worldData.regionData.id;
+
+        weatherState.raining = level.isRaining();
+        weatherState.thundering = level.isThundering();
+
+        weatherState.clearTime = 6000;
+        weatherState.rainTime = 6000;
+        weatherState.thunderTime = 6000;
+
+        weatherState.rainLevel = weatherState.raining ? 1.0f : 0.0f;
+        weatherState.thunderLevel = weatherState.thundering ? 1.0f : 0.0f;
+
+        weatherState.initialized = true;
     }
 
-    private void tickTimers(ServerLevel level, RegionizedWorldData.RegionalWeatherState st) {
+    /**
+     * Weather cycle: clear -> rain (30% chance of thunder) -> clear, with
+     * random durations rolled when each timer expires.
+     */
+    private void tickTimers(ServerLevel level, RegionizedWorldData.RegionalWeatherState weatherState) {
         final RandomSource rng = level.getRandom();
 
-        if (!st.raining) {
-            if (--st.clearTime <= 0) {
-                st.raining = true;
-                st.rainTime = randomRainDuration(rng);
+        if (!weatherState.raining) {
+            if (--weatherState.clearTime <= 0) {
+                weatherState.raining = true;
+                weatherState.rainTime = randomRainDuration(rng);
+
                 if (rng.nextInt(100) < 30) {
-                    st.thundering = true;
-                    st.thunderTime = randomThunderDuration(rng);
+                    weatherState.thundering = true;
+                    weatherState.thunderTime = randomThunderDuration(rng);
                 }
             }
         } else {
-            if (--st.rainTime <= 0) {
-                st.raining = false;
-                st.thundering = false;
-                st.clearTime = randomClearDuration(rng);
+            if (--weatherState.rainTime <= 0) {
+                weatherState.raining = false;
+                weatherState.thundering = false;
+                weatherState.clearTime = randomClearDuration(rng);
             }
         }
 
-        if (st.thundering) {
-            if (--st.thunderTime <= 0) {
-                st.thundering = false;
-                st.thunderTime = randomThunderDuration(rng);
+        if (weatherState.thundering) {
+            if (--weatherState.thunderTime <= 0) {
+                weatherState.thundering = false;
+                weatherState.thunderTime = randomThunderDuration(rng);
             }
         }
     }
 
+    /**
+     * 5 to 15 minutes.
+     */
     private int randomClearDuration(RandomSource rng) {
         return 6000 + rng.nextInt(12000);
     }
 
+    /**
+     * 5 to 15 minutes.
+     */
     private int randomRainDuration(RandomSource rng) {
         return 6000 + rng.nextInt(12000);
     }
 
+    /**
+     * 2.5 to 7.5 minutes.
+     */
     private int randomThunderDuration(RandomSource rng) {
         return 3000 + rng.nextInt(6000);
     }
 
+    /**
+     * Moves {@code current} toward {@code target} by at most {@code step}.
+     */
     private float approach(float current, float target, float step) {
         if (current < target) return Math.min(current + step, target);
         if (current > target) return Math.max(current - step, target);

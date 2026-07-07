@@ -5,10 +5,37 @@ import io.papermc.paper.threadedregions.RegionizedWorldData;
 import net.minecraft.server.level.ServerLevel;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftWorld;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * Reads and mutates the per-region weather state stored in {@link RegionizedWorldData}.
+ * Must be called from the tick thread owning the region at the given chunk coordinates.
+ */
+@NullMarked
 public final class WeatherControllerImpl implements WeatherController {
 
+    /**
+     * Applies levels immediately (current + old), bypassing the progressive fade.
+     */
+    private static void setLevelsInstant(final RegionizedWorldData.RegionalWeatherState weatherState, final float rain, final float thunder) {
+        try {
+            weatherState.oRainLevel = rain;
+            weatherState.oThunderLevel = thunder;
+        } catch (Throwable ignored) {
+
+        }
+
+        weatherState.rainLevel = rain;
+        weatherState.thunderLevel = thunder;
+    }
+
+    /**
+     * Sets the region's weather. If the state was never touched, it is first seeded
+     * from the world's global weather. A positive {@code durationTicks} holds the
+     * weather that long; otherwise the current cycle continues. {@code instantLevels}
+     * skips the client-side fade and applies intensities immediately.
+     */
     @Override
     public void setRegionalWeather(World world, int chunkX, int chunkZ, WeatherType type, int durationTicks, boolean instantLevels) {
         Preconditions.checkNotNull(world, "world cannot be null");
@@ -18,90 +45,95 @@ public final class WeatherControllerImpl implements WeatherController {
         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(level, chunkX, chunkZ, "Cannot retrieve chunk asynchronously");
 
         final RegionizedWorldData worldData = level.getCurrentWorldData();
-        final RegionizedWorldData.RegionalWeatherState st = worldData.weatherRegional;
+        final RegionizedWorldData.@Nullable RegionalWeatherState weatherState = worldData.weatherRegional;
 
-        if (st == null) {
-            return;
+        if (weatherState == null) {
+            return; // per-region weather disabled
         }
 
-        if (!st.initialized) {
-            st.regionSeed = level.getSeed() ^ worldData.regionData.id;
+        if (!weatherState.initialized) {
+            // seed from the world's current weather, then evolve independently
+            weatherState.regionSeed = level.getSeed() ^ worldData.regionData.id;
 
-            st.raining = level.isRaining();
-            st.thundering = level.isThundering();
+            weatherState.raining = level.isRaining();
+            weatherState.thundering = level.isThundering();
 
-            st.clearTime = 6000;
-            st.rainTime = 6000;
-            st.thunderTime = 6000;
+            weatherState.clearTime = 6000;
+            weatherState.rainTime = 6000;
+            weatherState.thunderTime = 6000;
 
-            st.rainLevel = st.raining ? 1.0f : 0.0f;
-            st.thunderLevel = st.thundering ? 1.0f : 0.0f;
+            weatherState.rainLevel = weatherState.raining ? 1.0f : 0.0f;
+            weatherState.thunderLevel = weatherState.thundering ? 1.0f : 0.0f;
 
             try {
-                st.oRainLevel = st.rainLevel;
-                st.oThunderLevel = st.thunderLevel;
+                weatherState.oRainLevel = weatherState.rainLevel;
+                weatherState.oThunderLevel = weatherState.thunderLevel;
             } catch (Throwable ignored) {
             }
 
-            st.initialized = true;
+            weatherState.initialized = true;
         }
 
-        final int d = durationTicks > 0 ? durationTicks : -1;
+        final int duration = durationTicks > 0 ? durationTicks : -1;
 
         switch (type) {
             case CLEAR -> {
-                st.raining = false;
-                st.thundering = false;
+                weatherState.raining = false;
+                weatherState.thundering = false;
 
                 // if duration provided: stay clear that long
-                if (d > 0) {
-                    st.clearTime = d;
-                    st.rainTime = 0;
-                    st.thunderTime = 0;
+                if (duration > 0) {
+                    weatherState.clearTime = duration;
+                    weatherState.rainTime = 0;
+                    weatherState.thunderTime = 0;
                 } else {
-                    st.clearTime = Math.max(st.clearTime, 1);
+                    weatherState.clearTime = Math.max(weatherState.clearTime, 1);
                 }
 
                 if (instantLevels) {
-                    setLevelsInstant(st, 0.0f, 0.0f);
+                    setLevelsInstant(weatherState, 0.0f, 0.0f);
                 }
             }
             case RAIN -> {
-                st.raining = true;
-                st.thundering = false;
+                weatherState.raining = true;
+                weatherState.thundering = false;
 
-                if (d > 0) {
-                    st.rainTime = d;
-                    st.thunderTime = 0;
-                    st.clearTime = 0;
+                if (duration > 0) {
+                    weatherState.rainTime = duration;
+                    weatherState.thunderTime = 0;
+                    weatherState.clearTime = 0;
                 } else {
-                    st.rainTime = Math.max(st.rainTime, 1);
+                    weatherState.rainTime = Math.max(weatherState.rainTime, 1);
                 }
 
                 if (instantLevels) {
-                    setLevelsInstant(st, 1.0f, 0.0f);
+                    setLevelsInstant(weatherState, 1.0f, 0.0f);
                 }
             }
             case THUNDER -> {
-                st.raining = true;
-                st.thundering = true;
+                weatherState.raining = true; // thunder implies rain
+                weatherState.thundering = true;
 
-                if (d > 0) {
-                    st.rainTime = d;
-                    st.thunderTime = d;
-                    st.clearTime = 0;
+                if (duration > 0) {
+                    weatherState.rainTime = duration;
+                    weatherState.thunderTime = duration;
+                    weatherState.clearTime = 0;
                 } else {
-                    st.rainTime = Math.max(st.rainTime, 1);
-                    st.thunderTime = Math.max(st.thunderTime, 1);
+                    weatherState.rainTime = Math.max(weatherState.rainTime, 1);
+                    weatherState.thunderTime = Math.max(weatherState.thunderTime, 1);
                 }
 
                 if (instantLevels) {
-                    setLevelsInstant(st, 1.0f, 1.0f);
+                    setLevelsInstant(weatherState, 1.0f, 1.0f);
                 }
             }
         }
     }
 
+    /**
+     * Returns a snapshot of the region's weather, or {@code null} if per-region
+     * weather is disabled for this world.
+     */
     @Override
     public @Nullable RegionalWeatherSnapshot getRegionalWeather(World world, int chunkX, int chunkZ) {
         Preconditions.checkNotNull(world, "world cannot be null");
@@ -109,33 +141,21 @@ public final class WeatherControllerImpl implements WeatherController {
         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(level, chunkX, chunkZ, "Cannot retrieve chunk asynchronously");
 
         final RegionizedWorldData worldData = level.getCurrentWorldData();
-        final RegionizedWorldData.RegionalWeatherState st = worldData.weatherRegional;
-        if (st == null) {
+        final RegionizedWorldData.@Nullable RegionalWeatherState weatherState = worldData.weatherRegional;
+        if (weatherState == null) {
             return null;
         }
 
         return new RegionalWeatherSnapshot(
             worldData.regionData.id,
-            st.raining,
-            st.thundering,
-            st.clearTime,
-            st.rainTime,
-            st.thunderTime,
-            st.rainLevel,
-            st.thunderLevel
+            weatherState.raining,
+            weatherState.thundering,
+            weatherState.clearTime,
+            weatherState.rainTime,
+            weatherState.thunderTime,
+            weatherState.rainLevel,
+            weatherState.thunderLevel
         );
-    }
-
-    private static void setLevelsInstant(final RegionizedWorldData.RegionalWeatherState st, final float rain, final float thunder) {
-        try {
-            st.oRainLevel = rain;
-            st.oThunderLevel = thunder;
-        } catch (Throwable ignored) {
-
-        }
-
-        st.rainLevel = rain;
-        st.thunderLevel = thunder;
     }
 
 
