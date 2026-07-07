@@ -28,6 +28,10 @@ public class LockedReference<E> {
         this.value = default_;
     }
 
+    public LockedReference() {
+        this.value = null;
+    }
+
     /**
      * Gets this reference as an {@link java.util.Optional}, returning an empty optional if the value is null when
      * calling

@@ -56,7 +56,7 @@ public class GlobalConfiguration extends Part {
     public static final int WARN = 1;
     public static final int ERROR = 2;
 
-    @UnknownNullability
+    @UnknownNullability("NonNull after reload is called")
     private static GlobalConfiguration INSTANCE;
     private static ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN;
     private static boolean ENABLE_FASTER_RANDOM = true;
