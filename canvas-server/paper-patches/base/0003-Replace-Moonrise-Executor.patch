@@ -5,10 +5,10 @@ Subject: [PATCH] Replace Moonrise Executor
 
 
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java b/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java
-index b9f788693b0c4be48e8a923a3dec50555d135e7e..3c8ee8d7ebf68a0189bf15a69481d2234d3d6123 100644
+index b9f788693b0c4be48e8a923a3dec50555d135e7e..b77c84d571f134d1b343e0cecc60a8a7c2312ea8 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/util/MoonriseCommon.java
-@@ -14,30 +14,15 @@ public final class MoonriseCommon {
+@@ -14,30 +14,19 @@ public final class MoonriseCommon {
  
      private static final Logger LOGGER = LogUtils.getClassLogger();
  
@@ -29,77 +29,95 @@ index b9f788693b0c4be48e8a923a3dec50555d135e7e..3c8ee8d7ebf68a0189bf15a69481d223
 -                        LOGGER.error("Uncaught exception in thread " + thread.getName(), throwable);
 -                    }
 -                });
-+    // Canvas start - replace moonrise executor
-+    public static final long WORKER_QUEUE_HOLD_TIME = (long)(1.0e6); // 1ms
-+    public static final long IO_WORKER_QUEUE_HOLD_TIME = (long)(1.0e6); // 1ms
-+    public static io.canvasmc.canvas.world.chunk.BalancedChunkSystem WORKER_POOL;
-+    public static io.canvasmc.canvas.world.chunk.BalancedChunkSystem IO_POOL;
- 
+-
 -                return thread;
 -            }
 -        }
 -    );
 -    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup CLIENT_GROUP = MoonriseCommon.WORKER_POOL.createOrderedStreamGroup();
 -    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup SERVER_GROUP = MoonriseCommon.WORKER_POOL.createOrderedStreamGroup();
-+    public static io.canvasmc.canvas.world.chunk.BalancedChunkSystem.OrderedStreamGroup SERVER_GROUP;
-+    public static io.canvasmc.canvas.world.chunk.BalancedChunkSystem.OrderedStreamGroup SERVER_IO_GROUP;
++    // Canvas start - replace moonrise executor
++    public static boolean AGGRESSIVE_VARIANT = io.canvasmc.canvas.util.Util.isFlagEnabled("Canvas.AggressiveChunkSystem");
++
++    // 1ms for aggressive, fallback to upstream when not
++    public static final long WORKER_QUEUE_HOLD_TIME = AGGRESSIVE_VARIANT ? (long)(1.0e6) : (long)(20.0e6);
++    public static final long IO_WORKER_QUEUE_HOLD_TIME = AGGRESSIVE_VARIANT ? (long)(1.0e6) : (long)(25.0e6);
++
++    public static BalancedPrioritisedThreadPool WORKER_POOL;
++    public static BalancedPrioritisedThreadPool IO_POOL;
++
++    public static io.canvasmc.canvas.world.chunk.StreamGroup SERVER_GROUP;
++    public static io.canvasmc.canvas.world.chunk.StreamGroup SERVER_IO_GROUP;
 +    // Canvas end - replace moonrise executor
  
      public static void adjustWorkerThreads(final int configWorkerThreads, final int configIoThreads) {
          int defaultWorkerThreads = OSNuma.getNativeInstance().getTotalCores()  / 2;
-@@ -56,36 +41,56 @@ public final class MoonriseCommon {
+@@ -56,16 +45,109 @@ public final class MoonriseCommon {
  
          final int ioThreads = Math.max(1, configIoThreads);
  
 -        WORKER_POOL.adjustThreadCount(workerThreads);
 -        IO_POOL.adjustThreadCount(ioThreads);
 +    // Canvas start - replace moonrise executor
++        if (AGGRESSIVE_VARIANT) {
++            setupAggressiveChunkSystem(workerThreads, ioThreads);
++        }
++        else {
++            setupPaperChunkSystem(workerThreads, ioThreads);
++        }
++    }
++
++    private static void setupAggressiveChunkSystem(final int workerThreads, final int ioThreads) {
 +        if (WORKER_POOL != null && IO_POOL != null) {
++
 +            // we just need to adjust the thread count, cannot recreate instances
++            // this is most likely result of a reload or startup
++
 +            WORKER_POOL.adjustThreadCount(workerThreads);
 +            IO_POOL.adjustThreadCount(ioThreads);
-+        } else {
-+            // setup chunk system
-+            LOGGER.info("Setting up ls_wg chunk system");
 +
-+            // build instances
-+            WORKER_POOL = new io.canvasmc.canvas.world.chunk.BalancedChunkSystem(
-+                WORKER_QUEUE_HOLD_TIME, workerThreads,
-+                new java.util.concurrent.ThreadFactory() {
-+                    private final AtomicInteger idGenerator = new AtomicInteger();
-+
-+                    @Override
-+                    public Thread newThread(final Runnable run) {
-+                        Thread thread = new Thread(run, "ls_wg worker #" + this.idGenerator.getAndIncrement());
-+                        thread.setPriority(io.canvasmc.canvas.GlobalConfiguration.getInstance().chunkSystem.threadPriority);
-+                        thread.setDaemon(true);
-+                        thread.setUncaughtExceptionHandler((thread1, throwable) -> LOGGER.error("Uncaught exception in thread {}", thread1.getName(), throwable));
-+                        return thread;
-+                    }
-+                }, "ls_wg"
-+            );
-+            IO_POOL = new io.canvasmc.canvas.world.chunk.BalancedChunkSystem(
-+                IO_WORKER_QUEUE_HOLD_TIME, ioThreads,
-+                new java.util.concurrent.ThreadFactory() {
-+                    private final AtomicInteger idGenerator = new AtomicInteger();
-+
-+                    @Override
-+                    public Thread newThread(final Runnable run) {
-+                        Thread thread = new Thread(run, "ls_wg/io worker #" + this.idGenerator.getAndIncrement());
-+                        thread.setPriority(io.canvasmc.canvas.GlobalConfiguration.getInstance().chunkSystem.threadPriority);
-+                        thread.setDaemon(true);
-+                        thread.setUncaughtExceptionHandler((thread1, throwable) -> LOGGER.error("Uncaught exception in thread {}", thread1.getName(), throwable));
-+                        return thread;
-+                    }
-+                }, "ls_wg/io"
-+            );
-+
-+            // setup server groups
-+            SERVER_GROUP = WORKER_POOL.createChunkOrderedStreamGroup();
-+            SERVER_IO_GROUP = IO_POOL.createChunkOrderedStreamGroup();
++            LOGGER.info("Adjusted LS ChunkSystem to {} worker threads and {} io threads", workerThreads, ioThreads);
++            return;
 +        }
++
++        // setup chunk system
++        LOGGER.info("Setting up ls_wg chunk system");
  
 -        LOGGER.info(PlatformHooks.get().getBrand() + " is using " + workerThreads + " worker threads, " + ioThreads + " I/O threads");
++        // build instances
++        WORKER_POOL = new io.canvasmc.canvas.world.chunk.BalancedChunkSystem(
++            WORKER_QUEUE_HOLD_TIME, workerThreads,
++            new ThreadFactory() {
++                private final AtomicInteger idGenerator = new AtomicInteger();
++
++                @Override
++                public Thread newThread(final Runnable run) {
++                    Thread thread = new Thread(run, "ls_wg worker #" + this.idGenerator.getAndIncrement());
++                    thread.setDaemon(true);
++                    thread.setUncaughtExceptionHandler((thread1, throwable) -> LOGGER.error("Uncaught exception in thread {}", thread1.getName(), throwable));
++                    return thread;
++                }
++            }, "ls_wg"
++        );
++        IO_POOL = new io.canvasmc.canvas.world.chunk.BalancedChunkSystem(
++            IO_WORKER_QUEUE_HOLD_TIME, ioThreads,
++            new ThreadFactory() {
++                private final AtomicInteger idGenerator = new AtomicInteger();
++
++                @Override
++                public Thread newThread(final Runnable run) {
++                    Thread thread = new Thread(run, "ls_wg/io worker #" + this.idGenerator.getAndIncrement());
++                    thread.setDaemon(true);
++                    thread.setUncaughtExceptionHandler((thread1, throwable) -> LOGGER.error("Uncaught exception in thread {}", thread1.getName(), throwable));
++                    return thread;
++                }
++            }, "ls_wg/io"
++        );
++
++        // setup server groups
++        SERVER_GROUP = ((io.canvasmc.canvas.world.chunk.BalancedChunkSystem) WORKER_POOL).createChunkOrderedStreamGroup();
++        SERVER_IO_GROUP = ((io.canvasmc.canvas.world.chunk.BalancedChunkSystem) IO_POOL).createChunkOrderedStreamGroup();
++
 +        LOGGER.info("Running LS ChunkSystem with {} worker threads and {} io threads", workerThreads, ioThreads);
      }
  
@@ -107,26 +125,66 @@ index b9f788693b0c4be48e8a923a3dec50555d135e7e..3c8ee8d7ebf68a0189bf15a69481d223
 -    public static final BalancedPrioritisedThreadPool IO_POOL = new BalancedPrioritisedThreadPool(
 -        IO_QUEUE_HOLD_TIME,
 -        new ThreadFactory() {
--                private final AtomicInteger idGenerator = new AtomicInteger();
--
--                @Override
--                public Thread newThread(final Runnable run) {
--                    final Thread thread = new Thread(run, PlatformHooks.get().getBrand() + " I/O Worker #" + this.idGenerator.getAndIncrement());
--
--                    thread.setDaemon(true);
--                    thread.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
--                        @Override
--                        public void uncaughtException(final Thread thread, final Throwable throwable) {
--                            LOGGER.error("Uncaught exception in thread " + thread.getName(), throwable);
--                        }
--                    });
--
--                    return thread;
--                }
--            }
++    private static void setupPaperChunkSystem(final int workerThreads, final int ioThreads) {
++        if (WORKER_POOL != null && IO_POOL != null) {
++
++            // we just need to adjust the thread count, cannot recreate instances
++            // this is most likely result of a reload or startup
++
++            WORKER_POOL.adjustThreadCount(workerThreads);
++            IO_POOL.adjustThreadCount(ioThreads);
++
++            LOGGER.info("{} is using {} worker threads, {} I/O threads", io.papermc.paper.ServerBuildInfo.buildInfo().brandName(), workerThreads, ioThreads);
++            return;
++        }
++
++        // setup chunk system
++        LOGGER.info("Setting up {} chunk system", PlatformHooks.get().getBrand());
++
++        // copied from Paper original diff
++        WORKER_POOL = new BalancedPrioritisedThreadPool(
++            WORKER_QUEUE_HOLD_TIME,
++            new ThreadFactory() {
++                private final AtomicInteger idGenerator = new AtomicInteger();
++
++                @Override
++                public Thread newThread(final Runnable run) {
++                    final Thread thread = new Thread(run, PlatformHooks.get().getBrand() + " Common Worker #" + this.idGenerator.getAndIncrement());
++
++                    thread.setDaemon(true);
++                    thread.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
++                        @Override
++                        public void uncaughtException(final Thread thread, final Throwable throwable) {
++                            LOGGER.error("Uncaught exception in thread " + thread.getName(), throwable);
++                        }
++                    });
++
++                    return thread;
++                }
++            }
++        );
++        IO_POOL = new BalancedPrioritisedThreadPool(
++            IO_WORKER_QUEUE_HOLD_TIME,
++            new ThreadFactory() {
+                 private final AtomicInteger idGenerator = new AtomicInteger();
+ 
+                 @Override
+@@ -83,9 +165,16 @@ public final class MoonriseCommon {
+                     return thread;
+                 }
+             }
 -    );
 -    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup CLIENT_IO_GROUP = IO_POOL.createOrderedStreamGroup();
 -    public static final BalancedPrioritisedThreadPool.OrderedStreamGroup SERVER_IO_GROUP = IO_POOL.createOrderedStreamGroup();
++        );
++
++        // setup server groups
++        SERVER_GROUP = WORKER_POOL.createOrderedStreamGroup();
++        SERVER_IO_GROUP = IO_POOL.createOrderedStreamGroup();
++
++        // setup thread count, go back to head of method
++        setupPaperChunkSystem(workerThreads, ioThreads);
++    }
 +    // Canvas end - replace moonrise executor
  
      public static void haltExecutors() {

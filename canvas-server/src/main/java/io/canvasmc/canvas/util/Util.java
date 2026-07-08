@@ -181,6 +181,21 @@ public class Util {
         return dimensionName;
     }
 
+    /**
+     * Allows checking if a boolean flag is enabled leniently. This allows for the user to just declare the flag like
+     * {@code -DCanvas.test} instead of {@code -DCanvas.test=true} for example. This accepts both of those, defaulting
+     * to {@code true} when the {@code =<value>} isn't present.
+     *
+     * @param flag
+     *     the property to search for
+     *
+     * @return the leniently parsed property
+     */
+    public static boolean isFlagEnabled(final String flag) {
+        final String property = System.getProperty(flag);
+        return property != null && (property.isEmpty() || Boolean.parseBoolean(property));
+    }
+
     public static final class Gradient {
         private final boolean negativePhase;
         private final TextColor[] colors;
