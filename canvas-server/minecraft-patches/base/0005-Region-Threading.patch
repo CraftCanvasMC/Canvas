@@ -1631,10 +1631,10 @@ index 0000000000000000000000000000000000000000..ffe40224484e97fdcf53e9b6c073ac7f
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..61c39e78732c340f25fcc74c339512fbf6ef1938
+index 0000000000000000000000000000000000000000..ef4dc83432cca48149d5109c01e04843957b477f
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
-@@ -0,0 +1,195 @@
+@@ -0,0 +1,199 @@
 +package io.canvasmc.canvas.threadedregions;
 +
 +import com.google.common.base.Preconditions;
@@ -1670,16 +1670,20 @@ index 0000000000000000000000000000000000000000..61c39e78732c340f25fcc74c339512fb
 +
 +        super(worldName + " shutdown thread");
 +        this.setUncaughtExceptionHandler((_, thrown) -> {
-+            LOGGER.error("Error shutting down world {}", worldName, thrown);
-+            MinecraftServer.getServer().stopServer();
++
++            // we have to schedule to the global tick for this, since this
++            // is a WORLD shutdown thread, not the server shutdown thread,
++            // and as such it will cause shutdown of the server to occur
++            // on this thread if not scheduled, so we schedule to the global
++            // tick to ensure shutdown is executed on the proper thread
++
++            LOGGER.error("Error shutting down world {}, alerting global tick to shutdown", worldName, thrown);
++            RegionizedServer.getInstance().addTask(MinecraftServer.getServer()::stopServer);
 +        });
 +
 +        this.debugName = worldName;
 +        this.level = level;
 +        this.theWaiter = theWaiter;
-+
-+        // we set this because frankly, we don't want to log everything
-+        // super.LOGGER = new SilentLogger(); // TODO - we just want errors only
 +    }
 +
 +    private String getWorldName() {
@@ -21661,7 +21665,7 @@ index ebb0923b38a7529e7df531b3947a0421df29d654..0b1f5a85c17c4c5266701aaa7959e95f
  
      public boolean isOldChunkAround(final ChunkPos pos, final int range) {
 diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
-index b124679701ca7c894951ac78562e9161cd2aef5d..a13d8da418722b76b258016335d1095074756bee 100644
+index b328b14919e837546b5e7081ed6e239e4486ee53..58ec4c37c1fb6735f4954a8d9f8788956baf78f3 100644
 --- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
 @@ -291,10 +291,17 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
@@ -21846,7 +21850,7 @@ index e84e243f35b09691d03e9a9cf3de0c093b1d5cfb..46983eb8ac670464c9ade84be21529a6
              }
              // Spigot end
 diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-index 4ea2718f48dbddd1a2343aad88873ad540eb4117..2dcfc4557ee75c802df8a1160bf888561ea7e0ff 100644
+index 4fd6f76bb59824b41241d6b3603ce5d3a6edad9c..385252df4562cb58ef12e35016de6577b3a6babc 100644
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 @@ -301,10 +301,10 @@ public class ServerGamePacketListenerImpl
@@ -23776,7 +23780,7 @@ index bb5f66c62c9541bb76a9faad9e9ee91c1466fc6a..66d7bb9418832638c220a08d06c01ef0
              return blockToFallLocation(blockState);
          } else {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406c457dd82 100644
+index 14978c122253dddf6ebd39694a38a8599ce9fcba..97ba8df73d04f08b62fe899a0a899d92dd72aecf 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -170,7 +170,7 @@ public abstract class Entity
@@ -23815,8 +23819,8 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
          return this.dimensions.makeBoundingBox(x, y, z);
      }
      // Paper end
-+    public io.canvasmc.canvas.util.@Nullable ServerLocation canvas$lastTeleportOrigin = null; // Canvas - region threading
-+    public @Nullable ServerLevel canvas$teleportingToDimension = null; // Canvas - region threading
++    public volatile io.canvasmc.canvas.util.@Nullable ServerLocation canvas$lastTeleportOrigin = null; // Canvas - region threading
++    public volatile @Nullable ServerLevel canvas$teleportingToDimension = null; // Canvas - region threading
      // Paper start - rewrite chunk system
      private final boolean isHardColliding = this.moonrise$isHardCollidingUncached();
      private net.minecraft.server.level.FullChunkStatus chunkStatus;
@@ -24034,7 +24038,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
      }
  
      public int getDimensionChangingDelay() {
-@@ -4042,7 +4101,1009 @@ public abstract class Entity
+@@ -4042,7 +4101,1032 @@ public abstract class Entity
          this.portalProcess = oldEntity.portalProcess;
      }
  
@@ -24603,14 +24607,37 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
 +        final Vec3 finalPos = pos;
 +        final Float finalYaw = yaw;
 +        final Float finalPitch = pitch;
++
 +        passengerTree.root.placeInAsync(originWorld, destination, teleportFlags, passengerTree, (entity) -> {
++            // reset the teleporting fields, we finished the teleport
 +            this.canvas$teleportingToDimension = null;
 +            this.canvas$lastTeleportOrigin = null;
-+            if (entity instanceof ServerPlayer serverPlayer && displayedScreen.isTrue()) serverPlayer.refresh(false);
-+            if (teleportComplete != null) teleportComplete.accept(entity);
++
++            // we need to check if the entity displayed the loading screen
++            if (entity instanceof ServerPlayer serverPlayer && displayedScreen.isTrue()) {
++                serverPlayer.refresh(false);
++            }
++
++            // now we need to run teleport completion for the teleport call
++            if (teleportComplete != null) {
++                teleportComplete.accept(entity);
++            }
++
++            // we run post event afterward because the event can call another
++            // teleport, which could cause the teleport complete to fail
 +            if (callEvents && io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
-+                org.bukkit.Location bukkitFrom = new org.bukkit.Location(originWorld.getWorld(), currPos.x, currPos.y, currPos.z, this.getYRot(), this.getXRot());
-+                org.bukkit.Location bukkitTo = new org.bukkit.Location(finalLevelDest.getWorld(), finalPos.x, finalPos.y, finalPos.z, finalYaw == null ? 0 : finalYaw, finalPitch == null ? 0 : finalPitch);
++                final org.bukkit.Location bukkitFrom = new org.bukkit.Location(
++                    originWorld.getWorld(),
++                    currPos.x, currPos.y, currPos.z,
++                    this.getYRot(),
++                    this.getXRot()
++                );
++                final org.bukkit.Location bukkitTo = new org.bukkit.Location(
++                    finalLevelDest.getWorld(),
++                    finalPos.x, finalPos.y, finalPos.z,
++                    finalYaw == null ? 0 : finalYaw,
++                    finalPitch == null ? 0 : finalPitch
++                );
 +                new io.canvasmc.canvas.event.EntityPostTeleportAsyncEvent(
 +                    this.getBukkitEntity(), bukkitFrom, bukkitTo, cause, teleportType
 +                ).callEvent();
@@ -25044,7 +25071,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
          // Paper start - Fix item duplication and teleport issues
          if ((!this.isAlive() || !this.valid) && (transition.newLevel() != this.level)) {
              LOGGER.warn("Illegal Entity Teleport {} to {}:{}", this, transition.newLevel(), transition.position(), new Throwable());
-@@ -4237,6 +5298,12 @@ public abstract class Entity
+@@ -4237,6 +5321,12 @@ public abstract class Entity
          }
      }
  
@@ -25057,7 +25084,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
      protected void removeAfterChangingDimensions() {
          this.setRemoved(Entity.RemovalReason.CHANGED_DIMENSION, null); // CraftBukkit - add Bukkit remove cause
          if (this instanceof Leashable leashable && leashable.isLeashed()) { // Paper - only call if it is leashed
-@@ -4570,6 +5637,12 @@ public abstract class Entity
+@@ -4570,6 +5660,12 @@ public abstract class Entity
      }
  
      public void startSeenByPlayer(final ServerPlayer player) {
@@ -25070,7 +25097,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
      }
  
      public void stopSeenByPlayer(final ServerPlayer player) {
-@@ -4579,6 +5652,12 @@ public abstract class Entity
+@@ -4579,6 +5675,12 @@ public abstract class Entity
              new io.papermc.paper.event.player.PlayerUntrackEntityEvent(player.getBukkitEntity(), this.getBukkitEntity()).callEvent();
          }
          // Paper end - entity tracking events
@@ -25083,7 +25110,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
      }
  
      public float rotate(final Rotation rotation) {
-@@ -4986,7 +6065,10 @@ public abstract class Entity
+@@ -4986,7 +6088,10 @@ public abstract class Entity
              return;
          }
          // Paper end - Block invalid positions and bounding box
@@ -25095,7 +25122,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
              this.position = new Vec3(x, y, z);
              int fx = Mth.floor(x);
              int fy = Mth.floor(y);
-@@ -5017,7 +6099,7 @@ public abstract class Entity
+@@ -5017,7 +6122,7 @@ public abstract class Entity
          }
          // Paper start - Block invalid positions and bounding box; don't allow desync of pos and AABB
          // hanging has its own special logic
@@ -25104,7 +25131,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
              this.setBoundingBox(this.makeBoundingBox());
          }
          // Paper end - Block invalid positions and bounding box
-@@ -5092,6 +6174,7 @@ public abstract class Entity
+@@ -5092,6 +6197,7 @@ public abstract class Entity
              Util.logAndPauseIfInIde("Invalid entity rotation: " + yRot + ", discarding.");
          } else {
              this.yRot = yRot;
@@ -25112,7 +25139,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
          }
      }
  
-@@ -5104,6 +6187,7 @@ public abstract class Entity
+@@ -5104,6 +6210,7 @@ public abstract class Entity
              Util.logAndPauseIfInIde("Invalid entity rotation: " + xRot + ", discarding.");
          } else {
              this.xRot = Math.clamp(xRot % 360.0F, -90.0F, 90.0F);
@@ -25120,7 +25147,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
          }
      }
  
-@@ -5123,6 +6207,12 @@ public abstract class Entity
+@@ -5123,6 +6230,12 @@ public abstract class Entity
          return this.removalReason != null;
      }
  
@@ -25133,7 +25160,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
      public Entity.@Nullable RemovalReason getRemovalReason() {
          return this.removalReason;
      }
-@@ -5137,6 +6227,7 @@ public abstract class Entity
+@@ -5137,6 +6250,7 @@ public abstract class Entity
          // Paper end - rewrite chunk system
          org.bukkit.craftbukkit.event.CraftEventFactory.callEntityRemoveEvent(this, cause); // CraftBukkit
          final boolean alreadyRemoved = this.removalReason != null; // Paper - Folia schedulers
@@ -25141,7 +25168,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
          if (this.removalReason == null) {
              this.removalReason = reason;
          }
-@@ -5160,6 +6251,10 @@ public abstract class Entity
+@@ -5160,6 +6274,10 @@ public abstract class Entity
          this.removalReason = null;
      }
  
@@ -25152,7 +25179,7 @@ index 14978c122253dddf6ebd39694a38a8599ce9fcba..1c21b1f7c331426c07264f68580e9406
      // Paper start - Folia schedulers
      /**
       * Invoked only when the entity is truly removed from the server, never to be added to any world.
-@@ -5171,7 +6266,7 @@ public abstract class Entity
+@@ -5171,7 +6289,7 @@ public abstract class Entity
      // Paper end - Folia schedulers
      // Paper start - optimise Folia entity scheduler
      public final void registerScheduler() {
