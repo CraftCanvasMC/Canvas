@@ -239,7 +239,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
         }
     }
 
-    public final class OrderedStreamGroup {
+    public final class OrderedStreamGroup implements StreamGroup {
 
         private final AtomicLong subOrderGenerator;
         private final COWArrayList<Queue> queues = new COWArrayList<>(Queue.class);
@@ -300,6 +300,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             return highestTask;
         }
 
+        @Override
         public Queue createExecutor() {
             synchronized (BalancedChunkSystem.this) {
                 if (BalancedChunkSystem.this.shutdown) {
@@ -314,7 +315,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
             }
         }
 
-        public final class Queue implements PrioritisedExecutor {
+        public final class Queue implements ChunkSystemExecutor {
 
             private final PrioritisedTaskQueue wrapped;
             private final AtomicLong executors = new AtomicLong();
@@ -328,6 +329,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
              * Removes this queue from the thread pool without shutting the queue down or waiting for queued tasks to be
              * executed
              */
+            @Override
             public void halt() {
                 this.halt = true;
                 BalancedChunkSystem.OrderedStreamGroup.this.queues.remove(this);
@@ -337,6 +339,7 @@ public final class BalancedChunkSystem extends BalancedPrioritisedThreadPool {
              * Returns whether this executor is scheduled to run tasks or is running tasks, otherwise it returns whether
              * this queue is not halted and not shutdown.
              */
+            @Override
             public boolean isActive() {
                 if (this.halt) {
                     return this.executors.get() > 0L;
