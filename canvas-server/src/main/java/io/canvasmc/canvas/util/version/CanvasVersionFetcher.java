@@ -7,6 +7,7 @@ import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.ServerBuildInfoImpl;
 import java.lang.management.ManagementFactory;
+import java.util.Arrays;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -66,10 +67,24 @@ public class CanvasVersionFetcher implements VersionFetcher {
 
         builder.append(text("[", LIST, TextDecoration.BOLD));
 
+        final Component contributors =
+            Arrays.stream(buildInfo.contributors()
+                .replace("[", "")
+                .replace("]", "")
+                .split("\\s*,\\s*")
+            ).map(name -> Component.text()
+                .append(text(" - ", LIST))
+                .append(text(name, INFORMATION))
+                .build())
+            .reduce((a, b) -> a.append(Component.newline()).append(b))
+            .orElse(Component.empty());
+
         TextComponent brandHoverText = Component.textOfChildren(
             text(buildInfo.brandName(), HEADER, TextDecoration.BOLD),
             text(" made by ", PRIMARY),
-            text(buildInfo.brandVendor().orElse("Unknown Vendor"), HEADER, TextDecoration.BOLD)
+            text(buildInfo.brandVendor().orElse("Unknown Vendor"), HEADER, TextDecoration.BOLD),
+            text("\nOther Contributors:\n", PRIMARY),
+            contributors
         );
         TextComponent brandComponent = text(buildInfo.brandName(), HEADER, TextDecoration.BOLD);
         if (buildInfo.brandWebsite().isPresent()) {
