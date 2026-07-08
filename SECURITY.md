@@ -2,14 +2,12 @@
 
 ## Supported Versions
 
-We generally only fully support the latest version, the same applies to exploits such as server crashes and item
-duplication bugs. In the transition period during larger Minecraft updates, we may still backport important fixes
-to the last minor or major release, determined on a case-by-case basis.
+Please view our [LTS policy](https://docs.canvasmc.io/canvas/lts/)
 
 ## Reporting a Vulnerability
 
 For bugs like behavior oddities and crashes and server errors, please use the issue tracker. Reporting things
-privately in our discord is only fro severe vulnerabilities like force-op exploits and mass duplication bugs, etc.
+privately in our discord is only for severe vulnerabilities like force-op exploits and mass duplication bugs, etc.
 
 To report a vulnerability, please open a post in our [discord server](https://discord.gg/uM7eC7rBrW) in the
 [#bug-support forum](https://discord.com/channels/1168986665038127205/1511222824511995994) requesting to
