@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.command.sub;
+package io.canvasmc.canvas.subcommands;
 
 import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 import com.mojang.brigadier.Command;
@@ -9,7 +9,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import io.canvasmc.canvas.GlobalConfiguration;
-import io.canvasmc.canvas.command.SubCommand;
+import io.canvasmc.canvas.commands.SubCommand;
 import io.canvasmc.canvas.util.Util;
 import io.canvasmc.canvas.world.PerWorldDistanceConfig;
 import java.util.Locale;

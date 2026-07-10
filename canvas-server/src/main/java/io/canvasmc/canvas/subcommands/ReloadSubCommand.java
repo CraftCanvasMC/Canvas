@@ -1,10 +1,10 @@
-package io.canvasmc.canvas.command.sub;
+package io.canvasmc.canvas.subcommands;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.canvasmc.canvas.WorldConfig;
-import io.canvasmc.canvas.command.SubCommand;
+import io.canvasmc.canvas.commands.SubCommand;
 import io.canvasmc.canvas.util.Util;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;

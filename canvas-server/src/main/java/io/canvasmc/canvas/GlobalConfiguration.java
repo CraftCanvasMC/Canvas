@@ -1,12 +1,18 @@
 package io.canvasmc.canvas;
 
 import ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom;
+import io.canvasmc.canvas.commands.CanvasCommands;
 import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
+import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
+import io.canvasmc.canvas.subcommands.RegionTickSubCommand;
+import io.canvasmc.canvas.subcommands.ReloadSubCommand;
+import io.canvasmc.canvas.subcommands.SetMaxPlayersSubCommand;
+import io.canvasmc.canvas.subcommands.WorldDistanceSubCommand;
 import io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
 import io.canvasmc.canvas.util.LockedReference;
@@ -232,6 +238,18 @@ public class GlobalConfiguration extends Part {
                     broadcast("Log cleaner removed " + amountRemoved.intValue() + " old log files", INFO);
                 }
             }
+
+            // register our commands to the Canvas command tree
+            CanvasCommands.register(
+                SetMaxPlayersSubCommand.class,
+                RegionBarSubCommand.class,
+                WorldDistanceSubCommand.class,
+                ReloadSubCommand.class,
+                RegionTickSubCommand.class // TODO - merge this into regiondata command
+                // RegionDataCommand.class // TODO - regiondata command
+            );
+
+            broadcast("Registered all Canvas commands", INFO);
         }
 
         // we do not want to allow larger unit values, nobody should autosave in units larger than

@@ -4,6 +4,574 @@ Date: Tue, 30 Jun 2026 19:57:42 -0700
 Subject: [PATCH] Rebrand
 
 
+diff --git a/io/canvasmc/canvas/commands/CanvasCommands.java b/io/canvasmc/canvas/commands/CanvasCommands.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..c777f4416680da6ec868a5bb40805e5075406f1f
+--- /dev/null
++++ b/io/canvasmc/canvas/commands/CanvasCommands.java
+@@ -0,0 +1,112 @@
++package io.canvasmc.canvas.commands;
++
++import com.mojang.brigadier.CommandDispatcher;
++import com.mojang.brigadier.builder.LiteralArgumentBuilder;
++import java.util.LinkedList;
++import java.util.List;
++import java.util.function.Predicate;
++import net.kyori.adventure.text.format.TextColor;
++import net.minecraft.commands.CommandBuildContext;
++import net.minecraft.commands.CommandSourceStack;
++import net.minecraft.server.permissions.Permissions;
++import org.jspecify.annotations.NullMarked;
++
++import static net.minecraft.commands.Commands.literal;
++
++@NullMarked
++public class CanvasCommands {
++    public static final CanvasCommands INSTANCE;
++
++    static final TextColor HEADER = TextColor.color(160, 90, 245);
++    static final TextColor PRIMARY = TextColor.color(118, 52, 212);
++    static final TextColor SECONDARY = TextColor.color(182, 118, 248);
++    static final TextColor INFORMATION = TextColor.color(208, 168, 252);
++    static final TextColor LIST = TextColor.color(62, 18, 148);
++    static final TextColor ACCENT = TextColor.color(230, 200, 255);
++    static final TextColor MUTED = TextColor.color(98, 52, 172);
++
++    static {
++        INSTANCE = new CanvasCommands();
++    }
++
++    private final List<SubCommand> subCommands = new LinkedList<>();
++
++    public static void register(final Class<? extends SubCommand> command) {
++        INSTANCE.internalRegister(command);
++    }
++
++    public static void register(final SubCommand command) {
++        INSTANCE.subCommands.add(command);
++    }
++
++    @SafeVarargs
++    public static void register(final Class<? extends SubCommand>... commands) {
++        for (final Class<? extends SubCommand> command : commands) {
++            register(command);
++        }
++    }
++
++    public static void register(final SubCommand... commands) {
++        for (final SubCommand command : commands) {
++            register(command);
++        }
++    }
++
++    public static Predicate<CommandSourceStack> permission(final String node) {
++        return source -> source.hasPermission(Permissions.COMMANDS_ADMIN, "canvas.command." + node);
++    }
++
++    private void internalRegister(final Class<? extends SubCommand> command) {
++        try {
++            if (command.getDeclaredConstructor().getParameterCount() != 0) {
++                throw new IllegalArgumentException("Command must have no-arg constructor");
++            }
++            internalRegister(command.getDeclaredConstructor().newInstance());
++        } catch (final Throwable thrown) {
++            throw new RuntimeException("Couldn't register command by class", thrown);
++        }
++    }
++
++    private void internalRegister(final SubCommand command) {
++        this.subCommands.add(command);
++    }
++
++    public void build(final CommandDispatcher<CommandSourceStack> dispatcher, final CommandBuildContext context) {
++        final LiteralArgumentBuilder<CommandSourceStack> base = literal("canvas")
++            .requires(source -> {
++                // the "base" is just the root command, "help" is builtin, so we need these hard coded
++                boolean canUse = permission("help").test(source);
++
++                // if we have sub commands, they should also allow usage of the base canvas command
++                // since it's a way to access said sub command
++
++                for (final SubCommand subCommand : this.subCommands) {
++                    if (canUse) break;
++
++                    if (permission(subCommand.getName()).test(source)) {
++                        canUse = true;
++                    }
++                }
++
++                return canUse;
++            });
++
++        for (final SubCommand sub : subCommands) {
++            final String name = sub.getName();
++
++            base.then(sub.construct(literal(name)
++                .requires(permission(name)), context));
++
++            if (sub.isAllowedSelfCommand()) {
++                dispatcher.register(sub.construct(literal(name)
++                    .requires(permission(name)), context));
++
++                dispatcher.register(sub.construct(literal("canvas:" + name)
++                    .requires(permission(name)), context));
++            }
++        }
++
++        HelpCommand.constructHelpSystem(base, () -> this.subCommands);
++        dispatcher.register(base);
++    }
++}
+diff --git a/io/canvasmc/canvas/commands/HelpCommand.java b/io/canvasmc/canvas/commands/HelpCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..47f1d62d868ddddcf5aab05d82db48a44e14a3ac
+--- /dev/null
++++ b/io/canvasmc/canvas/commands/HelpCommand.java
+@@ -0,0 +1,341 @@
++package io.canvasmc.canvas.commands;
++
++import com.google.common.collect.Lists;
++import com.mojang.brigadier.Command;
++import com.mojang.brigadier.builder.LiteralArgumentBuilder;
++import com.mojang.brigadier.context.CommandContext;
++import io.canvasmc.canvas.util.Util;
++import io.papermc.paper.dialog.Dialog;
++import io.papermc.paper.registry.data.dialog.ActionButton;
++import io.papermc.paper.registry.data.dialog.DialogBase;
++import io.papermc.paper.registry.data.dialog.action.DialogAction;
++import io.papermc.paper.registry.data.dialog.body.DialogBody;
++import io.papermc.paper.registry.data.dialog.type.DialogType;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Objects;
++import java.util.function.Supplier;
++import net.kyori.adventure.audience.Audience;
++import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.TextComponent;
++import net.kyori.adventure.text.event.ClickCallback;
++import net.kyori.adventure.text.event.ClickEvent;
++import net.kyori.adventure.text.event.HoverEvent;
++import net.kyori.adventure.text.format.NamedTextColor;
++import net.kyori.adventure.text.format.TextColor;
++import net.kyori.adventure.text.format.TextDecoration;
++import net.minecraft.commands.CommandSourceStack;
++import net.minecraft.server.level.ServerPlayer;
++import org.bukkit.command.CommandSender;
++import org.bukkit.craftbukkit.entity.CraftPlayer;
++import org.bukkit.entity.Player;
++import org.jetbrains.annotations.Contract;
++import org.jetbrains.annotations.Unmodifiable;
++
++import static io.canvasmc.canvas.commands.CanvasCommands.ACCENT;
++import static io.canvasmc.canvas.commands.CanvasCommands.HEADER;
++import static io.canvasmc.canvas.commands.CanvasCommands.INFORMATION;
++import static io.canvasmc.canvas.commands.CanvasCommands.LIST;
++import static io.canvasmc.canvas.commands.CanvasCommands.MUTED;
++import static io.canvasmc.canvas.commands.CanvasCommands.PRIMARY;
++import static io.canvasmc.canvas.commands.CanvasCommands.SECONDARY;
++import static net.minecraft.commands.Commands.literal;
++
++public class HelpCommand {
++
++    public static final ClickCallback<Audience> GO_BACK_ACTION = (audience) -> {
++        if (
++            audience instanceof CraftPlayer craftPlayer && CanvasCommands.permission("help").test(craftPlayer.getHandle().createCommandSourceStack())
++        ) {
++            // audience is a player and has "help" permissions
++            craftPlayer.performCommand("canvas help");
++        }
++        else {
++            audience.sendMessage(Component.text("You do not have the required permissions to run this command", NamedTextColor.RED));
++        }
++    };
++
++    // odd workaround for when the server gives permission to the help command but doesn't give
++    // full "admin"/"operator" status. when the player doesn't have that, then Minecraft asks the
++    // player "are you sure?" every time the "Go back" button is clicked, which is annoying
++    private static final Boolean USE_LEGACY = Boolean.getBoolean("Canvas.LegacyHelpCommand");
++
++    static void constructHelpSystem(
++        final LiteralArgumentBuilder<CommandSourceStack> base,
++        final Supplier<List<SubCommand>> commands
++    ) {
++        base.then(literal("help").requires(CanvasCommands.permission("help"))
++            .executes(context -> executeHelp(commands, context)));
++    }
++
++    @SuppressWarnings("SameReturnValue")
++    private static int executeHelp(
++        final Supplier<List<SubCommand>> commands,
++        final CommandContext<CommandSourceStack> context
++    ) {
++        final CommandSender bukkitCommandSender = context.getSource().getBukkitSender();
++
++        // if sender isn't a player, we use raw text, same if we do legacy output
++        if (!(bukkitCommandSender instanceof Player bukkitPlayer) || USE_LEGACY) {
++            TextComponent.Builder builder = Component.text();
++            appendConsoleOutput(commands, bukkitCommandSender, builder);
++            bukkitCommandSender.sendMessage(builder.build());
++            return Command.SINGLE_SUCCESS;
++        }
++
++        ((CraftPlayer) bukkitPlayer).taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++            final CraftPlayer craftPlayer = entityPlayer.getBukkitEntity();
++            final Dialog dialog = constructMainMenu(commands.get(), context);
++
++            // show main menu
++            craftPlayer.showDialog(dialog);
++        });
++
++        return Command.SINGLE_SUCCESS;
++    }
++
++    private static void appendConsoleOutput(
++        final Supplier<List<SubCommand>> commands,
++        final CommandSender bukkitSender,
++        final TextComponent.Builder builder
++    ) {
++        builder.append(Component.text("----", SECONDARY, TextDecoration.BOLD))
++            .append(Component.text("Canvas Commands", HEADER, TextDecoration.BOLD))
++            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
++            .appendNewline();
++
++        for (final SubCommand subCommand : commands.get()) {
++            final String name = subCommand.getName();
++            if (!bukkitSender.hasPermission("canvas.command." + name)) {
++                continue;
++            }
++
++            final Component hoverText = Component.text()
++                .append(Component.text("Click to view further details", INFORMATION))
++                .build();
++
++            final Component detailComponent = buildTextOut(subCommand);
++
++            final Component entry = Component.text()
++                .append(Component.text("- ").color(LIST))
++                .append(Component.text("/").color(SECONDARY))
++                .append(Component.text(name, PRIMARY)
++                    .decorate(TextDecoration.UNDERLINED)
++                    .hoverEvent(HoverEvent.showText(hoverText))
++                    .clickEvent(ClickEvent.callback((audience) -> audience.sendMessage(detailComponent))))
++                .appendNewline()
++                .build();
++
++            builder.append(entry);
++        }
++    }
++
++    private static Dialog constructMainMenu(
++        final List<SubCommand> subCommands,
++        final CommandContext<CommandSourceStack> context
++    ) {
++        final List<ActionButton> subCommandsAsButtons = buildSubCommandsButtons(subCommands, context);
++
++        return Dialog.create(builder -> builder.empty()
++            .base(DialogBase.builder(getGradientForCanvasTitled("Help")).build())
++            .type(
++                DialogType.multiAction(
++                    Lists.asList(
++                        ActionButton.create(
++                            Component.text("Useful links"),
++                            Component.text("A list of useful links for CanvasMC"),
++                            155,
++                            DialogAction.staticAction(ClickEvent.showDialog(Dialog.create(builder1 -> builder1.empty()
++                                .base(
++                                    DialogBase.builder(
++                                        getGradientForCanvasTitled("Links")
++                                    ).body(List.of(DialogBody.plainMessage(
++                                        Component.text("This is a list of all CanvasMCs important links. If you need support, join the CanvasMC discord server, linked below, and ask there. Do not ask in Paper's discord server!")
++                                    ))).build()
++                                ).type(
++                                    DialogType.multiAction(
++                                        List.of(
++                                            getLink("Discord", "https://canvasmc.io/discord/", "Click to open the discord server invite"),
++                                            getLink("Website", "https://canvasmc.io/", "Click to open our website"),
++                                            getLink("Source", "https://github.com/CraftCanvasMC/Canvas/", "Click to open the CanvasMC source repository"),
++                                            getLink("Issues", "https://github.com/CraftCanvasMC/Canvas/issues/", "Click to open our issues page on our repository"),
++                                            getLink("Docs", "https://docs.canvasmc.io/canvas/introduction/", "Click to open Canvas' documentation"),
++                                            getLink("Modrinth", "https://modrinth.com/organization/canvasmc/", "Click to open Canvas' Modrinth org"),
++                                            ActionButton.builder(Component.text("Go back"))
++                                                .width(100)
++                                                .action(DialogAction.staticAction(ClickEvent.callback(GO_BACK_ACTION)))
++                                                .build(),
++                                            ActionButton.builder(Component.text("Exit menu"))
++                                                .width(100)
++                                                .build()
++                                        )
++                                    ).columns(2).build()
++                                )
++                            )))
++                        ),
++                        subCommandsAsButtons.toArray(new ActionButton[0])
++                    )
++                ).columns(1).exitAction(ActionButton.builder(
++                    Component.text("Exit menu")
++                ).build()).build()
++            )
++        );
++    }
++
++    private static Component buildTextOut(final SubCommand subCommand) {
++        final String name = subCommand.getName();
++        final String description = subCommand.getDescription();
++        final boolean selfCmd = subCommand.isAllowedSelfCommand();
++
++        final TextComponent.Builder builder = Component.text()
++            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
++            .append(Component.text("/canvas " + name, HEADER, TextDecoration.BOLD))
++            .append(Component.text("----", SECONDARY, TextDecoration.BOLD))
++            .appendNewline()
++            .appendNewline();
++
++        builder.append(Component.text("  Description  ", MUTED).decorate(TextDecoration.BOLD))
++            .append(Component.text(description != null ? description : "No description provided.", ACCENT))
++            .appendNewline();
++
++        builder.append(Component.text("  Permission   ", MUTED).decorate(TextDecoration.BOLD))
++            .append(Component.text("canvas.command." + name, ACCENT))
++            .appendNewline();
++
++        builder.append(Component.text("  Standalone   ", MUTED).decorate(TextDecoration.BOLD))
++            .append(selfCmd
++                ? Component.text("Yes ", TextColor.color(100, 220, 140)).append(Component.text("(/" + name + ", /canvas:" + name + ")", INFORMATION))
++                : Component.text("No", TextColor.color(220, 100, 100)))
++            .appendNewline()
++            .appendNewline();
++
++        builder.append(Component.text("-".repeat(16 + name.length() - 1), SECONDARY, TextDecoration.BOLD));
++
++        return builder.append(Component.text("-----------------------", SECONDARY, TextDecoration.BOLD)).build();
++    }
++
++    @Unmodifiable
++    private static List<ActionButton> buildSubCommandsButtons(
++        final List<SubCommand> subCommands,
++        final CommandContext<CommandSourceStack> context
++    ) {
++        return subCommands.stream().map((subCommand) -> {
++            final String description = subCommand.getDescription();
++            final String name = subCommand.getName();
++            final String baseCommand = subCommand.isAllowedSelfCommand() ? "/" + name : "/canvas " + name;
++            final String permission = "canvas.command." + name;
++
++            // if source doesn't have permission, don't show
++            if (!CanvasCommands.permission(name).test(context.getSource())) {
++                return null;
++            }
++
++            return ActionButton.create(
++                Component.text(name),
++                description == null ? null : Component.text(description),
++                140,
++                DialogAction.staticAction(ClickEvent.showDialog(
++                    Dialog.create(builder -> builder.empty()
++                        .base(DialogBase.create(
++                            getTitleForCommand(subCommand).color(PRIMARY).decorate(TextDecoration.BOLD),
++                            null,
++                            true,
++                            false,
++                            DialogBase.DialogAfterAction.CLOSE,
++                            List.of(
++                                DialogBody.plainMessage(
++                                    Component.text(description != null ? description : "No description provided for this sub command.", ACCENT)
++                                ),
++                                DialogBody.plainMessage(
++                                    Component.text().append(Component.text("PERMISSION: ", MUTED).decorate(TextDecoration.BOLD))
++                                        .append(Component.text(permission, ACCENT, TextDecoration.UNDERLINED)).build()
++                                ),
++                                DialogBody.plainMessage(
++                                    Component.text(
++                                        subCommand.isAllowedSelfCommand() ? "You are able to use this outside of \"/canvas\"" : "This is strictly only a Canvas sub command",
++                                        ACCENT
++                                    )
++                                )
++                            ),
++                            List.of() // we have no inputs we need
++                        )).type(
++                            DialogType.multiAction(
++                                createCommandActions(
++                                    baseCommand,
++                                    subCommand.hasExtraArgs(),
++                                    CanvasCommands.permission(name).test(context.getSource()),
++                                    permission
++                                )
++                            ).columns(2).build()
++                        )
++                    )
++                ))
++            );
++        }).filter(Objects::nonNull).toList();
++    }
++
++    private static Component getGradientForCanvasTitled(final String textContent) {
++        return Util.gradient(
++            "CanvasMC - " + textContent,
++            style -> style.decorate(TextDecoration.BOLD),
++            TextColor.color(0xFF635BFF), TextColor.color(0xFFFF5CCF)
++        );
++    }
++
++    private static ActionButton getLink(final String name, final String link, final String description) {
++        return ActionButton.builder(Component.text(name, TextColor.color(0xFF82E5FF), TextDecoration.UNDERLINED))
++            .width(80)
++            .action(DialogAction.staticAction(ClickEvent.openUrl(link)))
++            .tooltip(Component.text(description))
++            .build();
++    }
++
++    @Contract("_ -> new")
++    private static Component getTitleForCommand(final SubCommand subCommand) {
++        return Component.text(Util.capitalize(Util.snakeToCamelCase(subCommand.getName())) + " Command");
++    }
++
++    @Unmodifiable
++    @Contract("_,_,_,_ -> new")
++    private static List<ActionButton> createCommandActions(
++        final String baseCommand,
++        final boolean hasExtraArgs,
++        final boolean sourceHasPermission,
++        final String permission
++    ) {
++        final ArrayList<ActionButton> buttons = new ArrayList<>(List.of(
++            ActionButton.create(
++                Component.text("Copy command"),
++                Component.text("Copies the base command to the clipboard"),
++                120,
++                DialogAction.staticAction(ClickEvent.copyToClipboard(baseCommand))
++            ),
++            ActionButton.create(
++                Component.text("Copy permission node"),
++                Component.text("Copies the permission node to the clipboard"),
++                120,
++                DialogAction.staticAction(ClickEvent.copyToClipboard(permission))
++            ),
++            ActionButton.create(
++                Component.text("Go back"),
++                Component.text("Go back to the main menu"),
++                120,
++                DialogAction.staticAction(ClickEvent.callback(GO_BACK_ACTION))
++            ),
++            ActionButton.builder(Component.text("Exit menu")).width(120).build()
++        ));
++
++        if (!hasExtraArgs && sourceHasPermission) {
++            buttons.add(
++                ActionButton.create(
++                    Component.text("Execute command"),
++                    Component.text("Executes the sub command"),
++                    120,
++                    DialogAction.staticAction(ClickEvent.runCommand(baseCommand))
++                )
++            );
++        }
++
++        return buttons;
++    }
++}
+diff --git a/io/canvasmc/canvas/commands/SubCommand.java b/io/canvasmc/canvas/commands/SubCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..558295060366f2590b3ebbdbfc53604d5d3fab2b
+--- /dev/null
++++ b/io/canvasmc/canvas/commands/SubCommand.java
+@@ -0,0 +1,84 @@
++package io.canvasmc.canvas.commands;
++
++import com.mojang.brigadier.builder.LiteralArgumentBuilder;
++import java.util.function.Predicate;
++import net.minecraft.commands.CommandBuildContext;
++import net.minecraft.commands.CommandSourceStack;
++import org.jspecify.annotations.Nullable;
++
++/**
++ * Represents a subcommand that can be registered under the Canvas command system.
++ * <p>
++ * Implementations define their name, description, and Brigadier command structure via the
++ * {@link #construct(LiteralArgumentBuilder, CommandBuildContext)} method.
++ * </p>
++ */
++public interface SubCommand {
++
++    /**
++     * Gets a short, human-readable description of this command.
++     * <p>
++     * This may be used in help menus or documentation.
++     * </p>
++     *
++     * @return the description of the command, or {@code null} if not provided
++     */
++    @Nullable
++    String getDescription();
++
++    /**
++     * Constructs and returns the Brigadier command structure for this subcommand.
++     * <p>
++     * Implementations should attach arguments and execution logic to the provided {@code base} literal. The base
++     * literal is already initialized with the command’s name and basic permission requirements.
++     * </p>
++     *
++     * @param base
++     *     the base literal builder to append arguments and execution logic to
++     *
++     * @return the fully constructed {@link LiteralArgumentBuilder} for registration
++     */
++    LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext);
++
++    /**
++     * Gets if the command can be registered on its own and not as a subcommand of `/canvas`
++     *
++     * @return if it can have a self-command
++     */
++    default boolean isAllowedSelfCommand() {
++        return true;
++    }
++
++    /**
++     * Gets if the command has extra arguments or not or if it's just executed from the literal base of this sub
++     * command
++     *
++     * @return If the command can be executed from just the literal base
++     */
++    default boolean hasExtraArgs() {
++        return true;
++    }
++
++    /**
++     * Returns the permission predicate for if the source stack in context has the permission node
++     * {@code canvas.command.{sub command name}.{node arg}}
++     *
++     * @param node
++     *     the node arg
++     *
++     * @return the constructed predicate
++     */
++    default Predicate<CommandSourceStack> check(final String node) {
++        return CanvasCommands.permission(getName() + "." + node);
++    }
++
++    /**
++     * Gets the unique name of this subcommand.
++     * <p>
++     * This is used as the command literal, e.g. {@code /canvas <name>}.
++     * </p>
++     *
++     * @return the subcommand name (never {@code null})
++     */
++    String getName();
++}
+diff --git a/io/canvasmc/canvas/commands/package-info.java b/io/canvasmc/canvas/commands/package-info.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..20fadd1e3b320f5474d06bc18e0dff29e321ec38
+--- /dev/null
++++ b/io/canvasmc/canvas/commands/package-info.java
+@@ -0,0 +1,7 @@
++/**
++ * Package containing the backing system for Canvas' commands, part of the rebranding patch
++ */
++@NullMarked
++package io.canvasmc.canvas.commands;
++
++import org.jspecify.annotations.NullMarked;
 diff --git a/net/minecraft/ReportType.java b/net/minecraft/ReportType.java
 index dbc107ea52cd1db899b991ee3bad5e72c2776b1a..12cfd9eebba1f6d9d9f8cb9cec1cc0c570ac2901 100644
 --- a/net/minecraft/ReportType.java
@@ -23,6 +591,60 @@ index dbc107ea52cd1db899b991ee3bad5e72c2776b1a..12cfd9eebba1f6d9d9f8cb9cec1cc0c5
  
          for (String extraComment : extraComments) {
              builder.append("// ");
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index d210f991366796d84e947df0a057c1adc62824f8..ba8fdecf400dbfdddf1e2da900900ad56fa5d040 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -302,6 +292,7 @@ public class Commands {
+             WhitelistCommand.register(this.dispatcher);
+         }
+ 
++        io.canvasmc.canvas.commands.CanvasCommands.INSTANCE.build(this.dispatcher, context); // Canvas - Rebrand - register commands
+         if (commandSelection.includeIntegrated) {
+             PublishCommand.register(this.dispatcher);
+             UnpublishCommand.register(this.dispatcher);
+diff --git a/net/minecraft/server/Bootstrap.java b/net/minecraft/server/Bootstrap.java
+index 0de71059cf509091840169bd27ba8fb04b214356..e32d3f1ff8a22f8568ccc20687e8fc25b43e95ed 100644
+--- a/net/minecraft/server/Bootstrap.java
++++ b/net/minecraft/server/Bootstrap.java
+@@ -49,6 +49,7 @@ public class Bootstrap {
+                 throw new IllegalStateException("Unable to load registries");
+             }
+ 
++            io.canvasmc.canvas.GlobalConfiguration.init(); // Canvas - Rebrand - load global configuration
+             FireBlock.bootStrap();
+             ComposterBlock.bootStrap();
+             if (EntityType.getKey(EntityTypes.PLAYER) == null) {
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 9286d9bcf3ec4069e77d3133f3d7bf29b2370c5a..98cadf77878240889fdb0f496975ac055db6246e 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -171,6 +171,17 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         return this.paperConfig;
+     }
+     // Paper end - add paper world config
++    // Canvas start - Rebrand - world config
++    private io.canvasmc.canvas.WorldConfig canvasConfig;
++
++    public io.canvasmc.canvas.WorldConfig canvasConfig() {
++        return this.canvasConfig;
++    }
++
++    public void reloadCanvasConfig() {
++        this.canvasConfig = io.canvasmc.canvas.WorldConfig.buildForLevel((ServerLevel) this, dimension);
++    }
++    // Canvas end - Rebrand - world config
+ 
+     public static @Nullable BlockPos lastPhysicsProblem; // Spigot
+     public final Map<ServerExplosion.CacheKey, Float> explosionDensityCache = new java.util.HashMap<>(); // Paper - Optimize explosions
+@@ -875,6 +886,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+         this.damageSources = new DamageSources(registryAccess);
+         this.entityLookup = new ca.spottedleaf.moonrise.patches.chunk_system.level.entity.dfl.DefaultEntityLookup(this); // Paper - rewrite chunk system
+         this.chunkPacketBlockController = this.paperConfig().anticheat.antiXray.enabled ? new io.papermc.paper.antixray.ChunkPacketBlockControllerAntiXray(this, executor) : io.papermc.paper.antixray.ChunkPacketBlockController.NO_OPERATION_INSTANCE; // Paper - Anti-Xray
++        reloadCanvasConfig(); // Canvas - Rebrand - world config
+     }
+ 
+     public int getNextEntityId() {
 diff --git a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java b/net/minecraft/world/level/chunk/storage/RegionFileStorage.java
 index 63b40c420030d935bb81a219fb33defe0946e21f..598facc98fc34e91eef77b1bdf86ddbe5ff86338 100644
 --- a/net/minecraft/world/level/chunk/storage/RegionFileStorage.java

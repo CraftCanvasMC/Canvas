@@ -1,11 +1,11 @@
-package io.canvasmc.canvas.command.sub;
+package io.canvasmc.canvas.subcommands;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
-import io.canvasmc.canvas.command.SubCommand;
+import io.canvasmc.canvas.commands.SubCommand;
 import io.canvasmc.canvas.world.RegionResourceBar;
 import java.util.Collection;
 import net.minecraft.commands.CommandBuildContext;
