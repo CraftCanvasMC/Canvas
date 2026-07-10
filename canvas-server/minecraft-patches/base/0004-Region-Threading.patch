@@ -3384,6 +3384,199 @@ index 0000000000000000000000000000000000000000..64f0e45eb4213ac153b56562acddf3b9
 +import ca.spottedleaf.concurrentutil.util.Priority;
 +import org.jspecify.annotations.NullMarked;
 +import java.util.function.Consumer;
+diff --git a/io/canvasmc/canvas/threadedregions/profiler/platform/ProfilerPlatform.java b/io/canvasmc/canvas/threadedregions/profiler/platform/ProfilerPlatform.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..176b8031869c9187a6532c4118267497dd1fe076
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/profiler/platform/ProfilerPlatform.java
+@@ -0,0 +1,48 @@
++package io.canvasmc.canvas.threadedregions.profiler.platform;
++
++import com.mojang.datafixers.util.Either;
++import java.io.File;
++import java.lang.management.ThreadInfo;
++import java.net.URL;
++import java.util.Optional;
++import java.util.concurrent.CompletableFuture;
++import net.minecraft.commands.CommandSourceStack;
++import org.jspecify.annotations.NullMarked;
++import org.jspecify.annotations.Nullable;
++
++/**
++ * The platform provider for the profiler implementation
++ */
++@NullMarked
++public interface ProfilerPlatform {
++
++    /**
++     * Starts the region profiler. This function is called on the region of which that is requesting profiling
++     *
++     * @param timeout
++     *     the timeout in nanoseconds for how long it should last, or {@link Long#MIN_VALUE} for no timeout
++     * @param alloc
++     *     if this is an allocation profiler or a cpu profiler
++     * @param onlyTicksOver
++     *     only to track ticks over a specific amount of time
++     *
++     * @return A future that should complete when the profiler <b>ends</b>. Pinning is conducted before this, so we
++     *     don't care for returning a future for when we finish the start. This is simply to hook for when timeouts end.
++     *     This should return the URL or the file it was saved to. It should return {@code null} if it couldn't start
++     *     the profiler, and if it couldn't save either the file or to the URL, the future should be completed with
++     *     {@link java.util.Optional#empty()}
++     */
++    CompletableFuture<@Nullable Optional<Either<URL, File>>> start(final CommandSourceStack css, final long timeout, final boolean alloc, final double onlyTicksOver, final ThreadInfo targetThread);
++
++    /**
++     * Ends the region profiler. This function is called on the region of which that is being profiled
++     *
++     * @param css
++     *     the command source stack
++     *
++     * @return A future that should complete when the profiler finishes the result. This should return the URL or the
++     *     file it was saved to. It should return {@code null} if there was no profiler, and if it couldn't save either
++     *     the file or to the URL, the future should be completed with {@link java.util.Optional#empty()}
++     */
++    CompletableFuture<@Nullable Optional<Either<URL, File>>> end(final CommandSourceStack css);
++}
+diff --git a/io/canvasmc/canvas/threadedregions/profiler/platform/SparkRegionProfiler.java b/io/canvasmc/canvas/threadedregions/profiler/platform/SparkRegionProfiler.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..f1b8ecc1b333b3589cdfa1bc64d66780f9d93ca6
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/profiler/platform/SparkRegionProfiler.java
+@@ -0,0 +1,133 @@
++package io.canvasmc.canvas.threadedregions.profiler.platform;
++
++import com.google.common.collect.Iterables;
++import com.mojang.datafixers.util.Either;
++import io.canvasmc.canvas.spark.SparkPlatformProvider;
++import io.papermc.paper.util.MCUtil;
++import me.lucko.spark.paper.PaperCommandSender;
++import me.lucko.spark.paper.common.SparkPlatform;
++import me.lucko.spark.paper.common.activitylog.Activity;
++import me.lucko.spark.paper.common.command.Arguments;
++import me.lucko.spark.paper.common.command.CommandResponseHandler;
++import me.lucko.spark.paper.common.sampler.Sampler;
++import me.lucko.spark.paper.common.sampler.java.MergeStrategy;
++import me.lucko.spark.paper.common.sampler.source.ClassSourceLookup;
++import me.lucko.spark.paper.common.util.MediaTypes;
++import me.lucko.spark.paper.proto.SparkSamplerProtos;
++import net.kyori.adventure.text.event.ClickEvent;
++import net.minecraft.commands.CommandSourceStack;
++import org.jspecify.annotations.NullMarked;
++import org.jspecify.annotations.Nullable;
++import java.io.File;
++import java.io.IOException;
++import java.lang.management.ThreadInfo;
++import java.net.URI;
++import java.net.URL;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.util.List;
++import java.util.Optional;
++import java.util.concurrent.CompletableFuture;
++import java.util.logging.Level;
++
++import static net.kyori.adventure.text.Component.text;
++import static net.kyori.adventure.text.format.NamedTextColor.GOLD;
++import static net.kyori.adventure.text.format.NamedTextColor.GRAY;
++import static net.kyori.adventure.text.format.NamedTextColor.RED;
++
++// note we need to end the profiler by hooking in a pin end at startup to then get that completed.
++//      on shutdown of the profiler we should just call stop like normal and after stop
++@NullMarked
++public class SparkRegionProfiler implements ProfilerPlatform {
++
++    @Override
++    public CompletableFuture<@Nullable Optional<Either<URL, File>>> start(final CommandSourceStack css, final long timeout, final boolean alloc, final double onlyTicksOver, final ThreadInfo targetThread) {
++        final SparkPlatform platform = SparkPlatformProvider.getSparkPlatform();
++        final Sampler previousSampler = platform.getSamplerContainer().getActiveSampler();
++
++        if (previousSampler != null) {
++            // TODO - inform css why we failed, profiler already running
++            return CompletableFuture.completedFuture(null);
++        }
++        // TODO - is it worth it to just create a SamplerModule instance and then use reflection
++        //        to call start? or do we just replicate like we did for stop
++    }
++
++    @Override
++    public CompletableFuture<@Nullable Optional<Either<URL, File>>> end(final CommandSourceStack css) {
++        final CompletableFuture<@Nullable Optional<Either<URL, File>>> future = new CompletableFuture<>();
++        MCUtil.scheduleAsyncTask(() -> {
++            final SparkPlatform platform = SparkPlatformProvider.getSparkPlatform();
++            final Sampler sampler = platform.getSamplerContainer().getActiveSampler();
++            // TODO - make this shit better
++            final CommandResponseHandler responseHandler = new CommandResponseHandler(platform, new PaperCommandSender(css.getBukkitSender()));
++
++            if (sampler == null) {
++                // return null, no profiler is running right now
++                future.complete(null);
++            }
++            else {
++                platform.getSamplerContainer().unsetActiveSampler(sampler);
++                sampler.stop(false);
++
++                final Sampler.ExportProps exportProps = getExportProps(platform, responseHandler, new Arguments(List.of(), false));
++                final Either<URL, File> either = handleUpload(platform, responseHandler, sampler, exportProps, false);
++
++                future.complete(Optional.ofNullable(either));
++            }
++        });
++        return future;
++    }
++
++    private static Sampler.ExportProps getExportProps(
++        final SparkPlatform platform, final CommandResponseHandler resp, final Arguments arguments
++    ) {
++        return new Sampler.ExportProps()
++            .creator(resp.senderData())
++            .comment(Iterables.getFirst(arguments.stringFlag("comment"), null))
++            .mergeStrategy(arguments.boolFlag("separate-parent-calls") ? MergeStrategy.SEPARATE_PARENT_CALLS : MergeStrategy.SAME_METHOD)
++            .classSourceLookup(() -> ClassSourceLookup.create(platform));
++    }
++
++    @Nullable
++    private static Either<URL, File> handleUpload(SparkPlatform platform, CommandResponseHandler resp, Sampler sampler, Sampler.ExportProps exportProps, boolean saveToFileFlag) {
++        final SparkSamplerProtos.SamplerData output = sampler.toProto(platform, exportProps);
++
++        try {
++            final String key = platform.getBytebinClient().postContent(output, MediaTypes.SPARK_SAMPLER_MEDIA_TYPE).key();
++            final String url = platform.getViewerUrl() + key;
++
++            resp.broadcastPrefixed(text("Profiler stopped & upload complete!", GOLD));
++            resp.broadcast(text()
++                .content(url)
++                .color(GRAY)
++                .clickEvent(ClickEvent.openUrl(url))
++                .build()
++            );
++
++            platform.getActivityLog().addToLog(Activity.urlActivity(resp.senderData(), System.currentTimeMillis(), "Profiler", url));
++            return Either.left(URI.create(url).toURL());
++        } catch (final Throwable thrown) {
++            resp.broadcastPrefixed(text("An error occurred whilst uploading the results. Attempting to save to disk instead.", RED));
++            platform.getPlugin().log(Level.WARNING, "Error whilst uploading profiler results", thrown);
++        }
++
++        // fallback to trying to save to disk
++
++        final Path file = platform.resolveSaveFile("profile", "sparkprofile");
++        try {
++            Files.write(file, output.toByteArray());
++
++            resp.broadcastPrefixed(text("Profiler stopped & save complete!", GOLD));
++            resp.broadcastPrefixed(text("Data has been written to: " + file));
++            resp.broadcastPrefixed(text("You can view the profile file using the web app @ " + platform.getViewerUrl(), GRAY));
++
++            platform.getActivityLog().addToLog(Activity.fileActivity(resp.senderData(), System.currentTimeMillis(), "Profiler", file.toString()));
++            return Either.right(file.toFile());
++        } catch (final IOException ioe) {
++            resp.broadcastPrefixed(text("An error occurred whilst saving the data.", RED));
++            platform.getPlugin().log(Level.WARNING, "Error whilst saving profiler results", ioe);
++            return null;
++        }
++    }
++}
 diff --git a/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02484235ea
