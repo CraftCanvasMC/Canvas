@@ -1,34 +1,32 @@
 package io.canvasmc.canvas.util;
 
 import java.util.Optional;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import org.jetbrains.annotations.UnknownNullability;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A wrapper of a generic type {@code E} that is modified via swap operations, in a way where upon mutations the object
- * being replaced with should not be the same as the previous object. Sort of a "copy, mutate, paste" style
- * <p>
- * All mutators should return a new object or copy of the previous object to maintain consistency with the intent of
- * this utility class
+ * A wrapper of a generic type {@code E} that is wrapped in a reentrant read write lock for all operations
  *
  * @param <E>
  *     the generic type element
  *
  * @author dueris
  */
-public class LockedReference<E> {
-    private final ReentrantLock writeLock = new ReentrantLock(true);
+public class ReadWriteLockedReference<E> {
+    private final ReadWriteLock rwlock = new ReentrantReadWriteLock(true);
 
     @UnknownNullability
     private E value;
 
-    public LockedReference(final @Nullable E default_) {
+    public ReadWriteLockedReference(final @Nullable E default_) {
         this.value = default_;
     }
 
-    public LockedReference() {
+    public ReadWriteLockedReference() {
         this(null);
     }
 
@@ -46,9 +44,39 @@ public class LockedReference<E> {
      * Gets if the value currently is set
      *
      * @return {@code true} if the value is set, {@code false} otherwise
+     *
+     * @apiNote Holds the read lock
      */
     public boolean isSet() {
-        return value != null;
+        rwlock.readLock().lock();
+        try {
+            return value != null;
+        } finally {
+            rwlock.readLock().unlock();
+        }
+    }
+
+    /**
+     * If the value is present it executes the consumer {@code ifPresent}, otherwise if the {@code orElse} runnable is
+     * nonnull then that gets run
+     *
+     * @param ifPresent
+     *     the consumer to run if the value is present
+     * @param orElse
+     *     the runnable to run if the value is not present
+     *
+     * @apiNote Holds the read lock
+     */
+    public void runIfPresentOrElse(final Consumer<E> ifPresent, final @Nullable Runnable orElse) {
+        rwlock.readLock().lock();
+        try {
+            if (value != null) {
+                ifPresent.accept(value);
+            }
+            else if (orElse != null) orElse.run();
+        } finally {
+            rwlock.readLock().unlock();
+        }
     }
 
     /**
@@ -73,13 +101,15 @@ public class LockedReference<E> {
      *
      * @param operator
      *     the operator to apply, the returned value can be {@code null}
+     *
+     * @apiNote Holds the write lock
      */
     public void swapValue(final UnaryOperator<@Nullable E> operator) {
-        writeLock.lock();
+        rwlock.writeLock().lock();
         try {
             value = operator.apply(value);
         } finally {
-            writeLock.unlock();
+            rwlock.writeLock().unlock();
         }
     }
 
@@ -90,13 +120,15 @@ public class LockedReference<E> {
      *     the operator to apply, the returned value can be {@code null}
      *
      * @return the new value
+     *
+     * @apiNote Holds the write lock
      */
     public E swapAndGet(final UnaryOperator<E> operator) {
-        writeLock.lock();
+        rwlock.writeLock().lock();
         try {
             return value = operator.apply(value);
         } finally {
-            writeLock.unlock();
+            rwlock.writeLock().unlock();
         }
     }
 
@@ -104,9 +136,16 @@ public class LockedReference<E> {
      * Gets the current value
      *
      * @return the value
+     *
+     * @apiNote Holds the read lock
      */
     @UnknownNullability
     public E getValue() {
-        return value;
+        rwlock.readLock().lock();
+        try {
+            return value;
+        } finally {
+            rwlock.readLock().unlock();
+        }
     }
 }
