@@ -7,13 +7,14 @@ import io.canvasmc.canvas.spark.provider.FoliaClassSourceLookup;
 import io.canvasmc.canvas.spark.provider.FoliaPlayerPingProvider;
 import io.canvasmc.canvas.spark.provider.FoliaServerConfigProvider;
 import io.canvasmc.canvas.spark.provider.FoliaWorldInfoProvider;
-import io.canvasmc.canvas.threadedregions.profiler.RegionThreadDumper;
+import io.canvasmc.canvas.threadedregions.profiler.InterchangeableThreadDumper;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import me.lucko.spark.api.Spark;
 import me.lucko.spark.paper.PaperCommandSender;
@@ -56,7 +57,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
         this.classLookup = classLookup;
         this.tickHook = new FoliaTickHook();
         this.tickReporter = new FoliaTickReporter();
-        this.gameThreadDumper = new RegionThreadDumper();
+        this.gameThreadDumper = new InterchangeableThreadDumper(Pattern.compile("Folia Region Scheduler Thread #\\d+", Pattern.CASE_INSENSITIVE));
         this.platform = new SparkPlatform(this);
     }
 
