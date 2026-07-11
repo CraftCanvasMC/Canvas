@@ -1,5 +1,17 @@
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
+@@ -389,6 +_,11 @@
+     public long activatedTick = Integer.MIN_VALUE;
+     public boolean isTemporarilyActive;
+     public long activatedImmunityTick = Integer.MIN_VALUE;
++    // Canvas start - preserve portal tick order across regions
++    // Transient state: a newly-entered portal must be handled before another physics tick if the
++    // entity changed region ownership while entering it. This is deliberately not serialized.
++    public int canvas$portalTickState;
++    // Canvas end - preserve portal tick order across regions
+ 
+     public void inactiveTick() {
+     }
 @@ -908,7 +_,7 @@
          }
  
@@ -113,6 +125,76 @@
                  if (this.level.paperConfig().collisions.onlyPlayersCollide && !(entity instanceof ServerPlayer || this instanceof ServerPlayer)) return; // Paper - Collision option for requiring a player participant
                  double xa = entity.getX() - this.getX();
                  double za = entity.getZ() - this.getZ();
+@@ -3594,6 +_,7 @@
+         } else {
+             if (this.portalProcess == null || !this.portalProcess.isSamePortal(portal)) {
+                 this.portalProcess = new PortalProcessor(portal, pos.immutable());
++                if (!(this instanceof Player)) this.canvas$portalTickState = 1; // Canvas - preserve portal tick order across regions
+             } else if (!this.portalProcess.isInsidePortalThisTick()) {
+                 this.portalProcess.updateEntryPosition(pos.immutable());
+                 this.portalProcess.setAsInsidePortalThisTick(true);
+@@ -3604,14 +_,50 @@
+     public boolean handlePortal() { // Folia - region threading - ret type -> boolean
+-        if (this.level() instanceof ServerLevel level) {
+-            this.processPortalCooldown();
+-            if (this.portalProcess != null) {
+-                if (this.portalProcess.processPortalTeleportation(level, this, this.canUsePortal(false))) {
+-                    this.setPortalCooldown();
+-                    return this.portalProcess.portalAsync(level, this); // Folia - region threading
+-                } else if (this.portalProcess.hasExpired()) {
+-                    this.portalProcess = null;
+-                }
+-            }
+-        }
++        if (!(this.level() instanceof ServerLevel level)) {
++            return false;
++        }
++
++        final PortalProcessor processor = this.portalProcess;
++        // Canvas start - preserve portal tick order across regions
++        // true means that this tick must stop: the portal hand-off either started or must be
++        // retried by the region that owns both the entity and its portal entry block.
++        if (processor != null && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            if (!(this instanceof Player) && processor.isInsidePortalThisTick()) {
++                this.canvas$portalTickState = 1;
++            }
++            return true;
++        }
++
++        final boolean allowedToTeleport = processor != null && this.canUsePortal(false);
++        if (
++            processor != null
++                && processor.isReadyToTeleport(level, this, allowedToTeleport)
++                && processor.requiresPortalEntryBlockOwnership()
++                && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, processor.getEntryPosition())
++        ) {
++            // Region topology may settle between ticks, but the entity and an along-path portal
++            // can also remain in distinct regions. Retry once, then abandon cleanly rather than
++            // freezing the entity forever with physics disabled.
++            // Players keep moving before their next portal check and therefore cannot safely retain
++            // a stale inside marker; only the non-player pre-physics state machine may defer.
++            if (!(this instanceof Player) && processor.shouldDeferForPortalRegionOwnership(this.tickCount)) {
++                this.canvas$portalTickState = 1;
++                return true;
++            }
++            this.portalProcess = null;
++            this.canvas$portalTickState = 0;
++            return false;
++        }
++        // Canvas end - preserve portal tick order across regions
++
++        this.processPortalCooldown();
++        if (processor != null) {
++            if (processor.processPortalTeleportation(level, this, allowedToTeleport)) {
++                this.setPortalCooldown();
++                this.canvas$portalTickState = 0; // Canvas - portal attempt was committed
++                return processor.portalAsync(level, this); // Folia - region threading
++            } else if (processor.hasExpired()) {
++                this.portalProcess = null;
++            }
++        }
+         return false; // Folia - region threading
+     }
 @@ -3898,6 +_,7 @@
      }
  
@@ -121,6 +203,39 @@
          if (level instanceof ServerLevel serverLevel) {
              RandomSource random = level.getRandom();
  
+@@ -4418,13 +_,31 @@
+     }
+ 
+     protected final void transform(final TeleportTransition telpeort) {
++        this.transform(PositionMoveRotation.of(this), telpeort);
++    }
++
++    // Canvas start - preserve live entity state through async dimension copies
++    protected final void transform(final PositionMoveRotation source, final TeleportTransition teleport) {
+         PositionMoveRotation move = PositionMoveRotation.calculateAbsolute(
+-            PositionMoveRotation.of(this), PositionMoveRotation.of(telpeort), telpeort.relatives()
++            source, PositionMoveRotation.of(teleport), teleport.relatives()
+         );
+         this.transform(
+             move.position(), move.yRot(), move.xRot(), move.deltaMovement()
+         );
+     }
++    // Canvas end - preserve live entity state through async dimension copies
++
++    // Canvas start - preserve portal momentum
++    protected final void transformForPortal(
++        final PositionMoveRotation source, final TeleportTransition teleport, final boolean preserveWorldSpaceVelocity
++    ) {
++        if (preserveWorldSpaceVelocity) {
++            this.transform(teleport.position(), teleport.yRot(), source.xRot(), source.deltaMovement());
++        } else {
++            this.transform(source, teleport);
++        }
++    }
++    // Canvas end - preserve portal momentum
+ 
+     protected void transform(final @Nullable Vec3 pos, final @Nullable Float yaw, final @Nullable Float pitch, final @Nullable Vec3 velocity) {
+         if (yaw != null) {
 @@ -4724,7 +_,7 @@
      public boolean endPortalLogicAsync(final BlockPos portalPos) {
          ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
@@ -139,6 +254,105 @@
          if (destination == null) {
              // wat
              return false;
+@@ -4767,14 +_,18 @@
+                         targetPos, 16, // load 16 blocks to be safe from block physics
+                         ca.spottedleaf.concurrentutil.util.Priority.HIGH,
+                         (chunks) -> {
+-                            net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(destination, targetPos.below(), true, null);
++                            // Canvas start - vanilla non-player End portal placement
++                            // Players stand on the platform; non-player entities retain the extra block of clearance
++                            // needed by vanilla contraptions. The platform is created after placement below.
++                            Vec3 finalPos = Vec3.atBottomCenterOf(this instanceof Player ? targetPos.below() : targetPos);
++                            // Canvas end - vanilla non-player End portal placement
+ 
+                             // the portal obsidian is placed at targetPos.y - 2, so if we want to place the entity
+                             // on the obsidian, we need to spawn at targetPos.y - 1
+                             portalInfoCompletable.complete(
+                                 new net.minecraft.world.level.portal.TeleportTransition(
+-                                    destination, Vec3.atBottomCenterOf(targetPos.below()), Vec3.ZERO, Direction.WEST.toYRot(), 0.0f,
+-                                    Relative.union(Relative.DELTA, Set.of(Relative.X_ROT)),
++                                    destination, finalPos, Vec3.ZERO, Direction.WEST.toYRot(), 0.0f,
++                                    Set.of(), // Canvas - End portals preserve world-space momentum; applied per entity below
+                                     TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET),
+                                     org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_PORTAL
+                                 )
+@@ -4846,7 +_,9 @@
+                             portalInfoCompletable.complete(
+                                 new TeleportTransition(destination, Vec3.atCenterOf(targetPos), Vec3.ZERO,
+                                     90.0f, 0.0f,
+-                                    TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET))
++                                    Relative.union(Relative.direction(true, true, true), Set.of(Relative.X_ROT)),
++                                    TeleportTransition.PLAY_PORTAL_SOUND.then(TeleportTransition.PLACE_PORTAL_TICKET),
++                                    org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.NETHER_PORTAL)
+                             );
+                             return;
+                         }
+@@ -5018,6 +_,18 @@
+             canvas$ensureCanPortalAsync(destination, takePassengers);
+         }
+         final ServerLevel finalDestination = destination;
++        // Canvas start - vanilla End platform timing
++        final boolean enteringEnd = type == PortalType.END
++            && finalDestination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END;
++        final java.util.function.Consumer<Entity> finalTeleportComplete = enteringEnd
++            ? teleported -> {
++                net.minecraft.world.level.levelgen.feature.EndPlatformFeature.createEndPlatform(
++                    finalDestination, ServerLevel.END_SPAWN_POINT.below(), true, null
++                );
++                if (teleportComplete != null) teleportComplete.accept(teleported);
++            }
++            : teleportComplete;
++        // Canvas end - vanilla End platform timing
+         // Canvas end - region threading
+ 
+         Vec3 initialPosition = this.position();
+@@ -5040,7 +_,12 @@
+             node.root.prePortalLogic(originWorld, destination, type);
+         }
+ 
++        // Canvas start - preserve live entity state through async dimension copies
++        // restoreFrom serializes through NBT, whose load path clamps motion components above 10.
++        // Retain the live state, as vanilla's synchronous cross-dimension path does.
++        List<PositionMoveRotation> portalSources = new ArrayList<>(fullPassengerTree.size());
+         for (EntityTreeNode node : fullPassengerTree) {
++            portalSources.add(PositionMoveRotation.of(node.root));
+             // we will update pos/rot/speed later
+             node.root = node.root.transformForAsyncTeleport(destination, null, null, null, null);
+             // set portal cooldown
+@@ -5051,6 +_,7 @@
+             }
+             // Canvas end - region threading
+         }
++        // Canvas end - preserve live entity state through async dimension copies
+ 
+         // ensure the region is always ticking in case of a shutdown
+         // otherwise, the shutdown will not be able to complete the shutdown as it requires a ticking region
+@@ -5079,8 +_,12 @@
+                 teleportHoldId
+             );
+             // adjust passenger tree to final pos/rot/speed
+-            for (EntityTreeNode node : fullPassengerTree) {
+-                node.root.transform(info);
++            for (int i = 0; i < fullPassengerTree.size(); ++i) {
++                EntityTreeNode node = fullPassengerTree.get(i);
++                PositionMoveRotation source = portalSources.get(i);
++                // The End has no exit-frame axis. Preserve each entity's world-space velocity rather
++                // than rotating the whole passenger tree toward the platform's fixed west-facing yaw.
++                node.root.transformForPortal(source, info, enteringEnd);
+             }
+ 
+             // place
+@@ -5096,8 +_,8 @@
+                     this.canvas$teleportingToDimension = null;
+                     this.canvas$lastTeleportOrigin = null;
+                     // Canvas end - region threading
+-                    if (teleportComplete != null) {
+-                        teleportComplete.accept(teleported);
++                    if (finalTeleportComplete != null) {
++                        finalTeleportComplete.accept(teleported);
+                     }
+                     // Canvas start - region threading
+                     if (io.canvasmc.canvas.event.EntityPostPortalAsyncEvent.getHandlerList().getRegisteredListeners().length > 0) {
 @@ -5356,7 +_,7 @@
  
      public boolean canTeleport(final Level from, final Level to) {

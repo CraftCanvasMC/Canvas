@@ -191,6 +191,69 @@
          // CraftBukkit start
          // If we stop due to everyone sleeping we should reset the weather duration to some other random value.
          // Not that everyone ever manages to get the whole server to sleep at the same time....
+@@ -1471,16 +_,62 @@
+         entity.totalEntityAge++; // Paper - age-like counter for all entities
+         final boolean isActive = io.papermc.paper.entity.activation.ActivationRange.checkIfActive(entity); // Paper - EAR 2
+         if (isActive) { // Paper - EAR 2
++        // Canvas start - preserve portal tick order across regions
++        if (entity.canvas$portalTickState == 2) {
++            // The previous tick handled the portal before physics. If teleportation did not happen,
++            // compensate that skipped physics tick, then perform this tick normally.
++            entity.tick();
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                // The first compensation tick crossed a region; resume compensation in its new owner.
++                return;
++            }
++            // Any portal entered by the tick above can be handled immediately by this region.
++            entity.canvas$portalTickState = 0;
++            if (entity.handlePortal()) {
++                return;
++            }
++
++            // Keep the compensation marker until the second tick has completed on one region owner.
++            entity.canvas$portalTickState = 2;
++            entity.tick();
++            // Both owed physics ticks are now complete. Preserve state 1 only if this tick entered
++            // another portal; otherwise a region hand-off must resume normal ticking, not compensate again.
++            if (entity.canvas$portalTickState == 2) entity.canvas$portalTickState = 0;
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                return;
++            }
++            // As above, consume state 1 only because handlePortal runs immediately below.
++            if (entity.canvas$portalTickState == 1) entity.canvas$portalTickState = 0;
++            if (entity.handlePortal()) {
++                return;
++            }
++        } else if (entity.canvas$portalTickState == 1) {
++            // Entering the portal changed region ownership during the preceding entity tick. Handle
++            // the portal before collision, drag, or gravity can mutate its position and momentum again.
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                return;
++            }
++            entity.canvas$portalTickState = 0;
++            if (entity.handlePortal()) {
++                return;
++            }
++            // The pre-physics portal attempt failed, so the skipped physics tick is still owed.
++            entity.canvas$portalTickState = 2;
++        } else {
+         entity.tick();
+         // Folia start - region threading
+         if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
+             // removed from region while ticking
+             return;
+         }
++        // State 1 is only deferred across a region hand-off. This region can handle it now.
++        if (entity.canvas$portalTickState == 1) entity.canvas$portalTickState = 0;
+         if (entity.handlePortal()) {
+             // portalled
+             return;
+         }
++        }
++        // Canvas end - preserve portal tick order across regions
+         // Folia end - region threading
+         } else {entity.inactiveTick();} // Paper - EAR 2
+ 
 @@ -1771,7 +_,7 @@
  
      public void unload(final LevelChunk levelChunk) {
