@@ -2713,6 +2713,78 @@ index 0000000000000000000000000000000000000000..2db8637c3e909ffb960152883e0789e7
 +        return SparkSamplerProtos.SamplerMetadata.DataAggregator.ThreadGrouper.BY_POOL;
 +    }
 +}
+diff --git a/io/canvasmc/canvas/threadedregions/profiler/InterchangeableThreadDumper.java b/io/canvasmc/canvas/threadedregions/profiler/InterchangeableThreadDumper.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..da70d8eca137c898e0f57d14710f2d2c8b91285a
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/profiler/InterchangeableThreadDumper.java
+@@ -0,0 +1,66 @@
++package io.canvasmc.canvas.threadedregions.profiler;
++
++import com.mojang.datafixers.util.Either;
++import java.lang.management.ThreadInfo;
++import java.lang.management.ThreadMXBean;
++import java.util.HashMap;
++import java.util.Map;
++import java.util.Objects;
++import java.util.regex.Pattern;
++import me.lucko.spark.paper.common.sampler.ThreadDumper;
++import me.lucko.spark.paper.common.util.ThreadFinder;
++import me.lucko.spark.paper.proto.SparkSamplerProtos;
++
++/**
++ * A threaddumper implementaton
++ *
++ * @author dueris
++ */
++public class InterchangeableThreadDumper implements ThreadDumper {
++
++    // just do specific because this one is a weird mix
++    private static final SparkSamplerProtos.SamplerMetadata.ThreadDumper METADATA = SparkSamplerProtos.SamplerMetadata.ThreadDumper.newBuilder().setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC).build();
++
++    private final ThreadFinder threadFinder = new ThreadFinder();
++    private final Map<Long, Boolean> cache = new HashMap<>();
++
++    private final Either<ThreadInfo, Pattern> target;
++
++    public InterchangeableThreadDumper(final Pattern targetPattern) {
++        this.target = Either.right(targetPattern);
++    }
++
++    public InterchangeableThreadDumper(final ThreadInfo targetThread) {
++        this.target = Either.left(targetThread);
++    }
++
++    @Override
++    public ThreadInfo[] dumpThreads(final ThreadMXBean threadBean) {
++        return this.threadFinder.getThreads()
++            .filter((thread) -> this.isThreadIncluded(thread.threadId(), thread.getName()))
++            .map((thread) -> threadBean.getThreadInfo(thread.threadId(), Integer.MAX_VALUE))
++            .filter(Objects::nonNull)
++            .toArray(ThreadInfo[]::new);
++    }
++
++    @Override
++    public boolean isThreadIncluded(final long threadId, final String threadName) {
++        final ThreadInfo targetThread = target.left().orElse(null);
++        final Pattern targetPattern = target.right().orElse(null);
++
++        if (targetThread != null) {
++            return targetThread.getThreadId() == threadId && targetThread.getThreadName().equals(threadName);
++        }
++        else if (targetPattern == null) {
++            throw new IllegalStateException("Target pattern and target thread cannot both be empty");
++        }
++
++        // get from cache or compute if absent
++        return cache.computeIfAbsent(threadId, _ -> targetPattern.matcher(threadName).matches());
++    }
++
++    @Override
++    public SparkSamplerProtos.SamplerMetadata.ThreadDumper getMetadata() {
++        return METADATA;
++    }
++}
 diff --git a/io/canvasmc/canvas/threadedregions/profiler/RegionProfiler.java b/io/canvasmc/canvas/threadedregions/profiler/RegionProfiler.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..6a36502399b2324fd6da56a6145552f7cd126dc6
@@ -3119,59 +3191,6 @@ index 0000000000000000000000000000000000000000..f318603ff77527f8c5326721ed4122ef
 +        }
 +    }
 +}
-diff --git a/io/canvasmc/canvas/threadedregions/profiler/RegionThreadDumper.java b/io/canvasmc/canvas/threadedregions/profiler/RegionThreadDumper.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..abf7e268e9855ff11584ca0d2a031478e538f89d
---- /dev/null
-+++ b/io/canvasmc/canvas/threadedregions/profiler/RegionThreadDumper.java
-@@ -0,0 +1,47 @@
-+package io.canvasmc.canvas.threadedregions.profiler;
-+
-+import io.canvasmc.canvas.threadedregions.SchedulerUtil;
-+import java.lang.management.ThreadInfo;
-+import java.lang.management.ThreadMXBean;
-+import java.util.HashMap;
-+import java.util.Map;
-+import java.util.Objects;
-+import java.util.regex.Pattern;
-+import me.lucko.spark.paper.common.sampler.ThreadDumper;
-+import me.lucko.spark.paper.common.util.ThreadFinder;
-+import me.lucko.spark.paper.proto.SparkSamplerProtos;
-+
-+/**
-+ * A {@link ThreadDumper} implementation that works similar to the {@link ThreadDumper.Regex} dumper, however it will
-+ * return the tracking thread <i>only</i> if a region profiler is currently running.
-+ *
-+ * @author dueris
-+ */
-+public class RegionThreadDumper implements ThreadDumper {
-+    public static final ThreadDumper INSTANCE = new RegionThreadDumper();
-+
-+    private final ThreadFinder threadFinder = new ThreadFinder();
-+    private final Map<Long, Boolean> cache = new HashMap<>();
-+    private final Pattern regionThreadNamePattern = Pattern.compile("Folia Region Scheduler Thread #\\d+", Pattern.CASE_INSENSITIVE);
-+
-+    @Override
-+    public ThreadInfo[] dumpThreads(final ThreadMXBean threadBean) {
-+        return this.threadFinder.getThreads().filter((thread) -> this.isThreadIncluded(thread.threadId(), thread.getName())).map((thread) -> threadBean.getThreadInfo(thread.threadId(), Integer.MAX_VALUE)).filter(Objects::nonNull).toArray(ThreadInfo[]::new);
-+    }
-+
-+    @Override
-+    public boolean isThreadIncluded(final long threadId, final String threadName) {
-+        if (SchedulerUtil.getHandle().isRunningRegionProfiler()) {
-+            return SchedulerUtil.getHandle().isRunningRegionProfilerOnThread(threadId, threadName);
-+        }
-+
-+        // get from cache or compute+cache
-+        return this.cache.computeIfAbsent(threadId, _ -> this.regionThreadNamePattern.matcher(threadName).matches());
-+    }
-+
-+    @Override
-+    public SparkSamplerProtos.SamplerMetadata.ThreadDumper getMetadata() {
-+        // just do specific because this one is a weird mix
-+        return SparkSamplerProtos.SamplerMetadata.ThreadDumper.newBuilder().setType(SparkSamplerProtos.SamplerMetadata.ThreadDumper.Type.SPECIFIC).build();
-+    }
-+}
 diff --git a/io/canvasmc/canvas/threadedregions/profiler/Session.java b/io/canvasmc/canvas/threadedregions/profiler/Session.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..d5baae7e1b9db80a63c88e7e8612ef5155737538
@@ -3395,7 +3414,7 @@ index 0000000000000000000000000000000000000000..54914ce69bf8eab240a3cde4079f47f3
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/profiler/platform/SparkRegionProfiler.java b/io/canvasmc/canvas/threadedregions/profiler/platform/SparkRegionProfiler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..34b329162bf3083c0f57b4f1e92136f653e9d356
+index 0000000000000000000000000000000000000000..3b1c9fdf7e9da96ed23b3865107071b38cf554f4
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/profiler/platform/SparkRegionProfiler.java
 @@ -0,0 +1,221 @@
@@ -3404,7 +3423,7 @@ index 0000000000000000000000000000000000000000..34b329162bf3083c0f57b4f1e92136f6
 +import com.google.common.collect.Iterables;
 +import com.mojang.datafixers.util.Either;
 +import io.canvasmc.canvas.spark.SparkPlatformProvider;
-+import io.canvasmc.canvas.threadedregions.profiler.RegionThreadDumper;
++import io.canvasmc.canvas.threadedregions.profiler.InterchangeableThreadDumper;
 +import io.papermc.paper.util.MCUtil;
 +import java.io.File;
 +import java.io.IOException;
@@ -3461,7 +3480,7 @@ index 0000000000000000000000000000000000000000..34b329162bf3083c0f57b4f1e92136f6
 +        }
 +
 +        final SamplerMode samplerMode = alloc ? SamplerMode.ALLOCATION : SamplerMode.EXECUTION;
-+        final ThreadDumper threadDumper = RegionThreadDumper.INSTANCE;
++        final ThreadDumper threadDumper = new InterchangeableThreadDumper(targetThread);
 +
 +        TickHook tickHook = null;
 +        if (onlyTicksOver != Integer.MIN_VALUE) {
