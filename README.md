@@ -89,4 +89,4 @@ This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**
 
 ## Acknowledgments & Inspiration
 
-Canvas incorporates patches inspired by or derived from other high-performance projects (e.g. **Lithium**, **Leaf**), along with its own custom optimizations.
+Canvas incorporates patches inspired by or derived from other high-performance projects (e.g. **Lithium**, **Leaf**, **Luminol**), along with its own custom optimizations.
