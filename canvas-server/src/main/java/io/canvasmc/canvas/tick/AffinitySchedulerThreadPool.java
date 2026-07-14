@@ -392,7 +392,17 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     @Override
     public void notifyTasks(final @NonNull SchedulableTick task) {
         if (task.state == null) return;
-        ((ScheduledState) task.state).markedWithTasks.set(true);
+        final ScheduledState state = (ScheduledState) task.state;
+        state.markedWithTasks.set(true);
+        final boolean changed = state.markedWithTasks.compareAndSet(false, true);
+
+        // try wake owner if present. if the thread is parking to wait
+        // until next tick, we can wake and have it run intermediate tasks
+
+        final TickThreadRunner owner = state.ownedBy;
+        if (changed && owner != null) {
+            LockSupport.unpark(owner.getRunnerThread());
+        }
     }
 
     public static final class ScheduledState {
