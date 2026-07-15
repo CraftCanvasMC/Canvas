@@ -694,6 +694,7 @@ public class GlobalConfiguration extends Part {
 
     public Autosave autosave = new Autosave();
 
+    @Undocumented("Doesn't require docs.")
     public static class Autosave extends Part {
 
         {
@@ -702,23 +703,14 @@ public class GlobalConfiguration extends Part {
 
         private String autosaveFrequency = "5m";
 
-        @Undocumented("Doesn't require docs.")
         public boolean autosaveScoreboards = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosaveStopwatches = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosavePearls = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosaveCustomBossEvents = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosaveTime = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosaveMaps = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosaveWeather = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosaveGamerules = true;
-        @Undocumented("Doesn't require docs.")
         public boolean autosavePlayers = true;
     }
 }

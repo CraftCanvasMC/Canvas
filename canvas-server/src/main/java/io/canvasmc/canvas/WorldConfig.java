@@ -232,6 +232,7 @@ public class WorldConfig extends Part {
     }
 
     public Visuals visuals = new Visuals();
+    @Undocumented("Doesn't require docs.")
     public static class Visuals extends Part {
 
         {
@@ -242,12 +243,11 @@ public class WorldConfig extends Part {
                 );
         }
 
-        @Undocumented("Doesn't require docs.")
         public boolean hideFlamesOnEntitiesWithFireResistance = false;
-        @Undocumented("Doesn't require docs.")
         public boolean hideFlamesOnEntitiesWithInvisibility = false;
 
         public Particles particles = new Particles();
+        @Undocumented("Doesn't require docs.")
         public static class Particles extends Part {
 
             {
@@ -255,16 +255,11 @@ public class WorldConfig extends Part {
                 option("disableNewCombatParticles").docs("Note that when enabled this option breaks Vanilla visual compatibility");
             }
 
-            @Undocumented("Doesn't require docs.")
             public boolean disableSprintParticles = false;
             public boolean disableFallParticles = false;
-            @Undocumented("Doesn't require docs.")
             public boolean disableDeathParticles = false;
-            @Undocumented("Doesn't require docs.")
             public boolean disableEffectParticles = false;
-            @Undocumented("Doesn't require docs.")
             public boolean disableWaterSplashParticles = false;
-            @Undocumented("Doesn't require docs.")
             public boolean disableBubbleColumnParticles = false;
             public boolean disableNewCombatParticles = false;
         }
@@ -288,6 +283,7 @@ public class WorldConfig extends Part {
     public boolean disableGrassLightChecks = false;
 
     public Farming farming = new Farming();
+    @Undocumented("Doesn't require docs.")
     public static class Farming extends Part {
 
         {
@@ -295,15 +291,11 @@ public class WorldConfig extends Part {
             option("cropsIgnoreLightCheck").docs("Makes crops ignore sunlight requirements when planting");
         }
 
-        @Undocumented("Doesn't require docs.")
         public boolean farmlandAlwaysMoist = false;
-        @Undocumented("Doesn't require docs.")
         public boolean disableLeafDecay = false;
         public boolean cropsIgnoreLightCheck = false;
         public boolean disableFarmlandTrampling = false;
-        @Undocumented("Doesn't require docs.")
         public boolean sugarCaneBonemealable = false;
-        @Undocumented("Doesn't require docs.")
         public boolean netherWartBonemealable = false;
     }
 
@@ -449,6 +441,7 @@ public class WorldConfig extends Part {
         public double skeletonAimAccuracy = 14.0D;
 
         public Villagers villagers = new Villagers();
+        @Undocumented("Doesn't require docs.")
         public static class Villagers extends Part {
 
             {
@@ -457,11 +450,8 @@ public class WorldConfig extends Part {
             }
 
             public boolean villagerAcquirePoiTasksLoadChunks = true;
-            @Undocumented("Doesn't require docs.")
             public boolean reduceJobSitePoiSearchRange = false;
-            @Undocumented("Doesn't require docs.")
             public boolean reduceHomePoiSearchRange = false;
-            @Undocumented("Doesn't require docs.")
             public boolean reduceMeetingPointPoiSearchRange = false;
         }
 

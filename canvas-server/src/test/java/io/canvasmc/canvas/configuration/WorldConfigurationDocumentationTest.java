@@ -96,7 +96,10 @@ class WorldConfigurationDocumentationTest {
         final Class<?> partClass,
         final List<String> errors
     ) {
-        final Undocumented undocumented = field.getAnnotation(Undocumented.class);
+        final Undocumented undocumented =
+            field.getAnnotation(Undocumented.class) != null
+                ? field.getAnnotation(Undocumented.class)
+                : partClass.getAnnotation(Undocumented.class);
 
         if (undocumented == null) {
             return false;
