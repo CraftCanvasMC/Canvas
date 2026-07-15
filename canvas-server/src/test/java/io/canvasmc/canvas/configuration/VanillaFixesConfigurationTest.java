@@ -75,6 +75,8 @@ class VanillaFixesConfigurationTest {
 
             throw new AssertionError(message);
         }
+        // we don't have debug so we don't fail
+        missing.forEach(issue -> System.err.println(issue + " does not exist on Mojira."));
     }
 
     private static JsonArray queryMojira(final Set<String> issues) throws Exception {
@@ -157,7 +159,7 @@ class VanillaFixesConfigurationTest {
 
         return versions.asList().stream()
             .map(version -> version.getAsJsonObject().get("name").getAsString())
-            .anyMatch(version -> "Future Update".equalsIgnoreCase(version) || "Future Hotfix".equalsIgnoreCase(version));
+            .allMatch(version -> "Future Update".equalsIgnoreCase(version) || "Future Hotfix".equalsIgnoreCase(version));
     }
 
     private static JsonObject getLatestFixVersion(final JsonObject fields) {
