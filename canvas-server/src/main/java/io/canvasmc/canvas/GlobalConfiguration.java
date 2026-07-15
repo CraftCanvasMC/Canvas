@@ -6,6 +6,7 @@ import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
+import io.canvasmc.canvas.configuration.Undocumented;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
@@ -439,9 +440,13 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean makeFluidPostProcessScheduledTick = false;
+        @Undocumented(because = "Docs haven't been written yet.")
         public boolean optimizeAquifer = false;
+        @Undocumented(because = "Docs haven't been written yet.")
         public boolean useEndBiomeCache = false;
+        @Undocumented(because = "Controls the cache size.")
         public int endBiomeCacheSize = 1024;
+        @Undocumented(because = "Docs haven't been written yet.")
         public boolean optimizeBeardifier = false;
 
         public StructureGen structureOptimizations = new StructureGen();
@@ -463,6 +468,7 @@ public class GlobalConfiguration extends Part {
             }
 
             public boolean deduplicateShuffledTemplatePoolElementList = false;
+            @Undocumented(because = "Controls whether structure optimizations are enabled in general.")
             public boolean enable = false;
         }
 
@@ -551,6 +557,13 @@ public class GlobalConfiguration extends Part {
                     "If alternative playerlist tick is enabled, this is the interval in ticks for how often",
                     "each bucket will be ticked"
                 ).greaterThan(0.0F);
+            option("purpurAlternativeKeepalive")
+                .docs(
+                    "Uses a different approach to keepalive ping timeouts.",
+                    "Enabling this sends a keepalive packet once per second to a player, and only kicks for timeout if none of them were responded to in 30 seconds.",
+                    "Responding to any of them in any order will keep the player connected.",
+                    "AKA, it won't kick your players because one packet gets dropped somewhere along the lines"
+                );
         }
 
         public boolean filterVelocityPacket = false;
@@ -566,6 +579,11 @@ public class GlobalConfiguration extends Part {
         option("displayWorldLoadScreenForPortaling")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
+                "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
+            );
+        option("displayWorldLoadScreenForTeleporting")
+            .docs(
+                "Folia's teleporting rewrite makes the world loading screen not display on the client properly, and",
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
@@ -617,8 +635,11 @@ public class GlobalConfiguration extends Part {
         public boolean enderChestPersistHiddenRows = true;
     }
 
+    @Undocumented(because = "Docs haven't been written yet.")
     public boolean blacklistNonPlayerEntitiesFromEnteringNetherPortals = false;
+    @Undocumented(because = "Docs haven't been written yet.")
     public boolean blacklistNonPlayerEntitiesFromEnteringEndPortals = false;
+    @Undocumented(because = "Docs haven't been written yet.")
     public boolean blacklistNonPlayerEntitiesFromEnteringGatewayPortals = false;
 
     public Chat chat = new Chat();
@@ -662,6 +683,9 @@ public class GlobalConfiguration extends Part {
         public boolean allowEnchantingWithIncompatibleEnchants = false;
     }
 
+    {
+        option("disableLocatorBarInAllWorlds").docs("Disables the locator bar globally, removing the need to disable it using gamerules per-world");
+    }
     public boolean disableLocatorBarInAllWorlds = false;
 
     {
@@ -681,14 +705,23 @@ public class GlobalConfiguration extends Part {
 
         private String autosaveFrequency = "5m";
 
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosaveScoreboards = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosaveStopwatches = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosavePearls = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosaveCustomBossEvents = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosaveTime = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosaveMaps = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosaveWeather = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosaveGamerules = true;
+        @Undocumented(because = "Doesn't require docs.")
         public boolean autosavePlayers = true;
     }
 }
