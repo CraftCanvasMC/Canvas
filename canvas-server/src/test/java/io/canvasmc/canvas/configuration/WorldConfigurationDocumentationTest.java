@@ -102,7 +102,7 @@ class WorldConfigurationDocumentationTest {
             return false;
         }
 
-        if (undocumented.because().isBlank()) {
+        if (undocumented.value().isBlank()) {
             errors.add(
                 partClass.getName() + "." + field.getName()
                     + " is annotated with @Undocumented but has an empty \"because\" field"
@@ -112,7 +112,7 @@ class WorldConfigurationDocumentationTest {
                 "Skipping documentation check for %s.%s: %s%n",
                 partClass.getName(),
                 field.getName(),
-                undocumented.because()
+                undocumented.value()
             );
         }
 

@@ -12,5 +12,5 @@ public @interface Undocumented {
     /**
      * Why this option is exempt from the documentation requirement.
      */
-    String because();
+    String value();
 }

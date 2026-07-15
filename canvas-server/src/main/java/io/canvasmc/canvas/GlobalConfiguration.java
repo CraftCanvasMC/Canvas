@@ -440,13 +440,9 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean makeFluidPostProcessScheduledTick = false;
-        @Undocumented(because = "Docs haven't been written yet.")
         public boolean optimizeAquifer = false;
-        @Undocumented(because = "Docs haven't been written yet.")
         public boolean useEndBiomeCache = false;
-        @Undocumented(because = "Controls the cache size.")
         public int endBiomeCacheSize = 1024;
-        @Undocumented(because = "Docs haven't been written yet.")
         public boolean optimizeBeardifier = false;
 
         public StructureGen structureOptimizations = new StructureGen();
@@ -468,7 +464,7 @@ public class GlobalConfiguration extends Part {
             }
 
             public boolean deduplicateShuffledTemplatePoolElementList = false;
-            @Undocumented(because = "Controls whether structure optimizations are enabled in general.")
+            @Undocumented("Controls whether structure optimizations are enabled in general.")
             public boolean enable = false;
         }
 
@@ -583,7 +579,7 @@ public class GlobalConfiguration extends Part {
             );
         option("displayWorldLoadScreenForTeleporting")
             .docs(
-                "Folia's teleporting rewrite makes the world loading screen not display on the client properly, and",
+                "Folia's teleport rewrite makes the world loading screen not display on the client properly, and",
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
@@ -635,11 +631,11 @@ public class GlobalConfiguration extends Part {
         public boolean enderChestPersistHiddenRows = true;
     }
 
-    @Undocumented(because = "Docs haven't been written yet.")
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringNetherPortals = false;
-    @Undocumented(because = "Docs haven't been written yet.")
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringEndPortals = false;
-    @Undocumented(because = "Docs haven't been written yet.")
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringGatewayPortals = false;
 
     public Chat chat = new Chat();
@@ -686,6 +682,7 @@ public class GlobalConfiguration extends Part {
     {
         option("disableLocatorBarInAllWorlds").docs("Disables the locator bar globally, removing the need to disable it using gamerules per-world");
     }
+
     public boolean disableLocatorBarInAllWorlds = false;
 
     {
@@ -705,23 +702,23 @@ public class GlobalConfiguration extends Part {
 
         private String autosaveFrequency = "5m";
 
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosaveScoreboards = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosaveStopwatches = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosavePearls = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosaveCustomBossEvents = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosaveTime = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosaveMaps = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosaveWeather = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosaveGamerules = true;
-        @Undocumented(because = "Doesn't require docs.")
+        @Undocumented("Doesn't require docs.")
         public boolean autosavePlayers = true;
     }
 }

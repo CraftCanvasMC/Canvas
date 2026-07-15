@@ -242,9 +242,9 @@ public class WorldConfig extends Part {
                 );
         }
 
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean hideFlamesOnEntitiesWithFireResistance = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean hideFlamesOnEntitiesWithInvisibility = false;
 
         public Particles particles = new Particles();
@@ -255,16 +255,16 @@ public class WorldConfig extends Part {
                 option("disableNewCombatParticles").docs("Note that when enabled this option breaks Vanilla visual compatibility");
             }
 
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean disableSprintParticles = false;
             public boolean disableFallParticles = false;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean disableDeathParticles = false;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean disableEffectParticles = false;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean disableWaterSplashParticles = false;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean disableBubbleColumnParticles = false;
             public boolean disableNewCombatParticles = false;
         }
@@ -295,15 +295,15 @@ public class WorldConfig extends Part {
             option("cropsIgnoreLightCheck").docs("Makes crops ignore sunlight requirements when planting");
         }
 
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean farmlandAlwaysMoist = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean disableLeafDecay = false;
         public boolean cropsIgnoreLightCheck = false;
         public boolean disableFarmlandTrampling = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean sugarCaneBonemealable = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean netherWartBonemealable = false;
     }
 
@@ -353,9 +353,9 @@ public class WorldConfig extends Part {
                     );
             }
 
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean itemEntitiesImmuneToExplosions = false;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean itemEntitiesImmuneToLightning = false;
             public double itemEntityVelocityOnDeathFactor = 1.0D;
             public boolean itemEntitiesWaitTwoSecondsForMergeCheckAlways = false;
@@ -422,9 +422,9 @@ public class WorldConfig extends Part {
                     );
             }
 
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public int maxProjectileChunkLoadsPerTick = 10;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public int maxProjectileChunkLoadsPerProjectileBeforeRemoval = 10;
             public List<String> loadChunks = new ArrayList<>();
             public boolean crossRegionRedirectableProjectileDeflection = false;
@@ -457,15 +457,15 @@ public class WorldConfig extends Part {
             }
 
             public boolean villagerAcquirePoiTasksLoadChunks = true;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean reduceJobSitePoiSearchRange = false;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean reduceHomePoiSearchRange = false;
-            @Undocumented(because = "Docs haven't been written yet.")
+            @Undocumented("Doesn't require docs.")
             public boolean reduceMeetingPointPoiSearchRange = false;
         }
 
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean experienceOrbsAreFireResistant = false;
     }
 
@@ -506,19 +506,19 @@ public class WorldConfig extends Part {
             option("useLegacyBlastProtection").docs("Restores the blast protection logic from before 1.21");
         }
 
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean disableSweepingEdge = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean disableCritsWhileSprinting = false;
         // public int invulnerabilityTicks = 10;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean allowFishingRodsToPullEntities = true;
         public float criticalHitMultiplier = 1.5F;
         public boolean removeRedDeathAnimation = false;
         public boolean useLegacyBlastProtection = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean snowballCanKnockbackPlayers = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean eggCanKnockbackPlayers = false;
     }
 
@@ -541,9 +541,9 @@ public class WorldConfig extends Part {
                 );
         }
 
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean chestsCanOpenWithFullBlockAbove = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean fullChiseledBookShelvesCountAsValidEnchantPowerSources = false;
 
         public Spawner spawner = new Spawner();
@@ -700,11 +700,11 @@ public class WorldConfig extends Part {
             return message;
         }
 
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean sleepIgnoresNearbyMobs = false;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean rainStopsAfterSleep = true;
-        @Undocumented(because = "Docs haven't been written yet.")
+        @Undocumented("Doesn't require docs.")
         public boolean thunderStopsAfterSleep = true;
     }
 
