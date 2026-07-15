@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.bukkit.craftbukkit.util.ApiVersion;
@@ -51,14 +52,28 @@ class VanillaFixesConfigurationTest {
             checkIssue(element.getAsJsonObject(), returned, fixed);
         }
 
-        issues.stream()
+        final Set<String> missing = issues.stream()
             .filter(issue -> !returned.contains(issue))
-            .forEach(issue -> System.err.println(issue + " does not exist on Mojira."));
+            .collect(Collectors.toCollection(HashSet::new));
 
-        if (DEBUG && !fixed.isEmpty()) {
-            throw new AssertionError(
-                "Issues fixed upstream:\n - " + String.join("\n - ", fixed)
-            );
+        if (DEBUG && (!missing.isEmpty() || !fixed.isEmpty())) {
+            final StringBuilder message = new StringBuilder();
+
+            if (!missing.isEmpty()) {
+                message.append("Issues missing from Mojira:\n - ")
+                    .append(String.join("\n - ", missing));
+            }
+
+            if (!fixed.isEmpty()) {
+                if (!message.isEmpty()) {
+                    message.append("\n\n");
+                }
+
+                message.append("Issues fixed upstream:\n - ")
+                    .append(String.join("\n - ", fixed));
+            }
+
+            throw new AssertionError(message);
         }
     }
 
