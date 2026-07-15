@@ -96,7 +96,7 @@ class GlobalConfigurationDocumentationTest {
         final List<String> errors
     ) {
         final Undocumented undocumented =
-            field.getAnnotation(Undocumented.class) != null
+            field.isAnnotationPresent(Undocumented.class)
                 ? field.getAnnotation(Undocumented.class)
                 : partClass.getAnnotation(Undocumented.class);
 
