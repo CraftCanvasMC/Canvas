@@ -28,6 +28,7 @@ class VanillaFixesConfigurationTest {
     private static final HttpClient HTTP = HttpClient.newHttpClient();
     private static final URI MOJIRA_API = URI.create("https://bugs.mojang.com/api/jql-search-post");
     private static final boolean DEBUG = Boolean.parseBoolean(System.getenv("CANVAS_TEST_DEBUG"));
+    private static final boolean STRICT = Boolean.parseBoolean(System.getenv("CANVAS_TEST_STRICT"));
 
     @BeforeAll
     static void bootstrapMinecraft() {
@@ -56,7 +57,7 @@ class VanillaFixesConfigurationTest {
             .filter(issue -> !returned.contains(issue))
             .collect(Collectors.toCollection(HashSet::new));
 
-        if (DEBUG && (!missing.isEmpty() || !fixed.isEmpty())) {
+        if (STRICT && (!missing.isEmpty() || !fixed.isEmpty())) {
             final StringBuilder message = new StringBuilder();
 
             if (!missing.isEmpty()) {
@@ -75,7 +76,7 @@ class VanillaFixesConfigurationTest {
 
             throw new AssertionError(message);
         }
-        // we don't have debug so we don't fail
+        // we don't have strict mode so we don't fail
         missing.forEach(issue -> System.err.println(issue + " does not exist on Mojira."));
     }
 
@@ -129,7 +130,7 @@ class VanillaFixesConfigurationTest {
 
             if (current.isNewerThanOrSameAs(fixVersion)) {
                 final String message = key + " has been fixed in " + cleanVersion(rawVersion);
-                if (DEBUG) {
+                if (STRICT) {
                     fixed.add(message);
                 } else {
                     System.err.println(message);
