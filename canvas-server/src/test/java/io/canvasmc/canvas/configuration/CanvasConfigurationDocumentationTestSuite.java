@@ -8,10 +8,10 @@ import org.junit.platform.suite.api.Suite;
 import org.junit.platform.suite.api.SuiteDisplayName;
 
 @Suite(failIfNoTests = false)
-@SuiteDisplayName("Canvas configuration documentation tests")
-@IncludeTags("Documentation")
+@SuiteDisplayName("Canvas configuration tests")
+@IncludeTags("Configuration")
 @SelectPackages("io.canvasmc.canvas.configuration")
 @ExcludeClassNamePatterns(".*TestSuite")
-@ConfigurationParameter(key = "TestSuite", value = "Documentation")
+@ConfigurationParameter(key = "TestSuite", value = "Configuration")
 public class CanvasConfigurationDocumentationTestSuite {
 }
