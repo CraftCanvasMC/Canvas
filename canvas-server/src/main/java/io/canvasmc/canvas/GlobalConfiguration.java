@@ -498,7 +498,7 @@ public class GlobalConfiguration extends Part {
             option("mc298464").docs("Fixes a memory leak related to Hoglin removal due to CHANGED_DIMENSION");
             option("mc223153").docs("Fixes blocks of raw copper using stone sounds instead of copper sounds");
             option("mc200418").docs("Fixes cured baby zombies staying as jockey variants");
-            // Fix Version/s: Minecraft 15w51a, Minecraft 16w07b - Why do we even have this, ask Dueris ?????
+            // NOTE: Marked as fixed but isn't; look at affected versions instead
             option("mc94054").docs("Fixes cave spiders and spiders with the small scale attribute spinning around when walking");
             option("mc245394").docs("Fixes raid horn blare sounds being controlled by the Friendly Creatures sound slider");
             option("mc227337").docs("Fixes explosion sounds and particles not being produced when a shulker bullet hits an entity");
