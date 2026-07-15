@@ -471,18 +471,12 @@ public class GlobalConfiguration extends Part {
                     "If alternative playerlist tick is enabled, this is the interval in ticks for how often",
                     "each bucket will be ticked"
                 ).greaterThan(0.0F);
-            option("asyncProtocolSwitch")
-                .docs(
-                    "This makes protocol switching asynchronous during login, which reduces global region blocking",
-                    "and can improve login and configuration phase performance during player join"
-                );
         }
 
         public boolean filterVelocityPacket = false;
         public boolean filterMovePackets = false;
         public boolean alternativePlayerListTick = false;
         public int playerInfoSendInterval = 600;
-        public boolean asyncProtocolSwitch = false;
         public boolean purpurAlternativeKeepalive = false;
     }
 
