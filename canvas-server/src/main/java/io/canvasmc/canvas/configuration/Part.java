@@ -12,7 +12,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.Function;
+import java.util.function.BiConsumer;
 import net.minecraft.util.FileUtil;
 import org.jspecify.annotations.Nullable;
 import org.yaml.snakeyaml.nodes.MappingNode;
@@ -20,7 +20,7 @@ import org.yaml.snakeyaml.nodes.Node;
 
 public abstract class Part {
 
-    final CanonicalReference<Function<String, @Nullable OptionDefinition>> processor = new CanonicalReference<>();
+    final CanonicalReference<BiConsumer<String, OptionDefinition>> processor = new CanonicalReference<>();
     // we don't need or care about this being linked tbh
     final Object2ObjectOpenHashMap<String, OptionDefinition> definitionOverrides = new Object2ObjectOpenHashMap<>();
     {
@@ -31,19 +31,19 @@ public abstract class Part {
     static Map<String, OptionDefinition> harvest(final Class<? extends Part> clazz) {
         try {
             final Part temp = clazz.getDeclaredConstructor().newInstance();
-            final Function<String, @Nullable OptionDefinition> resolver = temp.processor.valueSafe();
+            final BiConsumer<String, OptionDefinition> resolver = temp.processor.valueSafe();
 
             final Object2ObjectOpenHashMap<String, OptionDefinition> result = new Object2ObjectOpenHashMap<>();
             result.defaultReturnValue(new OptionDefinition());
 
             for (final Field field : clazz.getDeclaredFields()) {
                 final String key = field.getName();
-                final OptionDefinition value = resolver == null ? temp.definitionOverrides.get(key) : resolver.apply(key);
-                result.put(
-                    key,
-                    // the resolver can return null, so we should ensure to fill with a non-null value
-                    value == null ? temp.definitionOverrides.get(key) : value
-                );
+                OptionDefinition current =
+                    temp.definitionOverrides.computeIfAbsent(key, _ -> new OptionDefinition());
+                if (resolver != null) {
+                    resolver.accept(key, current);
+                }
+                result.put(key, current);
             }
 
             return result;
@@ -52,7 +52,7 @@ public abstract class Part {
         }
     }
 
-    public void stream(final Function<String, @Nullable OptionDefinition> processor) {
+    public void stream(final BiConsumer<String, OptionDefinition> processor) {
         this.processor.setValue(processor);
     }
 
@@ -121,7 +121,11 @@ public abstract class Part {
         }
 
         public OptionDefinition docs(final Style style) {
-            this.style = style;
+            if (this.style == null) {
+                this.style = style;
+            } else {
+                this.style.append(style);
+            }
             return this;
         }
 
