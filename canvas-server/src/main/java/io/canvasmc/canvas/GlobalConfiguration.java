@@ -483,11 +483,11 @@ public class GlobalConfiguration extends Part {
     public static class UpstreamFixes extends Part {
 
         {
-            stream((fieldName, definition) -> {
+            stream((fieldName, option) -> {
                 if (fieldName.startsWith("mc")
-                    // this is a specific minecraft fix
                     && fieldName.substring(2).chars().allMatch(Character::isDigit)) {
-                    definition.docs(
+                    // this is a specific minecraft fix
+                    option.docs(
                         Style.create()
                             .literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
                     );
