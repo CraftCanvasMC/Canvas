@@ -46,6 +46,11 @@ public class Style {
         return this;
     }
 
+    public Style append(final Style other) {
+        this.instructions.addAll(other.instructions);
+        return this;
+    }
+
     public String[] compile(final int characterLimit) {
         final List<String> lines = new ArrayList<>();
 

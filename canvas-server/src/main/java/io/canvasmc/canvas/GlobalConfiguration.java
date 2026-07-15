@@ -483,18 +483,35 @@ public class GlobalConfiguration extends Part {
     public static class UpstreamFixes extends Part {
 
         {
-            // TODO - Toffik - restore comments
-            // should we do these specific or do we try and do better with this?
-            // stream((fieldName) -> {
-            //     if (fieldName.startsWith("mc")) {
-            //         // this is a specific minecraft fix
-            //         return new OptionDefinition()
-            //             .docs(
-            //                 Style.create().literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
-            //             );
-            //     }
-            //     return null;
-            // });
+            stream((fieldName, option) -> {
+                if (fieldName.startsWith("mc")
+                    && fieldName.substring(2).chars().allMatch(Character::isDigit)) {
+                    // this is a specific minecraft fix
+                    option.docs(
+                        Style.create()
+                            .literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
+                    );
+                }
+            });
+
+            option("mc261810").docs("Fixes low firework propulsion in the void");
+            option("mc298464").docs("Fixes a memory leak related to Hoglin removal due to CHANGED_DIMENSION");
+            option("mc223153").docs("Fixes blocks of raw copper using stone sounds instead of copper sounds");
+            option("mc200418").docs("Fixes cured baby zombies staying as jockey variants");
+            // NOTE: Marked as fixed but isn't; look at affected versions instead
+            option("mc94054").docs("Fixes cave spiders and spiders with the small scale attribute spinning around when walking");
+            option("mc245394").docs("Fixes raid horn blare sounds being controlled by the Friendly Creatures sound slider");
+            option("mc227337").docs("Fixes explosion sounds and particles not being produced when a shulker bullet hits an entity");
+            option("mc221257").docs("Fixes shulker bullets not producing bubble particles when moving through water");
+            option("mc206922").docs("Fixes item drops by entities that were killed by lightning instantly disappearing");
+            option("mc155509").docs("Fixes dying puffed pufferfishes still stinging players");
+            option("mc132878").docs("Fixes armor stands destroyed by explosions/lava/fire not producing particles");
+            option("mc121706").docs("Fixes skeletons and illusioners not looking up/down at their target while strafing");
+            option("mc119754").docs("Fixes elytra firework boosts continuing while in spectator mode");
+            option("mc100991").docs("Fixes killing entities with a fishing rod not counting as a kill");
+            option("mc30391").docs("Fixes chickens, blazes and withers emitting particles during landing despite falling slowly");
+            option("mc183990").docs("Fixes group AI of some mobs breaking when their target dies");
+            option("mc136249").docs("Fixes wearing enchanted boots with depth strider decreasing the strength of the riptide enchantment");
         }
 
         public boolean mc261810 = false;
