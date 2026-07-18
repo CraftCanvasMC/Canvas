@@ -393,7 +393,6 @@ public final class AffinitySchedulerThreadPool extends Scheduler {
     public void notifyTasks(final @NonNull SchedulableTick task) {
         if (task.state == null) return;
         final ScheduledState state = (ScheduledState) task.state;
-        state.markedWithTasks.set(true);
         final boolean changed = state.markedWithTasks.compareAndSet(false, true);
 
         // try wake owner if present. if the thread is parking to wait
