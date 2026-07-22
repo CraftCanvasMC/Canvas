@@ -7,105 +7,129 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.BitRandomSource;
 import net.minecraft.world.level.levelgen.PositionalRandomFactory;
-import org.jetbrains.annotations.Contract;
 import org.jspecify.annotations.NullMarked;
 
+/**
+ * This class is derived from the Leaf faster RNG patch as linked below:
+ * <p>
+ * <a
+ * href="https://github.com/Winds-Studio/Leaf/blob/ver/26.2/leaf-server/src/main/java/org/dreeam/leaf/util/math/random/FasterRandomSource.java">FasterRandomSource.java</a>
+ * <p>
+ * The original patch files:
+ * <ol>
+ *     <li><a href="https://github.com/Winds-Studio/Leaf/blob/ver/26.2/leaf-server/paper-patches/features/0037-Faster-random-generator.patch">paper-patches/...</a></li>
+ *     <li><a href="https://github.com/Winds-Studio/Leaf/blob/ver/26.2/leaf-server/minecraft-patches/features/0121-Faster-random-generator.patch">minecraft-patches/...</a></li>
+ * </ol>
+ * <p>
+ * As stated in <a href="https://github.com/Winds-Studio/Leaf/blob/ver/26.2/LICENSE.md">Leaf/LICENSE.md</a>, their
+ * patches are licensed under MIT unless indicated differently in their header, meaning the license for the original
+ * patch this class is from is licensed under <a href="https://opensource.org/license/MIT">MIT</a>
+ *
+ * @author Winds-Studio/Leaf, HaHaWTH
+ */
 @NullMarked
 public class FasterRandomSource implements BitRandomSource {
 
     private static final RandomGeneratorFactory<RandomGenerator> FACTORY = RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
     private RandomGenerator rng;
 
-    public FasterRandomSource(long seed) {
+    public FasterRandomSource(final long seed) {
         this.rng = FACTORY.create(seed);
     }
 
-    @Contract(" -> new")
     @Override
-    public final RandomSource fork() {
+    public RandomSource fork() {
         return new FasterRandomSource(this.nextLong());
     }
 
-    @Contract(" -> new")
     @Override
-    public final PositionalRandomFactory forkPositional() {
+    public PositionalRandomFactory forkPositional() {
         return new FasterRandomSourcePositionalRandomFactory(this.nextLong());
     }
 
     @Override
-    public final void setSeed(long seed) {
+    public void setSeed(final long seed) {
         this.rng = FACTORY.create(seed);
     }
 
     @Override
-    public final double nextGaussian() {
+    public double nextGaussian() {
         return rng.nextGaussian();
     }
 
     @Override
-    public final int next(int bits) {
+    public void consumeCount(final int count) {
+        for (int i = 0; i < count; i++) {
+            this.rng.nextLong();
+        }
+    }
+
+    @Override
+    public int nextInt(final int origin, final int bound) {
+        return rng.nextInt(origin, bound);
+    }
+
+    @Override
+    public int next(final int bits) {
         return (int) (nextLong() >>> (64 - bits));
     }
 
     @Override
-    public final int nextInt() {
+    public int nextInt() {
         return rng.nextInt();
     }
 
     @Override
-    public final int nextInt(int bound) {
+    public int nextInt(final int bound) {
         return rng.nextInt(bound);
     }
 
     @Override
-    public final long nextLong() {
+    public long nextLong() {
         return rng.nextLong();
     }
 
     @Override
-    public final boolean nextBoolean() {
+    public boolean nextBoolean() {
         return rng.nextBoolean();
     }
 
     @Override
-    public final float nextFloat() {
+    public float nextFloat() {
         return rng.nextFloat();
     }
 
     @Override
-    public final double nextDouble() {
+    public double nextDouble() {
         return rng.nextDouble();
     }
 
-    public static class FasterRandomSourcePositionalRandomFactory implements PositionalRandomFactory {
-        private final long seed;
+    public double nextGaussian(final double mean, final double stddev) {
+        return rng.nextGaussian(mean, stddev);
+    }
 
-        public FasterRandomSourcePositionalRandomFactory(long seed) {
-            this.seed = seed;
-        }
+    private record FasterRandomSourcePositionalRandomFactory(long seed) implements PositionalRandomFactory {
 
         @Override
-        public RandomSource fromHashOf(String seed) {
+        public RandomSource fromHashOf(final String seed) {
             int i = seed.hashCode();
             return new FasterRandomSource((long) i ^ this.seed);
         }
 
         @Override
-        public RandomSource fromSeed(long seed) {
+        public RandomSource fromSeed(final long seed) {
             return new FasterRandomSource(seed);
         }
 
         @Override
-        public RandomSource at(int x, int y, int z) {
+        public RandomSource at(final int x, final int y, final int z) {
             //noinspection deprecation
-            long l = Mth.getSeed(x, y, z);
-            long m = l ^ this.seed;
-            return new FasterRandomSource(m);
+            return new FasterRandomSource(Mth.getSeed(x, y, z) ^ this.seed);
         }
 
         @VisibleForTesting
         @Override
-        public void parityConfigString(StringBuilder info) {
+        public void parityConfigString(final StringBuilder info) {
             info.append("FasterRandomSourcePositionalRandomFactory{").append(this.seed).append("}");
         }
     }
