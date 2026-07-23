@@ -678,4 +678,57 @@ public class WorldConfig extends Part {
         public boolean thunderStopsAfterSleep = true;
     }
 
+    public Weather weather = new Weather();
+    public static class Weather extends Part{
+
+        {
+            option("perRegion")
+                .docs("Enables weather per region, allowing different regions to have different weather. False by default (vanilla behavior)");
+            option("weatherWeights")
+                .docs(
+                    "The weights for each weather type. The higher the weight, the more likely it is to occur.",
+                    "This is only used when perRegion is enabled"
+                );
+            option("mergeStrategy")
+                .docs(
+                    "The strategy for merging weather when perRegion is enabled. This is only used when perRegion is enabled",
+                    "KEEP_INTO: Randomly merges the weather of the region",
+                    "MOST_PLAYERS: Keeps the weather of the region with the most players",
+                    "MOST_CHUNKS: Keeps the weather of the region with the most chunks",
+                    "WEATHER_PRIORITY: Keeps the weather of the region with the highest priority"
+                );
+            option("commandGetClear")
+                .docs("The message sent to the player when they use the /weather get clear command");
+            option("commandGetRain")
+                .docs("The message sent to the player when they use the /weather get rain command");
+            option("commandGetThunder")
+                .docs("The message sent to the player when they use the /weather get thunder command");
+        }
+        public boolean perRegion = false;
+
+        public WeatherWeights weatherWeights = new WeatherWeights();
+        public static class WeatherWeights extends Part {
+            {
+                option("clear").docs("The weight for clear weather");
+                option("rain").docs("The weight for rain weather");
+                option("thunder").docs("The weight for thunder weather");
+            }
+            public int clear = 0;
+            public int rain = 1;
+            public int thunder = 2;
+        }
+
+        public MergeStrategy mergeStrategy = MergeStrategy.KEEP_INTO;
+        public enum MergeStrategy {
+            KEEP_INTO,
+            MOST_PLAYERS,
+            MOST_CHUNKS,
+            WEATHER_PRIORITY
+        }
+
+        public String commandGetClear = "The weather is clear";
+        public String commandGetRain = "The weather is rainy";
+        public String commandGetThunder = "The weather is thundering";
+    }
+
 }
