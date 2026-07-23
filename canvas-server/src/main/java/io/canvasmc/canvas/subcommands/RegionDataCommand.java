@@ -44,7 +44,7 @@ public class RegionDataCommand implements SubCommand {
     public static final Pattern SPARK_PROFILER_START_REGEX = Pattern.compile("^spark\\s+profiler.*");
 
     private static final DynamicCommandExceptionType HANDLE_DOESNT_EXIST = new DynamicCommandExceptionType(
-        (handle) -> Component.literal("No region was found " + handle + ", is this area loaded?")
+        (handle) -> Component.literal("No region was found at " + handle + ", is this area loaded?")
     );
     private static final SimpleCommandExceptionType NOT_SPRINTING = new SimpleCommandExceptionType(
         Component.literal("The target scheduling handle is not currently sprinting")
@@ -123,9 +123,7 @@ public class RegionDataCommand implements SubCommand {
     public void replacePlatform(final ProfilerPlatform newPlatform) {
         computeIfProfiling((_) -> {
             throw new IllegalStateException("Unable to modify platform during profiling session");
-        }, () -> {
-            currentPlatform.swapValue(newPlatform);
-        });
+        }, () -> currentPlatform.swapValue(newPlatform));
     }
 
     private static ArgumentBuilder<CommandSourceStack, ?> addTickActions(final ArgumentBuilder<CommandSourceStack, ?> base) {
@@ -204,25 +202,29 @@ public class RegionDataCommand implements SubCommand {
         final CommandSourceStack css,
         final CSEConsumer<TickRegionScheduler.RegionScheduleHandle> action
     ) throws CommandSyntaxException {
-        final TickRegionScheduler.@Nullable RegionScheduleHandle handle = Util.getEitherOrNull(
-            arg.mapRight((pair) -> {
-                final ColumnPos blockPos = pair.getFirst();
-                final int chunkX = blockPos.x() >> 4;
-                final int chunkZ = blockPos.z() >> 4;
+        final TickRegionScheduler.RegionScheduleHandle handle;
 
-                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
-                    region = pair.getSecond().regioniser.getRegionAtSynchronised(chunkX, chunkZ);
+        try {
+            handle = Util.getEitherOrNull(
+                arg.mapRight((pair) -> {
+                    final ColumnPos blockPos = pair.getFirst();
+                    final int chunkX = blockPos.x() >> 4;
+                    final int chunkZ = blockPos.z() >> 4;
 
-                if (region == null) {
-                    css.sendFailure(Component.literal(HANDLE_DOESNT_EXIST.create(new ChunkPos(chunkX, chunkZ)).getMessage()));
-                    return null;
-                }
+                    final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
+                        region = pair.getSecond().regioniser.getRegionAtSynchronised(chunkX, chunkZ);
 
-                return region.getData().getRegionSchedulingHandle();
-            }).mapLeft(TickRegionScheduler.RegionScheduleHandle.class::cast)
-        );
+                    if (region == null) {
+                        final CommandSyntaxException cse = HANDLE_DOESNT_EXIST.create(new ChunkPos(chunkX, chunkZ));
 
-        if (handle == null) {
+                        css.sendFailure(Component.literal(cse.getMessage()));
+                        throw new IllegalArgumentException(cse);
+                    }
+
+                    return region.getData().getRegionSchedulingHandle();
+                }).mapLeft(TickRegionScheduler.RegionScheduleHandle.class::cast)
+            );
+        } catch (final IllegalArgumentException ignored) {
 
             // the global tick would've passed if specified, so this means
             // the region didn't exist at the coords, which feedback was already

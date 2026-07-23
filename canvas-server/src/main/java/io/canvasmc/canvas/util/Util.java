@@ -368,15 +368,9 @@ public class Util {
         return property != null && (property.isEmpty() || Boolean.parseBoolean(property));
     }
 
-    @Nullable
-    public static <A> A getEitherOrNull(final Either<@Nullable A, @Nullable A> either) {
+    public static <A> A getEitherOrNull(final Either<A, A> either) {
         final Optional<A> l = either.left();
         final Optional<A> r = either.right();
-
-        if (l.isEmpty() && r.isEmpty()) {
-            return null;
-        }
-
         return l.orElseGet(r::get);
     }
 
