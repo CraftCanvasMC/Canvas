@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.util;
 
 import com.google.common.base.Preconditions;
+import com.mojang.datafixers.util.Either;
 import io.canvasmc.canvas.ClientV2;
 import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.io.File;
@@ -10,6 +11,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -364,6 +366,18 @@ public class Util {
     public static boolean isFlagEnabled(final String flag) {
         final String property = System.getProperty(flag);
         return property != null && (property.isEmpty() || Boolean.parseBoolean(property));
+    }
+
+    @Nullable
+    public static <A> A getEitherOrNull(final Either<@Nullable A, @Nullable A> either) {
+        final Optional<A> l = either.left();
+        final Optional<A> r = either.right();
+
+        if (l.isEmpty() && r.isEmpty()) {
+            return null;
+        }
+
+        return l.orElseGet(r::get);
     }
 
     private static String pluralDecimal(final double value, final String unit) {

@@ -9,7 +9,7 @@ import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
-import io.canvasmc.canvas.subcommands.RegionTickSubCommand;
+import io.canvasmc.canvas.subcommands.RegionDataCommand;
 import io.canvasmc.canvas.subcommands.ReloadSubCommand;
 import io.canvasmc.canvas.subcommands.SetMaxPlayersSubCommand;
 import io.canvasmc.canvas.subcommands.WorldDistanceSubCommand;
@@ -19,17 +19,20 @@ import io.canvasmc.canvas.util.LockedReference;
 import io.canvasmc.canvas.util.TimeSpan;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
+import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.random.RandomGeneratorFactory;
+import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.minecraft.ChatFormatting;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.BrandPayload;
@@ -44,8 +47,7 @@ import net.minecraft.world.level.levelgen.RandomSupport;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.jetbrains.annotations.UnknownNullability;
 import org.jspecify.annotations.NullMarked;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.jspecify.annotations.Nullable;
 
 @SuppressWarnings({"FieldMayBeFinal", "unused"})
 @NullMarked
@@ -56,7 +58,7 @@ public class GlobalConfiguration extends Part {
 
     protected static final int CHAR_LIM = 90;
 
-    public static final Logger LOGGER = LoggerFactory.getLogger("CanvasMC");
+    public static final ComponentLogger LOGGER = ComponentLogger.logger("CanvasMC");
     public static final LockedReference<TimeSpan> AUTOSAVE_SPAN = new LockedReference<>(null);
 
     public static final int INFO = 0;
@@ -245,8 +247,7 @@ public class GlobalConfiguration extends Part {
                 RegionBarSubCommand.class,
                 WorldDistanceSubCommand.class,
                 ReloadSubCommand.class,
-                RegionTickSubCommand.class // TODO - merge this into regiondata command
-                // RegionDataCommand.class // TODO - regiondata command
+                RegionDataCommand.class
             );
 
             broadcast("Registered all Canvas commands", INFO);
@@ -273,8 +274,24 @@ public class GlobalConfiguration extends Part {
     }
 
     public static void broadcast(final String msg, final int severity) {
+        broadcast(msg, severity, null);
+    }
+
+    public static void broadcast(
+        final String msg,
+        final int severity,
+        final @Nullable CommandSourceStack extra
+    ) {
+        broadcast(net.kyori.adventure.text.Component.text(msg), severity, extra);
+    }
+
+    public static void broadcast(
+        final net.kyori.adventure.text.Component kyori,
+        final int severity,
+        final @Nullable CommandSourceStack extra
+    ) {
         if (TickRegions.hasStarted()) {
-            final MutableComponent literal = Component.literal(msg);
+            final MutableComponent literal = PaperAdventure.asVanilla(kyori).copy();
 
             switch (severity) {
                 case WARN -> literal.withStyle(ChatFormatting.YELLOW);
@@ -284,7 +301,10 @@ public class GlobalConfiguration extends Part {
             // players might be in the server, try and send msg to people with perms
 
             for (final ServerPlayer entityPlayer : MinecraftServer.getServer().getPlayerList().getPlayers()) {
-                if (entityPlayer.getBukkitEntity().hasPermission(BROADCAST_PERMISSION)) {
+                if (
+                    entityPlayer.getBukkitEntity().hasPermission(BROADCAST_PERMISSION)
+                    || (extra != null && extra.isPlayer() && Objects.requireNonNull(extra.getPlayer()).is(entityPlayer))
+                ) {
                     entityPlayer.sendSystemMessage(literal);
                 }
             }
@@ -292,9 +312,9 @@ public class GlobalConfiguration extends Part {
 
         // send to console
         switch (severity) {
-            case INFO -> LOGGER.info(msg);
-            case WARN -> LOGGER.warn(msg);
-            case ERROR -> LOGGER.error(msg);
+            case INFO -> LOGGER.info(kyori);
+            case WARN -> LOGGER.warn(kyori);
+            case ERROR -> LOGGER.error(kyori);
         }
     }
 
