@@ -55,6 +55,9 @@ public class RegionDataCommand implements SubCommand {
     private static final SimpleCommandExceptionType NOT_PAUSED = new SimpleCommandExceptionType(
         Component.literal("The target scheduling handle is already playing")
     );
+    private static final SimpleCommandExceptionType NOT_ON_REGION = new SimpleCommandExceptionType(
+        Component.literal("Not currently running on a region, and no target was specified")
+    );
 
     // this is the default platform we will use
     private static final ProfilerPlatform SPARK_PLATFORM = new SparkRegionProfiler();
@@ -78,6 +81,9 @@ public class RegionDataCommand implements SubCommand {
     @Override
     public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         // TODO - entity list(with filters), player list, region profile, tile entities, mob caps, scheduling info
+        // TODO - should specify region for most of these, but if no region is specified it uses the current region
+        //        should we include an ability to get data from all regions? mobcaps shouldnt, that's not safe, but
+        //        players/entities can
         return base
             .then(literal("profiler")
                 .then(literal("start"))
@@ -89,7 +95,10 @@ public class RegionDataCommand implements SubCommand {
                 .then(literal("players"))
                 .then(literal("tiles"))
                 .then(literal("entities"))
-                .then(literal("mobcaps"))
+                .then(literal("mobcaps").executes(RegionDataCommand::executeGetMobCaps)
+                    .then(argument("world", DimensionArgument.dimension())
+                        .then(argument("coords", ColumnPosArgument.columnPos()).executes(RegionDataCommand::executeGetMobCaps)))
+                )
             )
             .then(literal("tick")
                 .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(0.0F)).executes((context) -> {
@@ -104,6 +113,10 @@ public class RegionDataCommand implements SubCommand {
                 )
             )
             .then(literal("info"));
+    }
+
+    private static int executeGetMobCaps(final CommandContext<CommandSourceStack> ctx) {
+        return Command.SINGLE_SUCCESS;
     }
 
     @Override
@@ -130,7 +143,7 @@ public class RegionDataCommand implements SubCommand {
         return base
             .then(literal("sprint").then(argument("ticks", LongArgumentType.longArg(0L, 100_000L)).executes((ctx) -> {
                 final long ticksToSprint = LongArgumentType.getLong(ctx, "ticks");
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
                 postActionTo(target, css, (handle) -> {
@@ -141,7 +154,7 @@ public class RegionDataCommand implements SubCommand {
                 return Command.SINGLE_SUCCESS;
             })))
             .then(literal("walk").executes((ctx) -> {
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
                 postActionTo(target, css, (handle) -> {
@@ -155,7 +168,7 @@ public class RegionDataCommand implements SubCommand {
                 return Command.SINGLE_SUCCESS;
             }))
             .then(literal("pause").executes((ctx) -> {
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
                 postActionTo(target, css, (handle) -> {
@@ -169,7 +182,7 @@ public class RegionDataCommand implements SubCommand {
                 return Command.SINGLE_SUCCESS;
             }))
             .then(literal("play").executes((ctx) -> {
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
                 postActionTo(target, css, (handle) -> {
@@ -238,7 +251,7 @@ public class RegionDataCommand implements SubCommand {
     }
 
     private static Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> parseTargetHandleFromContext(
-        final CommandContext<CommandSourceStack> ctx
+        final CommandContext<CommandSourceStack> ctx, final boolean globalTickAvailable
     ) throws CommandSyntaxException {
 
         // we essentially try to parse the region first, and if
@@ -258,9 +271,25 @@ public class RegionDataCommand implements SubCommand {
             else if (thrown instanceof IllegalArgumentException) {
 
                 // the argument doesn't exist, meaning it probably
-                // is targeting the god tick
+                // is targeting the god tick if possible
 
-                return Either.left((RegionizedServer.GlobalTickTickHandle) RegionizedServer.getGlobalTickData());
+                if (globalTickAvailable) {
+                    return Either.left((RegionizedServer.GlobalTickTickHandle) RegionizedServer.getGlobalTickData());
+                }
+
+                // if global tick is unavailable, see if we can get the current region
+                // as a fallback, and if it's not present, throw
+
+                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
+                    currentRegion = TickRegionScheduler.getCurrentRegion();
+                if (currentRegion != null && !currentRegion.hasNoAliveSections()) {
+                    final ChunkPos center = currentRegion.getCenterChunk();
+
+                    return Either.right(Pair.of(new ColumnPos(center.x(), center.z()), currentRegion.regioniser.world));
+                }
+
+                // if the current region is null or all the sections are dead, we should just throw
+                throw NOT_ON_REGION.create();
             }
             throw thrown;
         }
