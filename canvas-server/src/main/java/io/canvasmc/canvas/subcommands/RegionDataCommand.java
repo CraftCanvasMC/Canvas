@@ -115,7 +115,12 @@ public class RegionDataCommand implements SubCommand {
             .then(literal("info"));
     }
 
-    private static int executeGetMobCaps(final CommandContext<CommandSourceStack> ctx) {
+    private static int executeGetMobCaps(final CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        final CommandSourceStack css = ctx.getSource();
+        postActionTo(parseTargetHandleFromContext(ctx, false), css, (rawHandle) -> {
+            final TickRegions.ConcreteRegionTickHandle concrete = (TickRegions.ConcreteRegionTickHandle) rawHandle;
+            css.sendSystemMessage(Component.literal("A"));
+        });
         return Command.SINGLE_SUCCESS;
     }
 
@@ -228,7 +233,7 @@ public class RegionDataCommand implements SubCommand {
                         region = pair.getSecond().regioniser.getRegionAtSynchronised(chunkX, chunkZ);
 
                     if (region == null) {
-                        final CommandSyntaxException cse = HANDLE_DOESNT_EXIST.create(new ChunkPos(chunkX, chunkZ));
+                        final CommandSyntaxException cse = HANDLE_DOESNT_EXIST.create(new ColumnPos(chunkX << 4, chunkZ << 4));
 
                         css.sendFailure(Component.literal(cse.getMessage()));
                         throw new IllegalArgumentException(cse);
