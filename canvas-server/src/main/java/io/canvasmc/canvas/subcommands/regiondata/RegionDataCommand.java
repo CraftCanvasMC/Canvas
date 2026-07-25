@@ -1,4 +1,4 @@
-package io.canvasmc.canvas.subcommands;
+package io.canvasmc.canvas.subcommands.regiondata;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.FloatArgumentType;
@@ -30,10 +30,12 @@ import java.util.regex.Pattern;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.DimensionArgument;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.coordinates.ColumnPosArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ColumnPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import org.jspecify.annotations.Nullable;
 
@@ -95,9 +97,13 @@ public class RegionDataCommand implements SubCommand {
                 .then(literal("players"))
                 .then(literal("tiles"))
                 .then(literal("entities"))
-                .then(literal("mobcaps").executes(RegionDataCommand::executeGetMobCaps)
-                    .then(argument("world", DimensionArgument.dimension())
-                        .then(argument("coords", ColumnPosArgument.columnPos()).executes(RegionDataCommand::executeGetMobCaps)))
+                .then(literal("mobcaps")
+                    .then(literal("player")
+                        .then(argument("target", EntityArgument.player())).executes(RegionDataCommand::executeGetPlayerMobCaps))
+                    .then(literal("region")
+                        .executes(RegionDataCommand::executeGetMobCaps)
+                        .then(argument("world", DimensionArgument.dimension())
+                            .then(argument("coords", ColumnPosArgument.columnPos()).executes(RegionDataCommand::executeGetMobCaps))))
                 )
             )
             .then(literal("tick")
@@ -113,15 +119,6 @@ public class RegionDataCommand implements SubCommand {
                 )
             )
             .then(literal("info"));
-    }
-
-    private static int executeGetMobCaps(final CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
-        final CommandSourceStack css = ctx.getSource();
-        postActionTo(parseTargetHandleFromContext(ctx, false), css, (rawHandle) -> {
-            final TickRegions.ConcreteRegionTickHandle concrete = (TickRegions.ConcreteRegionTickHandle) rawHandle;
-            css.sendSystemMessage(Component.literal("A"));
-        });
-        return Command.SINGLE_SUCCESS;
     }
 
     @Override
@@ -144,14 +141,42 @@ public class RegionDataCommand implements SubCommand {
         }, () -> currentPlatform.swapValue(newPlatform));
     }
 
+    private static int executeGetMobCaps(final CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        final CommandSourceStack css = ctx.getSource();
+        schedule(getTickHandle(ctx, false), css, (rawHandle) -> {
+            final TickRegions.ConcreteRegionTickHandle concrete = (TickRegions.ConcreteRegionTickHandle) rawHandle;
+            MobCapUtils.sendMobCaps(css, Either.right(concrete.region.world.getCurrentWorldData()));
+        });
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static int executeGetPlayerMobCaps(final CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        final CommandSourceStack css = ctx.getSource();
+
+        ServerPlayer target;
+
+        try {
+            target = EntityArgument.getPlayer(ctx, "target");
+        } catch (final IllegalArgumentException ignored) {
+            target = ctx.getSource().getPlayerOrException();
+        }
+
+        //noinspection CodeBlock2Expr
+        target.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
+            MobCapUtils.sendMobCaps(css, Either.left(entityPlayer));
+        });
+
+        return Command.SINGLE_SUCCESS;
+    }
+
     private static ArgumentBuilder<CommandSourceStack, ?> addTickActions(final ArgumentBuilder<CommandSourceStack, ?> base) {
         return base
             .then(literal("sprint").then(argument("ticks", LongArgumentType.longArg(0L, 100_000L)).executes((ctx) -> {
                 final long ticksToSprint = LongArgumentType.getLong(ctx, "ticks");
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = getTickHandle(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
-                postActionTo(target, css, (handle) -> {
+                schedule(target, css, (handle) -> {
                     handle.getTickManager().postAction(new ScheduledHandleTickState.Action.StartSprinting(ticksToSprint));
                     css.sendSuccess(() -> Component.literal("Started sprint on \"" + getString(handle) + "\" for " + ticksToSprint + " ticks"), true);
                 });
@@ -159,10 +184,10 @@ public class RegionDataCommand implements SubCommand {
                 return Command.SINGLE_SUCCESS;
             })))
             .then(literal("walk").executes((ctx) -> {
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = getTickHandle(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
-                postActionTo(target, css, (handle) -> {
+                schedule(target, css, (handle) -> {
                     if (!handle.getTickManager().isSprinting()) {
                         throw NOT_SPRINTING.create();
                     }
@@ -173,10 +198,10 @@ public class RegionDataCommand implements SubCommand {
                 return Command.SINGLE_SUCCESS;
             }))
             .then(literal("pause").executes((ctx) -> {
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = getTickHandle(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
-                postActionTo(target, css, (handle) -> {
+                schedule(target, css, (handle) -> {
                     if (!handle.getTickManager().doesRunGameElements()) {
                         throw NOT_PLAYING.create();
                     }
@@ -187,10 +212,10 @@ public class RegionDataCommand implements SubCommand {
                 return Command.SINGLE_SUCCESS;
             }))
             .then(literal("play").executes((ctx) -> {
-                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = parseTargetHandleFromContext(ctx, true);
+                final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target = getTickHandle(ctx, true);
                 final CommandSourceStack css = ctx.getSource();
 
-                postActionTo(target, css, (handle) -> {
+                schedule(target, css, (handle) -> {
                     if (handle.getTickManager().doesRunGameElements()) {
                         throw NOT_PAUSED.create();
                     }
@@ -215,8 +240,8 @@ public class RegionDataCommand implements SubCommand {
         throw new UnsupportedOperationException("Unknown handle: " + handle.getClass().getName());
     }
 
-    private static void postActionTo(
-        final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> arg,
+    private static void schedule(
+        final Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> target,
         final CommandSourceStack css,
         final CSEConsumer<TickRegionScheduler.RegionScheduleHandle> action
     ) throws CommandSyntaxException {
@@ -224,7 +249,7 @@ public class RegionDataCommand implements SubCommand {
 
         try {
             handle = Util.getEitherOrNull(
-                arg.mapRight((pair) -> {
+                target.mapRight((pair) -> {
                     final ColumnPos blockPos = pair.getFirst();
                     final int chunkX = blockPos.x() >> 4;
                     final int chunkZ = blockPos.z() >> 4;
@@ -255,7 +280,7 @@ public class RegionDataCommand implements SubCommand {
         action.act(handle);
     }
 
-    private static Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> parseTargetHandleFromContext(
+    private static Either<RegionizedServer.GlobalTickTickHandle, Pair<ColumnPos, ServerLevel>> getTickHandle(
         final CommandContext<CommandSourceStack> ctx, final boolean globalTickAvailable
     ) throws CommandSyntaxException {
 

@@ -9,7 +9,7 @@ import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
-import io.canvasmc.canvas.subcommands.RegionDataCommand;
+import io.canvasmc.canvas.subcommands.regiondata.RegionDataCommand;
 import io.canvasmc.canvas.subcommands.ReloadSubCommand;
 import io.canvasmc.canvas.subcommands.SetMaxPlayersSubCommand;
 import io.canvasmc.canvas.subcommands.WorldDistanceSubCommand;
