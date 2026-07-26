@@ -563,33 +563,21 @@ public class GlobalConfiguration extends Part {
     {
         option("serverModName").docs("The server mod name displayed in server listings and client info").word();
 
-        option("displayWorldLoadScreenForPortaling")
+        option("displayWorldLoadScreenForCrossRegionTransfers")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
-
-        option("defaultRespawnDimensionKey")
-            .docs(
-                "The default respawn dimension for the server. This can assist servers needing to change this to a",
-                "different world due to setup reasoning, like needing to send players to the \"spawn\" world or something.",
-                "This also applies to the end portal and nether portal, in replacement of the overworld, meaning the",
-                "target dimension for entities going from the nether for example will be sent here"
-            ).identifier(); // TODO - object mapping?
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
-    public boolean displayWorldLoadScreenForPortaling = true;
-    public boolean displayWorldLoadScreenForTeleporting = true;
+
+    public boolean displayWorldLoadScreenForCrossRegionTransfers = true;
+
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
     public boolean tileEntitySnapshotCreation = false;
-    public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
-
-    public static ResourceKey<Level> fetchRespawnDimensionKey() {
-        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
-    }
 
     public PurpurContainers purpurContainers = new PurpurContainers();
     public static class PurpurContainers extends Part {
