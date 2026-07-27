@@ -398,6 +398,18 @@ public class GlobalConfiguration extends Part {
             LOG,
             THROW
         }
+
+        {
+            option("preventExcessiveVelocityMoveOutOfRegion").docs(
+                "This option prevents the attempted movement of entities with excessive velocity from exceeding the region bounds",
+                "by setting the velocity of the entity to 0 if it attempts to move outside of the region. Note this option does",
+                "not take collisions into account, and it will calculate this from the raw velocity, which is a much stricter way",
+                "to govern this safe guard. By disabling this, if the entity is still attempting to move out of region after applying",
+                "collisions, a warning will show in console and the entity will instead be teleported to prevent the server from crashing."
+            );
+        }
+
+        public boolean preventExcessiveVelocityMoveOutOfRegion = false;
     }
 
     public ChunkSystem chunkSystem = new ChunkSystem();
