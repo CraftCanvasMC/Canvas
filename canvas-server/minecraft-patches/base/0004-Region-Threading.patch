@@ -31267,7 +31267,7 @@ index 2bdbb8451974f0b8d6e94d390ac735f4ccffd954..6b4f07fa571fc7105af3d351aff99e3e
  
      @Retention(RetentionPolicy.CLASS)
 diff --git a/net/minecraft/world/scores/Scoreboard.java b/net/minecraft/world/scores/Scoreboard.java
-index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682de37c33b 100644
+index 4a15851bda30c918c58c96d2cb98b74f30db396c..adbde0bc2de5bbeaba7d5c4b2f12c3a1d93da324 100644
 --- a/net/minecraft/world/scores/Scoreboard.java
 +++ b/net/minecraft/world/scores/Scoreboard.java
 @@ -30,17 +30,54 @@ import org.slf4j.Logger;
@@ -31377,7 +31377,8 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
 +            // even internally. stats incrementing is also thread-safe in Vanilla, and
 +            // this system is technically thread-safe now, so it's fine to run async
 +
-+            @Override
+             @Override
+-            public int get() {
 +            public synchronized int add(final int count) {
 +                return ScoreAccess.super.add(count);
 +            }
@@ -31388,8 +31389,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
 +            }
 +            // Canvas end - region threading
 +
-             @Override
--            public int get() {
++            @Override
 +            public synchronized int get() { // Canvas - region threading
                  return score.value();
              }
@@ -31440,7 +31440,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
                  score.setLocked(locked);
                  if (requiresSync.isTrue()) {
                      this.sendScoreToPlayers();
-@@ -158,14 +225,19 @@ public class Scoreboard {
+@@ -158,14 +225,26 @@ public class Scoreboard {
          };
      }
  
@@ -31449,10 +31449,17 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
 -        PlayerScores playerScore = this.playerScores.get(name.getScoreboardName());
 -        return playerScore != null ? playerScore.get(objective) : null;
 +        // Canvas start - region threading
-+        PlayerScores playerScore = this.scoresByName.get(name.getScoreboardName());
++        final PlayerScores playerScore = this.scoresByName.get(name.getScoreboardName());
++        if (playerScore == null) {
++            return null;
++        }
++
++        final Score score = playerScore.get(objective);
++
 +        // we wrap with our own implementation because technically you can cast ReadOnlyScoreInfo to Score
 +        // which then you can modify it with... no thanks!
-+        return playerScore != null ? new io.canvasmc.canvas.threadedregions.scores.ReadOnlyScore(playerScore.get(objective)) : null;
++
++        return score != null ? new io.canvasmc.canvas.threadedregions.scores.ReadOnlyScore(score) : null;
 +        // Canvas end - region threading
      }
  
@@ -31463,7 +31470,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
              Score score = scores.get(objective);
              if (score != null) {
                  result.add(new PlayerScoreEntry(player, score.value(), score.display(), score.numberFormat()));
-@@ -183,22 +255,28 @@ public class Scoreboard {
+@@ -183,22 +262,28 @@ public class Scoreboard {
      }
  
      public Collection<ScoreHolder> getTrackedPlayers() {
@@ -31496,7 +31503,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
                  if (removedPlayer != null) {
                      this.onPlayerRemoved(player);
                  }
-@@ -209,83 +287,136 @@ public class Scoreboard {
+@@ -209,83 +294,136 @@ public class Scoreboard {
      }
  
      public Object2IntMap<Objective> listPlayerScores(final ScoreHolder player) {
@@ -31628,12 +31635,12 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
 +
 +            newTeamsByHolder.put(player, team);
 +            added.setValue(team.getPlayers().add(player));
++
++            return new Entry(current.teamsByName, newTeamsByHolder);
++        });
  
 -        this.teamsByPlayer.put(player, team);
 -        return team.getPlayers().add(player);
-+            return new Entry(current.teamsByName, newTeamsByHolder);
-+        });
-+
 +        return added.isTrue();
 +        // Canvas end - region threading
      }
@@ -31669,7 +31676,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
      }
  
      public void removePlayerFromTeam(final String player, final PlayerTeam team) {
-@@ -293,20 +424,32 @@ public class Scoreboard {
+@@ -293,20 +431,32 @@ public class Scoreboard {
              throw new IllegalStateException("Player is either on another team or not on any team. Cannot remove from team '" + team.getName() + "'.");
          }
  
@@ -31707,7 +31714,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
      }
  
      public void onObjectiveAdded(final Objective objective) {
-@@ -339,15 +482,16 @@ public class Scoreboard {
+@@ -339,15 +489,16 @@ public class Scoreboard {
      public void onTeamRemoved(final PlayerTeam team) {
      }
  
@@ -31729,7 +31736,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
              .entrySet()
              .stream()
              .flatMap(
-@@ -363,7 +507,9 @@ public class Scoreboard {
+@@ -363,7 +514,9 @@ public class Scoreboard {
              .toList();
      }
  
@@ -31739,7 +31746,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
          Objective objective = this.getObjective(score.objective);
          if (objective == null) {
              LOGGER.error("Unknown objective {} for name {}, ignoring", score.objective, score.owner);
-@@ -373,10 +519,13 @@ public class Scoreboard {
+@@ -373,10 +526,13 @@ public class Scoreboard {
      }
  
      protected List<PlayerTeam.Packed> packPlayerTeams() {
@@ -31753,7 +31760,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
          PlayerTeam team = this.addPlayerTeam(packed.name());
          packed.displayName().ifPresent(team::setDisplayName);
          team.setColor(packed.color());
-@@ -394,10 +543,13 @@ public class Scoreboard {
+@@ -394,10 +550,13 @@ public class Scoreboard {
      }
  
      protected List<Objective.Packed> packObjectives() {
@@ -31767,7 +31774,7 @@ index 4a15851bda30c918c58c96d2cb98b74f30db396c..e711f032920be9d35df14e0f71793682
          this.addObjective(
              objective.name(),
              objective.criteria(),
-@@ -409,6 +561,7 @@ public class Scoreboard {
+@@ -409,6 +568,7 @@ public class Scoreboard {
      }
  
      protected Map<DisplaySlot, String> packDisplaySlots() {
