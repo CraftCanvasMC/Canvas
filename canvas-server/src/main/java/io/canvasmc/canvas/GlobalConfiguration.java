@@ -404,6 +404,30 @@ public class GlobalConfiguration extends Part {
     public static class ChunkSystem extends Part {
 
         {
+            option("fluidPostProcessingAlgorithm")
+                .docs(
+                    Style.wrap(
+                        "The worldgen processes creates a lot of unnecessary fluid post-processing tasks,",
+                        "which can overload the server and cause stuttering when generating new chunks.",
+                        "Depending on the algorithm chosen, this can help reduce stutter and improve performance",
+                        "when generating chunks"
+                    ).defineEnum(FluidPostProcessingMode.class, (mode) -> switch (mode) {
+                        case VANILLA -> "Normal post processing algorithm, everything is processed";
+                        case DISABLED -> "Disables fluid post processing entirely";
+                        case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
+                    })
+                );
+        }
+
+        public FluidPostProcessingMode fluidPostProcessingAlgorithm = FluidPostProcessingMode.VANILLA;
+
+        public enum FluidPostProcessingMode {
+            VANILLA,
+            DISABLED,
+            FILTERED
+        }
+
+        {
             option("optimizeTreasureMapLocating")
                 .docs(
                     "Treasure map locating is a very expensive operation, leading to most production servers",
