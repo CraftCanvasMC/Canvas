@@ -1,0 +1,320 @@
+--- a/net/minecraft/world/entity/item/FallingBlockEntity.java
++++ b/net/minecraft/world/entity/item/FallingBlockEntity.java
+@@ -165,105 +_,230 @@
+                 return;
+             }
+             // Paper end - Configurable falling blocks height nerf
+-            // this.handlePortal(); // Folia - region threading
+-            if (this.level() instanceof ServerLevel serverLevel && (this.isAlive() || this.forceTickAfterTeleportToDuplicate)) {
+-                BlockPos pos = this.blockPosition();
+-                boolean isConcrete = this.blockState.getBlock() instanceof ConcretePowderBlock;
+-                boolean isStuckInWater = isConcrete && this.level().getFluidState(pos).is(FluidTags.WATER);
+-                double moveVec = this.getDeltaMovement().lengthSqr();
+-                if (isConcrete && moveVec > 1.0) {
+-                    BlockHitResult clip = this.level()
+-                        .clip(
+-                            new ClipContext(
+-                                new Vec3(this.xo, this.yo, this.zo), this.position(), ClipContext.Block.COLLIDER, ClipContext.Fluid.SOURCE_ONLY, this
++            // Canvas start - safely continue falling block ticks after starting an End portal transfer
++            if (
++                io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.allowUnsafeEndPortalTeleportation
++                    && this.portalProcess != null
++                    && this.portalProcess.isSamePortal((net.minecraft.world.level.block.Portal) net.minecraft.world.level.block.Blocks.END_PORTAL)
++                    && this.handlePortal()
++            ) {
++                return;
++            }
++            // Canvas end - safely continue falling block ticks after starting an End portal transfer
++
++            this.canvas$finishFallingBlockTick(block); // Canvas - safely continue falling block ticks after starting an End portal transfer
++        }
++    }
++
++    // Canvas start - safely continue falling block ticks after starting an End portal transfer
++    private void canvas$finishFallingBlockTick(final net.minecraft.world.level.block.Block block) {
++        if (
++            this.level() instanceof net.minecraft.server.level.ServerLevel serverLevel
++                && (this.isAlive() || this.forceTickAfterTeleportToDuplicate)
++        ) {
++            net.minecraft.core.BlockPos pos = this.blockPosition();
++            boolean isConcrete = this.blockState.getBlock() instanceof net.minecraft.world.level.block.ConcretePowderBlock;
++            boolean isStuckInWater = isConcrete && this.level().getFluidState(pos).is(net.minecraft.tags.FluidTags.WATER);
++            double moveVec = this.getDeltaMovement().lengthSqr();
++            if (isConcrete && moveVec > 1.0) {
++                net.minecraft.world.phys.BlockHitResult clip = this.level()
++                    .clip(
++                        new net.minecraft.world.level.ClipContext(
++                            new net.minecraft.world.phys.Vec3(this.xo, this.yo, this.zo),
++                            this.position(),
++                            net.minecraft.world.level.ClipContext.Block.COLLIDER,
++                            net.minecraft.world.level.ClipContext.Fluid.SOURCE_ONLY,
++                            this
++                        )
++                    );
++                if (
++                    clip.getType() != net.minecraft.world.phys.HitResult.Type.MISS
++                        && this.level().getFluidState(clip.getBlockPos()).is(net.minecraft.tags.FluidTags.WATER)
++                ) {
++                    pos = clip.getBlockPos();
++                    isStuckInWater = true;
++                }
++            }
++
++            if (!this.onGround() && !isStuckInWater) {
++                if (
++                    (this.time > 100 && this.autoExpire)
++                            && (pos.getY() <= this.level().getMinY() || pos.getY() > this.level().getMaxY())
++                        || (this.time > 600 && this.autoExpire)
++                ) { // Paper - Expand FallingBlock API
++                    if (this.dropItem && serverLevel.getGameRules().get(net.minecraft.world.level.gamerules.GameRules.ENTITY_DROPS)) {
++                        this.spawnAtLocation(serverLevel, block);
++                    }
++
++                    this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DROP); // CraftBukkit - add Bukkit remove cause
++                }
++            } else {
++                net.minecraft.world.level.block.state.BlockState currentState = this.level().getBlockState(pos);
++                this.setDeltaMovement(this.getDeltaMovement().multiply(0.7, -0.5, 0.7));
++                if (!currentState.is(net.minecraft.world.level.block.Blocks.MOVING_PISTON)) {
++                    if (!this.cancelDrop) {
++                        boolean mayReplace = currentState.canBeReplaced(
++                            new net.minecraft.world.item.context.DirectionalPlaceContext(
++                                this.level(),
++                                pos,
++                                net.minecraft.core.Direction.DOWN,
++                                net.minecraft.world.item.ItemStack.EMPTY,
++                                net.minecraft.core.Direction.UP
+                             )
+                         );
+-                    if (clip.getType() != HitResult.Type.MISS && this.level().getFluidState(clip.getBlockPos()).is(FluidTags.WATER)) {
+-                        pos = clip.getBlockPos();
+-                        isStuckInWater = true;
+-                    }
+-                }
+-
+-                if (!this.onGround() && !isStuckInWater) {
+-                    if ((this.time > 100 && this.autoExpire) && (pos.getY() <= this.level().getMinY() || pos.getY() > this.level().getMaxY()) || (this.time > 600 && this.autoExpire)) { // Paper - Expand FallingBlock API
+-                        if (this.dropItem && serverLevel.getGameRules().get(GameRules.ENTITY_DROPS)) {
+-                            this.spawnAtLocation(serverLevel, block);
+-                        }
+-
+-                        this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DROP); // CraftBukkit - add Bukkit remove cause
+-                    }
+-                } else {
+-                    BlockState currentState = this.level().getBlockState(pos);
+-                    this.setDeltaMovement(this.getDeltaMovement().multiply(0.7, -0.5, 0.7));
+-                    if (!currentState.is(Blocks.MOVING_PISTON)) {
+-                        if (!this.cancelDrop) {
+-                            boolean mayReplace = currentState.canBeReplaced(
+-                                new DirectionalPlaceContext(this.level(), pos, Direction.DOWN, ItemStack.EMPTY, Direction.UP)
+-                            );
+-                            boolean wouldContinueFalling = FallingBlock.isFree(this.level().getBlockState(pos.below())) && (!isConcrete || !isStuckInWater);
+-                            boolean wouldSurvive = this.blockState.canSurvive(this.level(), pos) && !wouldContinueFalling;
+-                            if (mayReplace && wouldSurvive) {
+-                                if (this.blockState.hasProperty(BlockStateProperties.WATERLOGGED) && this.level().getFluidState(pos).is(Fluids.WATER)) {
+-                                    this.blockState = this.blockState.setValue(BlockStateProperties.WATERLOGGED, true);
+-                                }
+-
+-                                // CraftBukkit start
+-                                if (!org.bukkit.craftbukkit.event.CraftEventFactory.callEntityChangeBlockEvent(this, pos, this.blockState)) {
+-                                    this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // SPIGOT-6586 called before the event in previous versions
+-                                    return;
+-                                }
+-                                // CraftBukkit end
+-                                if (this.level().setBlock(pos, this.blockState, Block.UPDATE_ALL)) {
+-                                    serverLevel.getChunkSource()
+-                                        .chunkMap
+-                                        .sendToTrackingPlayers(this, new ClientboundBlockUpdatePacket(pos, this.level().getBlockState(pos)));
+-                                    this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
+-                                    if (block instanceof Fallable fallable) {
+-                                        fallable.onLand(this.level(), pos, this.blockState, currentState, this);
+-                                    }
+-
+-                                    if (this.blockData != null && this.blockState.hasBlockEntity()) {
+-                                        BlockEntity blockEntity = this.level().getBlockEntity(pos);
+-                                        if (blockEntity != null) {
+-                                            try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(
+-                                                    blockEntity.problemPath(), LOGGER
+-                                                )) {
+-                                                RegistryAccess registryAccess = this.level().registryAccess();
+-                                                TagValueOutput output = TagValueOutput.createWithContext(reporter, registryAccess);
+-                                                blockEntity.saveWithoutMetadata(output);
+-                                                CompoundTag merged = output.buildResult();
+-                                                this.blockData.forEach((name, tag) -> merged.put(name, tag.copy()));
+-                                                blockEntity.loadWithComponents(TagValueInput.create(reporter, registryAccess, merged));
+-                                            } catch (Exception e) {
+-                                                LOGGER.error("Failed to load block entity from falling block", e);
+-                                            }
+-
+-                                            blockEntity.setChanged();
++                        boolean wouldContinueFalling = net.minecraft.world.level.block.FallingBlock.isFree(
++                            this.level().getBlockState(pos.below())
++                        ) && (!isConcrete || !isStuckInWater);
++                        boolean wouldSurvive = this.blockState.canSurvive(this.level(), pos) && !wouldContinueFalling;
++                        if (mayReplace && wouldSurvive) {
++                            if (
++                                this.blockState.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED)
++                                    && this.level().getFluidState(pos).is(net.minecraft.world.level.material.Fluids.WATER)
++                            ) {
++                                this.blockState = this.blockState.setValue(
++                                    net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED,
++                                    true
++                                );
++                            }
++
++                            // CraftBukkit start
++                            if (!org.bukkit.craftbukkit.event.CraftEventFactory.callEntityChangeBlockEvent(this, pos, this.blockState)) {
++                                this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // SPIGOT-6586 called before the event in previous versions
++                                return;
++                            }
++                            // CraftBukkit end
++                            if (this.level().setBlock(pos, this.blockState, net.minecraft.world.level.block.Block.UPDATE_ALL)) {
++                                serverLevel.getChunkSource()
++                                    .chunkMap
++                                    .sendToTrackingPlayers(
++                                        this,
++                                        new net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket(
++                                            pos,
++                                            this.level().getBlockState(pos)
++                                        )
++                                    );
++                                this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++                                if (block instanceof net.minecraft.world.level.block.Fallable fallable) {
++                                    fallable.onLand(this.level(), pos, this.blockState, currentState, this);
++                                }
++
++                                if (this.blockData != null && this.blockState.hasBlockEntity()) {
++                                    net.minecraft.world.level.block.entity.BlockEntity blockEntity = this.level().getBlockEntity(pos);
++                                    if (blockEntity != null) {
++                                        try (
++                                            net.minecraft.util.ProblemReporter.ScopedCollector reporter =
++                                                new net.minecraft.util.ProblemReporter.ScopedCollector(blockEntity.problemPath(), LOGGER)
++                                        ) {
++                                            net.minecraft.core.RegistryAccess registryAccess = this.level().registryAccess();
++                                            net.minecraft.world.level.storage.TagValueOutput output =
++                                                net.minecraft.world.level.storage.TagValueOutput.createWithContext(reporter, registryAccess);
++                                            blockEntity.saveWithoutMetadata(output);
++                                            net.minecraft.nbt.CompoundTag merged = output.buildResult();
++                                            this.blockData.forEach((name, tag) -> merged.put(name, tag.copy()));
++                                            blockEntity.loadWithComponents(
++                                                net.minecraft.world.level.storage.TagValueInput.create(reporter, registryAccess, merged)
++                                            );
++                                        } catch (java.lang.Exception exception) {
++                                            LOGGER.error("Failed to load block entity from falling block", exception);
+                                         }
++
++                                        blockEntity.setChanged();
+                                     }
+-                                } else if (this.dropItem && serverLevel.getGameRules().get(GameRules.ENTITY_DROPS)) {
+-                                    this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DROP); // CraftBukkit - add Bukkit remove cause
+-                                    this.callOnBrokenAfterFall(block, pos);
+-                                    this.spawnAtLocation(serverLevel, block);
+                                 }
+-                            } else {
++                            } else if (
++                                this.dropItem
++                                    && serverLevel.getGameRules().get(net.minecraft.world.level.gamerules.GameRules.ENTITY_DROPS)
++                            ) {
+                                 this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DROP); // CraftBukkit - add Bukkit remove cause
+-                                if (this.dropItem && serverLevel.getGameRules().get(GameRules.ENTITY_DROPS)) {
+-                                    this.callOnBrokenAfterFall(block, pos);
+-                                    this.spawnAtLocation(serverLevel, block);
+-                                }
++                                this.callOnBrokenAfterFall(block, pos);
++                                this.spawnAtLocation(serverLevel, block);
+                             }
+                         } else {
+-                            this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
+-                            this.callOnBrokenAfterFall(block, pos);
++                            this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DROP); // CraftBukkit - add Bukkit remove cause
++                            if (
++                                this.dropItem
++                                    && serverLevel.getGameRules().get(net.minecraft.world.level.gamerules.GameRules.ENTITY_DROPS)
++                            ) {
++                                this.callOnBrokenAfterFall(block, pos);
++                                this.spawnAtLocation(serverLevel, block);
++                            }
+                         }
++                    } else {
++                        this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
++                        this.callOnBrokenAfterFall(block, pos);
+                     }
+                 }
+             }
+-
+-            this.setDeltaMovement(this.getDeltaMovement().scale(this.getAirDrag()));
+-        }
+-    }
++        }
++
++        this.setDeltaMovement(this.getDeltaMovement().scale(this.getAirDrag()));
++    }
++
++    @Override
++    protected java.lang.@org.jspecify.annotations.Nullable Runnable canvas$preparePortalTransferContinuation(
++        final net.minecraft.server.level.ServerLevel origin,
++        final net.minecraft.server.level.ServerLevel destination,
++        final net.minecraft.world.entity.Entity.PortalType type
++    ) {
++        final boolean fromOrToEnd =
++            (
++                origin.dimension() == net.minecraft.world.level.Level.END
++                    || destination.dimension() == net.minecraft.world.level.Level.END
++            ) && origin.dimension() != destination.dimension();
++        if (
++            type != net.minecraft.world.entity.Entity.PortalType.END
++                || !fromOrToEnd
++                || !io.papermc.paper.configuration.GlobalConfiguration.get()
++                    .unsupportedSettings
++                    .allowUnsafeEndPortalTeleportation
++        ) {
++            return null;
++        }
++
++        final net.minecraft.world.entity.Entity created = this.getType()
++            .create(origin, net.minecraft.world.entity.EntitySpawnReason.DIMENSION_TRAVEL);
++        if (!(created instanceof net.minecraft.world.entity.item.FallingBlockEntity continuation)) {
++            LOGGER.error("Unable to create a falling block continuation for End portal duplication");
++            return null;
++        }
++
++        continuation.restoreFrom(this, false);
++        continuation.setUUID(java.util.UUID.randomUUID());
++        continuation.portalProcess = null;
++        continuation.forceTickAfterTeleportToDuplicate = false;
++        continuation.setStartPos(this.getStartPos());
++        continuation.setDeltaMovement(this.getDeltaMovement());
++        continuation.xo = this.xo;
++        continuation.yo = this.yo;
++        continuation.zo = this.zo;
++        continuation.xOld = this.xOld;
++        continuation.yOld = this.yOld;
++        continuation.zOld = this.zOld;
++        continuation.yRotO = this.yRotO;
++        continuation.xRotO = this.xRotO;
++        continuation.onGround = this.onGround;
++        continuation.horizontalCollision = this.horizontalCollision;
++        continuation.verticalCollision = this.verticalCollision;
++        continuation.verticalCollisionBelow = this.verticalCollisionBelow;
++        continuation.minorHorizontalCollision = this.minorHorizontalCollision;
++
++        return () -> {
++            origin.addDuringTeleport(continuation);
++            if (continuation.hasNullCallback() || continuation.isRemoved()) {
++                LOGGER.error("Unable to add a falling block continuation for End portal duplication");
++                return;
++            }
++
++            try {
++                continuation.canvas$finishFallingBlockTick(continuation.blockState.getBlock());
++            } finally {
++                if (!continuation.isRemoved()) {
++                    continuation.discard();
++                }
++            }
++        };
++    }
++    // Canvas end - safely continue falling block ticks after starting an End portal transfer
+ 
+     public void callOnBrokenAfterFall(final Block block, final BlockPos pos) {
+         if (block instanceof Fallable fallable) {
