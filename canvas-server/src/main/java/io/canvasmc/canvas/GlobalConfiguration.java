@@ -398,6 +398,18 @@ public class GlobalConfiguration extends Part {
             LOG,
             THROW
         }
+
+        {
+            option("preventExcessiveVelocityMoveOutOfRegion").docs(
+                "This option prevents the attempted movement of entities with excessive velocity from exceeding the region bounds",
+                "by setting the velocity of the entity to 0 if it attempts to move outside of the region. Note this option does",
+                "not take collisions into account, and it will calculate this from the raw velocity, which is a much stricter way",
+                "to govern this safe guard. By disabling this, if the entity is still attempting to move out of region after applying",
+                "collisions, a warning will show in console and the entity will instead be teleported to prevent the server from crashing."
+            );
+        }
+
+        public boolean preventExcessiveVelocityMoveOutOfRegion = false;
     }
 
     public ChunkSystem chunkSystem = new ChunkSystem();
@@ -444,18 +456,35 @@ public class GlobalConfiguration extends Part {
     public static class UpstreamFixes extends Part {
 
         {
-            // TODO - Toffik - restore comments
-            // should we do these specific or do we try and do better with this?
-            // stream((fieldName) -> {
-            //     if (fieldName.startsWith("mc")) {
-            //         // this is a specific minecraft fix
-            //         return new OptionDefinition()
-            //             .docs(
-            //                 Style.create().literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
-            //             );
-            //     }
-            //     return null;
-            // });
+            stream((fieldName, option) -> {
+                if (fieldName.startsWith("mc")
+                    && fieldName.substring(2).chars().allMatch(Character::isDigit)) {
+                    // this is a specific minecraft fix
+                    option.docs(
+                        Style.create()
+                            .literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
+                    );
+                }
+            });
+
+            option("mc261810").docs("Fixes low firework propulsion in the void");
+            option("mc298464").docs("Fixes a memory leak related to Hoglin removal due to CHANGED_DIMENSION");
+            option("mc223153").docs("Fixes blocks of raw copper using stone sounds instead of copper sounds");
+            option("mc200418").docs("Fixes cured baby zombies staying as jockey variants");
+            // NOTE: Marked as fixed but isn't; look at affected versions instead
+            option("mc94054").docs("Fixes cave spiders and spiders with the small scale attribute spinning around when walking");
+            option("mc245394").docs("Fixes raid horn blare sounds being controlled by the Friendly Creatures sound slider");
+            option("mc227337").docs("Fixes explosion sounds and particles not being produced when a shulker bullet hits an entity");
+            option("mc221257").docs("Fixes shulker bullets not producing bubble particles when moving through water");
+            option("mc206922").docs("Fixes item drops by entities that were killed by lightning instantly disappearing");
+            option("mc155509").docs("Fixes dying puffed pufferfishes still stinging players");
+            option("mc132878").docs("Fixes armor stands destroyed by explosions/lava/fire not producing particles");
+            option("mc121706").docs("Fixes skeletons and illusioners not looking up/down at their target while strafing");
+            option("mc119754").docs("Fixes elytra firework boosts continuing while in spectator mode");
+            option("mc100991").docs("Fixes killing entities with a fishing rod not counting as a kill");
+            option("mc30391").docs("Fixes chickens, blazes and withers emitting particles during landing despite falling slowly");
+            option("mc183990").docs("Fixes group AI of some mobs breaking when their target dies");
+            option("mc136249").docs("Fixes wearing enchanted boots with depth strider decreasing the strength of the riptide enchantment");
         }
 
         public boolean mc261810 = false;
@@ -507,33 +536,21 @@ public class GlobalConfiguration extends Part {
     {
         option("serverModName").docs("The server mod name displayed in server listings and client info").word();
 
-        option("displayWorldLoadScreenForPortaling")
+        option("displayWorldLoadScreenForCrossRegionTransfers")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
-
-        option("defaultRespawnDimensionKey")
-            .docs(
-                "The default respawn dimension for the server. This can assist servers needing to change this to a",
-                "different world due to setup reasoning, like needing to send players to the \"spawn\" world or something.",
-                "This also applies to the end portal and nether portal, in replacement of the overworld, meaning the",
-                "target dimension for entities going from the nether for example will be sent here"
-            ).identifier(); // TODO - object mapping?
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
-    public boolean displayWorldLoadScreenForPortaling = true;
-    public boolean displayWorldLoadScreenForTeleporting = true;
+
+    public boolean displayWorldLoadScreenForCrossRegionTransfers = true;
+
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
     public boolean tileEntitySnapshotCreation = false;
-    public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
-
-    public static ResourceKey<Level> fetchRespawnDimensionKey() {
-        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
-    }
 
     public PurpurContainers purpurContainers = new PurpurContainers();
     public static class PurpurContainers extends Part {
