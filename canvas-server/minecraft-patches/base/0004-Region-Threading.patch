@@ -12284,18 +12284,9 @@ index 89b9d1a4122d502437d516f8affc5ba72f421f5f..587ec673a0821e91de67abaf3a559c78
      }
  
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
-index cbc15f9acee527682c37c0c42283bd740fc7d169..ef851c5a8c71f1dd4df7778ffc2bb42729972902 100644
+index cbc15f9acee527682c37c0c42283bd740fc7d169..19774a47830260d21751bc66eb1ac9bd551f61a7 100644
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java
-@@ -201,7 +201,7 @@ public class Commands {
-         CloneCommands.register(this.dispatcher, context);
-         DamageCommand.register(this.dispatcher, context);
-         DataCommands.register(this.dispatcher);
--        DataPackCommand.register(this.dispatcher, context);
-+        //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO
-         DefaultGameModeCommands.register(this.dispatcher);
-         DialogCommand.register(this.dispatcher, context);
-         DifficultyCommand.register(this.dispatcher);
 @@ -212,12 +212,12 @@ public class Commands {
          FillCommand.register(this.dispatcher, context);
          FillBiomeCommand.register(this.dispatcher, context);
@@ -14971,6 +14962,119 @@ index bec064ee3fa076961e8266e4c879da1c24f857a5..660f80535f52bc9c9cdfb7ab59b82db9
 +    // Canvas end - region threading
      }
  }
+diff --git a/net/minecraft/server/commands/DataPackCommand.java b/net/minecraft/server/commands/DataPackCommand.java
+index 0da1e4ada8616af825ddd4678e61246c672f9c4f..7758943c53dd5845ef7229f51ab2d050eee7be74 100644
+--- a/net/minecraft/server/commands/DataPackCommand.java
++++ b/net/minecraft/server/commands/DataPackCommand.java
+@@ -99,75 +99,26 @@ public class DataPackCommand {
+         dispatcher.register(
+             Commands.literal("datapack")
+                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+-                .then(
+-                    Commands.literal("enable")
+-                        .then(
+-                            Commands.argument("name", StringArgumentType.string())
+-                                .suggests(UNSELECTED_PACKS)
+-                                .executes(
+-                                    c -> enablePack(
+-                                        c.getSource(), getPack(c, "name", true), (l, p) -> p.getDefaultPosition().insert(l, p, Pack::selectionConfig, false)
+-                                    )
+-                                )
+-                                .then(
+-                                    Commands.literal("after")
+-                                        .then(
+-                                            Commands.argument("existing", StringArgumentType.string())
+-                                                .suggests(SELECTED_PACKS)
+-                                                .executes(
+-                                                    c -> enablePack(
+-                                                        c.getSource(),
+-                                                        getPack(c, "name", true),
+-                                                        (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)) + 1, p)
+-                                                    )
+-                                                )
+-                                        )
+-                                )
+-                                .then(
+-                                    Commands.literal("before")
+-                                        .then(
+-                                            Commands.argument("existing", StringArgumentType.string())
+-                                                .suggests(SELECTED_PACKS)
+-                                                .executes(
+-                                                    c -> enablePack(
+-                                                        c.getSource(), getPack(c, "name", true), (l, p) -> l.add(l.indexOf(getPack(c, "existing", false)), p)
+-                                                    )
+-                                                )
+-                                        )
+-                                )
+-                                .then(Commands.literal("last").executes(c -> enablePack(c.getSource(), getPack(c, "name", true), List::add)))
+-                                .then(Commands.literal("first").executes(c -> enablePack(c.getSource(), getPack(c, "name", true), (l, p) -> l.add(0, p))))
+-                        )
+-                )
+-                .then(
+-                    Commands.literal("disable")
+-                        .then(
+-                            Commands.argument("name", StringArgumentType.string())
+-                                .suggests(SELECTED_PACKS)
+-                                .executes(c -> disablePack(c.getSource(), getPack(c, "name", false)))
+-                        )
+-                )
++                // Canvas start - region threading
++                //
++                // I think honestly it's a good idea if we keep this read-only of sorts, since we can't restore
++                // the whole command because reloading the server registries in region threading is like... no...
++                // SO we are going to make it so that this command can only read the selected enabled packs on
++                // the server and ONLY that.  We also are going to comment out the FULL code in the command because
++                // if there are changes made to this command it's probably best that we track those changes closely
++                //
++                // note: this doesn't need to be scheduled at all either since the selected packs is immutable
++                //
++                // Useful in issue reports and stuff to provide further information about the server
++                //
++                // Canvas end - region threading
+                 .then(
+                     Commands.literal("list")
+                         .executes(c -> listPacks(c.getSource()))
+-                        .then(Commands.literal("available").executes(c -> listAvailablePacks(c.getSource())))
++                        // Canvas - region threading - don't show available packs
+                         .then(Commands.literal("enabled").executes(c -> listEnabledPacks(c.getSource())))
+                 )
+-                .then(
+-                    Commands.literal("create")
+-                        .requires(Commands.hasPermission(Commands.LEVEL_OWNERS))
+-                        .then(
+-                            Commands.argument("id", StringArgumentType.string())
+-                                .then(
+-                                    Commands.argument("description", ComponentArgument.textComponent(context))
+-                                        .executes(
+-                                            c -> createPack(
+-                                                c.getSource(), StringArgumentType.getString(c, "id"), ComponentArgument.getResolvedComponent(c, "description")
+-                                            )
+-                                        )
+-                                )
+-                        )
+-                )
++                // Canvas - region threading - we don't want to allow "creation" of packs
+         );
+     }
+ 
+@@ -238,7 +189,7 @@ public class DataPackCommand {
+     }
+ 
+     private static int listPacks(final CommandSourceStack source) {
+-        return listEnabledPacks(source) + listAvailablePacks(source);
++        return listEnabledPacks(source); // Canvas - region threading - we shouldn't include available packs, since we can't load datapacks safely in region threading
+     }
+ 
+     private static int listAvailablePacks(final CommandSourceStack source) {
+@@ -266,7 +217,7 @@ public class DataPackCommand {
+ 
+     private static int listEnabledPacks(final CommandSourceStack source) {
+         PackRepository repository = source.getServer().getPackRepository();
+-        repository.reload();
++        // Canvas - region threading - we shouldn't reload the repository
+         Collection<? extends Pack> selectedPacks = repository.getSelectedPacks();
+         if (selectedPacks.isEmpty()) {
+             source.sendSuccess(() -> Component.translatable("commands.datapack.list.enabled.none"), false);
 diff --git a/net/minecraft/server/commands/DefaultGameModeCommands.java b/net/minecraft/server/commands/DefaultGameModeCommands.java
 index 7bdeda13c9f9fdaccf462286712713bae277e6e5..9ec2ace36c7541edee644ecfd032e090799011b5 100644
 --- a/net/minecraft/server/commands/DefaultGameModeCommands.java
