@@ -447,6 +447,7 @@ public class WorldConfig extends Part {
         }
 
         public boolean experienceOrbsAreFireResistant = false;
+        public boolean experienceOrbsImmuneToExplosions = false;
     }
 
     public Combat combat = new Combat();
