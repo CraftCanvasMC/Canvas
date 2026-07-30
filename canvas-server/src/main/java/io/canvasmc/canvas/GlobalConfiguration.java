@@ -340,25 +340,15 @@ public class GlobalConfiguration extends Part {
                         .literal("Default: 0.1ms, Higher is safer, lower means more work is done")
                     ).greaterThanOrEqualTo(0.0F);
 
-                option("enableWorkStealing")
-                    .docs(
-                        "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
-                        "to improve performance. If this is enabled, and the task misses its deadline by \"stealThresholdMillis\", it can",
-                        "be taken by another tick thread to be run."
-                    );
-
-                option("enableMidTickTasks").docs("Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick");
                 option("tickRegionAffinity")
                     .docs("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
                     .greaterThanOrEqualTo(0.0F);
-
                 option("enableAffinitySchedulerCpuAffinity").docs("Enables pinning threads of the AFFINITY region scheduler to cpu cores");
             }
 
             public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
             public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
-            public boolean enableWorkStealing = true;
-            public boolean enableMidTickTasks = true;
+
             public int[] tickRegionAffinity = new int[0];
             public boolean enableAffinitySchedulerCpuAffinity = false;
         }

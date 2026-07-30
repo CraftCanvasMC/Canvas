@@ -1195,10 +1195,10 @@ index 0000000000000000000000000000000000000000..42ae4a950bcfcc0fd724a09cfa8e406f
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/SchedulerUtil.java b/io/canvasmc/canvas/threadedregions/SchedulerUtil.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..460bc93f493d001d100f91be252db0d135108c6b
+index 0000000000000000000000000000000000000000..5cae245725c51a3e1b8a95b0fd3929cd38bc616d
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/SchedulerUtil.java
-@@ -0,0 +1,392 @@
+@@ -0,0 +1,390 @@
 +package io.canvasmc.canvas.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.numa.OSNuma;
@@ -1332,9 +1332,7 @@ index 0000000000000000000000000000000000000000..460bc93f493d001d100f91be252db0d1
 +                        (long) (affinityConfig.runTasksBufferMillis * 1_000_000L),
 +                        affinityConfig.stealThresholdMillis * 1_000_000L,
 +                        SchedulerUtil::doesSupportRegionProfiler,
-+                        affinityConfig.enableWorkStealing,
-+                        affinityConfig.enableAffinitySchedulerCpuAffinity,
-+                        affinityConfig.enableMidTickTasks
++                        affinityConfig.enableAffinitySchedulerCpuAffinity
 +                    );
 +                }
 +                default: {
@@ -3386,10 +3384,10 @@ index 0000000000000000000000000000000000000000..64f0e45eb4213ac153b56562acddf3b9
 +import java.util.function.Consumer;
 diff --git a/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02484235ea
+index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa759d711235
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
-@@ -0,0 +1,744 @@
+@@ -0,0 +1,755 @@
 +package io.canvasmc.canvas.threadedregions.scheduler;
 +
 +import ca.spottedleaf.common.util.TimeUtil;
@@ -3441,7 +3439,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +public final class AffinitySchedulerThreadPool extends Scheduler {
 +
 +    public static final long DEFAULT_STEAL_THRESH_MILLIS = 3L;
-+    public static final double DEFAULT_RUN_TASKS_BUFFER_MILLIS = (double) 100_000 / 1_000_000;
++    public static final double DEFAULT_RUN_TASKS_BUFFER_MILLIS = (double) 80_000 / 1_000_000; // 0.08ms
 +
 +    private static final Comparator<AffinitySchedulerThreadPool.ScheduledState> TICK_COMPARATOR_BY_TIME = (final AffinitySchedulerThreadPool.ScheduledState s1, final AffinitySchedulerThreadPool.ScheduledState s2) -> {
 +        final SchedulableTick t1 = s1.tick;
@@ -3467,8 +3465,6 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +    private final long runTaskBuff;
 +    private final long stealThresh;
 +    private final BooleanSupplier linkingSupported;
-+    private final boolean enableWorkStealing;
-+    private final boolean enableIntermediateTasks;
 +
 +    private final AtomicInteger nextSteal = new AtomicInteger(0);
 +
@@ -3480,19 +3476,17 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +        final long runTaskBuff,
 +        final long stealThresh,
 +        final BooleanSupplier linkingSupported,
-+        final boolean enableWorkStealing,
-+        final boolean enableAffinity,
-+        final boolean enableIntermediateTasks
++        final boolean enableAffinity
 +    ) {
 +        this.runTaskBuff = runTaskBuff;
 +        this.stealThresh = stealThresh;
 +        this.linkingSupported = linkingSupported;
-+        this.enableWorkStealing = enableWorkStealing;
-+        this.enableIntermediateTasks = enableIntermediateTasks;
++
 +        final BitSet idleThreads = new BitSet(threads);
 +        for (int i = 0; i < threads; ++i) {
 +            idleThreads.set(i);
 +        }
++
 +        this.idleThreads = idleThreads;
 +
 +        final BitSet affinitySet;
@@ -3505,7 +3499,10 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +                affinitySet = getAffinity(GlobalConfiguration.getInstance().regionScheduler.affinityScheduler.tickRegionAffinity);
 +            }
 +        }
-+        else affinitySet = new BitSet();
++        else {
++            affinitySet = new BitSet();
++        }
++
 +        if (!affinitySet.isEmpty()) {
 +            if (affinitySet.cardinality() < threads) {
 +                throw new IllegalArgumentException("Affinity setting needs 1 allocated core per tick thread");
@@ -3515,6 +3512,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +
 +        final TickThreadRunner[] runners = new TickThreadRunner[threads];
 +        final Thread[] t = new Thread[threads];
++
 +        for (int i = 0; i < threads; ++i) {
 +            int cpuId = affinitySet.isEmpty() ? -1 : affinitySet.nextSetBit(0);
 +            if (cpuId != -1) affinitySet.clear(cpuId);
@@ -3526,13 +3524,15 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +        this.runners = runners;
 +    }
 +
-+    private BitSet getAffinity(int[] affinity) {
++    private BitSet getAffinity(final int[] affinity) {
 +        if (affinity.length == 0) {
 +            LOGGER.warn("No affinity set configured, backing off, logging CPU topology:\n{}", CpuInfoReport.gatherCPUReport());
 +            return new BitSet();
 +        }
++
 +        final int maxAvailable = Runtime.getRuntime().availableProcessors();
 +        final BitSet affinitySet = new BitSet(affinity.length);
++
 +        Arrays.stream(affinity)
 +            .distinct()
 +            .filter(cpuId -> {
@@ -3547,6 +3547,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +                }
 +            })
 +            .forEach(affinitySet::set);
++
 +        return affinitySet;
 +    }
 +
@@ -3558,11 +3559,13 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +
 +    public TickThreadRunner getCurrentTickThreadRunner() {
 +        final Thread current = Thread.currentThread();
++
 +        for (final TickThreadRunner runner : this.runners) {
 +            if (runner.thread == current) {
 +                return runner;
 +            }
 +        }
++
 +        throw new IllegalStateException("Not on tick runner");
 +    }
 +
@@ -3570,6 +3573,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +        final long nsToWait = TimeUnit.MILLISECONDS.toNanos(msToWait);
 +        final long start = System.nanoTime();
 +        final long deadline = start + nsToWait;
++
 +        boolean interrupted = false;
 +        try {
 +            for (final Thread thread : this.threads) {
@@ -3609,6 +3613,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +    @Override
 +    public Thread[] getAliveThreads() {
 +        final List<Thread> ret = new ArrayList<>(this.threads.length);
++
 +        for (final Thread thread : this.threads) {
 +            if (thread.isAlive()) {
 +                ret.add(thread);
@@ -3626,6 +3631,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +    @Override
 +    public void halt() {
 +        this.halted = true;
++
 +        for (final Thread thread : this.threads) {
 +            // force response to halt
 +            LockSupport.unpark(thread);
@@ -3694,23 +3700,22 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +        if (globalHead != null && globalHead == localHead) {
 +            throw new IllegalStateException("Global queue and local queue contain same element");
 +        }
-+        else {
-+            // handle the local and/or global head being overdue already
-+            final boolean localOverdue = localHead != null && localHead.isOverdue(now);
-+            final boolean globalOverdue = globalHead != null && globalHead.isOverdue(now);
-+            if (localOverdue && globalOverdue) {
-+                // we should pick the more urgent one
-+                if (TICK_COMPARATOR_BY_TIME.compare(localHead, globalHead) <= 0) {
-+                    return runner.localQueue.poll();
-+                }
-+                else return globalQueue.poll();
-+            }
-+            else if (localOverdue) {
++
++        // handle the local and/or global head being overdue already
++        final boolean localOverdue = localHead != null && localHead.isOverdue(now);
++        final boolean globalOverdue = globalHead != null && globalHead.isOverdue(now);
++        if (localOverdue && globalOverdue) {
++            // we should pick the more urgent one
++            if (TICK_COMPARATOR_BY_TIME.compare(localHead, globalHead) <= 0) {
 +                return runner.localQueue.poll();
 +            }
-+            else if (globalOverdue) {
-+                return globalQueue.poll();
-+            }
++            else return globalQueue.poll();
++        }
++        else if (localOverdue) {
++            return runner.localQueue.poll();
++        }
++        else if (globalOverdue) {
++            return globalQueue.poll();
 +        }
 +
 +        ScheduledState best = null;
@@ -3783,8 +3788,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +        if (reschedule != null) {
 +            // we don't wanna send this to the queue if linked
 +            if (linkedToRunner == null || linkedToRunner.state == null || linkedToRunner.state != reschedule) {
-+                if (enableWorkStealing) runner.localQueue.offer(reschedule);
-+                else globalQueue.offer(reschedule);
++                runner.localQueue.offer(reschedule);
 +            }
 +        }
 +
@@ -3794,18 +3798,16 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +            // pinned
 +            ret = (ScheduledState) linkedToRunner.state;
 +        }
-+        else if (enableWorkStealing) {
++        else {
 +            // not pinned, using work stealing
 +            ret = this.poll(runner);
-+        }
-+        else {
-+            // not work stealing, not pinned, use global
-+            ret = globalQueue.poll();
 +        }
 +
 +        if (ret == null && linkedToRunner == null) {
 +            this.idleThreads.set(runner.id);
++
 +            final int s = runner.localQueue.size();
++
 +            if (s != 0) {
 +                throw new IllegalStateException("Local queue must be drained before going idle. Currently " + s);
 +            }
@@ -3825,6 +3827,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +
 +        @Nullable
 +        private AffinitySchedulerThreadPool schedulerOwnedBy;
++
 +        @Nullable
 +        private volatile TickThreadRunner ownedBy;
 +
@@ -3907,6 +3910,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +
 +        @UnknownNullability("null until the runner starts on a thread")
 +        private volatile Thread thread;
++
 +        @Nullable
 +        private volatile SchedulableTick linked;
 +
@@ -4012,6 +4016,7 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +        @Override
 +        public void run() {
 +            this.thread = Thread.currentThread();
++
 +            if (affinity != -1) {
 +                Affinity.setAffinity(affinity);
 +                LOGGER.debug("{} bound to CPU {}", this, affinity);
@@ -4097,7 +4102,6 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +                // haven't hit deadline yet, try tasks and then try park
 +                final TickThreadRunnerState runTasksState = new TickThreadRunnerState(startStateTask, STATE_EXECUTING_TASKS);
 +                if (
-+                    scheduler.enableIntermediateTasks &&
 +                    adjustedForRunBuffer - System.nanoTime() > 0L &&
 +                    startStateTask.compareHasTasks() &&
 +                    tryExchangeState(startState, runTasksState)
@@ -4131,7 +4135,12 @@ index 0000000000000000000000000000000000000000..f2e4e4c33284935296a23a85d9b30b02
 +            return "AffinityRunner#" + id;
 +        }
 +
-+        private record TickThreadRunnerState(@UnknownNullability("null when state is idle") ScheduledState stateTarget, int state) {}
++        private record TickThreadRunnerState(
++            @UnknownNullability("null when state is idle")
++            ScheduledState stateTarget,
++            int state
++        ) {
++        }
 +    }
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/scores/ObjectiveData.java b/io/canvasmc/canvas/threadedregions/scores/ObjectiveData.java
