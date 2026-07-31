@@ -419,17 +419,6 @@ public class GlobalConfiguration extends Part {
                         case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
                     })
                 );
-
-            option("makeFluidPostProcessScheduledTick")
-                .docs(
-                    "Enabling this turns fluid post processing into a scheduled tick, which hopefully",
-                    "helps to mitigate MSPT spiking issues during chunk generation"
-                );
-            option("endBiomeCacheSize").greaterThan(0.0F);
-            option("structureOptimizations").docs(
-                "These options are ported from the mod StructureLayoutOptimizer, https://modrinth.com/mod/structure-layout-optimizer",
-                "which optimizes the generation of Jigsaw Structures and NBT pieces"
-            );
         }
 
         public FluidPostProcessingMode fluidPostProcessingAlgorithm = FluidPostProcessingMode.VANILLA;
@@ -438,34 +427,6 @@ public class GlobalConfiguration extends Part {
             VANILLA,
             DISABLED,
             FILTERED
-        }
-
-        public boolean makeFluidPostProcessScheduledTick = false;
-        public boolean optimizeAquifer = false;
-        public boolean useEndBiomeCache = false;
-        public int endBiomeCacheSize = 1024;
-        public boolean optimizeBeardifier = false;
-
-        public StructureGen structureOptimizations = new StructureGen();
-        public static class StructureGen extends Part {
-
-            {
-                option("deduplicateShuffledTemplatePoolElementList").docs(
-                    Style.wrap(
-                        "Whether to use an alternative strategy to make structure layouts generate slightly faster than",
-                        "the default optimization has for template pool weights. This alternative strategy works by",
-                        "changing the list of pieces that structures collect from the template pool to not have duplicate entries."
-                    )
-                    .blank()
-                    .wordWrap(
-                        "By enabling this option you can get a bit more performance from high weight Template Pool Structures,",
-                        "but you lose parity with Vanilla seeds on the layout of the structure"
-                    )
-                );
-            }
-
-            public boolean deduplicateShuffledTemplatePoolElementList = false;
-            public boolean enable = false;
         }
 
         {
