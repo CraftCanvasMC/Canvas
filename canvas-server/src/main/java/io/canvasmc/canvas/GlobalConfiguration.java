@@ -340,25 +340,15 @@ public class GlobalConfiguration extends Part {
                         .literal("Default: 0.1ms, Higher is safer, lower means more work is done")
                     ).greaterThanOrEqualTo(0.0F);
 
-                option("enableWorkStealing")
-                    .docs(
-                        "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
-                        "to improve performance. If this is enabled, and the task misses its deadline by \"stealThresholdMillis\", it can",
-                        "be taken by another tick thread to be run."
-                    );
-
-                option("enableMidTickTasks").docs("Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick");
                 option("tickRegionAffinity")
                     .docs("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
                     .greaterThanOrEqualTo(0.0F);
-
                 option("enableAffinitySchedulerCpuAffinity").docs("Enables pinning threads of the AFFINITY region scheduler to cpu cores");
             }
 
             public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
             public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
-            public boolean enableWorkStealing = true;
-            public boolean enableMidTickTasks = true;
+
             public int[] tickRegionAffinity = new int[0];
             public boolean enableAffinitySchedulerCpuAffinity = false;
         }
@@ -429,17 +419,6 @@ public class GlobalConfiguration extends Part {
                         case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
                     })
                 );
-
-            option("makeFluidPostProcessScheduledTick")
-                .docs(
-                    "Enabling this turns fluid post processing into a scheduled tick, which hopefully",
-                    "helps to mitigate MSPT spiking issues during chunk generation"
-                );
-            option("endBiomeCacheSize").greaterThan(0.0F);
-            option("structureOptimizations").docs(
-                "These options are ported from the mod StructureLayoutOptimizer, https://modrinth.com/mod/structure-layout-optimizer",
-                "which optimizes the generation of Jigsaw Structures and NBT pieces"
-            );
         }
 
         public FluidPostProcessingMode fluidPostProcessingAlgorithm = FluidPostProcessingMode.VANILLA;
@@ -448,34 +427,6 @@ public class GlobalConfiguration extends Part {
             VANILLA,
             DISABLED,
             FILTERED
-        }
-
-        public boolean makeFluidPostProcessScheduledTick = false;
-        public boolean optimizeAquifer = false;
-        public boolean useEndBiomeCache = false;
-        public int endBiomeCacheSize = 1024;
-        public boolean optimizeBeardifier = false;
-
-        public StructureGen structureOptimizations = new StructureGen();
-        public static class StructureGen extends Part {
-
-            {
-                option("deduplicateShuffledTemplatePoolElementList").docs(
-                    Style.wrap(
-                        "Whether to use an alternative strategy to make structure layouts generate slightly faster than",
-                        "the default optimization has for template pool weights. This alternative strategy works by",
-                        "changing the list of pieces that structures collect from the template pool to not have duplicate entries."
-                    )
-                    .blank()
-                    .wordWrap(
-                        "By enabling this option you can get a bit more performance from high weight Template Pool Structures,",
-                        "but you lose parity with Vanilla seeds on the layout of the structure"
-                    )
-                );
-            }
-
-            public boolean deduplicateShuffledTemplatePoolElementList = false;
-            public boolean enable = false;
         }
 
         {
