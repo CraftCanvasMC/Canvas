@@ -514,6 +514,9 @@ public class GlobalConfiguration extends Part {
                     "If alternative playerlist tick is enabled, this is the interval in ticks for how often",
                     "each bucket will be ticked"
                 ).greaterThan(0.0F);
+
+            option("flushLocationWhileKnockback")
+                .docs("Derived from Leaf, this synchronizes the player immediately when knocked back");
         }
 
         public boolean filterVelocityPacket = false;
@@ -521,6 +524,10 @@ public class GlobalConfiguration extends Part {
         public boolean alternativePlayerListTick = false;
         public int playerInfoSendInterval = 600;
         public boolean purpurAlternativeKeepalive = false;
+
+        // Originally from Leaf: https://github.com/Winds-Studio/Leaf/blob/ver/26.2/leaf-server/minecraft-patches/features/0216-Flush-location-while-knockback.patch
+        // License described in Leaf-Flush-location-while-knockback.patch
+        public boolean flushLocationWhileKnockback = false;
     }
 
     {
