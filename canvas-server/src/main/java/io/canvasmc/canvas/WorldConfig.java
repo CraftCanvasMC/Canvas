@@ -457,6 +457,8 @@ public class WorldConfig extends Part {
 
         @Undocumented("Doesn't require docs.")
         public boolean experienceOrbsAreFireResistant = false;
+        @Undocumented("Doesn't require docs.")
+        public boolean experienceOrbsImmuneToExplosions = false;
     }
 
     public Combat combat = new Combat();
