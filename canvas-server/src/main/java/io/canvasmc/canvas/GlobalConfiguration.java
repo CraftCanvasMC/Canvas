@@ -6,6 +6,7 @@ import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
+import io.canvasmc.canvas.configuration.Undocumented;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
 import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
@@ -514,6 +515,15 @@ public class GlobalConfiguration extends Part {
                     "If alternative playerlist tick is enabled, this is the interval in ticks for how often",
                     "each bucket will be ticked"
                 ).greaterThan(0.0F);
+            option("purpurAlternativeKeepalive")
+                .docs(
+                    Style.create()
+                        .wordWrap(
+                            "Uses a different approach to keepalive ping timeouts.",
+                            "Enabling this sends a keepalive packet once per second to a player, and only kicks for timeout if none of them were responded to in 30 seconds.",
+                            "Responding to any of them in any order will keep the player connected.")
+                        .blank()
+                        .wordWrap("AKA, it won't kick your players because one packet gets dropped somewhere along the lines"));
         }
 
         public boolean filterVelocityPacket = false;
@@ -568,8 +578,11 @@ public class GlobalConfiguration extends Part {
         public boolean enderChestPersistHiddenRows = true;
     }
 
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringNetherPortals = false;
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringEndPortals = false;
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringGatewayPortals = false;
 
     public Chat chat = new Chat();
@@ -613,6 +626,10 @@ public class GlobalConfiguration extends Part {
         public boolean allowEnchantingWithIncompatibleEnchants = false;
     }
 
+    {
+        option("disableLocatorBarInAllWorlds").docs("Disables the locator bar globally, removing the need to disable it using gamerules per-world");
+    }
+
     public boolean disableLocatorBarInAllWorlds = false;
 
     {
@@ -624,6 +641,7 @@ public class GlobalConfiguration extends Part {
 
     public Autosave autosave = new Autosave();
 
+    @Undocumented("Doesn't require docs.")
     public static class Autosave extends Part {
 
         {
