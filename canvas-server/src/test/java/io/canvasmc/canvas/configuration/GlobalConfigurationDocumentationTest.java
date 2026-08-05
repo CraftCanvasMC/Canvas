@@ -63,7 +63,7 @@ class GlobalConfigurationDocumentationTest {
             }
 
             if (Part.class.isAssignableFrom(field.getType())) {
-                @SuppressWarnings("unchecked")
+                //noinspection unchecked
                 final Class<? extends Part> nested = (Class<? extends Part>) field.getType();
 
                 verifyPart(nested, errors);

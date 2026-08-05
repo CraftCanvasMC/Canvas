@@ -2,6 +2,7 @@ package io.canvasmc.canvas.configuration;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import io.canvasmc.canvas.GlobalConfiguration;
 import io.papermc.paper.ServerBuildInfo;
@@ -49,7 +50,7 @@ class VanillaFixesConfigurationTest {
         final Set<String> returned = new HashSet<>();
         final Set<String> fixed = new HashSet<>();
 
-        for (final var element : found) {
+        for (final JsonElement element : found) {
             checkIssue(element.getAsJsonObject(), returned, fixed);
         }
 

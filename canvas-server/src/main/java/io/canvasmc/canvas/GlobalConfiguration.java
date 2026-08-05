@@ -555,11 +555,13 @@ public class GlobalConfiguration extends Part {
                 ).greaterThan(0.0F);
             option("purpurAlternativeKeepalive")
                 .docs(
-                    "Uses a different approach to keepalive ping timeouts.",
-                    "Enabling this sends a keepalive packet once per second to a player, and only kicks for timeout if none of them were responded to in 30 seconds.",
-                    "Responding to any of them in any order will keep the player connected.",
-                    "AKA, it won't kick your players because one packet gets dropped somewhere along the lines"
-                );
+                    Style.create()
+                        .wordWrap(
+                            "Uses a different approach to keepalive ping timeouts.",
+                            "Enabling this sends a keepalive packet once per second to a player, and only kicks for timeout if none of them were responded to in 30 seconds.",
+                            "Responding to any of them in any order will keep the player connected.")
+                        .blank()
+                        .wordWrap("AKA, it won't kick your players because one packet gets dropped somewhere along the lines"));
         }
 
         public boolean filterVelocityPacket = false;

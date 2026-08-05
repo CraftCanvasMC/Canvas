@@ -483,14 +483,6 @@ public class WorldConfig extends Part {
         }
 
         {
-            // TODO - can we restore this? the issue with this is that plugins can change this, and entities
-            //        can change worlds, which complicates this logic
-            // option("invulnerabilityTicks")
-            //     .docs(
-            //         "When an entity is damaged, it has 10 ticks of \"invulnerability time\" until it can be",
-            //         "damaged next. This configuration lets you control the amount of invulnerability time",
-            //         "that is applied to the entity. 0 meaning invulnerability isn't applied"
-            //     ).greaterThan(0.0F);
             option("criticalHitMultiplier").docs("Configures the damage modifier per critical hit");
             option("removeRedDeathAnimation").docs("Removes the red death animation seen on entities when killed");
             option("useLegacyBlastProtection").docs("Restores the blast protection logic from before 1.21");
@@ -500,7 +492,6 @@ public class WorldConfig extends Part {
         public boolean disableSweepingEdge = false;
         @Undocumented("Doesn't require docs.")
         public boolean disableCritsWhileSprinting = false;
-        // public int invulnerabilityTicks = 10;
         @Undocumented("Doesn't require docs.")
         public boolean allowFishingRodsToPullEntities = true;
         public float criticalHitMultiplier = 1.5F;
