@@ -4474,14 +4474,14 @@ index 0000000000000000000000000000000000000000..fb6f4eb879c9409ce66900dd61b790e3
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/waypoints/RegionizedWaypointManager.java b/io/canvasmc/canvas/threadedregions/waypoints/RegionizedWaypointManager.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..3fd785d6237c39fe0318256c5364f284dee34079
+index 0000000000000000000000000000000000000000..d2f2a3d00731fcf85318ae0059ceabd14a4d6764
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/waypoints/RegionizedWaypointManager.java
 @@ -0,0 +1,282 @@
 +package io.canvasmc.canvas.threadedregions.waypoints;
 +
-+import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
++import com.google.common.collect.Sets;
 +import io.canvasmc.canvas.GlobalConfiguration;
 +import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 +import java.util.HashSet;
@@ -4529,8 +4529,8 @@ index 0000000000000000000000000000000000000000..3fd785d6237c39fe0318256c5364f284
 +     */
 +    private final double scale;
 +
-+    private final MultiThreadedQueue<WaypointTransmitter> waypoints = new MultiThreadedQueue<>();
-+    private final MultiThreadedQueue<ServerPlayer> players = new MultiThreadedQueue<>();
++    private final Set<WaypointTransmitter> waypoints = Sets.newConcurrentHashSet();
++    private final Set<ServerPlayer> players = Sets.newConcurrentHashSet();
 +    private final ServerLevel level;
 +
 +    public RegionizedWaypointManager(final ServerLevel level) {
@@ -20961,7 +20961,7 @@ index fbbe5928ff6c6cb1719eef14d4123b146c6f1781..1b3a411717df224fc48118750aabf25a
      // Paper end - lag compensation
  }
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa921519e19 100644
+index ef5f937aaf648c399715a5f4ec73ff4327000737..d17c6c600a49bb7345797bcf68d2fb52addd0114 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
 @@ -206,7 +206,7 @@ import org.slf4j.Logger;
@@ -20973,7 +20973,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
      private static final int NEUTRAL_MOB_DEATH_NOTIFICATION_RADII_XZ = 32;
      private static final int NEUTRAL_MOB_DEATH_NOTIFICATION_RADII_Y = 10;
      private static final int FLY_STAT_RECORDING_SPEED = 25;
-@@ -273,7 +273,40 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -273,7 +273,48 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      private @Nullable BlockPos raidOmenPosition;
      private Vec3 lastKnownClientMovement = Vec3.ZERO;
      private Input lastClientInput = Input.EMPTY;
@@ -20981,6 +20981,14 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
 +    // Canvas start - region threading
 +    public final it.unimi.dsi.fastutil.objects.Object2ObjectMap<net.minecraft.world.waypoints.WaypointTransmitter, net.minecraft.world.waypoints.WaypointTransmitter.Connection>
 +        canvas$activeWaypoints = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
++    public volatile double waypointReceiveRangeCached = Attributes.WAYPOINT_RECEIVE_RANGE.value().getDefaultValue();
++
++    protected void updateWaypointCache() {
++        super.updateWaypointCache();
++
++        waypointReceiveRangeCached = getAttributes().getValue(Attributes.WAYPOINT_RECEIVE_RANGE);
++    }
++
 +    public boolean canvas$isDisplayingEndCredits = false;
 +    private @Nullable Runnable canvas$exitEndCreditsCallback = null;
 +
@@ -21015,7 +21023,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
      private long timeEntitySatOnShoulder;
      private CompoundTag shoulderEntityLeft = new CompoundTag();
      private CompoundTag shoulderEntityRight = new CompoundTag();
-@@ -489,8 +522,157 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -489,8 +530,157 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          // CraftBukkit end
      }
  
@@ -21173,7 +21181,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          CompletableFuture<Vec3> future = PlayerSpawnFinder.findSpawn(level, spawnSuggestion);
          level.getChunkSource().mainThreadProcessor.managedBlock(future::isDone); // Paper - rewrite chunk system
          return BlockPos.containing(future.join());
-@@ -507,7 +689,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -507,7 +697,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
              .ifPresent(p -> this.recipeBook.loadUntrusted(p, id -> this.server.getRecipeManager().byKey(id).isPresent()));
          this.getBukkitEntity().readExtraData(input); // CraftBukkit
          if (this.isSleeping()) {
@@ -21182,7 +21190,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          }
  
          this.respawnConfig = input.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
-@@ -583,8 +765,16 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -583,8 +773,16 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          Optional<ValueInput> rootTag = playerInput.child("RootVehicle");
          if (!rootTag.isEmpty()) {
              ServerLevel serverLevel = this.level();
@@ -21200,7 +21208,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
              );
              if (vehicle != null) {
                  UUID attachTo = rootTag.get().read("Attach", UUIDUtil.CODEC).orElse(null);
-@@ -612,6 +802,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -612,6 +810,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      }
  
      private void saveEnderPearls(final ValueOutput playerOutput) {
@@ -21208,7 +21216,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          if (!this.enderPearls.isEmpty()) {
              ValueOutput.ValueOutputList pearlsOutput = playerOutput.childrenList("ender_pearls");
  
-@@ -627,9 +818,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -627,9 +826,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
              }
          }
      }
@@ -21239,7 +21247,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
      }
  
      private void loadAndSpawnEnderPearl(final ValueInput pearlInput) {
-@@ -638,10 +850,16 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -638,10 +858,16 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
              ServerLevel pearlLevel = this.level().getServer().getLevel(pearlLevelKey.get());
              if (pearlLevel != null) {
                  Entity pearl = EntityType.loadEntityRecursive(
@@ -21259,7 +21267,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
                  } else {
                      LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", pearlLevelKey.get());
                  }
-@@ -683,6 +901,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -683,6 +909,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      }
  
      public void initMenu(final AbstractContainerMenu container) {
@@ -21267,7 +21275,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          container.addSlotListener(this.containerListener);
          container.setSynchronizer(this.containerSynchronizer);
      }
-@@ -744,12 +963,24 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -744,12 +971,24 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
          Entity camera = this.getCamera();
          if (camera != this) {
@@ -21293,7 +21301,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
              } else {
                  this.setCamera(this);
              }
-@@ -890,9 +1121,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -890,9 +1129,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
                  this.oldLevel = this.experienceLevel;
              }
  
@@ -21304,7 +21312,25 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
              // CraftBukkit end
          } catch (Throwable t) {
              CrashReport report = CrashReport.forThrowable(t, "Ticking player");
-@@ -1435,7 +1664,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1402,14 +1639,15 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+ 
+     public boolean isReceivingWaypoints() {
+-        return this.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE) > 0.0;
++        return waypointReceiveRangeCached > 0.0; // Canvas - region threading - use cached variant
+     }
+ 
+     @Override
+     protected void onAttributeUpdated(final Holder<Attribute> attribute) {
+         if (attribute.is(Attributes.WAYPOINT_RECEIVE_RANGE)) {
+             ServerWaypointManager waypointManager = this.level().getWaypointManager();
+-            if (this.getAttributes().getValue(attribute) > 0.0) {
++            updateWaypointCache(); // Canvas - region threading
++            if (waypointReceiveRangeCached > 0.0) { // Canvas - region threading - use cached variant
+                 waypointManager.addPlayer(this);
+             } else {
+                 waypointManager.removePlayer(this);
+@@ -1435,7 +1673,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
              Runnable consumeAnchorCharge = null; // Paper - Fix SPIGOT-5989 (don't use charge until after respawn event)
              Optional<Vec3> standUpPosition = RespawnAnchorBlock.findStandUpPosition(EntityTypes.PLAYER, level, pos);
              if (!forced && consumeSpawnBlock && standUpPosition.isPresent()) {
@@ -21317,7 +21343,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
              }
              final Runnable finalConsumeAnchorCharge = consumeAnchorCharge; // Paper - Fix SPIGOT-5989
  
-@@ -1469,8 +1702,417 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1469,8 +1711,417 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          }
      }
  
@@ -21735,7 +21761,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          if (this.isSleeping()) return null; // CraftBukkit - SPIGOT-3154
          if (this.isRemoved()) {
              return null;
-@@ -1564,7 +2206,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1564,7 +2215,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          this.connection.send(new ClientboundPlayerRotationPacket(yRot, relativeY, xRot, relativeX));
      }
  
@@ -21744,7 +21770,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          ResourceKey<Level> oldKey = oldLevel.dimension();
          ResourceKey<Level> newKey = this.level().dimension();
          // CraftBukkit start
-@@ -1583,7 +2225,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1583,7 +2234,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
          if (oldMainDimensionKey == Level.NETHER && newMainDimensionKey == Level.OVERWORLD && this.enteredNetherPosition != null) {
              // CraftBukkit end
@@ -21753,7 +21779,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          }
  
          if (newMainDimensionKey != Level.NETHER) { // CraftBukkit
-@@ -1592,6 +2234,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1592,6 +2243,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          this.gameMode.hasDelayedDestroy = false; // Paper
      }
  
@@ -21766,7 +21792,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
      @Override
      public boolean broadcastToPlayer(final ServerPlayer player) {
          return player.isSpectator() ? this.getCamera() == this : !this.isSpectator() && super.broadcastToPlayer(player);
-@@ -1767,7 +2415,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1767,7 +2424,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
      @Override
      protected void pushEntities() {
@@ -21775,7 +21801,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
              super.pushEntities();
          }
      }
-@@ -1790,6 +2438,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1790,6 +2447,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
      @Override
      public OptionalInt openMenu(final @Nullable MenuProvider provider) {
@@ -21783,7 +21809,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          if (provider == null) {
              return OptionalInt.empty();
          }
-@@ -1929,6 +2578,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1929,6 +2587,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      }
      @Override
      public void closeContainer(org.bukkit.event.inventory.InventoryCloseEvent.Reason reason) {
@@ -21791,7 +21817,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          org.bukkit.craftbukkit.event.CraftEventFactory.handleInventoryCloseEvent(this, reason); // CraftBukkit
          // Paper end - Inventory close reason
          this.connection.send(new ClientboundContainerClosePacket(this.containerMenu.containerId));
-@@ -2530,7 +3180,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2530,7 +3189,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          return this.camera == null ? this : this.camera;
      }
  
@@ -21822,7 +21848,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          Entity oldCamera = this.getCamera();
          this.camera = newCamera == null ? this : newCamera;
          if (oldCamera != this.camera) {
-@@ -2549,16 +3222,21 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2549,16 +3231,21 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
                  }
              }
              // Paper end - Add PlayerStartSpectatingEntityEvent and PlayerStopSpectatingEntity
@@ -21851,7 +21877,7 @@ index ef5f937aaf648c399715a5f4ec73ff4327000737..fae61a38583dcd3e13a82084341adaa9
          }
      }
  
-@@ -3104,7 +3782,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -3104,7 +3791,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          this.experienceLevel = this.newLevel;
          this.totalExperience = this.newTotalExp;
          this.experienceProgress = 0;
@@ -24147,7 +24173,7 @@ index bb5f66c62c9541bb76a9faad9e9ee91c1466fc6a..66d7bb9418832638c220a08d06c01ef0
              return blockToFallLocation(blockState);
          } else {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index bd935ae0cafc8fa2f53ed756a9acedab9db54b30..e87539cdd9813e68fe105d5311221227590fea87 100644
+index bd935ae0cafc8fa2f53ed756a9acedab9db54b30..d90f29cf64ccd0e8e0e4fcf8b432fa1680dba5e1 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -170,7 +170,7 @@ public abstract class Entity
@@ -24182,6 +24208,15 @@ index bd935ae0cafc8fa2f53ed756a9acedab9db54b30..e87539cdd9813e68fe105d5311221227
      private EntityDimensions dimensions;
      private float eyeHeight;
      public boolean isInPowderSnow;
+@@ -356,7 +360,7 @@ public abstract class Entity
+     private CustomData customData = CustomData.EMPTY;
+     // CraftBukkit start
+     public boolean persist = true;
+-    public boolean visibleByDefault = true;
++    public volatile boolean visibleByDefault = true; // Canvas - region threading - volatile
+     public boolean valid;
+     public boolean inWorld = false;
+     public boolean generation;
 @@ -396,6 +400,8 @@ public abstract class Entity
          return this.dimensions.makeBoundingBox(x, y, z);
      }
@@ -25794,7 +25829,7 @@ index 5b19fee8a4861e5dbfb545bbe4dabda7787c430a..e87b1f8c3a129aab186dae91de0bc3c7
                      }
                  }
 diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
-index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228b12c12b4 100644
+index 101ae05810994a2972908ec0cca6cbe7cb321590..2e286864bde97d4ca0badc9be5284dad293070af 100644
 --- a/net/minecraft/world/entity/LivingEntity.java
 +++ b/net/minecraft/world/entity/LivingEntity.java
 @@ -277,7 +277,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
@@ -25806,11 +25841,21 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
      protected int autoSpinAttackTicks;
      protected float autoSpinAttackDmg;
      protected @Nullable ItemStack autoSpinAttackItemStack;
-@@ -304,6 +304,26 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -304,6 +304,36 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
      public net.kyori.adventure.util.TriState frictionState = net.kyori.adventure.util.TriState.NOT_SET; // Paper - Friction API
      public int invulnerableDuration = LivingEntity.INVULNERABLE_DURATION; // Paper - configurable invulnerable duration
      // CraftBukkit end
 +    // Folia start - region threading
++    // Canvas start - region threading
++    public volatile double waypointTransmitRangeCached = Attributes.WAYPOINT_TRANSMIT_RANGE.value().getDefaultValue();
++
++    protected void updateWaypointCache() {
++        ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot update waypoint cache async");
++
++        waypointTransmitRangeCached = attributes.getValue(Attributes.WAYPOINT_TRANSMIT_RANGE);
++    }
++
++    // Canvas end - region threading
 +    @Override
 +    public void updateTicks(long fromTickOffset, long fromRedstoneTimeOffset) {
 +        super.updateTicks(fromTickOffset, fromRedstoneTimeOffset);
@@ -25833,7 +25878,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
  
      protected LivingEntity(final EntityType<? extends LivingEntity> type, final Level level) {
          super(type, level);
-@@ -501,7 +521,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -501,7 +531,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
  
          if (this.isDeadOrDying() && this.level().shouldTickDeath(this)) {
              this.tickDeath();
@@ -25842,7 +25887,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
  
          if (this.lastHurtByPlayerMemoryTime > 0) {
              this.lastHurtByPlayerMemoryTime--;
-@@ -595,11 +615,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -595,11 +625,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
          return true;
      }
  
@@ -25858,7 +25903,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          }
      }
  
-@@ -899,7 +921,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -899,7 +931,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
          // CraftBukkit end
          this.setHealth(input.getFloatOr("Health", this.getMaxHealth()));
          this.hurtTime = input.getShortOr("HurtTime", (short)0);
@@ -25867,7 +25912,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          input.getString("Team").ifPresent(teamName -> {
              Scoreboard scoreboard = this.level().getScoreboard();
              PlayerTeam team = scoreboard.getPlayerTeam(teamName);
-@@ -1153,6 +1175,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -1153,6 +1185,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
  
      public boolean addEffect(final MobEffectInstance newEffect, final @Nullable Entity source, final EntityPotionEffectEvent.Cause cause, final boolean fireEvent) {
          // Paper end - Don't fire sync event during generation
@@ -25875,7 +25920,17 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          if (this.tickingEffects) {
              this.deferredEffectUpdates.offer(() -> this.addEffect(newEffect, source, cause, fireEvent));
              return true;
-@@ -1533,7 +1556,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -1346,7 +1379,8 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             this.refreshDimensions();
+         } else if (attribute.is(Attributes.WAYPOINT_TRANSMIT_RANGE) && this.level() instanceof ServerLevel serverLevel) {
+             ServerWaypointManager waypointManager = serverLevel.getWaypointManager();
+-            if (this.attributes.getValue(attribute) > 0.0) {
++            updateWaypointCache(); // Canvas - region threading
++            if (waypointTransmitRangeCached > 0.0) { // Canvas - region threading - use cached variant
+                 waypointManager.trackWaypoint(this);
+             } else {
+                 waypointManager.untrackWaypoint(this);
+@@ -1533,7 +1567,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
          boolean success = !blocked; // CraftBukkit - Ensure to return false if damage is blocked
          if (success) {
              this.lastDamageSource = source;
@@ -25884,7 +25939,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
  
              for (MobEffectInstance effect : this.getActiveEffects()) {
                  effect.onMobHurt(level, this, source, damage);
-@@ -1548,7 +1571,16 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -1548,7 +1582,16 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
          }
  
          if (source.getEntity() instanceof ServerPlayer sourcePlayer) {
@@ -25902,7 +25957,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          }
  
          return success;
-@@ -1787,7 +1819,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -1787,7 +1830,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
      }
  
      public @Nullable DamageSource getLastDamageSource() {
@@ -25911,7 +25966,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
              this.lastDamageSource = null;
          }
  
-@@ -1821,6 +1853,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -1821,6 +1864,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
      public List<Runnable> postDeathEventTasks = new java.util.ArrayList<>(); // Paper - after death event and death (no revive as converted entity in killedEntity)
  
      public void die(final DamageSource source) {
@@ -25919,7 +25974,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          if (!this.isRemoved() && !this.dead) {
              Entity sourceEntity = source.getEntity();
              LivingEntity killer = this.getKillCredit();
-@@ -2556,7 +2589,15 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -2556,7 +2600,15 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
                      }
  
                      if (source.getEntity() instanceof ServerPlayer sourcePlayer) {
@@ -25936,7 +25991,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
                      }
  
                      return !io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.skipVanillaDamageTickWhenShieldBlocked; // Paper - this should always return true, however expose an unsupported setting to flip this to false to enable "shield stunning".
-@@ -2574,10 +2615,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -2574,10 +2626,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
      }
  
      public @Nullable LivingEntity getKillCredit() {
@@ -25949,7 +26004,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          }
      }
  
-@@ -2663,7 +2704,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -2663,7 +2715,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
          }
  
          this.lastDamageSource = source;
@@ -25958,7 +26013,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
      }
  
      @Override
-@@ -3789,7 +3830,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -3789,7 +3841,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
  
          this.pushEntities();
          // Paper start - Add EntityMoveEvent
@@ -25967,7 +26022,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
              if (this.xo != this.getX() || this.yo != this.getY() || this.zo != this.getZ() || this.yRotO != this.getYRot() || this.xRotO != this.getXRot()) {
                  Location from = new Location(this.level().getWorld(), this.xo, this.yo, this.zo, this.yRotO, this.xRotO);
                  Location to = new Location(this.level().getWorld(), this.getX(), this.getY(), this.getZ(), this.getYRot(), this.getXRot());
-@@ -3992,7 +4033,16 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -3992,7 +4044,16 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
  
      public void onItemPickup(final ItemEntity entity) {
          if (EntityReference.getEntity(entity.thrower, this.level()::getGlobalPlayerByUUID, Entity.class) instanceof ServerPlayer serverPlayer) { // Paper - check global player list where appropriate
@@ -25985,7 +26040,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          }
      }
  
-@@ -4488,7 +4538,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -4488,7 +4549,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
          boolean ok = false;
          BlockPos pos = BlockPos.containing(xx, y, zz);
          Level level = this.level();
@@ -25994,7 +26049,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
              boolean landed = false;
  
              while (!landed && pos.getY() > level.getMinY()) {
-@@ -4513,21 +4563,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -4513,21 +4574,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
                  this.setPos(xo, yo, zo);
  
                  if (ok) {
@@ -26022,7 +26077,7 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
                  }
                  // CraftBukkit end
              }
-@@ -4650,6 +4691,11 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+@@ -4650,6 +4702,11 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
                  this.setXRot(0.0F);
              }
          });
@@ -26034,6 +26089,15 @@ index 101ae05810994a2972908ec0cca6cbe7cb321590..3069b4b74ac9804822ea39d00a606228
          Vec3 pos = this.position();
          this.setPose(Pose.STANDING);
          this.setPos(pos.x, pos.y, pos.z);
+@@ -4856,7 +4913,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+ 
+     @Override
+     public boolean isTransmittingWaypoint() {
+-        return this.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE) > 0.0;
++        return waypointTransmitRangeCached > 0.0; // Canvas - region threading - use cache variant
+     }
+ 
+     @Override
 diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
 index 0b70732d41fbe1b60f70ff0702eb2056b7ddcb48..843e94ffb3135a5452626944cb47ac562fa944e2 100644
 --- a/net/minecraft/world/entity/Mob.java
@@ -32105,16 +32169,16 @@ index e4c4eef70a6ae3059deca81eea1c454cb2852628..0dfb92233b11e4e046a42830a1bd3b43
      public Value applyTimeBased(final Value baseValue, final int cacheTickId) {
          if (this.cachedArgument == null || cacheTickId != this.cachedTickId) {
 diff --git a/net/minecraft/world/waypoints/WaypointTransmitter.java b/net/minecraft/world/waypoints/WaypointTransmitter.java
-index 07af92310ee5c8bba04e6175b6faac629632e4de..7f9cbda2d3e86acf8d145ea6bddbf99869d2d34a 100644
+index 07af92310ee5c8bba04e6175b6faac629632e4de..7e580185ac86b937be9654f962a58d5f72cd14ae 100644
 --- a/net/minecraft/world/waypoints/WaypointTransmitter.java
 +++ b/net/minecraft/world/waypoints/WaypointTransmitter.java
-@@ -20,20 +20,36 @@ public interface WaypointTransmitter extends Waypoint {
+@@ -20,20 +20,38 @@ public interface WaypointTransmitter extends Waypoint {
      Waypoint.Icon waypointIcon();
  
      static boolean doesSourceIgnoreReceiver(final LivingEntity source, final ServerPlayer receiver) {
 -        if (!receiver.getBukkitEntity().canSee(source.getBukkitEntity())) return true; // Paper - ignore if entity is hidden from player
 +        // Canvas start - region threading
-+        if (!receiver.getBukkitEntity().canSeeChunkMapUpdatePlayer(source.getBukkitEntity())) return true; // Paper - ignore if entity is hidden from player
++        if (!receiver.getBukkitEntity().canSeeNMS(source)) return true; // Paper - ignore if entity is hidden from player
          if (receiver.isSpectator()) {
              return false;
 -        } else if (!source.isSpectator() && !source.hasIndirectPassenger(receiver)) {
@@ -32132,13 +32196,15 @@ index 07af92310ee5c8bba04e6175b6faac629632e4de..7f9cbda2d3e86acf8d145ea6bddbf998
 +            double horizontalDistSq = dx * dx + dz * dz;
 +
 +            if (horizontalDistSq < 4.0) {
++                // close enough together that they are in the same region
 +                if (source.hasIndirectPassenger(receiver)) {
 +                    return true;
 +                }
 +            }
 +
-+            double transmitRange = source.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE);
-+            double receiveRange = receiver.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE);
++            // use cached variants, volatile
++            double transmitRange = source.waypointTransmitRangeCached;
++            double receiveRange = receiver.waypointReceiveRangeCached;
 +            double minRange = Math.min(transmitRange, receiveRange);
 +
 +            return source.distanceTo(receiver) >= minRange;
