@@ -660,4 +660,19 @@ public class GlobalConfiguration extends Part {
         public boolean autosaveGamerules = true;
         public boolean autosavePlayers = true;
     }
+
+    public OptimizedExplosions optimizedExplosions = new OptimizedExplosions();
+    public static class OptimizedExplosions extends Part {
+
+        {
+            option("enabled").docs(
+                "Enables asynchronous multi-core TNT explosion processing using ForkJoinPool work-stealing.",
+                "TNT ray tracing (1352 rays per explosion) is parallelized across multiple CPU cores,",
+                "while maintaining identical vanilla explosion behavior and EntityExplodeEvent compatibility.",
+                "Only affects TNTPrimed explosions; creepers, beds, crystals, etc. remain unchanged."
+            );
+        }
+
+        public boolean enabled = true;
+    }
 }
