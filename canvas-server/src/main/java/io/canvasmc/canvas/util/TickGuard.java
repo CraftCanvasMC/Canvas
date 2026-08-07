@@ -51,7 +51,7 @@ public class TickGuard {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
                 if (!TickThread.isTickThreadFor(entity)) {
-                    LOGGER.warn("Thread failed main thread check: {}, context={}, entity={}", reason, getThreadContext(), EntityUtil.dumpEntity(entity), new Throwable());
+                    LOGGER.warn("Thread failed main thread check: {}, context={}, entity={}", reason, getThreadContext(), TickThread.getEntityContext(entity), new Throwable());
                 }
             }
             case THROW -> TickThread.ensureTickThread(entity, reason);

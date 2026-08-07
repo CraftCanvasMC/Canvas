@@ -1,24 +1,42 @@
 package io.canvasmc.canvas.util;
 
+import com.google.common.base.Preconditions;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
-import org.jspecify.annotations.Nullable;
+import org.bukkit.Location;
+import org.bukkit.craftbukkit.CraftWorld;
+import org.bukkit.craftbukkit.util.CraftLocation;
 
 /**
- * A location in the server with a nullable pos, pitch, and yaw. It is worth noting that if {@code pos}, {@code pitch},
- * and {@code yaw} are all null, this is being used as a <b>world destination</b> target, not as a <b>specific</b>
- * location target
+ * A location in the server with a world, specific position, yaw, and float. All are considered nonnull
  *
  * @param level
- *     the world target
+ *     the world
  * @param pos
- *     the nullable position in the world
+ *     the position in the world
  * @param yaw
- *     the nullable yaw at the location
+ *     the yaw at the position
  * @param pitch
- *     the nullable pitch at the location
+ *     the pitch at the position
  *
  * @author dueris
  */
-public record ServerLocation(ServerLevel level, @Nullable Vec3 pos, @Nullable Float yaw, @Nullable Float pitch) {
+public record ServerLocation(ServerLevel level, Vec3 pos, float yaw, float pitch) {
+
+    public static ServerLocation fromBukkit(final Location location) {
+        Preconditions.checkNotNull(location.getWorld(), "Cannot pass location with null world to server location construction");
+        final ServerLevel world = ((CraftWorld) location.getWorld()).getHandle();
+
+        return new ServerLocation(
+            world,
+            CraftLocation.toVec3(location),
+            location.getYaw(),
+            location.getPitch()
+        );
+    }
+
+    @Override
+    public String toString() {
+        return "ServerLocation=[world=" + Util.getLevelName(level) + ",pos=" + pos + ",yaw=" + yaw + ",pitch=" + pitch + "]";
+    }
 }
