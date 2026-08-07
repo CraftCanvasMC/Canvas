@@ -12495,7 +12495,7 @@ index 90fa64310ec08604420d755bbdf7dc5a0191680a..568817d94d6d2affd1aacb457e1955b8
          if (!this.haveTestsStarted()) {
              this.startTests(level);
 diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
-index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372dd48384aa 100644
+index 02a693a4e110c94a52c2812837dd273341e5d8b7..387bc001bea09d0270a182d086b12a259f9f9b95 100644
 --- a/net/minecraft/network/Connection.java
 +++ b/net/minecraft/network/Connection.java
 @@ -65,7 +65,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
@@ -12589,7 +12589,42 @@ index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372d
          }
      }
  
-@@ -507,10 +544,11 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -456,12 +493,30 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+             return;
+         }
+ 
+-        if (connected && this.pendingActions.isEmpty()) {
+-            this.channel.eventLoop().execute(task);
+-        } else {
+-            this.pendingActions.add(new WrappedConsumer(connection -> connection.channel.eventLoop().execute(task)));
++        // Folia start - region threading - connection fixes
++
++        // the task needs to be completed by the time the method returns
++        // otherwise we can send packets out of order and kick the client
++
++        if (this.channel.eventLoop().inEventLoop()) {
+             this.flushQueue();
++            task.run();
++            return;
+         }
++
++        final java.util.concurrent.CompletableFuture<Void> taskFinish = new java.util.concurrent.CompletableFuture<>();
++        this.pendingActions.add(new WrappedConsumer(connection -> connection.channel.eventLoop().execute(() -> {
++            try {
++                task.run();
++            } finally {
++                taskFinish.complete(null);
++            }
++        })));
++
++        // flush the queue and wait for the task to finish
++        this.flushQueue();
++        taskFinish.join();
++        // Folia end - region threading - connection fixes
+     }
+     // Paper end - Add netty task scheduling helper
+ 
+@@ -507,10 +562,11 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
      }
  
      public void flushChannel() {
@@ -12602,7 +12637,7 @@ index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372d
          }
      }
  
-@@ -524,53 +562,61 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -524,53 +580,61 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
  
      // Paper start - Optimize network: Rewrite this to be safer if ran off main thread
      private boolean flushQueue() {
@@ -12698,7 +12733,7 @@ index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372d
      }
      // Paper end - Optimize network
  
-@@ -579,22 +625,48 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -579,22 +643,48 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
      private static int currTick; // Paper - Buffer joins to world
      public void tick() {
          this.flushQueue();
@@ -12756,7 +12791,7 @@ index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372d
              this.handleDisconnection();
          }
  
-@@ -645,6 +717,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -645,6 +735,7 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
              this.channel.close().awaitUninterruptibly();
              this.disconnectionDetails = details;
          }
@@ -12764,7 +12799,7 @@ index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372d
      }
  
      public boolean isMemoryConnection() {
-@@ -840,10 +913,10 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -840,10 +931,10 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
  
      public void handleDisconnection() {
          if (this.channel != null && !this.channel.isOpen()) {
@@ -12777,7 +12812,7 @@ index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372d
                  PacketListener packetListener = this.getPacketListener();
                  PacketListener disconnectListener = packetListener != null ? packetListener : this.disconnectListener;
                  if (disconnectListener != null) {
-@@ -872,6 +945,21 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -872,6 +963,21 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
                      }
                  }
                  // Paper end - Add PlayerConnectionCloseEvent
@@ -12799,7 +12834,7 @@ index 02a693a4e110c94a52c2812837dd273341e5d8b7..54a4712a10815b7c8a6a2fd0cde3372d
              }
          }
      }
-@@ -899,15 +987,25 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+@@ -899,15 +1005,25 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
      // Paper start - Optimize network
      public void clearPacketQueue() {
          final net.minecraft.server.level.ServerPlayer player = getPlayer();
@@ -22684,7 +22719,7 @@ index 438c1d99e48e50a9871bbc16433e4a173884eaa9..e2794c133adab3c9783aafea914715bb
  
      public final boolean isDisconnected() {
 diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
-index b94e01aa54b932b29370d1742b00ed73254fe4dc..64a4f300a90834ee88b0a02e4cffa748699901e6 100644
+index b94e01aa54b932b29370d1742b00ed73254fe4dc..e41b33eae86cc887d6ac89c6f64b45a5be59a28c 100644
 --- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
 @@ -92,7 +92,13 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
@@ -22715,7 +22750,7 @@ index b94e01aa54b932b29370d1742b00ed73254fe4dc..64a4f300a90834ee88b0a02e4cffa748
              }
  
 -            boolean waitForDisconnection = playerList.disconnectAllPlayersWithProfile(profile); // Paper - validate usernames
-+            boolean waitForDisconnection = false &&playerList.disconnectAllPlayersWithProfile(profile); // Paper - validate usernames // Folia - rewrite login process - always false here
++            boolean waitForDisconnection = false && playerList.disconnectAllPlayersWithProfile(profile); // Paper - validate usernames // Folia - rewrite login process - always false here
              if (waitForDisconnection) {
                  this.state = ServerLoginPacketListenerImpl.State.WAITING_FOR_DUPE_DISCONNECT;
              } else {
