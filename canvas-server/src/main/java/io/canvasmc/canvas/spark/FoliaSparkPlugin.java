@@ -93,7 +93,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     @Override
     public Collection<String> getPermissions() {
-        return this.platform.getAllSparkPermissions();
+        return this.platform.getCommandManager().getAllSparkPermissions();
     }
 
     @Override
@@ -108,7 +108,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
 
     @Override
     public String getVersion() {
-        return "1.10.133";
+        return "1.10.172";
     }
 
     @Override
