@@ -524,6 +524,9 @@ public class GlobalConfiguration extends Part {
                             "Responding to any of them in any order will keep the player connected.")
                         .blank()
                         .wordWrap("AKA, it won't kick your players because one packet gets dropped somewhere along the lines"));
+
+            option("flushLocationWhileKnockback")
+                .docs("Derived from Leaf, this synchronizes the player immediately when knocked back");
         }
 
         public boolean filterVelocityPacket = false;
@@ -531,6 +534,10 @@ public class GlobalConfiguration extends Part {
         public boolean alternativePlayerListTick = false;
         public int playerInfoSendInterval = 600;
         public boolean purpurAlternativeKeepalive = false;
+
+        // Originally from Leaf: https://github.com/Winds-Studio/Leaf/blob/58a4a9cb7994474e63ba49205cd21e89f8dacc9a/leaf-server/minecraft-patches/features/0216-Flush-location-while-knockback.patch
+        // License described in Leaf-Flush-location-while-knockback.patch
+        public boolean flushLocationWhileKnockback = false;
     }
 
     {
