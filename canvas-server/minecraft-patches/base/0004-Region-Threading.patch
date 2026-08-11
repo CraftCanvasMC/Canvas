@@ -59,6 +59,18 @@ are stated below:
 
 This list and description of the patch will be updated over time as new developments are made.
 
+diff --git a/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java b/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
+index f2eee66aa0fbe23f509b3287e4eb1d068376744a..a8231195ad6e3e450daa927041dfb57f5582705a 100644
+--- a/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
++++ b/ca/spottedleaf/concurrentutil/scheduler/SchedulableTick.java
+@@ -31,6 +31,7 @@ public abstract class SchedulableTick {
+     public final long id = ID_GENERATOR.getAndIncrement();
+ 
+     public long scheduledStart = TimeUtil.DEADLINE_NOT_SET;
++    public long lastQueueInsertion = TimeUtil.DEADLINE_NOT_SET; // Canvas - affinity scheduler
+ 
+     public Object state;
+ 
 diff --git a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java b/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
 index fff7a796a61542213bdaa417d44e25cd05f7e774..5292556f9c59942c51e8372a5d91a692e00e9969 100644
 --- a/ca/spottedleaf/moonrise/common/misc/NearbyPlayers.java
@@ -3368,10 +3380,10 @@ index 0000000000000000000000000000000000000000..64f0e45eb4213ac153b56562acddf3b9
 +import java.util.function.Consumer;
 diff --git a/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa759d711235
+index 0000000000000000000000000000000000000000..4aa29739a327e14e9fe2a4c12ba58f94984316bd
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
-@@ -0,0 +1,755 @@
+@@ -0,0 +1,861 @@
 +package io.canvasmc.canvas.threadedregions.scheduler;
 +
 +import ca.spottedleaf.common.util.TimeUtil;
@@ -3380,7 +3392,6 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
 +import io.canvasmc.canvas.GlobalConfiguration;
 +import io.canvasmc.canvas.util.CpuInfoReport;
-+import io.canvasmc.canvas.util.collection.FastHeapPriorityQueue;
 +import java.lang.invoke.VarHandle;
 +import java.time.Duration;
 +import java.util.ArrayList;
@@ -3397,8 +3408,6 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +import net.openhft.affinity.Affinity;
 +import org.jetbrains.annotations.Contract;
 +import org.jetbrains.annotations.UnknownNullability;
-+import org.jspecify.annotations.NonNull;
-+import org.jspecify.annotations.NullMarked;
 +import org.jspecify.annotations.Nullable;
 +import org.slf4j.Logger;
 +import org.slf4j.LoggerFactory;
@@ -3419,13 +3428,12 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 + * @author dueris, spottedleaf
 + */
 +@SuppressWarnings("unused")
-+@NullMarked
 +public final class AffinitySchedulerThreadPool extends Scheduler {
 +
 +    public static final long DEFAULT_STEAL_THRESH_MILLIS = 3L;
 +    public static final double DEFAULT_RUN_TASKS_BUFFER_MILLIS = (double) 80_000 / 1_000_000; // 0.08ms
 +
-+    private static final Comparator<AffinitySchedulerThreadPool.ScheduledState> TICK_COMPARATOR_BY_TIME = (final AffinitySchedulerThreadPool.ScheduledState s1, final AffinitySchedulerThreadPool.ScheduledState s2) -> {
++    static final Comparator<AffinitySchedulerThreadPool.ScheduledState> TICK_COMPARATOR_BY_TIME = (final AffinitySchedulerThreadPool.ScheduledState s1, final AffinitySchedulerThreadPool.ScheduledState s2) -> {
 +        final SchedulableTick t1 = s1.tick;
 +        final SchedulableTick t2 = s2.tick;
 +
@@ -3437,12 +3445,25 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        return Long.signum(t1.id - t2.id);
 +    };
 +
++    static final Comparator<AffinitySchedulerThreadPool.ScheduledState> TICK_COMPARATOR_BY_QUEUE_INSERTION = (final AffinitySchedulerThreadPool.ScheduledState s1, final AffinitySchedulerThreadPool.ScheduledState s2) -> {
++        final SchedulableTick t1 = s1.tick;
++        final SchedulableTick t2 = s2.tick;
++
++        final int timeCompare = Long.compare(t1.lastQueueInsertion, t2.lastQueueInsertion);
++        if (timeCompare != 0) {
++            return timeCompare;
++        }
++
++        return Long.signum(s1.tick.id - s2.tick.id);
++    };
++
 +    private static final Logger LOGGER = LoggerFactory.getLogger("Scheduler");
 +
 +    private final TickThreadRunner[] runners;
 +    private final Thread[] threads;
 +    private final BitSet idleThreads;
 +
++    // we don't need this queue to be anything special, since no specific thread should own it
 +    private final FastHeapPriorityQueue<ScheduledState> globalQueue = new FastHeapPriorityQueue<>(100, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
 +
 +    private final Object scheduleLock = new Object();
@@ -3679,7 +3700,7 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        final long now = System.nanoTime();
 +
 +        final ScheduledState globalHead = globalQueue.peek();
-+        final ScheduledState localHead = runner.localQueue.peek();
++        final ScheduledState localHead = runner.localQueue.peekEdf();
 +
 +        if (globalHead != null && globalHead == localHead) {
 +            throw new IllegalStateException("Global queue and local queue contain same element");
@@ -3691,12 +3712,12 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        if (localOverdue && globalOverdue) {
 +            // we should pick the more urgent one
 +            if (TICK_COMPARATOR_BY_TIME.compare(localHead, globalHead) <= 0) {
-+                return runner.localQueue.poll();
++                return runner.localQueue.pollEdf();
 +            }
 +            else return globalQueue.poll();
 +        }
 +        else if (localOverdue) {
-+            return runner.localQueue.poll();
++            return runner.localQueue.pollEdf();
 +        }
 +        else if (globalOverdue) {
 +            return globalQueue.poll();
@@ -3725,17 +3746,17 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        final TickThreadRunner stealingFrom = runners[nextSteal.getAndUpdate(v -> (v + 1) % runners.length)];
 +
 +        if (stealingFrom != runner) {
-+            final ScheduledState stealCandidate = stealingFrom.localQueue.peek();
++            final ScheduledState stealCandidate = stealingFrom.localQueue.peekEdf();
 +            if (stealCandidate != null && stealCandidate.isStealable(now)) {
 +                if (best == null ||
 +                    TICK_COMPARATOR_BY_TIME.compare(stealCandidate, best) < 0) {
-+                    return stealingFrom.localQueue.poll();
++                    return stealingFrom.localQueue.pollEdf();
 +                }
 +            }
 +        }
 +
 +        if (best != null) {
-+            return bestIsLocal ? runner.localQueue.poll() : globalQueue.poll();
++            return bestIsLocal ? runner.localQueue.pollEdf() : globalQueue.poll();
 +        }
 +
 +        return null;
@@ -3772,7 +3793,7 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        if (reschedule != null) {
 +            // we don't wanna send this to the queue if linked
 +            if (linkedToRunner == null || linkedToRunner.state == null || linkedToRunner.state != reschedule) {
-+                runner.localQueue.offer(reschedule);
++                runner.localQueue.insert(reschedule);
 +            }
 +        }
 +
@@ -3805,7 +3826,9 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        private static final int SCHEDULE_STATE_SCHEDULED = 1;
 +        private static final int SCHEDULE_STATE_CANCELLED = 2;
 +
-+        private final SchedulableTick tick;
++        // package-private
++        final SchedulableTick tick;
++
 +        private final AtomicInteger scheduled = new AtomicInteger();
 +        private final AtomicBoolean markedWithTasks = new AtomicBoolean(false);
 +
@@ -3819,11 +3842,15 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +            this.tick = tick;
 +        }
 +
-+        public boolean compareHasTasks() {
++        public boolean hasTasks() {
 +            if (markedWithTasks.getAndSet(false)) {
 +                return true;
 +            }
 +            return tick.hasTasks();
++        }
++
++        public boolean peekHasTasks() {
++            return markedWithTasks.get() || tick.hasTasks();
 +        }
 +
 +        private boolean tryMarkScheduled() {
@@ -3890,7 +3917,7 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        public final AffinitySchedulerThreadPool scheduler;
 +
 +        private final int affinity;
-+        private final FastHeapPriorityQueue<ScheduledState> localQueue = new FastHeapPriorityQueue<>(20, TICK_COMPARATOR_BY_TIME, ScheduledState.class);
++        private final SchedulableTickFastQueue localQueue = new SchedulableTickFastQueue();
 +
 +        @UnknownNullability("null until the runner starts on a thread")
 +        private volatile Thread thread;
@@ -4071,6 +4098,7 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +            final long deadline = startStateTask.tick.getScheduledStart();
 +            final long adjustedForRunBuffer = deadline - scheduler.runTaskBuff;
 +
++            mainLoop:
 +            for (;;) {
 +                if (this.state != startState) {
 +                    // state was changed unexpectedly(async?)
@@ -4087,25 +4115,115 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +                final TickThreadRunnerState runTasksState = new TickThreadRunnerState(startStateTask, STATE_EXECUTING_TASKS);
 +                if (
 +                    adjustedForRunBuffer - System.nanoTime() > 0L &&
-+                    startStateTask.compareHasTasks() &&
 +                    tryExchangeState(startState, runTasksState)
 +                ) {
 +                    // we are in run tasks state
-+                    startStateTask.tick.runTasks(() -> !scheduler.halted && (adjustedForRunBuffer - System.nanoTime() > 0L));
-+                    if (!tryExchangeState(runTasksState, startState)) { // restore back to start state
++                    if (startStateTask.hasTasks()) {
++                        startStateTask.tick.runTasks(() -> !scheduler.halted && (adjustedForRunBuffer - System.nanoTime() > 0L));
++                    }
++
++                    if (!tryExchangeState(runTasksState, startState)) { // restore back to initial state
 +                        throw new IllegalStateException("Couldn't set state back to AWAITING");
 +                    }
-+                }
-+                else {
-+                    // shouldn't or couldn't run tasks, park until deadline
-+                    //noinspection ResultOfMethodCallIgnored
-+                    Thread.interrupted();
-+                    LockSupport.parkNanos(startState, diff);
-+                    if (this.scheduler.halted) {
-+                        // just continue to the head of the loop again
-+                        // we have a check there for if we halted
-+                        return true;
++
++                    // if the start task no longer has tasks, we should poll
++                    // from the longest time in the queue
++
++                    if (adjustedForRunBuffer - System.nanoTime() > 0) {
++                        boolean hasAnyTasks = false;
++
++                        // we have time, try and run through the rest of the queue
++                        final FastHeapPriorityQueue<ScheduledState> byQueueOrder = localQueue.snapshotQueue();
++
++                        // note: it is intentional that we remove and insert the
++                        //       cursor during the poll, thus resetting the last
++                        //       insertion time. this is for fairness, not a bug
++
++                        ScheduledState cursor;
++                        cursorLoop:
++                        while ((cursor = byQueueOrder.poll()) != null) {
++                            // check we aren't overdue first, if we are, cancel the rest of the loop
++                            if (adjustedForRunBuffer - System.nanoTime() <= 0L) {
++                                continue mainLoop;
++                            }
++
++                            // pre-filter to check if we should even attempt
++                            if (!cursor.peekHasTasks()) {
++                                //noinspection UnnecessaryLabelOnContinueStatement
++                                continue cursorLoop;
++                            }
++
++                            hasAnyTasks = true;
++
++                            // try to remove from the active queue to prevent other worker
++                            // threads from stealing the current task
++
++                            if (!localQueue.remove(cursor)) {
++                                //noinspection UnnecessaryLabelOnContinueStatement
++                                continue cursorLoop;
++                            }
++
++                            final TickThreadRunnerState cursorRunTasksState = new TickThreadRunnerState(cursor, STATE_EXECUTING_TASKS);
++
++                            // while yes, we already checked if it has tasks, we
++                            // have to call hasTasks specifically so that if the
++                            // flag markedWithTasks is true we set that to false
++
++                            // if exchange state fails, then this is sorta fine ig?
++                            // in the end, it always falls back to checking the
++                            // actual schedulable tick instance, so it doesn't really
++                            // matter all that much
++
++                            if (cursor.hasTasks() && tryExchangeState(startState, cursorRunTasksState)) {
++                                if (cursor.ownedBy != null) {
++                                    throw new IllegalStateException("Already owned by another runner");
++                                }
++                                cursor.ownedBy = this;
++
++                                try {
++                                    // try to run tick tasks for the state in the queue the longest
++                                    cursor.tick.runTasks(() -> !scheduler.halted && (adjustedForRunBuffer - System.nanoTime() > 0L));
++                                } finally {
++                                    // unset this
++                                    cursor.ownedBy = null;
++                                }
++
++                                // restore back to previous state
++                                if (!tryExchangeState(cursorRunTasksState, startState)) {
++                                    throw new IllegalStateException("Couldn't set state back to AWAITING");
++                                }
++
++                                // add back to the queue
++                                localQueue.insert(cursor);
++                            }
++                            else {
++                                // couldn't set the state??
++                                localQueue.insert(cursor);
++                                continue mainLoop; // state probably changed, bail out
++                            }
++                        }
++
++                        if (hasAnyTasks) {
++
++                            // we processed tasks, so lets go around and check again to make
++                            // sure we drained ALL of them. if we end up not having any tasks
++                            // on the next pass, we fall through to parking until we are woken
++                            // or the nano diff is up
++
++                            //noinspection UnnecessaryLabelOnContinueStatement
++                            continue mainLoop;
++                        }
 +                    }
++                }
++
++                // shouldn't or couldn't run tasks, park until deadline
++                //noinspection ResultOfMethodCallIgnored
++                Thread.interrupted();
++                LockSupport.parkNanos(startState, diff);
++                if (this.scheduler.halted) {
++                    // just continue to the head of the loop again
++                    // we have a check there for if we halted
++                    return true;
 +                }
 +            }
 +
@@ -4127,6 +4245,209 @@ index 0000000000000000000000000000000000000000..be0bc8f502eb11614b50497e7b52fa75
 +        }
 +    }
 +}
+diff --git a/io/canvasmc/canvas/threadedregions/scheduler/FastHeapPriorityQueue.java b/io/canvasmc/canvas/threadedregions/scheduler/FastHeapPriorityQueue.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..8babb77a34ff008db9146226091c44467bfd9d76
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/scheduler/FastHeapPriorityQueue.java
+@@ -0,0 +1,112 @@
++package io.canvasmc.canvas.threadedregions.scheduler;
++
++import it.unimi.dsi.fastutil.objects.ObjectArrays;
++import it.unimi.dsi.fastutil.objects.ObjectHeaps;
++import java.lang.reflect.Array;
++import java.util.Arrays;
++import java.util.Comparator;
++import java.util.Objects;
++import org.jetbrains.annotations.UnknownNullability;
++import org.jspecify.annotations.Nullable;
++
++/**
++ * A priority queue based off {@link it.unimi.dsi.fastutil.objects.ObjectHeapPriorityQueue} from fastutil offering minor
++ * tweaks and new utility methods
++ *
++ * @param <K>
++ *     the generic type of the queue
++ *
++ * @author dueris
++ */
++public class FastHeapPriorityQueue<K> {
++
++    protected int size;
++    protected Comparator<? super K> comp;
++
++    @UnknownNullability("considered nonnull until the index is >= the size")
++    public transient K[] arr;
++
++    @SuppressWarnings("unchecked")
++    public FastHeapPriorityQueue(final int capacity, final Comparator<? super K> comp, final Class<K> classOf) {
++        this.arr = (K[]) Array.newInstance(classOf, Math.max(1, capacity));
++        this.comp = comp;
++    }
++
++    public void offer(final K element) {
++        Objects.requireNonNull(element, "null elements cannot be inserted");
++        if (size == arr.length) arr = ObjectArrays.grow(arr, Math.max(size * 2, 1));
++        arr[size++] = element;
++        ObjectHeaps.upHeap(arr, size, size - 1, comp);
++    }
++
++    public boolean remove(final K element) {
++        Objects.requireNonNull(element, "cannot remove null element");
++
++        for (int i = 0; i < size; i++) {
++            if (arr[i].equals(element)) {
++                arr[i] = arr[--size];
++                arr[size] = null;
++                if (size > i) {
++                    ObjectHeaps.upHeap(arr, size, i, comp);
++                    ObjectHeaps.downHeap(arr, size, i, comp);
++                }
++                return true;
++            }
++        }
++
++        return false;
++    }
++
++    @Nullable
++    public K poll() {
++        if (size == 0) return null;
++        final K result = arr[0];
++        arr[0] = arr[--size];
++        arr[size] = null;
++        if (size != 0) ObjectHeaps.downHeap(arr, size, 0, comp);
++        return result;
++    }
++
++    @Nullable
++    public K peek() {
++        if (size == 0) return null;
++        return arr[0];
++    }
++
++    public int size() {
++        return size;
++    }
++
++    public void clear() {
++        Arrays.fill(arr, 0, size, null);
++        size = 0;
++    }
++
++    public void trim() {
++        arr = ObjectArrays.trim(arr, size);
++    }
++
++    public Comparator<? super K> comparator() {
++        return comp;
++    }
++
++    public boolean contains(final K element) {
++        for (int i = 0; i < size; i++) {
++            final K k = this.arr[i];
++            if (k == element) return true;
++        }
++        return false;
++    }
++
++    public FastHeapPriorityQueue<K> copy() {
++        //noinspection unchecked
++        final FastHeapPriorityQueue<K> copy = new FastHeapPriorityQueue<>(
++            this.arr.length,
++            this.comp,
++            (Class<K>) this.arr.getClass().getComponentType()
++        );
++        System.arraycopy(this.arr, 0, copy.arr, 0, this.size);
++        copy.size = this.size;
++        return copy;
++    }
++}
+diff --git a/io/canvasmc/canvas/threadedregions/scheduler/SchedulableTickFastQueue.java b/io/canvasmc/canvas/threadedregions/scheduler/SchedulableTickFastQueue.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..55f3559a9bdab6a32a8b03189b85ff270c21b1d4
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/scheduler/SchedulableTickFastQueue.java
+@@ -0,0 +1,69 @@
++package io.canvasmc.canvas.threadedregions.scheduler;
++
++import org.jspecify.annotations.Nullable;
++
++final class SchedulableTickFastQueue {
++    private static final int INITIAL_CAPACITY = 20;
++
++    private final Object lock = new Object();
++
++    // note: edf is the only one that should control removals, queueTime should never
++    //       be removed unless it's removed from EDF
++
++    private final FastHeapPriorityQueue<AffinitySchedulerThreadPool.ScheduledState> edf = new FastHeapPriorityQueue<>(
++        INITIAL_CAPACITY,
++        AffinitySchedulerThreadPool.TICK_COMPARATOR_BY_TIME,
++        AffinitySchedulerThreadPool.ScheduledState.class
++    );
++    private final FastHeapPriorityQueue<AffinitySchedulerThreadPool.ScheduledState> queueTime = new FastHeapPriorityQueue<>(
++        INITIAL_CAPACITY,
++        AffinitySchedulerThreadPool.TICK_COMPARATOR_BY_QUEUE_INSERTION,
++        AffinitySchedulerThreadPool.ScheduledState.class
++    );
++
++    public void insert(final AffinitySchedulerThreadPool.ScheduledState state) {
++        synchronized (lock) {
++            state.tick.lastQueueInsertion = System.nanoTime();
++            edf.offer(state);
++            queueTime.offer(state);
++        }
++    }
++
++    public boolean remove(final AffinitySchedulerThreadPool.ScheduledState state) {
++        synchronized (lock) {
++            final boolean removedFromEdf = edf.remove(state);
++            if (removedFromEdf) {
++                queueTime.remove(state);
++            }
++            return removedFromEdf;
++        }
++    }
++
++    public AffinitySchedulerThreadPool.@Nullable ScheduledState pollEdf() {
++        synchronized (lock) {
++            final AffinitySchedulerThreadPool.ScheduledState state = edf.poll();
++            if (state != null) {
++                queueTime.remove(state);
++            }
++            return state;
++        }
++    }
++
++    public AffinitySchedulerThreadPool.@Nullable ScheduledState peekEdf() {
++        synchronized (lock) {
++            return edf.peek();
++        }
++    }
++
++    public FastHeapPriorityQueue<AffinitySchedulerThreadPool.ScheduledState> snapshotQueue() {
++        synchronized (lock) {
++            return queueTime.copy();
++        }
++    }
++
++    public int size() {
++        synchronized (lock) {
++            return edf.size();
++        }
++    }
++}
+diff --git a/io/canvasmc/canvas/threadedregions/scheduler/package-info.java b/io/canvasmc/canvas/threadedregions/scheduler/package-info.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..9ad8dfa3dba691b702575ea3330c5af66fbde6b7
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/scheduler/package-info.java
+@@ -0,0 +1,4 @@
++@NullMarked
++package io.canvasmc.canvas.threadedregions.scheduler;
++
++import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/scores/ObjectiveData.java b/io/canvasmc/canvas/threadedregions/scores/ObjectiveData.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..65ff6d4f74d2ba7774149e441ec418d7d2443c04
