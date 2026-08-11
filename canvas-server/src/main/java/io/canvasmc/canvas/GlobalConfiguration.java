@@ -535,7 +535,7 @@ public class GlobalConfiguration extends Part {
         public int playerInfoSendInterval = 600;
         public boolean purpurAlternativeKeepalive = false;
 
-        // Originally from Leaf: https://github.com/Winds-Studio/Leaf/blob/ver/26.2/leaf-server/minecraft-patches/features/0216-Flush-location-while-knockback.patch
+        // Originally from Leaf: https://github.com/Winds-Studio/Leaf/blob/58a4a9cb7994474e63ba49205cd21e89f8dacc9a/leaf-server/minecraft-patches/features/0216-Flush-location-while-knockback.patch
         // License described in Leaf-Flush-location-while-knockback.patch
         public boolean flushLocationWhileKnockback = false;
     }
