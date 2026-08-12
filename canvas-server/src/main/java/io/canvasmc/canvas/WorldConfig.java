@@ -4,6 +4,7 @@ import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
+import io.canvasmc.canvas.configuration.Undocumented;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.util.CanonicalReference;
 import io.papermc.paper.adventure.PaperAdventure;
@@ -231,6 +232,7 @@ public class WorldConfig extends Part {
     }
 
     public Visuals visuals = new Visuals();
+    @Undocumented("Doesn't require docs.")
     public static class Visuals extends Part {
 
         {
@@ -245,6 +247,7 @@ public class WorldConfig extends Part {
         public boolean hideFlamesOnEntitiesWithInvisibility = false;
 
         public Particles particles = new Particles();
+        @Undocumented("Doesn't require docs.")
         public static class Particles extends Part {
 
             {
@@ -280,6 +283,7 @@ public class WorldConfig extends Part {
     public boolean disableGrassLightChecks = false;
 
     public Farming farming = new Farming();
+    @Undocumented("Doesn't require docs.")
     public static class Farming extends Part {
 
         {
@@ -341,7 +345,9 @@ public class WorldConfig extends Part {
                     );
             }
 
+            @Undocumented("Doesn't require docs.")
             public boolean itemEntitiesImmuneToExplosions = false;
+            @Undocumented("Doesn't require docs.")
             public boolean itemEntitiesImmuneToLightning = false;
             public double itemEntityVelocityOnDeathFactor = 1.0D;
             public boolean itemEntitiesWaitTwoSecondsForMergeCheckAlways = false;
@@ -408,7 +414,9 @@ public class WorldConfig extends Part {
                     );
             }
 
+            @Undocumented("Doesn't require docs.")
             public int maxProjectileChunkLoadsPerTick = 10;
+            @Undocumented("Doesn't require docs.")
             public int maxProjectileChunkLoadsPerProjectileBeforeRemoval = 10;
             public List<String> loadChunks = new ArrayList<>();
             public boolean crossRegionRedirectableProjectileDeflection = false;
@@ -433,6 +441,7 @@ public class WorldConfig extends Part {
         public double skeletonAimAccuracy = 14.0D;
 
         public Villagers villagers = new Villagers();
+        @Undocumented("Doesn't require docs.")
         public static class Villagers extends Part {
 
             {
@@ -446,7 +455,9 @@ public class WorldConfig extends Part {
             public boolean reduceMeetingPointPoiSearchRange = false;
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean experienceOrbsAreFireResistant = false;
+        @Undocumented("Doesn't require docs.")
         public boolean experienceOrbsImmuneToExplosions = false;
     }
 
@@ -474,27 +485,23 @@ public class WorldConfig extends Part {
         }
 
         {
-            // TODO - can we restore this? the issue with this is that plugins can change this, and entities
-            //        can change worlds, which complicates this logic
-            // option("invulnerabilityTicks")
-            //     .docs(
-            //         "When an entity is damaged, it has 10 ticks of \"invulnerability time\" until it can be",
-            //         "damaged next. This configuration lets you control the amount of invulnerability time",
-            //         "that is applied to the entity. 0 meaning invulnerability isn't applied"
-            //     ).greaterThan(0.0F);
             option("criticalHitMultiplier").docs("Configures the damage modifier per critical hit");
             option("removeRedDeathAnimation").docs("Removes the red death animation seen on entities when killed");
             option("useLegacyBlastProtection").docs("Restores the blast protection logic from before 1.21");
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean disableSweepingEdge = false;
+        @Undocumented("Doesn't require docs.")
         public boolean disableCritsWhileSprinting = false;
-        // public int invulnerabilityTicks = 10;
+        @Undocumented("Doesn't require docs.")
         public boolean allowFishingRodsToPullEntities = true;
         public float criticalHitMultiplier = 1.5F;
         public boolean removeRedDeathAnimation = false;
         public boolean useLegacyBlastProtection = false;
+        @Undocumented("Doesn't require docs.")
         public boolean snowballCanKnockbackPlayers = false;
+        @Undocumented("Doesn't require docs.")
         public boolean eggCanKnockbackPlayers = false;
     }
 
@@ -517,7 +524,9 @@ public class WorldConfig extends Part {
                 );
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean chestsCanOpenWithFullBlockAbove = false;
+        @Undocumented("Doesn't require docs.")
         public boolean fullChiseledBookShelvesCountAsValidEnchantPowerSources = false;
 
         public Spawner spawner = new Spawner();
@@ -674,8 +683,11 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean sleepIgnoresNearbyMobs = false;
+        @Undocumented("Doesn't require docs.")
         public boolean rainStopsAfterSleep = true;
+        @Undocumented("Doesn't require docs.")
         public boolean thunderStopsAfterSleep = true;
     }
 

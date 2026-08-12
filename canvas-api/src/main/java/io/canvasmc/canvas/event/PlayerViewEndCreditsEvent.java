@@ -7,6 +7,8 @@ import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Called when the player enters the exit portal, allows controlling if the end credits will show or not
+ *
+ * @apiNote It is not safe to teleport the player during this event
  */
 public class PlayerViewEndCreditsEvent extends PlayerEvent {
     private static final HandlerList HANDLERS = new HandlerList();

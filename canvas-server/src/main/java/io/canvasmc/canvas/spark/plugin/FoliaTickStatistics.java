@@ -15,6 +15,12 @@ public class FoliaTickStatistics implements TickStatistics {
     private static final AverageInfo EMPTY_AVERAGE_INFO = new AverageInfo();
 
     @Override
+    public int gameTargetTps() {
+        // rounding is probably easier and more accurate tbh
+        return Math.round(TickRegionScheduler.getTickRate());
+    }
+
+    @Override
     public double tps5Sec() {
         return getTpsFor(TimeSpan.TPS_5_SEC);
     }
