@@ -124,7 +124,7 @@ public class CanvasVersionFetcher implements VersionFetcher {
         }
         else {
             builder.append(text("-", HEADER));
-            builder.append(text("(NULL-COMMIT)", SECONDARY));
+            builder.append(text("(DEV)", SECONDARY));
         }
 
         builder.append(text(" | ", HEADER, TextDecoration.BOLD));
