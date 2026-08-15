@@ -41,8 +41,20 @@ comment ASAP.
 
 This list and description of the patch will be updated over time as new developments are made.
 
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/EntityUtil.java b/src/main/java/ca/spottedleaf/moonrise/common/util/EntityUtil.java
+index db5805298d33fbde3f3ed23d706dbc6af814122d..ec24d4a1723f8b70482c0e13241a5d1f50e6f5ef 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/EntityUtil.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/EntityUtil.java
+@@ -28,6 +28,7 @@ public final class EntityUtil {
+             + ",passenger_count=" + entity.getPassengers().size();
+     }
+ 
++    @Deprecated // Canvas - region threading
+     public static String dumpEntity(final Entity entity) {
+         final List<Entity> passengers = entity.getPassengers();
+         final List<String> passengerStrings = new ArrayList<>(passengers.size());
 diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
-index aae6b1ca2f3060efd3bb7877d07a7a0bd211acbe..39b51a4d6df45db8f0addd640bf97807d08488ab 100644
+index aae6b1ca2f3060efd3bb7877d07a7a0bd211acbe..521d8aab2c7488da5ed1ecda6963415126bda6b7 100644
 --- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
 +++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
 @@ -1,5 +1,11 @@
@@ -57,14 +69,19 @@ index aae6b1ca2f3060efd3bb7877d07a7a0bd211acbe..39b51a4d6df45db8f0addd640bf97807
  import net.minecraft.core.BlockPos;
  import net.minecraft.world.entity.Entity;
  import net.minecraft.world.level.ChunkPos;
-@@ -15,8 +21,26 @@ public class TickThread extends Thread {
+@@ -15,17 +21,122 @@ public class TickThread extends Thread {
  
      private static final Logger LOGGER = LoggerFactory.getLogger(TickThread.class);
  
-+    private static String getRegionInfo(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
++    // Canvas start - region threading
++    private static String getRegionInfo() {
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++            region = TickRegionScheduler.getCurrentRegion();
++
 +        if (region == null) {
-+            return "{null}";
++            return RegionizedServer.isGlobalTickThread() ? "{god-tick}" : "{null}";
 +        }
++    // Canvas end - region threading
 +
 +        final ChunkPos center = region.getCenterChunk();
 +        final net.minecraft.server.level.ServerLevel world = region.regioniser.world;
@@ -80,12 +97,171 @@ index aae6b1ca2f3060efd3bb7877d07a7a0bd211acbe..39b51a4d6df45db8f0addd640bf97807
 +            return "[thread=" + thread + ",class=" + thread.getClass().getName() + "]";
 +        }
 +
-+        return "[thread=" + thread.getName() + ",class=" + thread.getClass().getName() + ",region=" + getRegionInfo(TickRegionScheduler.getCurrentRegion()) + "]";
++        return "[thread=" + thread.getName() + ",class=" + thread.getClass().getName() + ",region=" + getRegionInfo() + "]";
 +
++    }
++    // Canvas start - region threading
++
++    private static final ThreadLocal<java.text.DecimalFormat> TWO_DECIMALS = ThreadLocal.withInitial(() -> {
++        return new java.text.DecimalFormat("#,##0.00");
++    });
++
++    private static String formatVec(final Vec3 vec) {
++        final java.text.DecimalFormat format = TWO_DECIMALS.get();
++
++        return "(" + format.format(vec.x) + "," + format.format(vec.y) + "," + format.format(vec.z) + ")";
      }
  
++    private static String dumpEntityWithoutReferences(final Entity entity) {
++        if (entity == null) {
++            return "{null}";
++        }
++
++        final String base = "{" +
++            "type=" + entity.getClass().getSimpleName() +
++            ",entity_id=" + entity.getId() +
++            ",uuid=" + entity.getStringUUID() +
++            ",position=" + formatVec(entity.position()) +
++            ",delta=" + formatVec(entity.getDeltaMovement()) +
++            ",aabb=" + entity.getBoundingBox() +
++            ",removed=" + entity.getRemovalReason() +
++            ",has_vehicle=" + (entity.getVehicle() != null) +
++            ",passenger_count=" + entity.getPassengers().size();
++
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState transferState =
++            entity.getRegionTransferState();
++
++        if (transferState != null) {
++            final StringBuilder stateTransferDump = new StringBuilder(base + "\n\tregion_transfer_state=[reason=\"" + transferState.getReason() + "\",type=\"" + transferState.getType() + "\"],called_by=[\n");
++            final java.util.List<StackTraceElement> callTrace = transferState.getCallTrace();
++
++            for (final StackTraceElement ste : callTrace) {
++                stateTransferDump.append("\t\tat ").append(ste.toString()).append("\n");
++            }
++
++            stateTransferDump.append("\t],extra=[").append(transferState.getExtra()).append("]");
++            return stateTransferDump.toString();
++        }
++
++        return base + "}";
++    }
++
++    public static String getEntityContext(final Entity entity) {
++        final java.util.List<Entity> passengers = entity.getPassengers();
++        final java.util.List<String> passengerStrings = new java.util.ArrayList<>(passengers.size());
++        final Entity vehicle = entity.getVehicle();
++
++        for (final Entity passenger : passengers) {
++            passengerStrings.add("(" + dumpEntityWithoutReferences(passenger) + ")");
++        }
++
++        final StringBuilder builder = new StringBuilder();
++        builder.append("EntityContext:{");
++
++        builder.append("self=[").append(dumpEntityWithoutReferences(entity)).append("]");
++
++        boolean addedIndented = false;
++
++        if (!passengers.isEmpty()) {
++            builder.append("\t\npassengers=[\n\t").append(String.join(",\n\t", passengerStrings)).append("\n]");
++            addedIndented = true;
++        }
++
++        if (vehicle != null) {
++            builder.append("\t\nvehicle[").append(dumpEntityWithoutReferences(vehicle)).append("]");
++            addedIndented = true;
++        }
++
++        if (addedIndented) {
++            builder.append("\n}");
++        }
++
++        return builder.toString();
++    }
++
++    public static final class ThreadViolationException extends RuntimeException {
++    }
++    // Canvas end - region threading
++
      /**
-@@ -123,50 +147,188 @@ public class TickThread extends Thread {
+      * @deprecated
+      */
+     @Deprecated
+     public static void ensureTickThread(final String reason) {
+         if (!isTickThread()) {
+-            LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new Throwable());
++            LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(reason);
+         }
+     }
+@@ -34,7 +145,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos)) {
+             final String ex = "Thread failed main thread check: " +
+                                reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -43,7 +154,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos, blockRadius)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos + ", block_radius=" + blockRadius;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -52,7 +163,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + pos;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -61,7 +172,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, chunkX, chunkZ)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -69,8 +180,10 @@ public class TickThread extends Thread {
+     public static void ensureTickThread(final Entity entity, final String reason) {
+         if (!isTickThreadFor(entity)) {
+             final String ex = "Thread failed main thread check: " +
+-                reason + ", context=" + getThreadContext() + ", entity=" + EntityUtil.dumpEntity(entity);
+-            LOGGER.error(ex, new Throwable());
++            // Canvas start - region threading
++                reason + ", context=" + getThreadContext() + ", entity=" + getEntityContext(entity);
++            LOGGER.error(ex, new ThreadViolationException());
++            // Canvas end - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -79,7 +192,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, aabb)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", aabb=" + aabb;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -88,7 +201,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, blockX, blockZ)) {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + new Vec3(blockX, 0.0, blockZ);
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex, new ThreadViolationException()); // Canvas - region threading
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -123,50 +236,188 @@ public class TickThread extends Thread {
      }
  
      public static boolean isShutdownThread() {
@@ -277,7 +453,7 @@ index aae6b1ca2f3060efd3bb7877d07a7a0bd211acbe..39b51a4d6df45db8f0addd640bf97807
 +        if (worldData.hasEntity(entity)) {
 +            return true;
 +        }
-+        
++
 +        if (entity instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
 +            net.minecraft.server.network.ServerGamePacketListenerImpl conn = serverPlayer.connection;
 +            return conn != null && worldData.hasConnection(conn.connection);
@@ -2815,7 +2991,7 @@ index 000c5ea5d39d5ab6e5592012ab1cc7ee547505dc..ab2ee478c53923be85f5a6d4971bed5b
      }
  
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
-index 0965a503160ae11aa20963a8871c3838c50d0c6a..f3072ed0da111207e2df8c42340c8625602ae114 100644
+index 0965a503160ae11aa20963a8871c3838c50d0c6a..34b9b7d6ab421b4ab53cca076919436db3cfd655 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
 @@ -112,6 +112,11 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
@@ -2886,7 +3062,7 @@ index 0965a503160ae11aa20963a8871c3838c50d0c6a..f3072ed0da111207e2df8c42340c8625
  
          if (entityTracker == null) {
              return;
-@@ -1153,24 +1164,37 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+@@ -1153,27 +1164,80 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
          location.checkFinite();
          Location locationClone = location.clone(); // clone so we don't need to worry about mutations after this call.
  
@@ -2923,13 +3099,36 @@ index 0965a503160ae11aa20963a8871c3838c50d0c6a..f3072ed0da111207e2df8c42340c8625
 +                ret.complete(Boolean.FALSE);
 +            }
 +        };
++        // Canvas start - region threading
++
++        // we have to create this early so that the call-trace is
++        // properly created, or else we risk losing the caller
++
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState transferState =
++            new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState(
++                "api-fronted teleport async call" + (
++                    // include this bit of debug since this can be called async from the entity context
++                    org.bukkit.Bukkit.isOwnedByCurrentRegion(this) ? " - synchronous" : " - to be scheduled"
++                ),
++                io.canvasmc.canvas.util.ServerLocation.fromBukkit(getLocation()),
++                io.canvasmc.canvas.util.ServerLocation.fromBukkit(locationClone)
++            );
++        // Canvas end - region threading
++
 +        if (org.bukkit.Bukkit.isOwnedByCurrentRegion(this)) {
++            setPluginTransferState(transferState); // Canvas - region threading
 +            run.accept(this.getHandle());
 +            return ret;
 +        }
 +        boolean scheduled = this.taskScheduler.schedule(
 +            // success
-+            run,
++            // Canvas start - region threading
++            (newEntity) -> {
++                // set the transfer state first, then teleport
++                setPluginTransferState(transferState);
++                run.accept(newEntity);
++            },
++            // Canvas end - region threading
 +            // retired
 +            (_) -> ret.complete(Boolean.FALSE),
 +            1L
@@ -2942,7 +3141,27 @@ index 0965a503160ae11aa20963a8871c3838c50d0c6a..f3072ed0da111207e2df8c42340c8625
  
          return ret;
      }
-@@ -1245,8 +1269,7 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
++    // Canvas start - region threading
++
++    // API-fronted teleport requests need to be specifically handled differently than
++    // generic teleport states, so we have a utility method for doing this to just avoid
++    // copy-pasting this
++
++    private void setPluginTransferState(
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState setTo
++    ) {
++        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getHandleRaw().getRegionTransferState();
++        if (previousTransferState != null) {
++            throw new IllegalStateException("Cannot teleport async when another region handoff is present! Current: " + previousTransferState);
++        }
++
++        getHandleRaw().setRegionTransferState(setTo);
++    }
++    // Canvas end - region threading
+     // Paper end - more teleport API / async chunk API
+ 
+     private final org.bukkit.entity.Entity.Spigot spigot = new org.bukkit.entity.Entity.Spigot() {
+@@ -1245,8 +1309,7 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
  
      @Override
      public Set<org.bukkit.entity.Player> getTrackedPlayers() {
