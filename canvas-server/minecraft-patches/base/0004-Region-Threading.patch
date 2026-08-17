@@ -28618,24 +28618,27 @@ index b844dee92b175ddef4506d96e513e5ca3d27750d..21c4deda503679ebf91355f289ddeac5
                          if (chicken instanceof Chicken realChicken) {
                              Optional.ofNullable(this.getItem().get(DataComponents.CHICKEN_VARIANT)).ifPresent(realChicken::setVariant);
 diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
-index 8d3c6abd387acc4cec27a33b96bcd24255fd01ac..040f0b47ac46236fa2c26f7d5682d18a7195061e 100644
+index 8d3c6abd387acc4cec27a33b96bcd24255fd01ac..58bbd78a701a3ee2dafc92c3649c12693699840b 100644
 --- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
 +++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
-@@ -81,6 +81,80 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+@@ -81,6 +81,83 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
          hitResult.getEntity().hurt(this.damageSources().thrown(this, this.getOwner()), 0.0F);
      }
  
 +    // Folia start - region threading
-+    private static void attemptTeleport(Entity source, ServerLevel checkWorld, net.minecraft.world.phys.Vec3 to) {
++    private void attemptTeleport(final Entity source, final ServerLevel checkWorld, final Vec3 to) {
 +        final boolean onPortalCooldown = source.isOnPortalCooldown();
++        final ThrownEnderpearl entityPearl = this;
++
 +        // ignore retired callback, in those cases we do not want to teleport
 +        source.getBukkitEntity().taskScheduler.scheduleOrExecute( // Canvas - region threading
 +            (Entity entity) -> {
 +                if (!isAllowedToTeleportOwner(entity, checkWorld)) {
 +                    return;
 +                }
++
 +                // source is now an invalid reference, do not use it, use the entity parameter
-+                net.minecraft.world.phys.Vec3 endermitePos = entity.position();
++                final Vec3 endermitePos = entity.position();
 +
 +                // dismount from any vehicles, so we can teleport and to prevent desync
 +                if (entity.isPassenger()) {
@@ -28655,16 +28658,16 @@ index 8d3c6abd387acc4cec27a33b96bcd24255fd01ac..040f0b47ac46236fa2c26f7d5682d18a
 +                        // entity is now an invalid reference, do not use it, instead use teleported
 +                        if (teleported instanceof ServerPlayer player) {
 +                            // connection teleport is already done
-+                            ServerLevel world = player.level();
++                            final ServerLevel world = player.level();
 +
 +                            // endermite spawn chance
 +                            if (world.getRandom().nextFloat() < 0.05F && world.isSpawningMonsters()) {
-+                                Endermite entityendermite = EntityTypes.ENDERMITE.create(world, EntitySpawnReason.TRIGGERED);
++                                final Endermite entityendermite = EntityTypes.ENDERMITE.create(world, EntitySpawnReason.TRIGGERED);
 +
 +                                if (entityendermite != null) {
-+                                    float yRot = teleported.getYRot();
-+                                    float xRot = teleported.getXRot();
-+                                    Runnable spawn = () -> {
++                                    final float yRot = teleported.getYRot();
++                                    final float xRot = teleported.getXRot();
++                                    final Runnable spawn = () -> {
 +                                        entityendermite.snapTo(endermitePos.x, endermitePos.y, endermitePos.z, yRot, xRot);
 +                                        world.addFreshEntity(entityendermite, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.ENDER_PEARL);
 +                                    };
@@ -28685,7 +28688,7 @@ index 8d3c6abd387acc4cec27a33b96bcd24255fd01ac..040f0b47ac46236fa2c26f7d5682d18a
 +                            // damage player
 +                            teleported.resetFallDistance();
 +                            player.resetCurrentImpulseContext();
-+                            player.hurtServer(player.level(), player.damageSources().enderPearl().eventEntityDamager(player), 5.0F); // CraftBukkit // Paper - fix DamageSource API
++                            player.hurtServer(player.level(), player.damageSources().enderPearl().eventEntityDamager(entityPearl), 5.0F); // CraftBukkit // Paper - fix DamageSource API
 +                            playSound(teleported.level(), to);
 +                        } else {
 +                            // reset fall damage so that if the entity was falling they do not instantly die
@@ -28702,20 +28705,22 @@ index 8d3c6abd387acc4cec27a33b96bcd24255fd01ac..040f0b47ac46236fa2c26f7d5682d18a
      @Override
      protected void onHit(final HitResult hitResult) {
          super.onHit(hitResult);
-@@ -99,6 +173,20 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+@@ -99,6 +176,22 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
          }
  
          if (this.level() instanceof ServerLevel level && !this.isRemoved()) {
 +            // Folia start - region threading
 +            if (true) {
 +                // we can't fire events, because we do not actually know where the other entity is located
-+                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
-+                    throw new IllegalStateException("Must be on tick thread for ticking entity: " + this);
-+                }
-+                Entity entity = this.getOwnerRaw();
++                ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Must be on tick thread for ticking entity");
++
++                // teleport the owner
++                final Entity entity = this.getOwnerRaw();
 +                if (entity != null) {
 +                    attemptTeleport(entity, (ServerLevel)this.level(), this.position());
 +                }
++
++                // discard after teleport
 +                this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.HIT);
 +                return;
 +            }
@@ -28723,7 +28728,7 @@ index 8d3c6abd387acc4cec27a33b96bcd24255fd01ac..040f0b47ac46236fa2c26f7d5682d18a
              Entity owner = this.getOwner();
              if (owner != null && isAllowedToTeleportOwner(owner, level)) {
                  Vec3 teleportPos = this.oldPosition();
-@@ -179,7 +267,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+@@ -179,7 +272,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
              int previousChunkZ = SectionPos.blockToSectionCoord(this.position().z());
              Entity owner = this.owner != null ? findOwnerIncludingDeadPlayer(serverLevel, this.owner.getUUID()) : null;
              if (owner instanceof ServerPlayer serverPlayer
@@ -28732,7 +28737,7 @@ index 8d3c6abd387acc4cec27a33b96bcd24255fd01ac..040f0b47ac46236fa2c26f7d5682d18a
                  && !serverPlayer.wonGame
                  && serverPlayer.level().getGameRules().get(GameRules.ENDER_PEARLS_VANISH_ON_DEATH)) {
                  this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
-@@ -203,7 +291,15 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+@@ -203,7 +296,15 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
          }
      }
  
