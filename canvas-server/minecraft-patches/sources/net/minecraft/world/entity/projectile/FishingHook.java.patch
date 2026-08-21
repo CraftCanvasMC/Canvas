@@ -1,5 +1,76 @@
 --- a/net/minecraft/world/entity/projectile/FishingHook.java
 +++ b/net/minecraft/world/entity/projectile/FishingHook.java
+@@ -174,6 +_,6 @@
+         this.getInterpolation().interpolate();
+         super.tick();
+-        Player owner = this.getPlayerOwner();
++        Player owner = this.canvas$getPlayerOwnerRaw(); // Canvas - preserve fishing hooks across dimension changes
+
+         if (owner == null) {
+             this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
+        } else if (this.level().isClientSide() || !this.shouldStopFishing(owner)) {
+@@ -271,10 +_,59 @@
+     }
+
++    // Canvas start - preserve fishing hooks across dimension changes
++    private boolean canvas$ownerCheckPending;
++
++    private @Nullable Player canvas$getPlayerOwnerRaw() {
++        return this.getOwnerRaw() instanceof Player player ? player : null;
++    }
++
++    private void canvas$completeOwnerCheck(final boolean ownerCanContinueFishing) {
++        this.getBukkitEntity().taskScheduler.scheduleOrExecute((FishingHook hook) -> {
++            hook.canvas$ownerCheckPending = false;
++            if (!ownerCanContinueFishing && !hook.isRemoved()) {
++                hook.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN);
++            }
++        });
++    }
++    // Canvas end - preserve fishing hooks across dimension changes
++
+     private boolean shouldStopFishing(final Player owner) {
+         // Folia start - region threading
++        // Canvas start - preserve fishing hooks across dimension changes
+         if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(owner)) {
+-            return true;
++            if (!this.canvas$ownerCheckPending) {
++                this.canvas$ownerCheckPending = true;
++                final Level hookLevel = this.level();
++                final Vec3 hookPosition = this.position();
++                final boolean scheduled = owner.getBukkitEntity().taskScheduler.schedule(
++                    (Player checkedOwner) -> {
++                        if (checkedOwner.isRemoved()) {
++                            this.canvas$completeOwnerCheck(checkedOwner.getRemovalReason() == Entity.RemovalReason.CHANGED_DIMENSION && checkedOwner.getHealth() > 0.0F);
++                            return;
++                        }
++
++                        if (!checkedOwner.canInteractWithLevel() || !checkedOwner.isAlive()) {
++                            this.canvas$completeOwnerCheck(false);
++                            return;
++                        }
++
++                        final ItemStack selectedItem = checkedOwner.getMainHandItem();
++                        final ItemStack selectedItemOffHand = checkedOwner.getOffhandItem();
++                        final boolean isHoldingRod = selectedItem.is(Items.FISHING_ROD) || selectedItemOffHand.is(Items.FISHING_ROD);
++                        final boolean isTooFarAway = checkedOwner.level() == hookLevel
++                            && hookPosition.distanceToSqr(checkedOwner.position()) > 1024.0;
++                        this.canvas$completeOwnerCheck(isHoldingRod && !isTooFarAway);
++                    },
++                    (Player _) -> this.canvas$completeOwnerCheck(false),
++                    1L
++                );
++                if (!scheduled) {
++                    this.canvas$completeOwnerCheck(false);
++                }
++            }
++            return true;
+         }
++        // Canvas end - preserve fishing hooks across dimension changes
+         // Folia end - region threading
+         if (owner.canInteractWithLevel()) {
+             ItemStack selectedItem = owner.getMainHandItem();
+             ItemStack selectedItemOffHand = owner.getOffhandItem();
 @@ -508,6 +_,11 @@
          if (!this.level().isClientSide() && owner != null && !this.shouldStopFishing(owner)) {
              int dmg = 0;
@@ -27,3 +98,23 @@
          }
      }
  
+@@ -619,6 +_,17 @@
+     @Override
+     protected void preRemove(RemovalReason reason) {
+         super.preRemove(reason);
+-        this.updateOwnerInfo(null);
++        // Canvas start - preserve fishing hooks across dimension changes
++        final Player owner = this.canvas$getPlayerOwnerRaw();
++        if (owner != null && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(owner)) {
++            owner.getBukkitEntity().taskScheduler.scheduleOrExecute((Player checkedOwner) -> {
++                if (checkedOwner.fishing == this) {
++                    checkedOwner.fishing = null;
++                }
++            });
++        } else {
++            this.updateOwnerInfo(null);
++        }
++        // Canvas end - preserve fishing hooks across dimension changes
+     }
+
+     // Folia end - region threading
