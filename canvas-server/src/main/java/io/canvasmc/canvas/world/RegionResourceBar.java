@@ -6,11 +6,11 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import io.papermc.paper.adventure.PaperAdventure;
 import io.papermc.paper.threadedregions.RegionizedWorldData;
+import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
-import io.papermc.paper.threadedregions.TickRegionScheduler;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
@@ -19,7 +19,6 @@ import net.minecraft.network.protocol.game.ClientboundSetActionBarTextPacket;
 import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
 
 public abstract class RegionResourceBar {
     protected static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
@@ -27,7 +26,7 @@ public abstract class RegionResourceBar {
     private final Function<RegionizedWorldData, Boolean> enabled;
     private long nextTick = System.nanoTime();
 
-    public RegionResourceBar(final @NonNull Function<RegionizedWorldData, Boolean> enabled) {
+    public RegionResourceBar(final Function<RegionizedWorldData, Boolean> enabled) {
         this.enabled = enabled;
     }
 
@@ -49,15 +48,15 @@ public abstract class RegionResourceBar {
 
     abstract Pair<Component, Float> buildComponent();
 
-    abstract String normalize(String input);
+    abstract String normalize(final String input);
 
     abstract String getDefaultFormat();
 
     abstract String[] getKeys();
 
     @Contract("_, _, _ -> new")
-    @NonNull Component number(final double value, final @NonNull ThreadLocal<DecimalFormat> fmt, final TextColor color) {
-        return Component.text(fmt.get().format(value), color);
+    Component number(final double value, final ThreadLocal<DecimalFormat> format, final TextColor color) {
+        return Component.text(format.get().format(value), color);
     }
 
     public enum Placement {
@@ -66,8 +65,9 @@ public abstract class RegionResourceBar {
     }
 
     public interface DisplayManager {
+
         @Contract(value = "_, _ -> new", pure = true)
-        static @NonNull DisplayManager createNew(ServerPlayer entityPlayer, BossBar.Color color) {
+        static DisplayManager createNew(final ServerPlayer entityPlayer, final BossBar.Color color) {
             return new DisplayManager() {
                 private Component display = Component.text("Waiting for region update...");
                 public final BossBar resourceBar =
@@ -161,21 +161,26 @@ public abstract class RegionResourceBar {
 
         void tick();
 
-        void setDisplay(Component component);
+        void setDisplay(final Component component);
 
-        void setProgress(float progress);
+        void setProgress(final float progress);
 
         void enable();
 
         void disable();
 
-        void updateFromEntry(RegionResourceBar.Entry entry);
+        void updateFromEntry(final RegionResourceBar.Entry entry);
 
         RegionResourceBar.Entry serializeDisplay();
     }
 
     record FormatEntry(String raw, List<Segment> segments) {
-        private static @NonNull List<Segment> buildSegments(final String normalized, final String[] keys) {
+        static FormatEntry compile(final String effectiveRaw, final RegionResourceBar resourceBar) {
+            final String normalized = effectiveRaw.isEmpty() ? resourceBar.getDefaultFormat() : resourceBar.normalize(effectiveRaw);
+            return new FormatEntry(effectiveRaw, buildSegments(normalized, resourceBar.getKeys()));
+        }
+
+        private static List<Segment> buildSegments(final String normalized, final String[] keys) {
             final List<Segment> result = new ArrayList<>();
             String remaining = normalized;
 
@@ -206,17 +211,12 @@ public abstract class RegionResourceBar {
         }
 
         @Contract("_ -> new")
-        private static Segment.@NonNull Static parseStatic(final String text) {
+        private static Segment.Static parseStatic(final String text) {
             try {
                 return new Segment.Static(MINI_MESSAGE.deserialize(text));
             } catch (final Exception e) {
                 return new Segment.Static(Component.text(text));
             }
-        }
-
-        static @NonNull FormatEntry compile(final @NonNull String effectiveRaw, final @NonNull RegionResourceBar resourceBar) {
-            final String normalized = effectiveRaw.isEmpty() ? resourceBar.getDefaultFormat() : resourceBar.normalize(effectiveRaw);
-            return new FormatEntry(effectiveRaw, buildSegments(normalized, resourceBar.getKeys()));
         }
 
         sealed interface Segment permits Segment.Static, Segment.Dynamic {
@@ -228,13 +228,10 @@ public abstract class RegionResourceBar {
 
     public record Entry(boolean enabled, Placement placement) {
         public static final Entry FALLBACK = new Entry(false, Placement.BOSS_BAR);
-        public static final Codec<Entry> CODEC = RecordCodecBuilder.create(
-            instance -> instance.group(
-                    Codec.BOOL.optionalFieldOf("enabled", false).forGetter(Entry::enabled),
-                    Placement.CODEC.optionalFieldOf("placement", Placement.BOSS_BAR).forGetter(Entry::placement)
-                )
-                .apply(instance, Entry::new)
-        );
+        public static final Codec<Entry> CODEC = RecordCodecBuilder.create(i -> i.group(
+            Codec.BOOL.optionalFieldOf("enabled", false).forGetter(Entry::enabled),
+            Placement.CODEC.optionalFieldOf("placement", Placement.BOSS_BAR).forGetter(Entry::placement)
+        ).apply(i, Entry::new));
     }
 
 }

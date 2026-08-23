@@ -37,7 +37,7 @@ if (!file(".git").exists()) {
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
-rootProject.name = "canvas"
+rootProject.name = "Canvas"
 for (name in listOf("canvas-api", "canvas-server")) {
     val projName = name.lowercase(Locale.ENGLISH)
     include(projName)

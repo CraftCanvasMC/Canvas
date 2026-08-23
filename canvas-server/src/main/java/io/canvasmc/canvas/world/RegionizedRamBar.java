@@ -2,7 +2,6 @@ package io.canvasmc.canvas.world;
 
 import com.mojang.datafixers.util.Pair;
 import io.canvasmc.canvas.WorldConfig;
-import io.papermc.paper.threadedregions.RegionizedWorldData;
 import io.papermc.paper.threadedregions.commands.CommandUtil;
 import java.text.DecimalFormat;
 import java.util.concurrent.atomic.AtomicReference;
@@ -11,7 +10,7 @@ import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.format.TextColor;
 import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 public class RegionizedRamBar extends RegionResourceBar {
     private static final ThreadLocal<DecimalFormat> VALUE_FORMAT = ThreadLocal.withInitial(() -> new DecimalFormat("#,##0.0"));
@@ -21,7 +20,7 @@ public class RegionizedRamBar extends RegionResourceBar {
     private static final String[] KEYS = {"used", "xmx", "percent"};
 
     // we have this as an instance field because formats can be per-world
-    private final AtomicReference<FormatEntry> cachedFormat = new AtomicReference<>(null);
+    private final AtomicReference<@Nullable FormatEntry> cachedFormat = new AtomicReference<>(null);
 
     public RegionizedRamBar() {
         super((worldData) -> worldData.world.canvasConfig().regionBars.enableRamBar);
@@ -48,6 +47,7 @@ public class RegionizedRamBar extends RegionResourceBar {
 
         final String raw = getWorldData().world.canvasConfig().regionBars.ramBarFormat;
         final String effectiveRaw = (raw == null || raw.isBlank()) ? "" : raw;
+
         FormatEntry entry = cachedFormat.get();
         if (entry == null || !effectiveRaw.equals(entry.raw())) {
             entry = FormatEntry.compile(effectiveRaw, this);
@@ -77,13 +77,8 @@ public class RegionizedRamBar extends RegionResourceBar {
         return new Pair<>(builder.build(), (float) Math.clamp(percent / 100.0, 0.0, 1.0));
     }
 
-    @Contract("_, _ -> new")
-    private @NonNull Component valueWithUnit(final double value, final TextColor color) {
-        return Component.text(VALUE_FORMAT.get().format(value) + " MiB", color);
-    }
-
     @Override
-    String normalize(final @NonNull String input) {
+    String normalize(final String input) {
         return input
             .replace("%used%", "<used>")
             .replace("%xmx%", "<xmx>")
@@ -98,5 +93,10 @@ public class RegionizedRamBar extends RegionResourceBar {
     @Override
     String[] getKeys() {
         return KEYS;
+    }
+
+    @Contract("_, _ -> new")
+    private Component valueWithUnit(final double value, final TextColor color) {
+        return Component.text(VALUE_FORMAT.get().format(value) + " MiB", color);
     }
 }

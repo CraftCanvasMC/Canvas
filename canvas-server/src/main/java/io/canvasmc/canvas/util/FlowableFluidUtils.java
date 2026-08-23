@@ -8,7 +8,6 @@ import net.minecraft.world.level.material.FlowingFluid;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -20,9 +19,10 @@ import org.jspecify.annotations.Nullable;
  *
  * @author ishland
  */
+// TODO - cleanup
 public class FlowableFluidUtils {
 
-    private static boolean canFlowNormally(LevelReader level, BlockPos pos, BlockState state, @NonNull FluidState fluidState) {
+    private static boolean canFlowNormally(LevelReader level, BlockPos pos, BlockState state, FluidState fluidState) {
         if (fluidState.isEmpty()) return false;
 
         BlockPos belowPos = pos.below();
@@ -43,7 +43,7 @@ public class FlowableFluidUtils {
             canSpreadToSidesNormally(level, pos, state, fluidState);
     }
 
-    private static boolean canSpreadToSidesNormally(LevelReader level, BlockPos pos, BlockState state, @NonNull FluidState fluidState) {
+    private static boolean canSpreadToSidesNormally(LevelReader level, BlockPos pos, BlockState state, FluidState fluidState) {
         int nextFluidLevel = fluidState.getAmount() - ((FlowingFluid) fluidState.getType()).getDropOff(level);
         if (fluidState.getValue(FlowingFluid.FALLING)) {
             nextFluidLevel = 7;
@@ -73,7 +73,8 @@ public class FlowableFluidUtils {
         return false;
     }
 
-    private static @Nullable FluidState getUpdatedState(FlowingFluid receiver, LevelReader level, BlockPos pos, BlockState state) {
+    @Nullable
+    private static FluidState getUpdatedState(FlowingFluid receiver, LevelReader level, BlockPos pos, BlockState state) {
         int i = 0;
         int j = 0;
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
@@ -114,7 +115,7 @@ public class FlowableFluidUtils {
         }
     }
 
-    public static boolean needsPostProcessing(LevelReader level, BlockPos pos, BlockState state, @NonNull FluidState fluidState) {
+    public static boolean needsPostProcessing(LevelReader level, BlockPos pos, BlockState state, FluidState fluidState) {
         if (!fluidState.isSource()) {
             return true;
         }

@@ -24,7 +24,7 @@ public interface WorldRegionizer {
      * @param forEach
      *     The consumer to apply to each {@link ChunkRegion}.
      */
-    void computeForAllChunkRegions(Consumer<ChunkRegion> forEach);
+    void computeForAllChunkRegions(final Consumer<ChunkRegion> forEach);
 
     /**
      * Iterates over all chunk regions without synchronization.
@@ -35,7 +35,7 @@ public interface WorldRegionizer {
      * @param forEach
      *     The consumer to apply to each {@link ChunkRegion}.
      */
-    void computeForAllChunkRegionsUnsynchronized(Consumer<ChunkRegion> forEach);
+    void computeForAllChunkRegionsUnsynchronized(final Consumer<ChunkRegion> forEach);
 
     /**
      * Returns the bit shift used to map chunk coordinates to section (region) coordinates.
@@ -173,6 +173,19 @@ public interface WorldRegionizer {
          * @return The regionizer managing this region.
          */
         WorldRegionizer getRegionizer();
+
+        /**
+         * Returns the {@code long} id associated with this region.
+         * <p>
+         * The id is immutable upon creation of the region in question, and is unique per threaded region object
+         * created. It is not recommended to try and predict these values, however it can be useful for if you are
+         * trying to track regions. It is worth noting that region splits would discard the existing region object and
+         * create new region objects for each new split area, and merge operations would only discard one of the region
+         * objects in question, generating a new id per new region created.
+         *
+         * @return the {@code long} id
+         */
+        long getId();
 
         /**
          * Represents the lifecycle state of a {@link ChunkRegion}.

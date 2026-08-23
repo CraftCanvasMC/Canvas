@@ -1,0 +1,2426 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dueris <duerismc@gmail.com>
+Date: Tue, 23 Jun 2026 01:29:19 -0700
+Subject: [PATCH] Remove Vanilla Profiler
+
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 7a6d9c084e95f38221376d024c85ad70e965db16..cbc15f9acee527682c37c0c42283bd740fc7d169 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -56,7 +56,6 @@ import net.minecraft.server.commands.CloneCommands;
+ import net.minecraft.server.commands.DamageCommand;
+ import net.minecraft.server.commands.DataPackCommand;
+ import net.minecraft.server.commands.DeOpCommands;
+-import net.minecraft.server.commands.DebugCommand;
+ import net.minecraft.server.commands.DebugConfigCommand;
+ import net.minecraft.server.commands.DebugMobSpawningCommand;
+ import net.minecraft.server.commands.DebugPathCommand;
+@@ -146,7 +145,6 @@ import net.minecraft.server.permissions.PermissionSetSupplier;
+ import net.minecraft.server.permissions.Permissions;
+ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.jfr.JvmProfiler;
+ import net.minecraft.world.flag.FeatureFlagSet;
+ import net.minecraft.world.flag.FeatureFlags;
+@@ -204,7 +202,6 @@ public class Commands {
+         DamageCommand.register(this.dispatcher, context);
+         DataCommands.register(this.dispatcher);
+         DataPackCommand.register(this.dispatcher, context);
+-        DebugCommand.register(this.dispatcher);
+         DefaultGameModeCommands.register(this.dispatcher);
+         DialogCommand.register(this.dispatcher, context);
+         DifficultyCommand.register(this.dispatcher);
+@@ -371,7 +368,6 @@ public class Commands {
+         org.spigotmc.AsyncCatcher.catchOp("Cannot perform command async");
+         // Paper end
+         CommandSourceStack sender = command.getContext().getSource();
+-        Profiler.get().push(() -> "/" + commandString);
+         ContextChain<CommandSourceStack> commandChain = finishParsing(command, commandString, sender);
+ 
+         try {
+@@ -406,8 +402,6 @@ public class Commands {
+                 sender.sendFailure(Component.literal(Util.describeError(e)));
+                 LOGGER.error("'/{}' threw an exception", commandString, e);
+             }
+-        } finally {
+-            Profiler.get().pop();
+         }
+     }
+ 
+@@ -465,7 +459,7 @@ public class Commands {
+             int chainLimit = Math.max(1, gameRules.get(GameRules.MAX_COMMAND_SEQUENCE_LENGTH));
+             int forkLimit = gameRules.get(GameRules.MAX_COMMAND_FORKS);
+ 
+-            try (ExecutionContext<CommandSourceStack> executionContext = new ExecutionContext<>(chainLimit, forkLimit, Profiler.get())) {
++            try (ExecutionContext<CommandSourceStack> executionContext = new ExecutionContext<>(chainLimit, forkLimit)) {
+                 CURRENT_EXECUTION_CONTEXT.set(executionContext);
+                 config.accept(executionContext);
+                 executionContext.runCommandQueue();
+diff --git a/net/minecraft/commands/execution/ExecutionContext.java b/net/minecraft/commands/execution/ExecutionContext.java
+index d78935546eb15a1788ed12bfa37e652333c4a556..feba03732ae676c73334f3f30378e0575ebaf141 100644
+--- a/net/minecraft/commands/execution/ExecutionContext.java
++++ b/net/minecraft/commands/execution/ExecutionContext.java
+@@ -20,7 +20,6 @@ public class ExecutionContext<T> implements AutoCloseable {
+     private static final Logger LOGGER = LogUtils.getLogger();
+     private final int commandLimit;
+     private final int forkLimit;
+-    private final ProfilerFiller profiler;
+     private @Nullable TraceCallbacks tracer;
+     private int commandQuota;
+     private boolean queueOverflow;
+@@ -28,10 +27,9 @@ public class ExecutionContext<T> implements AutoCloseable {
+     private final List<CommandQueueEntry<T>> newTopCommands = new ObjectArrayList<>();
+     private int currentFrameDepth;
+ 
+-    public ExecutionContext(final int commandLimit, final int forkLimit, final ProfilerFiller profiler) {
++    public ExecutionContext(final int commandLimit, final int forkLimit) {
+         this.commandLimit = commandLimit;
+         this.forkLimit = forkLimit;
+-        this.profiler = profiler;
+         this.commandQuota = commandLimit;
+     }
+ 
+@@ -130,7 +128,7 @@ public class ExecutionContext<T> implements AutoCloseable {
+     }
+ 
+     public ProfilerFiller profiler() {
+-        return this.profiler;
++        return net.minecraft.util.profiling.InactiveProfiler.INSTANCE;
+     }
+ 
+     public int forkLimit() {
+diff --git a/net/minecraft/commands/execution/tasks/BuildContexts.java b/net/minecraft/commands/execution/tasks/BuildContexts.java
+index 6d4024d74766fed8c50d68462532394651b84fde..52143313c0a3a47abfb9b8db21189cc0e32a5b7c 100644
+--- a/net/minecraft/commands/execution/tasks/BuildContexts.java
++++ b/net/minecraft/commands/execution/tasks/BuildContexts.java
+@@ -44,9 +44,7 @@ public class BuildContexts<T extends ExecutionCommandSource<T>> {
+         ChainModifiers modifiers = initialModifiers;
+         List<T> currentSources = initialSources;
+         if (currentStage.getStage() != Stage.EXECUTE) {
+-            context.profiler().push(() -> "prepare " + this.commandInput);
+-
+-            try {
++            {
+                 int forkLimit = context.forkLimit();
+ 
+                 while (currentStage.getStage() != Stage.EXECUTE) {
+@@ -88,8 +86,6 @@ public class BuildContexts<T extends ExecutionCommandSource<T>> {
+ 
+                     currentStage = currentStage.nextStage();
+                 }
+-            } finally {
+-                context.profiler().pop();
+             }
+         }
+ 
+diff --git a/net/minecraft/commands/execution/tasks/ExecuteCommand.java b/net/minecraft/commands/execution/tasks/ExecuteCommand.java
+index cfdb2c3e6c91dc8ac1d81a95b6a9de4fa1be175c..35c52d1a612cd1dfe0c7a46365cf63cd2f8e4c82 100644
+--- a/net/minecraft/commands/execution/tasks/ExecuteCommand.java
++++ b/net/minecraft/commands/execution/tasks/ExecuteCommand.java
+@@ -23,8 +23,6 @@ public class ExecuteCommand<T extends ExecutionCommandSource<T>> implements Unbo
+ 
+     @Override
+     public void execute(final T sender, final ExecutionContext<T> context, final Frame frame) {
+-        context.profiler().push(() -> "execute " + this.commandInput);
+-
+         try {
+             context.incrementCost();
+             int result = ContextChain.runExecutable(this.executionContext, sender, ExecutionCommandSource.resultConsumer(), this.modifiers.isForked());
+@@ -34,8 +32,6 @@ public class ExecuteCommand<T extends ExecutionCommandSource<T>> implements Unbo
+             }
+         } catch (CommandSyntaxException e) {
+             sender.handleError(e, this.modifiers.isForked(), context.tracer());
+-        } finally {
+-            context.profiler().pop();
+         }
+     }
+ }
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index cee799b257bd4415ad8b437e59726bf6577026fe..a1baf2aa49303830a443d8104098e59ac4c2aa28 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -118,20 +118,9 @@ import net.minecraft.util.Util;
+ import net.minecraft.util.debug.ServerDebugSubscribers;
+ import net.minecraft.util.debugchart.SampleLogger;
+ import net.minecraft.util.debugchart.TpsDebugDimensions;
+-import net.minecraft.util.profiling.EmptyProfileResults;
+-import net.minecraft.util.profiling.ProfileResults;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+-import net.minecraft.util.profiling.ResultField;
+-import net.minecraft.util.profiling.SingleTickProfiler;
+ import net.minecraft.util.profiling.jfr.Environment;
+ import net.minecraft.util.profiling.jfr.JvmProfiler;
+ import net.minecraft.util.profiling.jfr.callback.ProfiledDuration;
+-import net.minecraft.util.profiling.metrics.profiling.ActiveMetricsRecorder;
+-import net.minecraft.util.profiling.metrics.profiling.InactiveMetricsRecorder;
+-import net.minecraft.util.profiling.metrics.profiling.MetricsRecorder;
+-import net.minecraft.util.profiling.metrics.profiling.ServerMetricsSamplersProvider;
+-import net.minecraft.util.profiling.metrics.storage.MetricsPersister;
+ import net.minecraft.util.thread.ReentrantBlockableEventLoop;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.RandomSequences;
+@@ -221,12 +210,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     private final SavedDataStorage savedDataStorage;
+     private final List<Runnable> tickables = Lists.newArrayList();
+     // Paper - per-level GameRules
+-    private MetricsRecorder metricsRecorder = InactiveMetricsRecorder.INSTANCE;
+-    private Consumer<ProfileResults> onMetricsRecordingStopped = results -> this.stopRecordingMetrics();
+-    private Consumer<Path> onMetricsRecordingFinished = ignored -> {};
+-    private boolean willStartRecordingMetrics;
+-    private MinecraftServer.@Nullable TimeProfiler debugCommandProfiler;
+-    private boolean debugCommandProfilerDelayStart;
+     private ServerConnectionListener connection;
+     // Paper - per world load listener - moved LevelLoadListener to ServerLevel
+     private @Nullable ServerStatus status;
+@@ -1016,9 +999,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         org.spigotmc.WatchdogThread.doStop(); // Paper - Improved watchdog support
+         // CraftBukkit end
+         this.packetProcessor.close();
+-        if (this.metricsRecorder.isRecording()) {
+-            this.cancelRecordingMetrics();
+-        }
+ 
+         LOGGER.info("Stopping server");
+         Commands.COMMAND_SENDING_POOL.shutdownNow(); // Paper - Perf: Async command map building; Shutdown and don't bother finishing
+@@ -1173,10 +1153,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+         // note: To avoid possibly spinning forever, only execute tasks that are roughly available at the beginning
+         //       of this call. Packet processing and chunk system tasks are possibly always being queued.
+-        final ProfilerFiller profiler = Profiler.get();
+-        profiler.push("moonrise:run_all_tasks");
+-
+-        profiler.push("moonrise:run_all_server");
+         // avoid calling pollTask - we just want to execute queued tasks
+         final int currentTick = this.tickTaskTickCount.incrementAndGet();
+         final java.util.function.Predicate<net.minecraft.server.TickTask> taskPredicate = (final TickTask task) -> {
+@@ -1190,38 +1166,23 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             ((ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer)this).moonrise$executeMidTickTasks(); // Paper - rewrite chunk system
+             this.packetProcessor.executeSinglePacket();
+         }
+-        profiler.popPush("moonrise:run_all_packets");
+         while (this.packetProcessor.executeSinglePacket()) {
+             // execute possibly latency sensitive chunk system tasks (see above)
+             ((ca.spottedleaf.moonrise.patches.chunk_system.server.ChunkSystemMinecraftServer)this).moonrise$executeMidTickTasks(); // Paper - rewrite chunk system
+         }
+-        profiler.popPush("moonrise:run_all_chunk");
+         // Paper start - rewrite chunk system
+         for (final ServerLevel world : this.getAllLevels()) {
+-            profiler.push(world.toString() + " " + world.dimension().identifier()); // keep same formatting from regular tick, see tickChildren
+-
+             // note: legacy tasks may expect a distance manager update
+-            profiler.push("moonrise:distance_manager_update");
+             ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)world).moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
+-            profiler.popPush("moonrise:legacy_chunk_tasks");
+             world.getChunkSource().mainThreadProcessor.executeAllRecentInternalTasks();
+-            profiler.popPush("moonrise:chunk_system_tasks");
+             ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)world).moonrise$getChunkTaskScheduler().executeAllRecentlyQueuedMainThreadTasks();
+-            profiler.pop();
+-
+-            profiler.pop(); // world name
+         }
+         // Paper end - rewrite chunk system
+-        profiler.pop(); // moonrise:run_all_chunk
+-        profiler.pop(); // moonrise:run_all_tasks
+ 
+         this.finishMeasuringTaskExecutionTime();
+     }
+ 
+     private void recordTaskExecutionTimeWhileWaiting() {
+-        final ProfilerFiller profiler = Profiler.get();
+-
+-        profiler.push("moonrise:execute_tasks_until_tick");
+         this.waitingForNextTick = true;
+         // implement waitForTasks
+         final boolean isLoggingEnabled = this.isTickTimeLoggingEnabled();
+@@ -1257,7 +1218,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         } finally {
+             this.waitingForNextTick = false;
+         }
+-        profiler.pop();
+     }
+     // Paper end - improve tick loop
+ 
+@@ -1337,17 +1297,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                 // Paper end - improve tick loop
+ 
+                 boolean sprinting = thisTickNanos == 0L;
+-                if (this.debugCommandProfilerDelayStart) {
+-                    this.debugCommandProfilerDelayStart = false;
+-                    this.debugCommandProfiler = new MinecraftServer.TimeProfiler(Util.getNanos(), this.tickCount);
+-                }
+ 
+                 // Paper - improve tick loop - done above
+ 
+-                try (Profiler.Scope ignored = Profiler.use(this.createProfiler())) {
++                {
+                     this.processPacketsAndTick(sprinting);
+-                    ProfilerFiller profiler = Profiler.get();
+-                    profiler.push("nextTickWait");
+                     this.mayHaveDelayedTasks = true;
+                     this.delayedTasksMaxNextTickTimeNanos = Math.max(Util.getNanos() + thisTickNanos, this.nextTickTimeNanos);
+                     this.startMeasuringTaskExecutionTime();
+@@ -1357,10 +1311,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                         this.tickRateManager.endTickWork();
+                     }
+ 
+-                    profiler.pop();
+                     this.logFullTickTime();
+-                } finally {
+-                    this.endMetricsRecordingTick();
+                 }
+ 
+                 this.isReady = true;
+@@ -1530,7 +1481,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+ 
+     @Override
+     protected void doRunTask(final TickTask task) {
+-        Profiler.get().incrementCounter("runTask");
+         super.doRunTask(task);
+     }
+ 
+@@ -1629,7 +1579,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         if (playerSaveInterval < 0) {
+             playerSaveInterval = this.autosavePeriod;
+         }
+-        Profiler.get().push("save");
+         final boolean fullSave = this.autosavePeriod > 0 && this.tickCount % this.autosavePeriod == 0;
+         try {
+             this.isSaving = true;
+@@ -1647,10 +1596,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         } finally {
+             this.isSaving = false;
+         }
+-        Profiler.get().pop();
+         // Paper end - Incremental chunk and player saving
+ 
+-        ProfilerFiller profiler = Profiler.get();
+         this.server.spark.executeMainThreadTasks(); // Paper - spark
+         // Paper start - Server Tick Events
+         long endTime = System.nanoTime();
+@@ -1658,7 +1605,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         new com.destroystokyo.paper.event.server.ServerTickEndEvent(this.tickCount, ((double)(endTime - this.currentTickStart) / 1000000D), remaining).callEvent();
+         // Paper end - Server Tick Events
+         this.server.spark.tickEnd(((double)(endTime - this.currentTickStart) / 1000000D)); // Paper - spark
+-        profiler.push("tallying");
+         long tickTime = Util.getNanos() - nano;
+         int tickIndex = this.tickCount % 100;
+         this.aggregatedTickTimesNanos = this.aggregatedTickTimesNanos - this.tickTimesNanos[tickIndex];
+@@ -1666,12 +1612,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         this.tickTimesNanos[tickIndex] = tickTime;
+         this.smoothedTickTimeMillis = this.smoothedTickTimeMillis * 0.8F + (float)tickTime / (float)TimeUtil.NANOSECONDS_PER_MILLISECOND * 0.19999999F;
+         this.logTickMethodTime(nano);
+-        profiler.pop();
+     }
+ 
+     protected void processPacketsAndTick(final boolean sprinting) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("tick");
+         this.tickFrame.start();
+         // Paper - improve tick loop - moved into runAllTasksAtTickStart
+         this.runAllTasksAtTickStart(); // Paper - improve tick loop
+@@ -1685,16 +1628,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         // Paper end - rewrite chunk system
+         this.tickFrame.end();
+         this.recordEndOfTick(); // Paper - improve tick loop
+-        profiler.pop();
+     }
+ 
+     private void autoSave() {
+         this.ticksUntilAutosave = this.autosavePeriod; // CraftBukkit
+         LOGGER.debug("Autosave started");
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("save");
+         this.saveEverything(true, false, false);
+-        profiler.pop();
+         LOGGER.debug("Autosave finished");
+     }
+ 
+@@ -1762,7 +1701,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public final io.papermc.paper.threadedregions.EntityScheduler.EntitySchedulerTickList entitySchedulerTickList = new io.papermc.paper.threadedregions.EntityScheduler.EntitySchedulerTickList(); // Paper - optimise Folia entity scheduler
+ 
+     protected void tickChildren(final BooleanSupplier haveTime) {
+-        ProfilerFiller profiler = Profiler.get();
+         this.getPlayerList().getPlayers().forEach(playerx -> playerx.connection.suspendFlushing());
+         this.server.getScheduler().mainThreadHeartbeat(); // CraftBukkit
+         // Paper start - optimise Folia entity scheduler
+@@ -1778,11 +1716,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         // Paper end - Folia scheduler API
+         io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.ADVENTURE_CLICK_MANAGER.handleQueue(this.tickCount); // Paper
+         io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue(this.tickCount); // Paper
+-        profiler.push("commandFunctions");
+         this.getFunctions().tick();
+-        profiler.pop();
+         if (this.tickRateManager.runsNormally()) {
+-            profiler.push("clocks");
+             // Paper start - per-world time
+             if (io.papermc.paper.configuration.GlobalConfiguration.get().time.affectsAllWorlds) {
+                 this.clockManager.tick();
+@@ -1792,13 +1727,10 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                 }
+             }
+             // Paper end - per-world time
+-            profiler.pop();
+         }
+ 
+         if (this.tickCount % 20 == 0) {
+-            profiler.push("timeSync");
+             this.forceGameTimeSynchronization();
+-            profiler.pop();
+         }
+ 
+         // CraftBukkit start
+@@ -1807,7 +1739,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             this.processQueue.remove().run();
+         }
+ 
+-        profiler.push("levels");
+         this.updateEffectiveRespawnData();
+ 
+         this.isIteratingOverLevels = true; // Paper - Throw exception on world create while being ticked
+@@ -1816,8 +1747,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             level.hasEntityMoveEvent = io.papermc.paper.event.entity.EntityMoveEvent.getHandlerList().getRegisteredListeners().length > 0; // Paper - Add EntityMoveEvent
+             level.updateLagCompensationTick(); // Paper - lag compensation
+             net.minecraft.world.level.block.entity.HopperBlockEntity.skipHopperEvents = level.paperConfig().hopper.disableMoveEvent || org.bukkit.event.inventory.InventoryMoveItemEvent.getHandlerList().getRegisteredListeners().length == 0; // Paper - Perf: Optimize Hoppers
+-            profiler.push(() -> level + " " + level.dimension().identifier());
+-            profiler.push("tick");
+ 
+             try {
+                 level.tick(haveTime);
+@@ -1827,37 +1756,26 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                 throw new ReportedException(report);
+             }
+ 
+-            profiler.pop();
+-            profiler.pop();
+             level.explosionDensityCache.clear(); // Paper - Optimize explosions
+         }
+         this.isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
+ 
+-        profiler.popPush("connection");
+         this.tickConnection();
+-        profiler.popPush("players");
+         this.playerList.tick();
+-        profiler.popPush("debugSubscribers");
+         this.debugSubscribers.tick();
+         if (this.tickRateManager.runsNormally()) {
+-            profiler.popPush("gameTests");
+             GameTestTicker.SINGLETON.tick();
+         }
+ 
+-        profiler.popPush("server gui refresh");
+-
+         for (Runnable tickable : this.tickables) {
+             tickable.run();
+         }
+ 
+-        profiler.popPush("send chunks");
+-
+         for (ServerPlayer player : this.playerList.getPlayers()) {
+             player.connection.chunkSender.sendNextChunks(player);
+             player.connection.resumeFlushing();
+         }
+ 
+-        profiler.pop();
+         this.serverActivityMonitor.tick();
+     }
+ 
+@@ -1875,14 +1793,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+ 
+     public void forceGameTimeSynchronization() {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("timeSync");
+         // Paper start - per-world time
+         for (ServerLevel level : this.getAllLevels()) {
+             this.playerList.broadcastAll(new ClientboundSetTimePacket(level.getGameTime(), Map.of()), level);
+         }
+         // Paper end - per-world time
+-        profiler.pop();
+     }
+ 
+     public void addTickable(final Runnable tickable) {
+@@ -2745,55 +2660,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     }
+     // CraftBukkit end
+ 
+-    private ProfilerFiller createProfiler() {
+-        if (this.willStartRecordingMetrics) {
+-            this.metricsRecorder = ActiveMetricsRecorder.createStarted(
+-                new ServerMetricsSamplersProvider(Util.timeSource(), this.isDedicatedServer()),
+-                Util.timeSource(),
+-                Util.ioPool(),
+-                new MetricsPersister("server"),
+-                this.onMetricsRecordingStopped,
+-                reportPath -> {
+-                    this.executeBlocking(() -> this.saveDebugReport(reportPath.resolve("server")));
+-                    this.onMetricsRecordingFinished.accept(reportPath);
+-                }
+-            );
+-            this.willStartRecordingMetrics = false;
+-        }
+-
+-        this.metricsRecorder.startTick();
+-        return SingleTickProfiler.decorateFiller(this.metricsRecorder.getProfiler(), SingleTickProfiler.createTickProfiler("Server"));
+-    }
+-
+-    protected void endMetricsRecordingTick() {
+-        this.metricsRecorder.endTick();
+-    }
+-
+-    public boolean isRecordingMetrics() {
+-        return this.metricsRecorder.isRecording();
+-    }
+-
+-    public void startRecordingMetrics(final Consumer<ProfileResults> onStopped, final Consumer<Path> onFinished) {
+-        this.onMetricsRecordingStopped = report -> {
+-            this.stopRecordingMetrics();
+-            onStopped.accept(report);
+-        };
+-        this.onMetricsRecordingFinished = onFinished;
+-        this.willStartRecordingMetrics = true;
+-    }
+-
+-    public void stopRecordingMetrics() {
+-        this.metricsRecorder = InactiveMetricsRecorder.INSTANCE;
+-    }
+-
+-    public void finishRecordingMetrics() {
+-        this.metricsRecorder.end();
+-    }
+-
+-    public void cancelRecordingMetrics() {
+-        this.metricsRecorder.cancel();
+-    }
+-
+     public Path getWorldPath(final LevelResource resource) {
+         return this.storageSource.getLevelPath(resource);
+     }
+@@ -2842,24 +2708,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         return this.isSaving;
+     }
+ 
+-    public boolean isTimeProfilerRunning() {
+-        return this.debugCommandProfilerDelayStart || this.debugCommandProfiler != null;
+-    }
+-
+-    public void startTimeProfiler() {
+-        this.debugCommandProfilerDelayStart = true;
+-    }
+-
+-    public ProfileResults stopTimeProfiler() {
+-        if (this.debugCommandProfiler == null) {
+-            return EmptyProfileResults.EMPTY;
+-        }
+-
+-        ProfileResults results = this.debugCommandProfiler.stop(Util.getNanos(), this.tickCount);
+-        this.debugCommandProfiler = null;
+-        return results;
+-    }
+-
+     public int getMaxChainedNeighborUpdates() {
+         return 1000000;
+     }
+@@ -3087,55 +2935,6 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public record ServerResourcePackInfo(UUID id, String url, String hash, boolean isRequired, @Nullable Component prompt) {
+     }
+ 
+-    private static class TimeProfiler {
+-        private final long startNanos;
+-        private final int startTick;
+-
+-        private TimeProfiler(final long startNanos, final int startTick) {
+-            this.startNanos = startNanos;
+-            this.startTick = startTick;
+-        }
+-
+-        private ProfileResults stop(final long stopNanos, final int stopTick) {
+-            return new ProfileResults() {
+-                @Override
+-                public List<ResultField> getTimes(final String path) {
+-                    return Collections.emptyList();
+-                }
+-
+-                @Override
+-                public boolean saveResults(final Path file) {
+-                    return false;
+-                }
+-
+-                @Override
+-                public long getStartTimeNano() {
+-                    return TimeProfiler.this.startNanos;
+-                }
+-
+-                @Override
+-                public int getStartTimeTicks() {
+-                    return TimeProfiler.this.startTick;
+-                }
+-
+-                @Override
+-                public long getEndTimeNano() {
+-                    return stopNanos;
+-                }
+-
+-                @Override
+-                public int getEndTimeTicks() {
+-                    return stopTick;
+-                }
+-
+-                @Override
+-                public String getProfilerResults() {
+-                    return "";
+-                }
+-            };
+-        }
+-    }
+-
+     // Paper start - Add tick times API and /mspt command
+     public static class TickTimes {
+         private final long[] times;
+diff --git a/net/minecraft/server/ReloadableServerResources.java b/net/minecraft/server/ReloadableServerResources.java
+index 8921b17a2caf39ae4b892238e926066c1ebe0330..f233c2fea9e2008f0c15aa80eb07cae3bb68b005 100644
+--- a/net/minecraft/server/ReloadableServerResources.java
++++ b/net/minecraft/server/ReloadableServerResources.java
+@@ -115,7 +115,7 @@ public class ReloadableServerResources {
+                                     backgroundExecutor,
+                                     mainThreadExecutor,
+                                     DATA_RELOAD_INITIAL_TASK,
+-                                    LOGGER.isDebugEnabled()
++                                    false
+                                 )
+                                 .done()
+                                 .thenApply(ignore -> result);
+diff --git a/net/minecraft/server/ServerFunctionManager.java b/net/minecraft/server/ServerFunctionManager.java
+index d4d2947a57ec8ae12b796da9b2ef7f73ec92534f..291eba3c0567057e7de1ad61e4fe3bfb6ddbf254 100644
+--- a/net/minecraft/server/ServerFunctionManager.java
++++ b/net/minecraft/server/ServerFunctionManager.java
+@@ -15,8 +15,6 @@ import net.minecraft.commands.functions.CommandFunction;
+ import net.minecraft.commands.functions.InstantiatedFunction;
+ import net.minecraft.resources.Identifier;
+ import net.minecraft.server.permissions.LevelBasedPermissionSet;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import org.slf4j.Logger;
+ 
+ public class ServerFunctionManager {
+@@ -51,19 +49,12 @@ public class ServerFunctionManager {
+     }
+ 
+     private void executeTagFunctions(final Collection<CommandFunction<CommandSourceStack>> functions, final Identifier loadFunctionTag) {
+-        Profiler.get().push(loadFunctionTag::toString);
+-
+         for (CommandFunction<CommandSourceStack> function : functions) {
+             this.execute(function, this.getGameLoopSender());
+         }
+-
+-        Profiler.get().pop();
+     }
+ 
+     public void execute(final CommandFunction<CommandSourceStack> functionIn, final CommandSourceStack sender) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push(() -> "function " + functionIn.id());
+-
+         try {
+             InstantiatedFunction<CommandSourceStack> function = functionIn.instantiate(null, this.getDispatcher());
+             Commands.executeCommandInContext(
+@@ -72,8 +63,6 @@ public class ServerFunctionManager {
+         } catch (FunctionInstantiationException var9) {
+         } catch (Exception e) {
+             LOGGER.warn("Failed to execute function {}", functionIn.id(), e);
+-        } finally {
+-            profiler.pop();
+         }
+     }
+ 
+diff --git a/net/minecraft/server/commands/DebugCommand.java b/net/minecraft/server/commands/DebugCommand.java
+index e890128286c825ac5fb1ab22dd4a5f61bcced024..b554a94665a4c47b1a65e36c0bc571db7d1aac96 100644
+--- a/net/minecraft/server/commands/DebugCommand.java
++++ b/net/minecraft/server/commands/DebugCommand.java
+@@ -71,32 +71,11 @@ public class DebugCommand {
+     }
+ 
+     private static int start(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (server.isTimeProfilerRunning()) {
+-            throw ERROR_ALREADY_RUNNING.create();
+-        }
+-
+-        server.startTimeProfiler();
+-        source.sendSuccess(() -> Component.translatable("commands.debug.started"), true);
+         return 0;
+     }
+ 
+     private static int stop(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (!server.isTimeProfilerRunning()) {
+-            throw ERROR_NOT_RUNNING.create();
+-        }
+-
+-        ProfileResults results = server.stopTimeProfiler();
+-        double seconds = (double)results.getNanoDuration() / TimeUtil.NANOSECONDS_PER_SECOND;
+-        double tps = results.getTickDuration() / seconds;
+-        source.sendSuccess(
+-            () -> Component.translatable(
+-                "commands.debug.stopped", String.format(Locale.ROOT, "%.2f", seconds), results.getTickDuration(), String.format(Locale.ROOT, "%.2f", tps)
+-            ),
+-            true
+-        );
+-        return (int)tps;
++        return 0;
+     }
+ 
+     private static class TraceCustomExecutor
+diff --git a/net/minecraft/server/commands/PerfCommand.java b/net/minecraft/server/commands/PerfCommand.java
+index f881d6c20487569c0408fbb33e5d9d09363d7cbc..23694feabda7799a0bd4c2313c01f2c27b9fbd11 100644
+--- a/net/minecraft/server/commands/PerfCommand.java
++++ b/net/minecraft/server/commands/PerfCommand.java
+@@ -42,25 +42,10 @@ public class PerfCommand {
+     }
+ 
+     private static int startProfilingDedicatedServer(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (server.isRecordingMetrics()) {
+-            throw ERROR_ALREADY_RUNNING.create();
+-        }
+-
+-        Consumer<ProfileResults> onStopped = results -> whenStopped(source, results);
+-        Consumer<Path> onReportFinished = profilingLogs -> saveResults(source, profilingLogs, server);
+-        server.startRecordingMetrics(onStopped, onReportFinished);
+-        source.sendSuccess(() -> Component.translatable("commands.perf.started"), false);
+         return 0;
+     }
+ 
+     private static int stopProfilingDedicatedServer(final CommandSourceStack source) throws CommandSyntaxException {
+-        MinecraftServer server = source.getServer();
+-        if (!server.isRecordingMetrics()) {
+-            throw ERROR_NOT_RUNNING.create();
+-        }
+-
+-        server.finishRecordingMetrics();
+         return 0;
+     }
+ 
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index 96cd83400fbc14581ee9b3f18807911ac049aeab..4d08dcdea36f75e232eea071711d033ef8779b11 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -972,12 +972,6 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         return this.settings.getProperties().serverResourcePackInfo;
+     }
+ 
+-    @Override
+-    protected void endMetricsRecordingTick() {
+-        super.endMetricsRecordingTick();
+-        this.isTickTimeLoggingEnabled = this.debugSubscribers().hasAnySubscriberFor(DebugSubscriptions.DEDICATED_SERVER_TICK_TIME);
+-    }
+-
+     @Override
+     protected SampleLogger getTickTimeLogger() {
+         return this.tickTimeLogger;
+diff --git a/net/minecraft/server/level/ChunkGenerationTask.java b/net/minecraft/server/level/ChunkGenerationTask.java
+index cf7d1280e414025975880079e7d13f199c59a02c..d0ebc5b4a3987bf97d4d2bfb8ba1abe8c5797363 100644
+--- a/net/minecraft/server/level/ChunkGenerationTask.java
++++ b/net/minecraft/server/level/ChunkGenerationTask.java
+@@ -4,8 +4,6 @@ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.concurrent.CompletableFuture;
+ import net.minecraft.util.StaticCache2D;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.Zone;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.chunk.ChunkAccess;
+ import net.minecraft.world.level.chunk.status.ChunkDependencies;
+@@ -113,8 +111,7 @@ public class ChunkGenerationTask {
+     }
+ 
+     private void scheduleLayer(final ChunkStatus status, final boolean needsGeneration) {
+-        try (Zone zone = Profiler.get().zone("scheduleLayer")) {
+-            zone.addText(status::getName);
++        {
+             int radius = this.getRadiusForLayer(status, needsGeneration);
+ 
+             for (int x = this.pos.x() - radius; x <= this.pos.x() + radius; x++) {
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index 7e9361407042ddaabe3f66ee8957ae84b6ef2317..b9033a745c9ada7f77fc9bcd80d8f25d062f2572 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -68,8 +68,6 @@ import net.minecraft.util.StaticCache2D;
+ import net.minecraft.util.TriState;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.datafix.DataFixTypes;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.util.thread.BlockableEventLoop;
+ import net.minecraft.util.thread.ConsecutiveExecutor;
+ import net.minecraft.world.entity.Entity;
+@@ -400,15 +398,10 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+     }
+ 
+     protected void tick(final BooleanSupplier haveTime) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("poi");
+         this.poiManager.tick(haveTime);
+-        profiler.popPush("chunk_unload");
+         if (!this.level.noSave()) {
+             this.processUnloads(haveTime);
+         }
+-
+-        profiler.pop();
+     }
+ 
+     public boolean hasWork() {
+diff --git a/net/minecraft/server/level/ServerChunkCache.java b/net/minecraft/server/level/ServerChunkCache.java
+index e97de026465eaa08df5fa96a2a20a89274dccbb9..0df8e380b7d4254e004949964ce266ff369088dd 100644
+--- a/net/minecraft/server/level/ServerChunkCache.java
++++ b/net/minecraft/server/level/ServerChunkCache.java
+@@ -25,8 +25,6 @@ import net.minecraft.network.protocol.game.ClientGamePacketListener;
+ import net.minecraft.util.FileUtil;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.VisibleForDebug;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.util.thread.BlockableEventLoop;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.MobCategory;
+@@ -466,37 +464,27 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+     // CraftBukkit start - modelled on below
+     public void purgeUnload() {
+         if (true) return; // Paper - rewrite chunk system
+-        ProfilerFiller gameprofilerfiller = Profiler.get();
+-
+-        gameprofilerfiller.push("purge");
+         this.ticketStorage.purgeStaleTickets(this.chunkMap);
+         this.runDistanceManagerUpdates();
+-        gameprofilerfiller.popPush("unload");
+         this.chunkMap.tick(() -> true);
+-        gameprofilerfiller.pop();
+         this.clearCache();
+     }
+     // CraftBukkit end
+ 
+     @Override
+     public void tick(final BooleanSupplier haveTime, final boolean tickChunks) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("purge");
+         if (this.level.tickRateManager().runsNormally() || !tickChunks || this.level.spigotConfig.unloadFrozenChunks) { // Spigot
+             this.ticketStorage.purgeStaleTickets(this.chunkMap);
+         }
+ 
+         this.runDistanceManagerUpdates();
+-        profiler.popPush("chunks");
+         if (tickChunks) {
+             ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.level).moonrise$getPlayerChunkLoader().tick(); // Paper - rewrite chunk system
+             this.tickChunks();
+             this.chunkMap.tick();
+         }
+ 
+-        profiler.popPush("unload");
+         this.chunkMap.tick(haveTime);
+-        profiler.pop();
+         this.clearCache();
+     }
+ 
+@@ -505,22 +493,15 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         long timeDiff = time - this.lastInhabitedUpdate;
+         this.lastInhabitedUpdate = time;
+         if (!this.level.isDebug()) {
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push("pollingChunks");
+             if (this.level.tickRateManager().runsNormally() && this.level.paperConfig().unsupportedSettings.ticking.chunks) { // Paper - option to disable ticking
+-                profiler.push("tickingChunks");
+-                this.tickChunks(profiler, timeDiff);
+-                profiler.pop();
++                this.tickChunks(timeDiff);
+             }
+ 
+-            this.broadcastChangedChunks(profiler);
+-            profiler.pop();
++            this.broadcastChangedChunks();
+         }
+     }
+ 
+-    private void broadcastChangedChunks(final ProfilerFiller profiler) {
+-        profiler.push("broadcast");
+-
++    private void broadcastChangedChunks() {
+         for (ChunkHolder chunkHolder : this.chunkHoldersToBroadcast) {
+             LevelChunk chunk = chunkHolder.getChunkToSend(); // Paper - rewrite chunk system
+             if (chunk != null) {
+@@ -529,11 +510,9 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         }
+ 
+         this.chunkHoldersToBroadcast.clear();
+-        profiler.pop();
+     }
+ 
+-    private void tickChunks(final ProfilerFiller profiler, final long timeDiff) {
+-        profiler.push("naturalSpawnCount");
++    private void tickChunks(final long timeDiff) {
+         int chunkCount = this.distanceManager.getNaturalSpawnChunkCount();
+         // Paper start - Optional per player mob spawns
+         NaturalSpawner.SpawnState spawnCookie;
+@@ -579,14 +558,11 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+         List<LevelChunk> spawningChunks = this.spawningChunks;
+ 
+         try {
+-            profiler.popPush("filteringSpawningChunks");
+             this.chunkMap.collectSpawningChunks(spawningChunks);
+-            profiler.popPush("shuffleSpawningChunks");
+             // Paper start - chunk tick iteration optimisation
+             this.shuffleRandom.setSeed(this.level.getRandom().nextLong());
+             if (!this.level.paperConfig().entities.spawning.perPlayerMobSpawns) Util.shuffle(spawningChunks, this.level.getRandom()); // Paper - Optional per player mob spawns; do not need this when per-player is enabled
+             // Paper end - chunk tick iteration optimisation
+-            profiler.popPush("tickSpawningChunks");
+ 
+             for (LevelChunk chunk : spawningChunks) {
+                 this.tickSpawningChunk(chunk, timeDiff, spawningCategories, spawnCookie);
+@@ -595,14 +571,10 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+             spawningChunks.clear();
+         }
+ 
+-        profiler.popPush("tickTickingChunks");
+         this.iterateTickingChunksFaster(); // Paper - chunk tick iteration optimizations
+         if (doMobSpawning) {
+-            profiler.popPush("customSpawners");
+             this.level.tickCustomSpawners(this.spawnEnemies);
+         }
+-
+-        profiler.pop();
+     }
+ 
+     private void tickSpawningChunk(
+@@ -823,7 +795,6 @@ public class ServerChunkCache extends ChunkSource implements ca.spottedleaf.moon
+ 
+         @Override
+         protected void doRunTask(final Runnable task) {
+-            Profiler.get().incrementCounter("runTask");
+             super.doRunTask(task);
+         }
+ 
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 6016a5e2917dc35fb7a2fa2b2c9e48a7883b03c5..fbbe5928ff6c6cb1719eef14d4123b146c6f1781 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -73,8 +73,6 @@ import net.minecraft.util.Util;
+ import net.minecraft.util.datafix.DataFixTypes;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.LevelDebugSynchronizers;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.util.random.WeightedList;
+ import net.minecraft.util.valueproviders.IntProvider;
+ import net.minecraft.util.valueproviders.UniformInt;
+@@ -796,17 +794,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     }
+ 
+     public void tick(final BooleanSupplier haveTime) {
+-        ProfilerFiller profiler = Profiler.get();
+         this.handlingTick = true;
+         this.environmentAttributes().invalidateTickCache();
+         TickRateManager tickRateManager = this.tickRateManager();
+         boolean runs = tickRateManager.runsNormally();
+         if (runs) {
+-            profiler.push("world border");
+             this.getWorldBorder().tick();
+-            profiler.popPush("weather");
+             this.advanceWeatherCycle();
+-            profiler.pop();
+         }
+ 
+         int percentage = this.getGameRules().get(GameRules.PLAYERS_SLEEPING_PERCENTAGE);
+@@ -840,30 +834,22 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             this.tickTime();
+         }
+ 
+-        profiler.push("tickPending");
+         if (!this.isDebug() && runs) {
+             long tick = this.getGameTime();
+-            profiler.push("blockTicks");
+             this.blockTicks.tick(tick, paperConfig().environment.maxBlockTicks, this::tickBlock); // Paper - configurable max block ticks
+-            profiler.popPush("fluidTicks");
+             this.fluidTicks.tick(tick, paperConfig().environment.maxFluidTicks, this::tickFluid); // Paper - configurable max fluid ticks
+-            profiler.pop();
+         }
+ 
+-        profiler.popPush("raid");
+         if (runs) {
+             this.raids.tick(this);
+         }
+ 
+-        profiler.popPush("chunkSource");
+         this.getChunkSource().tick(haveTime, true);
+-        profiler.popPush("blockEvents");
+         if (runs) {
+             this.runBlockEvents();
+         }
+ 
+         this.handlingTick = false;
+-        profiler.pop();
+         boolean isActive = !paperConfig().unsupportedSettings.disableWorldTickingWhenEmpty || this.chunkSource.hasActiveTickets(); // CraftBukkit - this prevents entity cleanup, other issues on servers with no players // Paper - restore this
+         if (isActive) {
+             this.resetEmptyTime();
+@@ -874,11 +860,8 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         }
+ 
+         if (this.emptyTime < 300) {
+-            profiler.push("entities");
+             if (this.dragonFight != null && runs) {
+-                profiler.push("dragonFight");
+                 this.dragonFight.tick();
+-                profiler.pop();
+             }
+ 
+             io.papermc.paper.entity.activation.ActivationRange.activateEntities(this); // Paper - EAR
+@@ -887,9 +870,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                     entity -> {
+                         if (!entity.isRemoved()) {
+                             if (!tickRateManager.isEntityFrozen(entity)) {
+-                                profiler.push("checkDespawn");
+                                 entity.checkDespawn();
+-                                profiler.pop();
+                                 if (true) { // Paper - rewrite chunk system
+                                     Entity vehicle = entity.getVehicle();
+                                     if (vehicle != null) {
+@@ -900,26 +881,19 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                                         entity.stopRiding();
+                                     }
+ 
+-                                    profiler.push("tick");
+                                     this.guardEntityTick(this::tickNonPassenger, entity);
+-                                    profiler.pop();
+                                 }
+                             }
+                         }
+                     }
+                 );
+             if (this.paperConfig().unsupportedSettings.ticking.blockEntities) { // Paper - option to disable ticking
+-            profiler.popPush("blockEntities");
+             this.tickBlockEntities();
+-            profiler.pop();
+             } // Paper - option to disable ticking
+             this.spigotConfig.currentPrimedTnt = 0; // Spigot
+         }
+ 
+-        profiler.push("entityManagement");
+         // Paper - rewrite chunk system
+-        profiler.pop();
+-        profiler.push("debugSynchronizers");
+         if (this.debugSynchronizers.hasAnySubscriberFor(DebugSubscriptions.NEIGHBOR_UPDATES)) {
+             this.neighborUpdater
+                 .setDebugListener(blockPos -> this.debugSynchronizers.broadcastEventToTracking(blockPos, DebugSubscriptions.NEIGHBOR_UPDATES, blockPos));
+@@ -928,7 +902,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         }
+ 
+         this.debugSynchronizers.tick(this.server.debugSubscribers());
+-        profiler.pop();
+     }
+ 
+     @Override
+@@ -943,9 +916,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         if (this.tickTime) {
+             long time = this.levelData.getGameTime() + 1L;
+             this.serverLevelData.setGameTime(time);
+-            Profiler.get().push("scheduledFunctions");
+             this.scheduledEvents.tick(this.server, time); // Paper - per-level scheduledEvents
+-            Profiler.get().pop();
+         }
+     }
+ 
+@@ -1017,8 +988,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         ChunkPos chunkPos = chunk.getPos();
+         int minX = chunkPos.getMinBlockX();
+         int minZ = chunkPos.getMinBlockZ();
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("iceandsnow");
+ 
+         if (!this.paperConfig().environment.disableIceAndSnow) { // Paper - Option to disable ice and snow
+         for (int i = 0; i < tickSpeed; i++) {
+@@ -1028,12 +997,9 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         }
+         } // Paper - Option to disable ice and snow
+ 
+-        profiler.popPush("tickBlocks");
+         if (tickSpeed > 0) {
+             this.optimiseRandomTick(chunk, tickSpeed); // Paper - optimise random ticking
+         }
+-
+-        profiler.pop();
+     }
+ 
+     public void tickThunder(final LevelChunk chunk) {
+@@ -1041,8 +1007,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         boolean raining = this.isRaining();
+         int minX = chunkPos.getMinBlockX();
+         int minZ = chunkPos.getMinBlockZ();
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("thunder");
+         if (!this.paperConfig().environment.disableThunder && raining && this.isThundering() && this.spigotConfig.thunderChance > 0 && this.random.nextInt(this.spigotConfig.thunderChance) == 0) { // Spigot // Paper - Option to disable thunder
+             BlockPos pos = this.findLightningTargetAround(this.getBlockRandomPos(minX, 0, minZ, 15));
+             if (this.isRainingAt(pos)) {
+@@ -1068,8 +1032,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                 }
+             }
+         }
+-
+-        profiler.pop();
+     }
+ 
+     @VisibleForTesting
+@@ -1395,17 +1357,13 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             }
+             // Paper end - log detailed entity tick information
+         entity.setOldPosAndRot();
+-        ProfilerFiller profiler = Profiler.get();
+         entity.tickCount++;
+         entity.totalEntityAge++; // Paper - age-like counter for all entities
+-        profiler.push(entity.typeHolder()::getRegisteredName);
+-        profiler.incrementCounter("tickNonPassenger");
+         final boolean isActive = io.papermc.paper.entity.activation.ActivationRange.checkIfActive(entity); // Paper - EAR 2
+         if (isActive) { // Paper - EAR 2
+         entity.tick();
+         entity.postTick(); // CraftBukkit
+         } else {entity.inactiveTick();} // Paper - EAR 2
+-        profiler.pop();
+ 
+         for (Entity passenger : entity.getPassengers()) {
+             this.tickPassenger(entity, passenger, isActive); // Paper - EAR 2
+@@ -1426,9 +1384,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             entity.setOldPosAndRot();
+             entity.tickCount++;
+             entity.totalEntityAge++; // Paper - age-like counter for all entities
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push(entity.typeHolder()::getRegisteredName);
+-            profiler.incrementCounter("tickPassenger");
+             // Paper start - EAR 2
+             if (isActive) {
+             entity.rideTick();
+@@ -1440,7 +1395,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                 vehicle.positionRider(entity);
+             }
+             // Paper end - EAR 2
+-            profiler.pop();
+ 
+             for (Entity passenger : entity.getPassengers()) {
+                 this.tickPassenger(entity, passenger, isActive); // Paper - EAR 2
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 7d556b9e1bd624a116026b25f7090d8c74c74c8a..ef5f937aaf648c399715a5f4ec73ff4327000737 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -107,8 +107,6 @@ import net.minecraft.util.ProblemReporter;
+ import net.minecraft.util.Unit;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.debug.DebugSubscription;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.Container;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.InteractionHand;
+@@ -1529,19 +1527,14 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         this.portalProcess = null; // SPIGOT-7785: there is no need to carry this over as it contains the old world/location and we might run into trouble if there is a portal in the same spot in both worlds
+         oldLevel.removePlayerImmediately(this, Entity.RemovalReason.CHANGED_DIMENSION);
+         this.unsetRemoved();
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("moving");
+         if (oldLevelTypeKey == net.minecraft.world.level.dimension.LevelStem.OVERWORLD && newLevel.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER) { // CraftBukkit - empty to fall through to null to event
+             this.enteredNetherPosition = this.position();
+         }
+ 
+-        profiler.pop();
+-        profiler.push("placing");
+         this.setServerLevel(newLevel);
+         this.connection.internalTeleport(PositionMoveRotation.of(transition), transition.relatives()); // CraftBukkit - use internal teleport without event
+         this.connection.resetPosition();
+         newLevel.addDuringTeleport(this);
+-        profiler.pop();
+         this.triggerDimensionChangeTriggers(oldLevel);
+         this.stopUsingItem();
+         this.connection.send(new ClientboundPlayerAbilitiesPacket(this.getAbilities()));
+diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+index e40ee5e67cd423e36dda489cfcc5ffca2956a66e..b328b14919e837546b5e7081ed6e239e4486ee53 100644
+--- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
+@@ -26,7 +26,6 @@ import net.minecraft.server.level.ClientInformation;
+ import net.minecraft.server.players.NameAndId;
+ import net.minecraft.util.Util;
+ import net.minecraft.util.VisibleForDebug;
+-import net.minecraft.util.profiling.Profiler;
+ import org.jspecify.annotations.Nullable;
+ import org.slf4j.Logger;
+ 
+@@ -254,7 +253,6 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+     }
+ 
+     protected void keepConnectionAlive() {
+-        Profiler.get().push("keepAlive");
+         long now = Util.getMillis();
+         // Paper start - improve keepalives
+         if (this.checkIfClosed(now)) {
+@@ -275,8 +273,6 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
+                 // Paper end - improve keepalives
+             }
+         }
+-
+-        Profiler.get().pop();
+     }
+ 
+     private boolean checkIfClosed(final long now) {
+diff --git a/net/minecraft/server/packs/resources/ProfiledReloadInstance.java b/net/minecraft/server/packs/resources/ProfiledReloadInstance.java
+index 26f43dcea2c6598731adf4b00f3ef76635374c0f..45af9e8f31e583ae462e843ce2355cae3bfd286d 100644
+--- a/net/minecraft/server/packs/resources/ProfiledReloadInstance.java
++++ b/net/minecraft/server/packs/resources/ProfiledReloadInstance.java
+@@ -9,8 +9,6 @@ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.atomic.AtomicLong;
+ import net.minecraft.util.Unit;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import org.slf4j.Logger;
+ 
+ public class ProfiledReloadInstance extends SimpleReloadInstance<ProfiledReloadInstance.State> {
+@@ -71,13 +69,10 @@ public class ProfiledReloadInstance extends SimpleReloadInstance<ProfiledReloadI
+ 
+     private static Executor profiledExecutor(final Executor executor, final AtomicLong accumulatedNanos, final AtomicLong taskCount, final String name) {
+         return r -> executor.execute(() -> {
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push(name);
+             long nanos = Util.getNanos();
+             r.run();
+             accumulatedNanos.addAndGet(Util.getNanos() - nanos);
+             taskCount.incrementAndGet();
+-            profiler.pop();
+         });
+     }
+ 
+diff --git a/net/minecraft/server/packs/resources/ReloadableResourceManager.java b/net/minecraft/server/packs/resources/ReloadableResourceManager.java
+index f715438dbf6777720661aefcbd316395ed67b21a..6a5d3a8be65e095505f48a83d6435f5196a782ff 100644
+--- a/net/minecraft/server/packs/resources/ReloadableResourceManager.java
++++ b/net/minecraft/server/packs/resources/ReloadableResourceManager.java
+@@ -46,7 +46,7 @@ public class ReloadableResourceManager implements AutoCloseable, ResourceManager
+         LOGGER.info("Reloading ResourceManager: {}", LogUtils.defer(() -> resourcePacks.stream().map(PackResources::packId).collect(Collectors.joining(", "))));
+         this.resources.close();
+         this.resources = new MultiPackResourceManager(this.type, resourcePacks);
+-        return SimpleReloadInstance.create(this.resources, this.listeners, backgroundExecutor, mainThreadExecutor, initialTask, LOGGER.isDebugEnabled());
++        return SimpleReloadInstance.create(this.resources, this.listeners, backgroundExecutor, mainThreadExecutor, initialTask, false);
+     }
+ 
+     @Override
+diff --git a/net/minecraft/server/packs/resources/ResourceManagerReloadListener.java b/net/minecraft/server/packs/resources/ResourceManagerReloadListener.java
+index 987b32870a65d531b31f44b169a5b95631e20749..8440b9712c3ab595a66ddc7c5a61b28fed5964f8 100644
+--- a/net/minecraft/server/packs/resources/ResourceManagerReloadListener.java
++++ b/net/minecraft/server/packs/resources/ResourceManagerReloadListener.java
+@@ -3,8 +3,6 @@ package net.minecraft.server.packs.resources;
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.Executor;
+ import net.minecraft.util.Unit;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ 
+ public interface ResourceManagerReloadListener extends PreparableReloadListener {
+     @Override
+@@ -16,10 +14,7 @@ public interface ResourceManagerReloadListener extends PreparableReloadListener
+     ) {
+         ResourceManager manager = currentReload.resourceManager();
+         return preparationBarrier.wait(Unit.INSTANCE).thenRunAsync(() -> {
+-            ProfilerFiller reloadProfiler = Profiler.get();
+-            reloadProfiler.push("listener");
+             this.onResourceManagerReload(manager);
+-            reloadProfiler.pop();
+         }, reloadExecutor);
+     }
+ 
+diff --git a/net/minecraft/server/packs/resources/SimplePreparableReloadListener.java b/net/minecraft/server/packs/resources/SimplePreparableReloadListener.java
+index a7954c94a53cf20a39491971f64ff6438c326401..dfe0c18f01da22102f7f6157833630779acc3a84 100644
+--- a/net/minecraft/server/packs/resources/SimplePreparableReloadListener.java
++++ b/net/minecraft/server/packs/resources/SimplePreparableReloadListener.java
+@@ -2,7 +2,6 @@ package net.minecraft.server.packs.resources;
+ 
+ import java.util.concurrent.CompletableFuture;
+ import java.util.concurrent.Executor;
+-import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.profiling.ProfilerFiller;
+ 
+ public abstract class SimplePreparableReloadListener<T> implements PreparableReloadListener {
+@@ -14,9 +13,9 @@ public abstract class SimplePreparableReloadListener<T> implements PreparableRel
+         final Executor reloadExecutor
+     ) {
+         ResourceManager manager = currentReload.resourceManager();
+-        return CompletableFuture.<T>supplyAsync(() -> this.prepare(manager, Profiler.get()), taskExecutor)
++        return CompletableFuture.<T>supplyAsync(() -> this.prepare(manager, net.minecraft.util.profiling.InactiveProfiler.INSTANCE), taskExecutor)
+             .thenCompose(preparationBarrier::wait)
+-            .thenAcceptAsync(preparations -> this.apply((T)preparations, manager, Profiler.get()), reloadExecutor);
++            .thenAcceptAsync(preparations -> this.apply((T)preparations, manager, net.minecraft.util.profiling.InactiveProfiler.INSTANCE), reloadExecutor);
+     }
+ 
+     protected abstract T prepare(final ResourceManager manager, final ProfilerFiller profiler);
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 490efe6cff92e8a1e3cc3904266eb539ae530de8..2eba9ffac02e826258e2e161727b5b21320369d2 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -86,8 +86,6 @@ import net.minecraft.util.Util;
+ import net.minecraft.util.debug.DebugEntityBlockIntersection;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.DebugValueSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.Nameable;
+@@ -876,8 +874,6 @@ public abstract class Entity
+     // CraftBukkit end
+ 
+     public void baseTick() {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("entityBaseTick");
+         if (this.firstTick && this instanceof net.minecraft.world.entity.NeutralMob neutralMob) neutralMob.tickInitialPersistentAnger(this.level); // Paper - Prevent entity loading causing async lookups
+         this.computeSpeed();
+         this.inBlockState = null;
+@@ -932,8 +928,6 @@ public abstract class Entity
+         if (this.level() instanceof ServerLevel serverLevel && this instanceof Leashable) {
+             Leashable.tickLeash(serverLevel, (Entity & Leashable)this);
+         }
+-
+-        profiler.pop();
+     }
+ 
+     protected void computeSpeed() {
+@@ -1166,8 +1160,6 @@ public abstract class Entity
+                 }
+             }
+ 
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push("move");
+             if (this.stuckSpeedMultiplier.lengthSqr() > 1.0E-7) {
+                 if (moverType != MoverType.PISTON) {
+                     delta = delta.multiply(this.stuckSpeedMultiplier);
+@@ -1179,7 +1171,6 @@ public abstract class Entity
+             // Paper start - ignore movement changes while inactive.
+             if (isTemporarilyActive && !(this instanceof ItemEntity) && delta == getDeltaMovement() && moverType == MoverType.SELF) {
+                 setDeltaMovement(Vec3.ZERO);
+-                profiler.pop();
+                 return;
+             }
+             // Paper end
+@@ -1204,8 +1195,6 @@ public abstract class Entity
+                 this.setPos(newPosition);
+             }
+ 
+-            profiler.pop();
+-            profiler.push("rest");
+             boolean xCollision = !Mth.equal(delta.x, movement.x);
+             boolean zCollision = !Mth.equal(delta.z, movement.z);
+             this.horizontalCollision = xCollision || zCollision;
+@@ -1229,7 +1218,6 @@ public abstract class Entity
+             }
+ 
+             if (this.isRemoved()) {
+-                profiler.pop();
+             } else {
+                 if (this.canSimulateMovement() && (movedVertically && this.verticalCollision || this.horizontalCollision)) {
+                     this.restituteMovementAfterCollisions(effectState, xCollision, zCollision, movement);
+@@ -1265,7 +1253,6 @@ public abstract class Entity
+ 
+                 float blockSpeedFactor = this.getBlockSpeedFactor();
+                 this.setDeltaMovement(this.getDeltaMovement().multiply(blockSpeedFactor, 1.0, blockSpeedFactor));
+-                profiler.pop();
+             }
+         }
+         // Paper start - detailed watchdog information
+@@ -3583,8 +3570,6 @@ public abstract class Entity
+             this.processPortalCooldown();
+             if (this.portalProcess != null) {
+                 if (this.portalProcess.processPortalTeleportation(level, this, this.canUsePortal(false))) {
+-                    ProfilerFiller profiler = Profiler.get();
+-                    profiler.push("portal");
+                     this.setPortalCooldown();
+                     TeleportTransition teleportTransition = this.portalProcess.getPortalDestination(level, this);
+                     if (teleportTransition != null) {
+@@ -3593,8 +3578,6 @@ public abstract class Entity
+                             this.teleport(teleportTransition);
+                         }
+                     }
+-
+-                    profiler.pop();
+                 } else if (this.portalProcess.hasExpired()) {
+                     this.portalProcess = null;
+                 }
+@@ -4164,15 +4147,12 @@ public abstract class Entity
+             passenger.teleport(this.calculatePassengerTransition(transition, passenger));
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("teleportSameDimension");
+         this.teleportSetPosition(PositionMoveRotation.of(transition), transition.relatives());
+         if (!transition.asPassenger()) {
+             this.sendTeleportTransitionToRidingPlayers(transition);
+         }
+ 
+         transition.postTeleportTransition().onTransition(this);
+-        profiler.pop();
+         return this;
+     }
+ 
+@@ -4188,11 +4168,8 @@ public abstract class Entity
+             }
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("teleportCrossDimension");
+         Entity newEntity = this.getType().create(newLevel, EntitySpawnReason.DIMENSION_TRAVEL);
+         if (newEntity == null) {
+-            profiler.pop();
+             return null;
+         }
+ 
+@@ -4213,7 +4190,6 @@ public abstract class Entity
+         newLevel.resetEmptyTime();
+         transition.postTeleportTransition().onTransition(newEntity);
+         this.teleportSpectators(transition, oldLevel);
+-        profiler.pop();
+         return newEntity;
+     }
+ 
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 3a4da514c163e7565fc241835db52c464a5c4734..101ae05810994a2972908ec0cca6cbe7cb321590 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -65,8 +65,6 @@ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.BlockUtil;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.damagesource.CombatRules;
+@@ -449,8 +447,6 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         }
+ 
+         super.baseTick();
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("livingEntityBaseTick");
+         if (this.isAlive() && this.level() instanceof ServerLevel level) {
+             boolean isPlayer = this instanceof Player;
+             if (this.isInWall()) {
+@@ -531,7 +527,6 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         this.yBodyRotO = this.yBodyRot;
+         this.yRotO = this.getYRot();
+         this.xRotO = this.getXRot();
+-        profiler.pop();
+     }
+ 
+     protected boolean shouldTakeDrowningDamage() {
+@@ -3455,11 +3450,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             yBodyRotT = this.getYRot();
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("headTurn");
+         this.tickHeadTurn(yBodyRotT);
+-        profiler.pop();
+-        profiler.push("rangeChecks");
+ 
+         // Paper start - stop large pitch and yaw changes from crashing the server
+         this.yRotO += Math.round((this.getYRot() - this.yRotO) / 360.0F) * 360.0F;
+@@ -3471,7 +3462,6 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         this.yHeadRotO += Math.round((this.yHeadRot - this.yHeadRotO) / 360.0F) * 360.0F;
+         // Paper end - stop large pitch and yaw changes from crashing the server
+ 
+-        profiler.pop();
+         if (this.isFallFlying()) {
+             this.fallFlyTicks++;
+         } else {
+@@ -3719,21 +3709,15 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         }
+ 
+         this.setDeltaMovement(dx, dy, dz);
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("ai");
+         this.applyInput();
+         if (this.isImmobile()) {
+             this.jumping = false;
+             this.xxa = 0.0F;
+             this.zza = 0.0F;
+         } else if (this.isEffectiveAi() && !this.level().isClientSide()) {
+-            profiler.push("newAi");
+             this.serverAiStep();
+-            profiler.pop();
+         }
+ 
+-        profiler.pop();
+-        profiler.push("jump");
+         if (this.jumping && this.isAffectedByFluids()) {
+             double fluidHeight;
+             if (this.isInLava()) {
+@@ -3762,8 +3746,6 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             this.noJumpDelay = 0;
+         }
+ 
+-        profiler.pop();
+-        profiler.push("travel");
+         if (this.isFallFlying()) {
+             this.updateFallFlying();
+         }
+@@ -3788,9 +3770,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             this.calculateEntityAnimation(this.omnidirectionalAirMover());
+         }
+ 
+-        profiler.pop();
+         if (this.level() instanceof ServerLevel serverLevel) {
+-            profiler.push("freezing");
+             if ((!this.isInPowderSnow || !this.canFreeze()) && !this.freezeLocked) { // Paper - Freeze Tick Lock API
+                 this.setTicksFrozen(Math.max(0, this.getTicksFrozen() - 2));
+             }
+@@ -3800,18 +3780,14 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             if (this.tickCount % 40 == 0 && this.isFullyFrozen() && this.canFreeze()) {
+                 this.hurtServer(serverLevel, this.damageSources().freeze(), 1.0F);
+             }
+-
+-            profiler.pop();
+         }
+ 
+-        profiler.push("push");
+         if (this.autoSpinAttackTicks > 0) {
+             this.autoSpinAttackTicks--;
+             this.checkAutoSpinAttack(beforeTravelBox, this.getBoundingBox());
+         }
+ 
+         this.pushEntities();
+-        profiler.pop();
+         // Paper start - Add EntityMoveEvent
+         if (((ServerLevel) this.level()).hasEntityMoveEvent && !(this instanceof Player)) {
+             if (this.xo != this.getX() || this.yo != this.getY() || this.zo != this.getZ() || this.yRotO != this.getYRot() || this.xRotO != this.getXRot()) {
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index c2dd2da4bfb7d65ad2730ba1ce771e2b488beda4..0b70732d41fbe1b60f70ff0702eb2056b7ddcb48 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -34,8 +34,6 @@ import net.minecraft.util.debug.DebugGoalInfo;
+ import net.minecraft.util.debug.DebugPathInfo;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.DebugValueSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.Container;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.DifficultyInstance;
+@@ -343,14 +341,10 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+     @Override
+     public void baseTick() {
+         super.baseTick();
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("mobBaseTick");
+         if (this.isAlive() && this.random.nextInt(1000) < this.ambientSoundTime++) {
+             this.resetAmbientSoundTime();
+             this.playAmbientSound();
+         }
+-
+-        profiler.pop();
+     }
+ 
+     @Override
+@@ -529,8 +523,6 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+             this.burnUndead();
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("looting");
+         if (this.level() instanceof ServerLevel serverLevel
+             && this.canPickUpLoot()
+             && this.isAlive()
+@@ -550,8 +542,6 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+                 }
+             }
+         }
+-
+-        profiler.pop();
+     }
+ 
+     protected EquipmentSlot sunProtectionSlot() {
+@@ -818,42 +808,21 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+             return;
+         }
+         // Paper end - Allow nerfed mobs to jump and float
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("sensing");
+         this.sensing.tick();
+-        profiler.pop();
+         int idBasedTickCount = this.tickCount + this.getId();
+         if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {
+-            profiler.push("targetSelector");
+             this.targetSelector.tickRunningGoals(false);
+-            profiler.pop();
+-            profiler.push("goalSelector");
+             this.goalSelector.tickRunningGoals(false);
+-            profiler.pop();
+         } else {
+-            profiler.push("targetSelector");
+             this.targetSelector.tick();
+-            profiler.pop();
+-            profiler.push("goalSelector");
+             this.goalSelector.tick();
+-            profiler.pop();
+         }
+ 
+-        profiler.push("navigation");
+         this.navigation.tick();
+-        profiler.pop();
+-        profiler.push("mob tick");
+         this.customServerAiStep((ServerLevel)this.level());
+-        profiler.pop();
+-        profiler.push("controls");
+-        profiler.push("move");
+         this.moveControl.tick();
+-        profiler.popPush("look");
+         this.lookControl.tick();
+-        profiler.popPush("jump");
+         this.jumpControl.tick();
+-        profiler.pop();
+-        profiler.pop();
+     }
+ 
+     protected void customServerAiStep(final ServerLevel level) {
+diff --git a/net/minecraft/world/entity/ai/goal/GoalSelector.java b/net/minecraft/world/entity/ai/goal/GoalSelector.java
+index 0439543fbb25ddb974550fe9dbdaa479e330937d..5fe0ca450dd9de5badca4d7dd2a68e0612d9a56b 100644
+--- a/net/minecraft/world/entity/ai/goal/GoalSelector.java
++++ b/net/minecraft/world/entity/ai/goal/GoalSelector.java
+@@ -6,8 +6,6 @@ import java.util.EnumSet;
+ import java.util.Map;
+ import java.util.Set;
+ import java.util.function.Predicate;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ 
+ public class GoalSelector {
+     private static final WrappedGoal NO_GOAL = new WrappedGoal(Integer.MAX_VALUE, new Goal() {
+@@ -82,9 +80,6 @@ public class GoalSelector {
+     }
+ 
+     public void tick() {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("goalCleanup");
+-
+         for (WrappedGoal goal : this.availableGoals) {
+             if (goal.isRunning() && (goalContainsAnyFlags(goal, this.goalTypes) || !goal.canContinueToUse())) { // Paper - Perf: optimize goal types by removing streams
+                 goal.stop();
+@@ -92,8 +87,6 @@ public class GoalSelector {
+         }
+ 
+         this.lockedFlags.entrySet().removeIf(entry -> !entry.getValue().isRunning());
+-        profiler.pop();
+-        profiler.push("goalUpdate");
+ 
+         for (WrappedGoal goal : this.availableGoals) {
+             // Paper start
+@@ -113,21 +106,15 @@ public class GoalSelector {
+             }
+         }
+ 
+-        profiler.pop();
+         this.tickRunningGoals(true);
+     }
+ 
+     public void tickRunningGoals(final boolean forceTickAllRunningGoals) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("goalTick");
+-
+         for (WrappedGoal goal : this.availableGoals) {
+             if (goal.isRunning() && (forceTickAllRunningGoals || goal.requiresUpdateEveryTick())) {
+                 goal.tick();
+             }
+         }
+-
+-        profiler.pop();
+     }
+ 
+     public Set<WrappedGoal> getAvailableGoals() {
+diff --git a/net/minecraft/world/entity/ai/navigation/PathNavigation.java b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+index 862224dfc003bf02ee0d7c1d804549210d6c8ffa..ec68fe6af13017decd1c9aa364a996ec34e0aba2 100644
+--- a/net/minecraft/world/entity/ai/navigation/PathNavigation.java
++++ b/net/minecraft/world/entity/ai/navigation/PathNavigation.java
+@@ -11,8 +11,6 @@ import net.minecraft.tags.BlockTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.ServerDebugSubscribers;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.entity.ai.attributes.Attributes;
+@@ -188,13 +186,10 @@ public abstract class PathNavigation {
+             }
+         }
+         // Paper end - EntityPathfindEvent
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("pathfind");
+         BlockPos fromPos = above ? this.mob.blockPosition().above() : this.mob.blockPosition();
+         int radius = (int)(maxPathLength + radiusOffset);
+         PathNavigationRegion region = new PathNavigationRegion(this.level, fromPos.offset(-radius, -radius, -radius), fromPos.offset(radius, radius, radius));
+         Path path = this.pathFinder.findPath(region, this.mob, targets, maxPathLength, reachRange, this.maxVisitedNodesMultiplier);
+-        profiler.pop();
+         if (path != null && path.getTarget() != null) {
+             this.targetPos = path.getTarget();
+             this.reachRange = reachRange;
+diff --git a/net/minecraft/world/entity/ai/sensing/Sensing.java b/net/minecraft/world/entity/ai/sensing/Sensing.java
+index 0da4d7d500e4297457081b4c83862296c9b92e72..726700483d6fe57ddd49747e332dca808b4eaede 100644
+--- a/net/minecraft/world/entity/ai/sensing/Sensing.java
++++ b/net/minecraft/world/entity/ai/sensing/Sensing.java
+@@ -2,8 +2,6 @@ package net.minecraft.world.entity.ai.sensing;
+ 
+ import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+ import it.unimi.dsi.fastutil.ints.IntSet;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.Mob;
+ 
+@@ -31,10 +29,7 @@ public class Sensing {
+             return false;
+         }
+ 
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("hasLineOfSight");
+         boolean hasLineOfSight = this.mob.hasLineOfSight(target);
+-        profiler.pop();
+         if (hasLineOfSight) {
+             this.seen.add(targetId);
+         } else {
+diff --git a/net/minecraft/world/entity/animal/allay/Allay.java b/net/minecraft/world/entity/animal/allay/Allay.java
+index 69d8a10f524dd4db683a00f194e8d1a26c996f43..79facaa630cee0778f91d8a92d232d19fc165eb6 100644
+--- a/net/minecraft/world/entity/animal/allay/Allay.java
++++ b/net/minecraft/world/entity/animal/allay/Allay.java
+@@ -23,8 +23,6 @@ import net.minecraft.tags.GameEventTags;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.Mth;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.SimpleContainer;
+@@ -208,13 +206,8 @@ public class Allay extends PathfinderMob implements InventoryCarrier, VibrationS
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("allayBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("allayActivityUpdate");
+         AllayAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/armadillo/Armadillo.java b/net/minecraft/world/entity/animal/armadillo/Armadillo.java
+index c8c50683597a2314a3c0e72888d5d75dc73fb94a..434dfa9ed989cb8c7079f796ee0ed2ac4bf59454 100644
+--- a/net/minecraft/world/entity/animal/armadillo/Armadillo.java
++++ b/net/minecraft/world/entity/animal/armadillo/Armadillo.java
+@@ -21,8 +21,6 @@ import net.minecraft.util.ByIdMap;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+ import net.minecraft.util.TimeUtil;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -140,13 +138,8 @@ public class Armadillo extends Animal {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("armadilloBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("armadilloActivityUpdate");
+         ArmadilloAi.updateActivity(this);
+-        profiler.pop();
+         if (this.isAlive() && --this.scuteTime <= 0 && this.shouldDropLoot(level)) {
+             if (this.dropFromGiftLootTable(level, BuiltInLootTables.ARMADILLO_SHED, this::spawnAtLocation)) {
+                 this.playSound(SoundEvents.ARMADILLO_SCUTE_DROP, 1.0F, (this.random.nextFloat() - this.random.nextFloat()) * 0.2F + 1.0F);
+diff --git a/net/minecraft/world/entity/animal/axolotl/Axolotl.java b/net/minecraft/world/entity/animal/axolotl/Axolotl.java
+index fa774ac8f3eea281c9b684c76dd12d4e66d3ee24..ef4b24678efd61925ec2acc2c25b36d8d6042317 100644
+--- a/net/minecraft/world/entity/animal/axolotl/Axolotl.java
++++ b/net/minecraft/world/entity/animal/axolotl/Axolotl.java
+@@ -28,8 +28,6 @@ import net.minecraft.util.EasingType;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -368,13 +366,8 @@ public class Axolotl extends Animal implements Bucketable {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("axolotlBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("axolotlActivityUpdate");
+         AxolotlAi.updateActivity(this);
+-        profiler.pop();
+         if (!this.isNoAi()) {
+             Optional<Integer> playDeadTicks = this.getBrain().getMemory(MemoryModuleType.PLAY_DEAD_TICKS);
+             this.setPlayingDead(playDeadTicks.isPresent() && playDeadTicks.get() > 0);
+diff --git a/net/minecraft/world/entity/animal/camel/Camel.java b/net/minecraft/world/entity/animal/camel/Camel.java
+index 57127335a3c68fbf9ac3d64a8504c6e271a5d532..c36da824aae7d88acec5118a359fd5f1e8d01f0b 100644
+--- a/net/minecraft/world/entity/animal/camel/Camel.java
++++ b/net/minecraft/world/entity/animal/camel/Camel.java
+@@ -16,8 +16,6 @@ import net.minecraft.tags.BlockTags;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -170,14 +168,9 @@ public class Camel extends AbstractHorse {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("camelBrain");
+         Brain<Camel> brain = this.getBrain();
+         brain.tick(level, this);
+-        profiler.pop();
+-        profiler.push("camelActivityUpdate");
+         CamelAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/frog/Frog.java b/net/minecraft/world/entity/animal/frog/Frog.java
+index d7d8216524e8e4c66c9e5a8dd4e682f46f335ca1..7fc78e9f73fc5cdd0fe8cccfb6490c66f600249b 100644
+--- a/net/minecraft/world/entity/animal/frog/Frog.java
++++ b/net/minecraft/world/entity/animal/frog/Frog.java
+@@ -25,8 +25,6 @@ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.Unit;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.AgeableMob;
+@@ -175,13 +173,8 @@ public class Frog extends Animal {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("frogBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("frogActivityUpdate");
+         FrogAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/frog/Tadpole.java b/net/minecraft/world/entity/animal/frog/Tadpole.java
+index 296cae1d5f5a3a054949ee03e2a2552bfeae4682..e51bc45451afe862884f7fd185a8a7b4402683a8 100644
+--- a/net/minecraft/world/entity/animal/frog/Tadpole.java
++++ b/net/minecraft/world/entity/animal/frog/Tadpole.java
+@@ -12,8 +12,6 @@ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.tags.ItemTags;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -84,13 +82,8 @@ public class Tadpole extends AbstractFish {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("tadpoleBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("tadpoleActivityUpdate");
+         TadpoleAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/goat/Goat.java b/net/minecraft/world/entity/animal/goat/Goat.java
+index d6ad4b67704b5c8b32d064c94890710d8d2f1e57..4a05f50163dfbce1f1d0f4bde9d9255d171948c3 100644
+--- a/net/minecraft/world/entity/animal/goat/Goat.java
++++ b/net/minecraft/world/entity/animal/goat/Goat.java
+@@ -17,8 +17,6 @@ import net.minecraft.tags.ItemTags;
+ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -174,13 +172,8 @@ public class Goat extends Animal {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("goatBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("goatActivityUpdate");
+         GoatAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/golem/CopperGolem.java b/net/minecraft/world/entity/animal/golem/CopperGolem.java
+index b65b2672d8d85aa4637d14323b1f2e27c054d814..c09321922b2ca336f7dccbfa7bab73796dbfbe81 100644
+--- a/net/minecraft/world/entity/animal/golem/CopperGolem.java
++++ b/net/minecraft/world/entity/animal/golem/CopperGolem.java
+@@ -13,8 +13,6 @@ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.RandomSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -181,13 +179,8 @@ public class CopperGolem extends AbstractGolem implements ContainerUser, Shearab
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("copperGolemBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("copperGolemActivityUpdate");
+         CopperGolemAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/happyghast/HappyGhast.java b/net/minecraft/world/entity/animal/happyghast/HappyGhast.java
+index ee400d1bfd24cc738ca02c1ec50332d7cfc9c266..77bed50df8afe737d37b3dd282d4c976cea98996 100644
+--- a/net/minecraft/world/entity/animal/happyghast/HappyGhast.java
++++ b/net/minecraft/world/entity/animal/happyghast/HappyGhast.java
+@@ -12,8 +12,6 @@ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.Mth;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -404,13 +402,8 @@ public class HappyGhast extends Animal {
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+         if (this.isBaby()) {
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push("happyGhastBrain");
+             this.getBrain().tick(level, this);
+-            profiler.pop();
+-            profiler.push("happyGhastActivityUpdate");
+             HappyGhastAi.updateActivity(this);
+-            profiler.pop();
+         }
+ 
+         this.checkRestriction();
+diff --git a/net/minecraft/world/entity/animal/nautilus/Nautilus.java b/net/minecraft/world/entity/animal/nautilus/Nautilus.java
+index d6ba5f201314148a382ce71e2c570f336c5d7d40..db0088b95f2fc9c767791da13eb07fd227423a99 100644
+--- a/net/minecraft/world/entity/animal/nautilus/Nautilus.java
++++ b/net/minecraft/world/entity/animal/nautilus/Nautilus.java
+@@ -4,8 +4,6 @@ import java.util.List;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.AgeableMob;
+ import net.minecraft.world.entity.EntityAttachment;
+@@ -65,13 +63,8 @@ public class Nautilus extends AbstractNautilus {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("nautilusBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("nautilusActivityUpdate");
+         NautilusAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/nautilus/ZombieNautilus.java b/net/minecraft/world/entity/animal/nautilus/ZombieNautilus.java
+index c9aa882ab43ced1d3d9b84e19feae39d6ed28b78..9ee208bf213c5af17b66e436afc3562e93cb510d 100644
+--- a/net/minecraft/world/entity/animal/nautilus/ZombieNautilus.java
++++ b/net/minecraft/world/entity/animal/nautilus/ZombieNautilus.java
+@@ -12,8 +12,6 @@ import net.minecraft.network.syncher.SynchedEntityData;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.AgeableMob;
+@@ -74,13 +72,8 @@ public class ZombieNautilus extends AbstractNautilus {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("zombieNautilusBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+-        profiler.push("zombieNautilusActivityUpdate");
+         ZombieNautilusAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/animal/sniffer/Sniffer.java b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+index d5394ae7ce56555ad21aeafb2d78c291c62e2988..5967ecc18bbc142f14f8b047b5d7ffe108d9f153 100644
+--- a/net/minecraft/world/entity/animal/sniffer/Sniffer.java
++++ b/net/minecraft/world/entity/animal/sniffer/Sniffer.java
+@@ -27,8 +27,6 @@ import net.minecraft.tags.BlockTags;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.ByIdMap;
+ import net.minecraft.util.Mth;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -466,12 +464,8 @@ public class Sniffer extends Animal {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("snifferBrain");
+         this.getBrain().tick(level, this);
+-        profiler.popPush("snifferActivityUpdate");
+         SnifferAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/monster/Zoglin.java b/net/minecraft/world/entity/monster/Zoglin.java
+index c9091f9aed31ce23371539cb44695732b2ae4e9b..a2a56099146fc6fd1265a6268894b6c2eb5cefc8 100644
+--- a/net/minecraft/world/entity/monster/Zoglin.java
++++ b/net/minecraft/world/entity/monster/Zoglin.java
+@@ -11,8 +11,6 @@ import net.minecraft.network.syncher.SynchedEntityData;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.util.valueproviders.UniformInt;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.damagesource.DamageSource;
+@@ -238,10 +236,7 @@ public class Zoglin extends Monster implements HoglinBase {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("zoglinBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+         this.updateActivity();
+     }
+ 
+diff --git a/net/minecraft/world/entity/monster/breeze/Breeze.java b/net/minecraft/world/entity/monster/breeze/Breeze.java
+index eaa7eb69bdc819228bbab05b053844f1578294ba..6c8970c98229c5ebd14903eb0b7558ea3f94c044 100644
+--- a/net/minecraft/world/entity/monster/breeze/Breeze.java
++++ b/net/minecraft/world/entity/monster/breeze/Breeze.java
+@@ -12,8 +12,6 @@ import net.minecraft.tags.EntityTypeTags;
+ import net.minecraft.util.debug.DebugBreezeInfo;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.DebugValueSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.AnimationState;
+ import net.minecraft.world.entity.Entity;
+@@ -232,12 +230,8 @@ public class Breeze extends Monster {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("breezeBrain");
+         this.getBrain().tick(level, this);
+-        profiler.popPush("breezeActivityUpdate");
+         BreezeAi.updateActivity(this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+     }
+ 
+diff --git a/net/minecraft/world/entity/monster/creaking/Creaking.java b/net/minecraft/world/entity/monster/creaking/Creaking.java
+index 22ea080d8c793c8c1bb9163808271c28d48dd302..0c27cb806500d740ec3fd3a333fc9e6a43e43306 100644
+--- a/net/minecraft/world/entity/monster/creaking/Creaking.java
++++ b/net/minecraft/world/entity/monster/creaking/Creaking.java
+@@ -13,8 +13,6 @@ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.tags.DamageTypeTags;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.AnimationState;
+ import net.minecraft.world.entity.Entity;
+@@ -206,10 +204,7 @@ public class Creaking extends Monster {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("creakingBrain");
+         this.getBrain().tick((ServerLevel)this.level(), this);
+-        profiler.pop();
+         CreakingAi.updateActivity(this);
+     }
+ 
+diff --git a/net/minecraft/world/entity/monster/hoglin/Hoglin.java b/net/minecraft/world/entity/monster/hoglin/Hoglin.java
+index 045b8320ef9d63d7b81a680ad12f1afa94a76c7d..b288e6de9284805b21cffd73b7276fa2594d34f4 100644
+--- a/net/minecraft/world/entity/monster/hoglin/Hoglin.java
++++ b/net/minecraft/world/entity/monster/hoglin/Hoglin.java
+@@ -12,8 +12,6 @@ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.sounds.SoundSource;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.RandomSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -142,10 +140,7 @@ public class Hoglin extends Animal implements Enemy, HoglinBase {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("hoglinBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+         HoglinAi.updateActivity(this);
+         if (this.isConverting()) {
+             this.timeInOverworld++;
+diff --git a/net/minecraft/world/entity/monster/piglin/Piglin.java b/net/minecraft/world/entity/monster/piglin/Piglin.java
+index 77638e1b9b2ab1165d11c1ac8ea09255b04544f6..affd20d07a1ec29adcfa8b96b2c7456d27877e6d 100644
+--- a/net/minecraft/world/entity/monster/piglin/Piglin.java
++++ b/net/minecraft/world/entity/monster/piglin/Piglin.java
+@@ -14,8 +14,6 @@ import net.minecraft.tags.ItemTags;
+ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.VisibleForDebug;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.InteractionResult;
+@@ -282,10 +280,7 @@ public class Piglin extends AbstractPiglin implements CrossbowAttackMob, Invento
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("piglinBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+         PiglinAi.updateActivity(this);
+         super.customServerAiStep(level);
+     }
+diff --git a/net/minecraft/world/entity/monster/piglin/PiglinBrute.java b/net/minecraft/world/entity/monster/piglin/PiglinBrute.java
+index 8bba57ee432ab41b47b6dd89a21bf17c4b462d1f..7901a3a331ad06684b2b5234c216c4214c2d84d8 100644
+--- a/net/minecraft/world/entity/monster/piglin/PiglinBrute.java
++++ b/net/minecraft/world/entity/monster/piglin/PiglinBrute.java
+@@ -6,8 +6,6 @@ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.sounds.SoundEvent;
+ import net.minecraft.sounds.SoundEvents;
+ import net.minecraft.util.RandomSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.EntitySpawnReason;
+@@ -94,10 +92,7 @@ public class PiglinBrute extends AbstractPiglin {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("piglinBruteBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+         PiglinBruteAi.updateActivity(this);
+         PiglinBruteAi.maybePlayActivitySound(this);
+         super.customServerAiStep(level);
+diff --git a/net/minecraft/world/entity/monster/warden/Warden.java b/net/minecraft/world/entity/monster/warden/Warden.java
+index 4552a36c3cd9b5c0f34cd44d376d6d1092ee110a..c809100488bbf1bbef45eb602551cbd6b83a8863 100644
+--- a/net/minecraft/world/entity/monster/warden/Warden.java
++++ b/net/minecraft/world/entity/monster/warden/Warden.java
+@@ -25,8 +25,6 @@ import net.minecraft.tags.TagKey;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.Unit;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.effect.MobEffectInstance;
+@@ -287,10 +285,7 @@ public class Warden extends Monster implements VibrationSystem {
+ 
+     @Override
+     protected void customServerAiStep(final ServerLevel level) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("wardenBrain");
+         this.getBrain().tick(level, this);
+-        profiler.pop();
+         super.customServerAiStep(level);
+         if ((this.tickCount + this.getId()) % 120 == 0) {
+             applyDarknessAround(level, this.position(), this, 20);
+diff --git a/net/minecraft/world/entity/npc/villager/Villager.java b/net/minecraft/world/entity/npc/villager/Villager.java
+index 0a02aef2ff159a1d94870bf3cede0ed29ae192af..0b7a25404354758da22ed4507e8e6f7ce213c18f 100644
+--- a/net/minecraft/world/entity/npc/villager/Villager.java
++++ b/net/minecraft/world/entity/npc/villager/Villager.java
+@@ -31,8 +31,6 @@ import net.minecraft.stats.Stats;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.SpawnUtil;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.DifficultyInstance;
+ import net.minecraft.world.InteractionHand;
+@@ -261,10 +259,7 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
+     }
+     protected void customServerAiStep(ServerLevel level, final boolean inactive) {
+         // Paper end - EAR 2
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("villagerBrain");
+         if (!inactive) this.getBrain().tick(level, this); // Paper - EAR 2
+-        profiler.pop();
+         if (this.assignProfessionWhenSpawned) {
+             this.assignProfessionWhenSpawned = false;
+         }
+diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
+index 98cadf77878240889fdb0f496975ac055db6246e..0d2daaa341785b84031c52ea23942b4d6a6fe287 100644
+--- a/net/minecraft/world/level/Level.java
++++ b/net/minecraft/world/level/Level.java
+@@ -37,7 +37,6 @@ import net.minecraft.util.AbortableIterationConsumer;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.StringRepresentable;
+-import net.minecraft.util.profiling.Profiler;
+ import net.minecraft.util.random.WeightedList;
+ import net.minecraft.world.TickRateManager;
+ import net.minecraft.world.attribute.EnvironmentAttributeSystem;
+@@ -231,7 +230,6 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+     @Override
+     public final <T extends Entity> List<T> getEntitiesOfClass(final Class<T> entityClass, final AABB boundingBox, final Predicate<? super T> predicate) {
+-        Profiler.get().incrementCounter("getEntities");
+         final List<T> ret = new java.util.ArrayList<>();
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(entityClass, null, boundingBox, ret, predicate);
+@@ -241,7 +239,6 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+     @Override
+     public final List<Entity> moonrise$getHardCollidingEntities(final Entity entity, final AABB box, final Predicate<? super Entity> predicate) {
+-        Profiler.get().incrementCounter("getEntities");
+         final List<Entity> ret = new java.util.ArrayList<>();
+ 
+         ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getHardCollidingEntities(entity, box, ret, predicate);
+@@ -1779,7 +1776,6 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+ 
+     @Override
+     public List<Entity> getEntities(final @Nullable Entity except, final AABB bb, final Predicate<? super Entity> selector) {
+-        Profiler.get().incrementCounter("getEntities");
+         // Paper start - rewrite chunk system
+         final List<Entity> ret = new java.util.ArrayList<>();
+ 
+@@ -1808,8 +1804,6 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     public <T extends Entity> void getEntities(final EntityTypeTest<Entity, T> entityTypeTest,
+                                                final AABB boundingBox, final Predicate<? super T> predicate,
+                                                final List<? super T> into, final int maxCount) {
+-        Profiler.get().incrementCounter("getEntities");
+-
+         if (entityTypeTest instanceof net.minecraft.world.entity.EntityType<T> byType) {
+             if (maxCount != Integer.MAX_VALUE) {
+                 ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemLevel)this).moonrise$getEntityLookup().getEntities(byType, boundingBox, into, predicate, maxCount);
+@@ -1894,7 +1888,6 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
+     // Paper end - rewrite chunk system
+ 
+     public <T extends Entity> boolean hasEntities(final EntityTypeTest<Entity, T> type, final AABB bb, final Predicate<? super T> selector) {
+-        Profiler.get().incrementCounter("hasEntities");
+         MutableBoolean hasEntities = new MutableBoolean();
+         this.getEntities().get(type, bb, e -> {
+             if (selector.test(e)) {
+diff --git a/net/minecraft/world/level/NaturalSpawner.java b/net/minecraft/world/level/NaturalSpawner.java
+index e193cbed115663e9ca7a611837d5b8540dda03db..71b442d6f7f37e177285b773090022f01982cfcf 100644
+--- a/net/minecraft/world/level/NaturalSpawner.java
++++ b/net/minecraft/world/level/NaturalSpawner.java
+@@ -23,8 +23,6 @@ import net.minecraft.tags.BlockTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.RandomSource;
+ import net.minecraft.util.VisibleForDebug;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.util.random.WeightedList;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.EntitySpawnReason;
+@@ -159,9 +157,6 @@ public final class NaturalSpawner {
+     public static void spawnForChunk(
+         final ServerLevel level, final LevelChunk chunk, final NaturalSpawner.SpawnState state, final List<MobCategory> spawningCategories
+     ) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("spawner");
+-
+         for (MobCategory mobCategory : spawningCategories) {
+             // Paper start - Optional per player mob spawns
+             final boolean canSpawn;
+@@ -196,8 +191,6 @@ public final class NaturalSpawner {
+                 // Paper end - Optional per player mob spawns
+             }
+         }
+-
+-        profiler.pop();
+     }
+ 
+     // Paper start - Add mobcaps commands
+diff --git a/net/minecraft/world/level/ServerExplosion.java b/net/minecraft/world/level/ServerExplosion.java
+index 623bd5d07664d8cd1c703482e9b8f227ed737317..f2f401f56faeaa20e751f6c0ee9e9b33ec10a24a 100644
+--- a/net/minecraft/world/level/ServerExplosion.java
++++ b/net/minecraft/world/level/ServerExplosion.java
+@@ -13,8 +13,6 @@ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.EntityTypeTags;
+ import net.minecraft.util.Mth;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.damagesource.DamageSource;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.entity.EntityTypes;
+@@ -635,10 +633,7 @@ public class ServerExplosion implements Explosion {
+         List<BlockPos> toBlow = this.calculateExplodedPositions();
+         this.hurtEntities();
+         if (this.interactsWithBlocks()) {
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push("explosion_blocks");
+             this.interactWithBlocks(toBlow);
+-            profiler.pop();
+         }
+ 
+         if (this.fire) {
+diff --git a/net/minecraft/world/level/chunk/LevelChunk.java b/net/minecraft/world/level/chunk/LevelChunk.java
+index 3ab76a6b447cc7d3a34ce654f601e91c53b2261d..f0922a86bd7975880ce58efc9071fe2655201cd1 100644
+--- a/net/minecraft/world/level/chunk/LevelChunk.java
++++ b/net/minecraft/world/level/chunk/LevelChunk.java
+@@ -28,8 +28,6 @@ import net.minecraft.util.ProblemReporter;
+ import net.minecraft.util.debug.DebugStructureInfo;
+ import net.minecraft.util.debug.DebugSubscriptions;
+ import net.minecraft.util.debug.DebugValueSource;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.Level;
+@@ -392,12 +390,8 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+         }
+ 
+         if (LightEngine.hasDifferentLightProperties(oldState, state)) {
+-            ProfilerFiller profiler = Profiler.get();
+-            profiler.push("updateSkyLightSources");
+             // Paper - rewrite chunk system
+-            profiler.popPush("queueCheckLight");
+             this.level.getChunkSource().getLightEngine().checkBlock(pos);
+-            profiler.pop();
+         }
+ 
+         boolean blockChanged = !oldState.is(newBlock);
+@@ -944,8 +938,6 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+                 BlockPos pos = this.blockEntity.getBlockPos();
+                 if (LevelChunk.this.isTicking(pos)) {
+                     try {
+-                        ProfilerFiller profiler = Profiler.get();
+-                        profiler.push(this::getType);
+                         BlockState blockState = LevelChunk.this.getBlockState(pos);
+                         if (this.blockEntity.getType().isValid(blockState)) {
+                             this.ticker.tick(LevelChunk.this.level, this.blockEntity.getBlockPos(), blockState, this.blockEntity);
+@@ -965,8 +957,6 @@ public class LevelChunk extends ChunkAccess implements DebugValueSource, ca.spot
+                                 );
+                             } // Paper - Remove the Block Entity if it's invalid
+                         }
+-
+-                        profiler.pop();
+                     } catch (Throwable t) {
+                         // Paper start - Prevent block entity and entity crashes
+                         final String msg = String.format("BlockEntity threw exception at %s:%s,%s,%s", io.papermc.paper.util.MCUtil.getLevelName(LevelChunk.this.getLevel()), this.getPos().getX(), this.getPos().getY(), this.getPos().getZ());
+diff --git a/net/minecraft/world/level/pathfinder/PathFinder.java b/net/minecraft/world/level/pathfinder/PathFinder.java
+index 253074a0a14115cd3d18aaae6fa5822cf32346c9..582471e4020f79c860dd5e317bb59805170dda67 100644
+--- a/net/minecraft/world/level/pathfinder/PathFinder.java
++++ b/net/minecraft/world/level/pathfinder/PathFinder.java
+@@ -12,9 +12,6 @@ import java.util.function.BooleanSupplier;
+ import java.util.function.Function;
+ import java.util.stream.Collectors;
+ import net.minecraft.core.BlockPos;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+-import net.minecraft.util.profiling.metrics.MetricCategory;
+ import net.minecraft.world.entity.Mob;
+ import net.minecraft.world.level.PathNavigationRegion;
+ import org.jspecify.annotations.Nullable;
+@@ -69,9 +66,6 @@ public class PathFinder {
+     private @Nullable Path findPath(
+         final Node from, final List<Map.Entry<Target, BlockPos>> targets, final float maxPathLength, final int reachRange, final float maxVisitedNodesMultiplier // Paper - optimize collection
+     ) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("find_path");
+-        profiler.markForCharting(MetricCategory.PATH_FINDING);
+         //Set<Target> targets = targetMap.keySet(); // Paper - unused
+         from.g = 0.0F;
+         from.h = this.getBestH(from, targets);
+@@ -146,7 +140,6 @@ public class PathFinder {
+                 best = path;
+             }
+         }
+-        profiler.pop();
+         if (captureDebug && best != null) {
+             Set<Target> set = Sets.newHashSet();
+             for(Map.Entry<Target, BlockPos> entry : targets) {
+diff --git a/net/minecraft/world/ticks/LevelTicks.java b/net/minecraft/world/ticks/LevelTicks.java
+index 651a073c49136f3ee5119f536462a03af13e4cae..4ebc6686b6b6107afc023b71f3f4afefb21c6b6a 100644
+--- a/net/minecraft/world/ticks/LevelTicks.java
++++ b/net/minecraft/world/ticks/LevelTicks.java
+@@ -23,8 +23,6 @@ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.SectionPos;
+ import net.minecraft.core.Vec3i;
+ import net.minecraft.util.Util;
+-import net.minecraft.util.profiling.Profiler;
+-import net.minecraft.util.profiling.ProfilerFiller;
+ import net.minecraft.world.level.ChunkPos;
+ import net.minecraft.world.level.levelgen.structure.BoundingBox;
+ 
+@@ -79,20 +77,13 @@ public class LevelTicks<T> implements LevelTickAccess<T> {
+     }
+ 
+     public void tick(final long currentTick, final int maxTicksToProcess, final BiConsumer<BlockPos, T> output) {
+-        ProfilerFiller profiler = Profiler.get();
+-        profiler.push("collect");
+-        this.collectTicks(currentTick, maxTicksToProcess, profiler);
+-        profiler.popPush("run");
+-        profiler.incrementCounter("ticksToRun", this.toRunThisTick.size());
++        this.collectTicks(currentTick, maxTicksToProcess);
+         this.runCollectedTicks(output);
+-        profiler.popPush("cleanup");
+         this.cleanupAfterTick();
+-        profiler.pop();
+     }
+ 
+-    private void collectTicks(final long currentTick, final int maxTicksToProcess, final ProfilerFiller profiler) {
++    private void collectTicks(final long currentTick, final int maxTicksToProcess) {
+         this.sortContainersToTick(currentTick);
+-        profiler.incrementCounter("containersToTick", this.containersToTick.size());
+         this.drainContainers(currentTick, maxTicksToProcess);
+         this.rescheduleLeftoverContainers();
+     }

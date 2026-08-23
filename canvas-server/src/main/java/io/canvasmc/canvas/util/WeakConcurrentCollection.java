@@ -12,7 +12,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -30,30 +29,30 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     @Override
     public int size() {
         int count = 0;
-        for (E _ : this) count++;
+        for (final E _ : this) count++;
         return count;
     }
 
     @Override
     public boolean isEmpty() {
         if (liveCount.get() <= 0) return true;
-        for (WeakReference<E> ref : backed) {
-            if (ref.get() != null) return false;
+        for (final WeakReference<E> weak : backed) {
+            if (weak.get() != null) return false;
         }
         return true;
     }
 
     @Override
-    public boolean contains(final Object o) {
-        if (o == null) return false;
-        for (E value : this) {
-            if (o.equals(value)) return true;
+    public boolean contains(final @Nullable Object obj) {
+        if (obj == null) return false;
+        for (final E element : this) {
+            if (obj.equals(element)) return true;
         }
         return false;
     }
 
     @Override
-    public @NonNull Iterator<E> iterator() {
+    public Iterator<E> iterator() {
         final List<WeakReference<E>> snapshot = List.copyOf(backed);
         return new Iterator<>() {
             private final Iterator<WeakReference<E>> it = snapshot.iterator();
@@ -64,7 +63,7 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
             public boolean hasNext() {
                 if (next != null) return true;
                 while (it.hasNext()) {
-                    E value = it.next().get();
+                    final E value = it.next().get();
                     if (value != null) {
                         next = value;
                         return true;
@@ -91,30 +90,30 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     }
 
     @Override
-    public @NonNull Object @NonNull [] toArray() {
+    public Object[] toArray() {
         return new ObjectArrayList<>(this).toArray();
     }
 
     @Override
-    public @NonNull <T> T @NonNull [] toArray(@NonNull final T @NonNull [] a) {
-        return new ObjectArrayList<>(this).toArray(a);
+    public <T> T[] toArray(final T[] arr) {
+        return new ObjectArrayList<>(this).toArray(arr);
     }
 
     @Override
-    public boolean add(final E value) {
-        Preconditions.checkArgument(value != null, "Cannot add null value");
-        backed.add(new WeakReference<>(value));
+    public boolean add(final E element) {
+        Objects.requireNonNull(element, "cannot add null element");
+        backed.add(new WeakReference<>(element));
         liveCount.incrementAndGet();
         compactIfNeeded();
         return true;
     }
 
     @Override
-    public boolean remove(final Object o) {
-        if (o == null) return false;
-        for (WeakReference<E> ref : backed) {
-            E value = ref.get();
-            if (o.equals(value)) {
+    public boolean remove(final @Nullable Object obj) {
+        if (obj == null) return false;
+        for (final WeakReference<E> ref : backed) {
+            final E value = ref.get();
+            if (obj.equals(value)) {
                 ref.clear();
                 if (backed.remove(ref)) {
                     liveCount.decrementAndGet();
@@ -126,17 +125,17 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     }
 
     @Override
-    public boolean containsAll(@NonNull final Collection<?> c) {
-        for (final Object o : c) {
-            if (!contains(o)) return false;
+    public boolean containsAll(final Collection<?> collection) {
+        for (final Object obj : collection) {
+            if (!contains(obj)) return false;
         }
         return true;
     }
 
     @Override
-    public boolean addAll(@NonNull final Collection<? extends E> c) {
+    public boolean addAll(final Collection<? extends E> collection) {
         boolean changed = false;
-        for (E value : c) changed |= add(value);
+        for (final E value : collection) changed |= add(value);
         return changed;
     }
 
@@ -179,22 +178,22 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
 
     @Override
     public void clear() {
-        for (WeakReference<E> ref : backed) ref.clear();
+        for (final WeakReference<E> weak : backed) weak.clear();
         backed.clear();
         liveCount.set(0);
     }
 
     public void compact() {
         int removed = 0;
-        for (WeakReference<E> ref : backed) {
-            if (ref.get() == null && backed.remove(ref)) removed++;
+        for (final WeakReference<E> weak : backed) {
+            if (weak.get() == null && backed.remove(weak)) removed++;
         }
         if (removed > 0) liveCount.addAndGet(-removed);
     }
 
     private void compactIfNeeded() {
-        int total = backed.size();
-        int live = liveCount.get();
+        final int total = backed.size();
+        final int live = liveCount.get();
         if (total > 0 && (total - live) * 4 >= total) compact();
     }
 }

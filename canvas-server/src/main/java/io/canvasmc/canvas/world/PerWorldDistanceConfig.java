@@ -6,7 +6,6 @@ import io.canvasmc.canvas.util.LockedReference;
 import java.util.Optional;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
-import org.jspecify.annotations.NonNull;
 
 /**
  * Per world view and simulation distance override. When the value is <= 0, it uses the value from the server
@@ -20,18 +19,15 @@ import org.jspecify.annotations.NonNull;
 public record PerWorldDistanceConfig(
     LockedReference<Integer> viewDistance, LockedReference<Integer> simulationDistance
 ) {
-    public static final Codec<PerWorldDistanceConfig> CODEC = RecordCodecBuilder.create(
-        instance -> instance.group(
-                Codec.INT.optionalFieldOf("ViewDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::viewDistanceAsOptional),
-                Codec.INT.optionalFieldOf("SimulationDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::simulationDistanceAsOptional)
-            )
-            .apply(instance, PerWorldDistanceConfig::new)
-    );
     public static PerWorldDistanceConfig DEFAULT = new PerWorldDistanceConfig(Optional.empty(), Optional.empty());
+    public static final Codec<PerWorldDistanceConfig> CODEC = RecordCodecBuilder.create(i -> i.group(
+        Codec.INT.optionalFieldOf("ViewDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::viewDistanceAsOptional),
+        Codec.INT.optionalFieldOf("SimulationDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::simulationDistanceAsOptional)
+    ).apply(i, PerWorldDistanceConfig::new));
 
     // this is for the codec, nothing much else
     @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
-    public PerWorldDistanceConfig(final @NonNull Optional<Integer> view, final @NonNull Optional<Integer> simulation) {
+    public PerWorldDistanceConfig(final Optional<Integer> view, final Optional<Integer> simulation) {
         this(
             view.map(LockedReference::new).orElse(new LockedReference<>(null)),
             simulation.map(LockedReference::new).orElse(new LockedReference<>(null))
@@ -39,15 +35,15 @@ public record PerWorldDistanceConfig(
     }
 
     public PerWorldDistanceConfig(
-        final @NonNull LockedReference<Integer> viewDistance,
-        final @NonNull LockedReference<Integer> simulationDistance
+        final LockedReference<Integer> viewDistance,
+        final LockedReference<Integer> simulationDistance
     ) {
 
         // for backwards compat with old system. we used to store
         // the -1 value, so this is a good way to clean this up
 
-        Integer view = viewDistance.getValue();
-        Integer simulation = simulationDistance.getValue();
+        final Integer view = viewDistance.getValue();
+        final Integer simulation = simulationDistance.getValue();
 
         this.viewDistance = Integer.valueOf(-1).equals(view)
             ? new LockedReference<>(null)
@@ -59,7 +55,7 @@ public record PerWorldDistanceConfig(
     }
 
     public int snapshotViewDistance() {
-        Integer raw = viewDistance().getValue();
+        final Integer raw = viewDistance().getValue();
         if (raw == null) {
             return -1;
         }
@@ -67,7 +63,7 @@ public record PerWorldDistanceConfig(
     }
 
     public int snapshotSimulationDistance() {
-        Integer raw = simulationDistance().getValue();
+        final Integer raw = simulationDistance().getValue();
         if (raw == null) {
             return -1;
         }
