@@ -140,7 +140,7 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     }
 
     @Override
-    public boolean removeAll(@NonNull final Collection<?> c) {
+    public boolean removeAll(final Collection<?> c) {
         if (c.isEmpty()) {
             return false;
         }
@@ -160,7 +160,7 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     }
 
     @Override
-    public boolean retainAll(@NonNull final Collection<?> c) {
+    public boolean retainAll(final Collection<?> c) {
         final Collection<?> target = c.isEmpty() ? Collections.emptySet() : (c instanceof Set<?> ? c : new HashSet<>(c));
         boolean changed = false;
         for (WeakReference<E> ref : backed) {
