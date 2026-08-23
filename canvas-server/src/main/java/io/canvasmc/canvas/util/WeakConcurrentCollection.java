@@ -4,8 +4,11 @@ import com.google.common.base.Preconditions;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import java.lang.ref.WeakReference;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.jspecify.annotations.NonNull;
@@ -138,10 +141,14 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
 
     @Override
     public boolean removeAll(@NonNull final Collection<?> c) {
+        if (c.isEmpty()) {
+            return false;
+        }
+        final Collection<?> target = c instanceof Set<?> ? c : new HashSet<>(c);
         boolean changed = false;
         for (WeakReference<E> ref : backed) {
             E value = ref.get();
-            if (value != null && c.contains(value)) {
+            if (value != null && target.contains(value)) {
                 ref.clear();
                 if (backed.remove(ref)) {
                     liveCount.decrementAndGet();
@@ -154,10 +161,11 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
 
     @Override
     public boolean retainAll(@NonNull final Collection<?> c) {
+        final Collection<?> target = c.isEmpty() ? Collections.emptySet() : (c instanceof Set<?> ? c : new HashSet<>(c));
         boolean changed = false;
         for (WeakReference<E> ref : backed) {
             E value = ref.get();
-            if (value != null && !c.contains(value)) {
+            if (value != null && !target.contains(value)) {
                 ref.clear();
                 if (backed.remove(ref)) {
                     liveCount.decrementAndGet();
