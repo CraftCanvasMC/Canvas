@@ -6,7 +6,6 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.schedule.Activity;
-import org.jspecify.annotations.NonNull;
 
 public final class ActivityBitSet extends AbstractObjectSet<Activity> {
     public static final int ACTIVITY_SIZE = BuiltInRegistries.ACTIVITY.size();
@@ -59,7 +58,7 @@ public final class ActivityBitSet extends AbstractObjectSet<Activity> {
     }
 
     @Override
-    public @NonNull ObjectIterator<Activity> iterator() {
+    public ObjectIterator<Activity> iterator() {
         return new ObjectIterator<>() {
             private int index = 0;
 

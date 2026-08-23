@@ -1,11 +1,12 @@
 package io.canvasmc.canvas.configuration.validation;
 
 import io.canvasmc.canvas.configuration.Part;
+import org.jetbrains.annotations.Nullable;
 
 public record NumberComparison(Type type, float... n) implements Part.Validation<Number> {
 
     @Override
-    public void validate(final Number number) {
+    public void validate(final @Nullable Number number) {
         if (number == null) throw new IllegalArgumentException("Value must not be null");
 
         final float val = number.floatValue();

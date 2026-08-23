@@ -1,14 +1,24 @@
 package io.canvasmc.canvas;
 
 import ca.spottedleaf.moonrise.common.util.SimpleThreadUnsafeRandom;
+import io.canvasmc.canvas.commands.CanvasCommands;
 import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
+import io.canvasmc.canvas.configuration.Undocumented;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
-import io.canvasmc.canvas.tick.AffinitySchedulerThreadPool;
+import io.canvasmc.canvas.subcommands.MobCapsSubCommand;
+import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
+import io.canvasmc.canvas.subcommands.RegionTickSubCommand;
+import io.canvasmc.canvas.subcommands.ReloadSubCommand;
+import io.canvasmc.canvas.subcommands.SetMaxPlayersSubCommand;
+import io.canvasmc.canvas.subcommands.WorldDistanceSubCommand;
+import io.canvasmc.canvas.threadedregions.scheduler.AffinitySchedulerThreadPool;
 import io.canvasmc.canvas.util.FasterRandomSource;
+import io.canvasmc.canvas.util.LockedReference;
+import io.canvasmc.canvas.util.TimeSpan;
 import io.canvasmc.canvas.util.Util;
 import io.papermc.paper.ServerBuildInfo;
 import io.papermc.paper.threadedregions.RegionizedServer;
@@ -17,7 +27,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.concurrent.CompletableFuture;
 import java.util.random.RandomGeneratorFactory;
 import net.minecraft.ChatFormatting;
@@ -35,10 +44,13 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.RandomSupport;
 import org.apache.commons.lang3.mutable.MutableInt;
-import org.jspecify.annotations.NonNull;
+import org.jetbrains.annotations.UnknownNullability;
+import org.jspecify.annotations.NullMarked;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings({"FieldMayBeFinal", "unused"})
+@NullMarked
 public class GlobalConfiguration extends Part {
 
     private static final Path CONFIG_PATH = Path.of("config/canvas-server.yml").toAbsolutePath().normalize();
@@ -47,17 +59,25 @@ public class GlobalConfiguration extends Part {
     protected static final int CHAR_LIM = 90;
 
     public static final Logger LOGGER = LoggerFactory.getLogger("CanvasMC");
+    public static final LockedReference<TimeSpan> AUTOSAVE_SPAN = new LockedReference<>(null);
 
     public static final int INFO = 0;
     public static final int WARN = 1;
     public static final int ERROR = 2;
 
+    @UnknownNullability("nonnull after reload is called")
     private static GlobalConfiguration INSTANCE;
     private static ClientV2.BuildStatus BUILD_STATUS = ClientV2.BuildStatus.UNKNOWN;
     private static boolean ENABLE_FASTER_RANDOM = true;
 
     static {
+        // if we surround this in try-catch and do any logging we
+        // actually just drown any error in log4j errors too
         reload();
+    }
+
+    public static void init() {
+        // no-op, just for static load from reload()
     }
 
     public static void reload() {
@@ -83,18 +103,20 @@ public class GlobalConfiguration extends Part {
                     postLoad(instance);
 
                     CompletableFuture.supplyAsync(() -> {
+                        final ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
+                        final int buildNum = buildInfo.buildNumber().orElse(-1);
+
                         ClientV2.BuildStatus buildStatus = ClientV2.BuildStatus.UNKNOWN;
-                        ServerBuildInfo buildInfo = ServerBuildInfo.buildInfo();
-                        int buildNum = buildInfo.buildNumber().orElse(-1);
                         if (buildNum == -1) {
                             buildStatus = ClientV2.BuildStatus.LOCAL;
                         }
                         else {
                             try {
                                 buildStatus = Util.CANVAS_CLIENT.getBuild(buildNum).buildStatus();
-                            } catch (Throwable ignored) {
+                            } catch (final Throwable ignored) {
                             }
                         }
+
                         return buildStatus;
                     }).thenAccept(buildStatus -> RegionizedServer.getInstance().addTask(() -> {
                         BUILD_STATUS = buildStatus;
@@ -130,7 +152,8 @@ public class GlobalConfiguration extends Part {
                 ).endLine()
                 .blank()
                 .wordWrap(
-                    "If you have questions about certain configuration options please reach out in our discord"
+                    "If you have questions about certain configuration options please reach out in our discord. As a",
+                    "general rule, if you don't know what a certain option does, DO NOT TOUCH IT."
                 ).endLine()
                 .literal("https://canvasmc.io/discord")
                 .compile(60)
@@ -143,7 +166,7 @@ public class GlobalConfiguration extends Part {
         // validate the configuration so users don't end up doing a stupid
         Validator.validateObject(configuration);
 
-        if (TickRegions.started) {
+        if (TickRegions.hasStarted()) {
 
             // if this is a reload, we may have things that need to be taken into effect now
             // for example, 1.8 combat delay configs may be updated, so we conduct updates
@@ -168,7 +191,7 @@ public class GlobalConfiguration extends Part {
 
             try {
                 RandomGeneratorFactory.of("Xoroshiro128PlusPlus");
-            } catch (Throwable throwable) {
+            } catch (final Throwable ignored) {
                 broadcast("Canvas' faster random impl is not supported by your VM, falling back to legacy random", WARN);
                 ENABLE_FASTER_RANDOM = false;
             }
@@ -176,8 +199,8 @@ public class GlobalConfiguration extends Part {
             // SIMD actions
             try {
                 SIMDDetection.isEnabled = SIMDDetection.canEnable(LOGGER);
-            } catch (NoClassDefFoundError | Exception ignored) {
-                ignored.printStackTrace();
+            } catch (final Throwable thrown) {
+                LOGGER.warn("Couldn't enable SIMD", thrown);
             }
 
             if (SIMDDetection.isEnabled) {
@@ -189,38 +212,55 @@ public class GlobalConfiguration extends Part {
                 LOGGER.warn("If you have already added this flag, then SIMD operations are not supported on your JVM or CPU.");
                 LOGGER.warn("Debug: Java: {}, test run: {}", System.getProperty("java.version"), SIMDDetection.testRun);
             }
-        }
 
-        broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
+            final Path logsDirectoryPath = Path.of("logs");
 
-        final Path logsDirectoryPath = Path.of("logs");
+            // start log cleaner, only at startup
+            if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath)) {
+                final MutableInt amountRemoved = new MutableInt(0);
 
-        // start log cleaner, only at startup
-        if (configuration.logs.enableLogCleaner && Files.exists(logsDirectoryPath) && !TickRegions.started) {
-
-            final Instant now = Instant.now();
-            final Instant adjustedInstantToThresh = now.minus(configuration.logs.length, configuration.logs.unit);
-            final MutableInt amountRemoved = new MutableInt(0);
-
-            Util.removeDirectoryContentsIf(logsDirectoryPath.toFile(), (path) -> {
-                try {
-                    final Instant lastModified = Files.getLastModifiedTime(path).toInstant();
-                    if (lastModified.isBefore(adjustedInstantToThresh) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
-                        // the time the log file was modified is before the
-                        // thresh, meaning it is older than the thresh set
-                        amountRemoved.increment();
-                        return true;
+                Util.removeDirectoryContentsIf(logsDirectoryPath.toFile(), (path) -> {
+                    try {
+                        final Instant lastModified = Files.getLastModifiedTime(path).toInstant();
+                        // accept large units because servers may specify units larger than days
+                        final TimeSpan loggerTimeSpan = TimeSpan.parse(configuration.logs.cleanerTimeSpan).acceptLargeUnits();
+                        if (lastModified.isBefore(loggerTimeSpan.inPast()) && !path.getFileName().toString().equalsIgnoreCase("latest.log")) {
+                            // the time the log file was modified is before the
+                            // thresh, meaning it is older than the thresh set
+                            amountRemoved.increment();
+                            return true;
+                        }
+                    } catch (final IOException ioe) {
+                        broadcast("Unable to determine if file " + path.getFileName() + " should be removed because: " + ioe.getMessage(), ERROR);
                     }
-                } catch (IOException ioe) {
-                    broadcast("Unable to determine if file " + path.getFileName() + " should be removed because: " + ioe.getMessage(), ERROR);
-                }
-                return false;
-            });
+                    return false;
+                });
 
-            if (amountRemoved.intValue() > 0) {
-                broadcast("Log cleaner removed " + amountRemoved.intValue() + " old log files", INFO);
+                if (amountRemoved.intValue() > 0) {
+                    broadcast("Log cleaner removed " + amountRemoved.intValue() + " old log files", INFO);
+                }
             }
+
+            // register our commands to the Canvas command tree
+            CanvasCommands.register(
+                SetMaxPlayersSubCommand.class,
+                RegionBarSubCommand.class,
+                WorldDistanceSubCommand.class,
+                ReloadSubCommand.class,
+                MobCapsSubCommand.class,
+                RegionTickSubCommand.class // TODO - merge this into regiondata command
+                // RegionDataCommand.class // TODO - regiondata command
+            );
+
+            broadcast("Registered all Canvas commands", INFO);
         }
+
+        // we do not want to allow larger unit values, nobody should autosave in units larger than
+        // days, like who tf would use time units like "1 week"??
+        AUTOSAVE_SPAN.swapValue((_) -> TimeSpan.parse(configuration.autosave.autosaveFrequency).verifyIsntLargeUnit());
+
+        broadcast("Server will autosave enabled selection every " + configuration.autosave.autosaveFrequency, INFO);
+        broadcast("Using " + configuration.regionScheduler.defaultTickRate + " as default tick rate", INFO);
     }
 
     public static GlobalConfiguration getInstance() {
@@ -231,12 +271,12 @@ public class GlobalConfiguration extends Part {
         return BUILD_STATUS;
     }
 
-    public static @NonNull RandomSource createFastRandom() {
+    public static RandomSource createFastRandom() {
         return ENABLE_FASTER_RANDOM ? new FasterRandomSource(RandomSupport.generateUniqueSeed()) : new SimpleThreadUnsafeRandom(RandomSupport.generateUniqueSeed());
     }
 
-    public static void broadcast(String msg, int severity) {
-        if (TickRegions.started) {
+    public static void broadcast(final String msg, final int severity) {
+        if (TickRegions.hasStarted()) {
             final MutableComponent literal = Component.literal(msg);
 
             switch (severity) {
@@ -259,6 +299,13 @@ public class GlobalConfiguration extends Part {
             case WARN -> LOGGER.warn(msg);
             case ERROR -> LOGGER.error(msg);
         }
+    }
+
+    /**
+     * Saves the existing configuration from memory to disk
+     */
+    public void save() {
+        save(CONFIG_PATH);
     }
 
     public RegionScheduler regionScheduler = new RegionScheduler();
@@ -296,25 +343,15 @@ public class GlobalConfiguration extends Part {
                         .literal("Default: 0.1ms, Higher is safer, lower means more work is done")
                     ).greaterThanOrEqualTo(0.0F);
 
-                option("enableWorkStealing")
-                    .docs(
-                        "Enables work stealing/task-thread affinity. This will try and attempt to keep tasks on the same tick thread",
-                        "to improve performance. If this is enabled, and the task misses its deadline by \"stealThresholdMillis\", it can",
-                        "be taken by another tick thread to be run."
-                    );
-
-                option("enableMidTickTasks").docs("Enables the affinity scheduler to run intermediate tasks while waiting for the deadline of the currently owned tick");
                 option("tickRegionAffinity")
                     .docs("Thread affinity for the AFFINITY scheduler provided by Canvas. By using this, you could pin the threads of region scheduler to cpu cores")
                     .greaterThanOrEqualTo(0.0F);
-
                 option("enableAffinitySchedulerCpuAffinity").docs("Enables pinning threads of the AFFINITY region scheduler to cpu cores");
             }
 
             public long stealThresholdMillis = AffinitySchedulerThreadPool.DEFAULT_STEAL_THRESH_MILLIS;
             public double runTasksBufferMillis = AffinitySchedulerThreadPool.DEFAULT_RUN_TASKS_BUFFER_MILLIS;
-            public boolean enableWorkStealing = true;
-            public boolean enableMidTickTasks = true;
+
             public int[] tickRegionAffinity = new int[0];
             public boolean enableAffinitySchedulerCpuAffinity = false;
         }
@@ -337,12 +374,10 @@ public class GlobalConfiguration extends Part {
                 .docs(
                     Style.wrap(
                         "Canvas introduces extra tick thread checks to help catch plugin issues. This determines how aggressive the new guards are"
-                    ).defineEnum(GuardSeverity.class, (severity) -> {
-                        return switch (severity) {
-                            case LOG -> "Just logs a warning in console, but continues the operation";
-                            case THROW -> "Throws an exception, can crash the server. Good for ensuring correctness";
-                            case SILENT -> "Doesn't say anything or do anything";
-                        };
+                    ).defineEnum(GuardSeverity.class, (severity) -> switch (severity) {
+                        case LOG -> "Just logs a warning in console, but continues the operation";
+                        case THROW -> "Throws an exception, can crash the server. Good for ensuring correctness";
+                        case SILENT -> "Doesn't say anything or do anything";
                     })
                 );
         }
@@ -356,13 +391,24 @@ public class GlobalConfiguration extends Part {
             LOG,
             THROW
         }
+
+        {
+            option("preventExcessiveVelocityMoveOutOfRegion").docs(
+                "This option prevents the attempted movement of entities with excessive velocity from exceeding the region bounds",
+                "by setting the velocity of the entity to 0 if it attempts to move outside of the region. Note this option does",
+                "not take collisions into account, and it will calculate this from the raw velocity, which is a much stricter way",
+                "to govern this safe guard. By disabling this, if the entity is still attempting to move out of region after applying",
+                "collisions, a warning will show in console and the entity will instead be teleported to prevent the server from crashing."
+            );
+        }
+
+        public boolean preventExcessiveVelocityMoveOutOfRegion = false;
     }
 
     public ChunkSystem chunkSystem = new ChunkSystem();
     public static class ChunkSystem extends Part {
 
         {
-            option("threadPriority").between(Thread.MIN_PRIORITY, Thread.MAX_PRIORITY);
             option("fluidPostProcessingAlgorithm")
                 .docs(
                     Style.wrap(
@@ -370,28 +416,14 @@ public class GlobalConfiguration extends Part {
                         "which can overload the server and cause stuttering when generating new chunks.",
                         "Depending on the algorithm chosen, this can help reduce stutter and improve performance",
                         "when generating chunks"
-                    ).defineEnum(FluidPostProcessingMode.class, (mode) -> {
-                        return switch (mode) {
-                            case VANILLA -> "Normal post processing algorithm, everything is processed";
-                            case DISABLED -> "Disables fluid post processing entirely";
-                            case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
-                        };
+                    ).defineEnum(FluidPostProcessingMode.class, (mode) -> switch (mode) {
+                        case VANILLA -> "Normal post processing algorithm, everything is processed";
+                        case DISABLED -> "Disables fluid post processing entirely";
+                        case FILTERED -> "C2MEs algorithm to filter unnecessary post processing tasks";
                     })
                 );
-
-            option("makeFluidPostProcessScheduledTick")
-                .docs(
-                    "Enabling this turns fluid post processing into a scheduled tick, which hopefully",
-                    "helps to mitigate MSPT spiking issues during chunk generation"
-                );
-            option("endBiomeCacheSize").greaterThan(0.0F);
-            option("structureOptimizations").docs(
-                "These options are ported from the mod StructureLayoutOptimizer, https://modrinth.com/mod/structure-layout-optimizer",
-                "which optimizes the generation of Jigsaw Structures and NBT pieces"
-            );
         }
 
-        public int threadPriority = Thread.NORM_PRIORITY;
         public FluidPostProcessingMode fluidPostProcessingAlgorithm = FluidPostProcessingMode.VANILLA;
 
         public enum FluidPostProcessingMode {
@@ -400,33 +432,16 @@ public class GlobalConfiguration extends Part {
             FILTERED
         }
 
-        public boolean makeFluidPostProcessScheduledTick = false;
-        public boolean optimizeAquifer = false;
-        public boolean useEndBiomeCache = false;
-        public int endBiomeCacheSize = 1024;
-        public boolean optimizeBeardifier = false;
-
-        public StructureGen structureOptimizations = new StructureGen();
-        public static class StructureGen extends Part {
-
-            {
-                option("deduplicateShuffledTemplatePoolElementList").docs(
-                    Style.wrap(
-                        "Whether to use an alternative strategy to make structure layouts generate slightly faster than",
-                        "the default optimization has for template pool weights. This alternative strategy works by",
-                        "changing the list of pieces that structures collect from the template pool to not have duplicate entries."
-                    )
-                    .blank()
-                    .wordWrap(
-                        "By enabling this option you can get a bit more performance from high weight Template Pool Structures,",
-                        "but you lose parity with Vanilla seeds on the layout of the structure"
-                    )
+        {
+            option("optimizeTreasureMapLocating")
+                .docs(
+                    "Treasure map locating is a very expensive operation, leading to most production servers",
+                    "disabling it. This option tries to optimize the treasure map initial search to make this",
+                    "less expensive on item creation"
                 );
-            }
-
-            public boolean deduplicateShuffledTemplatePoolElementList = false;
-            public boolean enable = false;
         }
+
+        public boolean optimizeTreasureMapLocating = false;
     }
 
     // TODO - check these on minecraft updates
@@ -434,24 +449,38 @@ public class GlobalConfiguration extends Part {
     public static class UpstreamFixes extends Part {
 
         {
-            // should we do these specific or do we try and do better with this?
-            // stream((fieldName) -> {
-            //     if (fieldName.startsWith("mc")) {
-            //         // this is a specific minecraft fix
-            //         return new OptionDefinition()
-            //             .docs(
-            //                 Style.create().literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
-            //             );
-            //     }
-            //     return null;
-            // });
-            option("pearlDuplication")
-                .docs(
-                    "There is a Vanilla bug where in-flight pearls are duplicated at shutdown. This fixes that when",
-                    "the option \"restoreVanillaEnderPearlBehavior\" is enabled alongside this."
-                );
+            stream((fieldName, option) -> {
+                if (fieldName.startsWith("mc")
+                    && fieldName.substring(2).chars().allMatch(Character::isDigit)) {
+                    // this is a specific minecraft fix
+                    option.docs(
+                        Style.create()
+                            .literal("https://bugs.mojang.com/browse/MC/issues/MC-" + fieldName.substring(2))
+                    );
+                }
+            });
+
+            option("mc261810").docs("Fixes low firework propulsion in the void");
+            option("mc298464").docs("Fixes a memory leak related to Hoglin removal due to CHANGED_DIMENSION");
+            option("mc223153").docs("Fixes blocks of raw copper using stone sounds instead of copper sounds");
+            option("mc200418").docs("Fixes cured baby zombies staying as jockey variants");
+            // NOTE: Marked as fixed but isn't; look at affected versions instead
+            option("mc94054").docs("Fixes cave spiders and spiders with the small scale attribute spinning around when walking");
+            option("mc245394").docs("Fixes raid horn blare sounds being controlled by the Friendly Creatures sound slider");
+            option("mc227337").docs("Fixes explosion sounds and particles not being produced when a shulker bullet hits an entity");
+            option("mc221257").docs("Fixes shulker bullets not producing bubble particles when moving through water");
+            option("mc206922").docs("Fixes item drops by entities that were killed by lightning instantly disappearing");
+            option("mc155509").docs("Fixes dying puffed pufferfishes still stinging players");
+            option("mc132878").docs("Fixes armor stands destroyed by explosions/lava/fire not producing particles");
+            option("mc121706").docs("Fixes skeletons and illusioners not looking up/down at their target while strafing");
+            option("mc119754").docs("Fixes elytra firework boosts continuing while in spectator mode");
+            option("mc100991").docs("Fixes killing entities with a fishing rod not counting as a kill");
+            option("mc30391").docs("Fixes chickens, blazes and withers emitting particles during landing despite falling slowly");
+            option("mc183990").docs("Fixes group AI of some mobs breaking when their target dies");
+            option("mc136249").docs("Fixes wearing enchanted boots with depth strider decreasing the strength of the riptide enchantment");
         }
 
+        public boolean mc261810 = false;
         public boolean mc298464 = false;
         public boolean mc223153 = false;
         public boolean mc200418 = false;
@@ -468,7 +497,6 @@ public class GlobalConfiguration extends Part {
         public boolean mc30391 = false;
         public boolean mc183990 = false;
         public boolean mc136249 = false;
-        public boolean pearlDuplication = false;
     }
 
     public Networking networking = new Networking();
@@ -489,72 +517,49 @@ public class GlobalConfiguration extends Part {
                     "If alternative playerlist tick is enabled, this is the interval in ticks for how often",
                     "each bucket will be ticked"
                 ).greaterThan(0.0F);
-            option("asyncProtocolSwitch")
+            option("purpurAlternativeKeepalive")
                 .docs(
-                    "This makes protocol switching asynchronous during login, which reduces global region blocking",
-                    "and can improve login and configuration phase performance during player join"
-                );
+                    Style.create()
+                        .wordWrap(
+                            "Uses a different approach to keepalive ping timeouts.",
+                            "Enabling this sends a keepalive packet once per second to a player, and only kicks for timeout if none of them were responded to in 30 seconds.",
+                            "Responding to any of them in any order will keep the player connected.")
+                        .blank()
+                        .wordWrap("AKA, it won't kick your players because one packet gets dropped somewhere along the lines"));
 
-            option("maximumPacketBytes")
-                .docs(
-                    "The maximum bytes that can be sent by the server in a single packet to a player before kicking them"
-                ).greaterThan(0.0F);
-            option("disablePaperPacketOverflowContainerFix")
-                .docs(
-                    "This disables Papers overflow fallback for large container packets being sent to the client. This means",
-                    "that if the container data is too large, it will kick the player if they attempt to open a container",
-                    "with contents larger than the max packet byte size"
-                );
-            option("packetTooLargeDisconnectReason")
-                .docs(
-                    "The disconnect reason sent to the client when the server attempted to send a packet that",
-                    "exceeded the max packet size"
-                );
+            option("flushLocationWhileKnockback")
+                .docs("Derived from Leaf, this synchronizes the player immediately when knocked back");
         }
 
         public boolean filterVelocityPacket = false;
         public boolean filterMovePackets = false;
         public boolean alternativePlayerListTick = false;
         public int playerInfoSendInterval = 600;
-        public boolean asyncProtocolSwitch = false;
-        public int maximumPacketBytes = 8388608;
-        public boolean disablePaperPacketOverflowContainerFix = false;
-        public String packetTooLargeDisconnectReason = "Clientbound packet exceeded max packet bytes";
         public boolean purpurAlternativeKeepalive = false;
+
+        // Originally from Leaf: https://github.com/Winds-Studio/Leaf/blob/58a4a9cb7994474e63ba49205cd21e89f8dacc9a/leaf-server/minecraft-patches/features/0216-Flush-location-while-knockback.patch
+        // License described in Leaf-Flush-location-while-knockback.patch
+        public boolean flushLocationWhileKnockback = false;
     }
 
     {
         option("serverModName").docs("The server mod name displayed in server listings and client info").word();
-        option("restoreVanillaEnderPearlBehavior").docs("Restores and fixes Vanilla Ender Pearl behavior, broken by Folia");
 
-        option("displayWorldLoadScreenForPortaling")
+        option("displayWorldLoadScreenForCrossRegionTransfers")
             .docs(
                 "Folia's portaling rewrite makes the world loading screen not display on the client properly, and",
                 "instead shows an empty void. With this enabled, Canvas will display the proper world loading screen"
             );
         option("cacheMinecraft2BukkitEntityTypeConversion").docs("Whether to cache expensive CraftEntityType#minecraftToBukkit call");
         option("tileEntitySnapshotCreation").docs("Enables creation of tile entity snapshots on retrieving blockstates");
-
-        option("defaultRespawnDimensionKey")
-            .docs(
-                "The default respawn dimension for the server. This can assist servers needing to change this to a",
-                "different world due to setup reasoning, like needing to send players to the \"spawn\" world or something.",
-                "This also applies to the end portal and nether portal, in replacement of the overworld, meaning the",
-                "target dimension for entities going from the nether for example will be sent here"
-            ).identifier(); // TODO - object mapping?
     }
 
     public String serverModName = ServerBuildInfo.buildInfo().brandName();
-    public boolean restoreVanillaEnderPearlBehavior = false;
-    public boolean displayWorldLoadScreenForPortaling = true;
-    public boolean displayWorldLoadScreenForTeleporting = true;
+
+    public boolean displayWorldLoadScreenForCrossRegionTransfers = true;
+
     public boolean cacheMinecraft2BukkitEntityTypeConversion = false;
     public boolean tileEntitySnapshotCreation = false;
-    public String defaultRespawnDimensionKey = Level.OVERWORLD.identifier().toString();
-
-    public static @NonNull ResourceKey<@NonNull Level> fetchRespawnDimensionKey() {
-        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(GlobalConfiguration.getInstance().defaultRespawnDimensionKey));
-    }
 
     public PurpurContainers purpurContainers = new PurpurContainers();
     public static class PurpurContainers extends Part {
@@ -582,8 +587,11 @@ public class GlobalConfiguration extends Part {
         public boolean enderChestPersistHiddenRows = true;
     }
 
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringNetherPortals = false;
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringEndPortals = false;
+    @Undocumented("Doesn't require docs.")
     public boolean blacklistNonPlayerEntitiesFromEnteringGatewayPortals = false;
 
     public Chat chat = new Chat();
@@ -599,16 +607,66 @@ public class GlobalConfiguration extends Part {
     }
 
     public Logs logs = new Logs();
+
     public static class Logs extends Part {
 
         {
             option("enableLogCleaner").docs("Auto-removes old log files from the \"logs\" directory");
-            option("length").docs("The amount of the time unit until the log file is marked for deletion");
-            option("unit").docs("The type of time unit to use when comparing how old the file is to the current time");
+            option("cleanerTimeSpan").docs("The amount of the time since the log file was last edited until it will be deleted");
+            option("logEnderPearlRewriteActions").docs("Logs when a pearl is saved or loaded from Canvas' pearl save rewrite");
         }
 
-        public boolean enableLogCleaner = false;
-        public long length = 30;
-        public ChronoUnit unit = ChronoUnit.DAYS;
+        private boolean enableLogCleaner = false;
+        private String cleanerTimeSpan = "30d";
+        public boolean logEnderPearlRewriteActions = true;
+    }
+
+    public EnchantCommand enchantCommand = new EnchantCommand();
+    public static class EnchantCommand extends Part {
+
+        {
+            option("uncapMaxLevel").docs("Uncaps the max level, allowing you to enchant to any level, even beyond the max");
+            option("allowEnchantsOnUnsupportedItems").docs("Allows setting enchants on items that normally do not support that enchantment");
+            option("allowEnchantingWithIncompatibleEnchants").docs("Allows setting enchants on items with incompatible enchants. e.g. Protection & Blast Protection");
+        }
+
+        public boolean uncapMaxLevel = false;
+        public boolean allowEnchantsOnUnsupportedItems = false;
+        public boolean allowEnchantingWithIncompatibleEnchants = false;
+    }
+
+    {
+        option("disableLocatorBarInAllWorlds").docs("Disables the locator bar globally, removing the need to disable it using gamerules per-world");
+    }
+
+    public boolean disableLocatorBarInAllWorlds = false;
+
+    {
+        option("autosave").docs(
+            "Folia breaks a lot of autosave features. Canvas restores these,",
+            "and this section allows more specific configuration of autosave functionalities"
+        );
+    }
+
+    public Autosave autosave = new Autosave();
+
+    @Undocumented("Doesn't require docs.")
+    public static class Autosave extends Part {
+
+        {
+            option("autosaveFrequency").docs("The time frequency of how often to autosave the enabled selection. Default is 5 minutes to match upstream");
+        }
+
+        private String autosaveFrequency = "5m";
+
+        public boolean autosaveScoreboards = true;
+        public boolean autosaveStopwatches = true;
+        public boolean autosavePearls = true;
+        public boolean autosaveCustomBossEvents = true;
+        public boolean autosaveTime = true;
+        public boolean autosaveMaps = true;
+        public boolean autosaveWeather = true;
+        public boolean autosaveGamerules = true;
+        public boolean autosavePlayers = true;
     }
 }

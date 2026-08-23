@@ -4,6 +4,7 @@ import io.canvasmc.canvas.configuration.ConfigurationProvider;
 import io.canvasmc.canvas.configuration.Part;
 import io.canvasmc.canvas.configuration.Resolver;
 import io.canvasmc.canvas.configuration.Style;
+import io.canvasmc.canvas.configuration.Undocumented;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.util.CanonicalReference;
 import io.papermc.paper.adventure.PaperAdventure;
@@ -23,10 +24,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@NullMarked
 public class WorldConfig extends Part {
 
     // all constants for configurations go here
@@ -56,7 +59,13 @@ public class WorldConfig extends Part {
         //noinspection ResultOfMethodCallIgnored
         GlobalConfiguration.getInstance(); // preload global
 
-        reload();
+        try {
+            reload();
+        } catch (final Throwable thrown) {
+            // we at least need to make sure this is logged
+            LOGGER.error("Couldn't load Canvas worlds default configuration", thrown);
+            throw thrown;
+        }
     }
 
     public static void reload() {
@@ -115,7 +124,7 @@ public class WorldConfig extends Part {
         );
 
         // on reload, if the server started, we need to swap out the configs
-        if (TickRegions.started) {
+        if (TickRegions.hasStarted()) {
             for (final ServerLevel level : MinecraftServer.getServer().getAllLevels()) {
 
                 // this will swap the config with the new patchable variant
@@ -126,14 +135,13 @@ public class WorldConfig extends Part {
         }
     }
 
-    public static WorldConfig buildForLevel(final @NonNull ServerLevel level, final ResourceKey<Level> dimension) {
+    public static WorldConfig buildForLevel(final ServerLevel level, final ResourceKey<Level> dimension) {
 
         // we build it as a patch here, and from here we can set the level properly
         final WorldConfig[] result = new WorldConfig[1];
 
         ConfigurationProvider.buildPatchableConfiguration(
-            MinecraftServer.getServer().storageSource.getDimensionPath(dimension)
-                .resolve("canvas-patch.yml"),
+            MinecraftServer.getServer().storageSource.getDimensionPath(dimension).resolve("canvas-patch.yml"),
             BASE_FILE,
             WorldConfig::new,
             instance -> {
@@ -161,7 +169,7 @@ public class WorldConfig extends Part {
         return result[0];
     }
 
-    private void onLoad(final @NonNull ServerLevel level) {
+    private void onLoad(final ServerLevel level) {
 
         // validate the object here too, because some users may do
         // something stupid in the patch variant
@@ -224,6 +232,7 @@ public class WorldConfig extends Part {
     }
 
     public Visuals visuals = new Visuals();
+    @Undocumented("Doesn't require docs.")
     public static class Visuals extends Part {
 
         {
@@ -238,6 +247,7 @@ public class WorldConfig extends Part {
         public boolean hideFlamesOnEntitiesWithInvisibility = false;
 
         public Particles particles = new Particles();
+        @Undocumented("Doesn't require docs.")
         public static class Particles extends Part {
 
             {
@@ -273,6 +283,7 @@ public class WorldConfig extends Part {
     public boolean disableGrassLightChecks = false;
 
     public Farming farming = new Farming();
+    @Undocumented("Doesn't require docs.")
     public static class Farming extends Part {
 
         {
@@ -304,15 +315,13 @@ public class WorldConfig extends Part {
             option("entityCollisionMode")
                 .docs(
                     Style.wrap("The entity collision mode for the server")
-                        .defineEnum(EntityCollisionMode.class, (mode) -> {
-                            return switch (mode) {
-                                case VANILLA -> "Default, all entities have collisions";
-                                case ONLY_PUSHABLE_PLAYERS_SMALL ->
-                                    "Only players are pushable by entities, searching in a small radius";
-                                case ONLY_PUSHABLE_PLAYERS_LARGE ->
-                                    "Only players are pushable by entities, searching in the normal radius";
-                                case NO_COLLISIONS -> "Disables entity collisions entirely";
-                            };
+                        .defineEnum(EntityCollisionMode.class, (mode) -> switch (mode) {
+                            case VANILLA -> "Default, all entities have collisions";
+                            case ONLY_PUSHABLE_PLAYERS_SMALL ->
+                                "Only players are pushable by entities, searching in a small radius";
+                            case ONLY_PUSHABLE_PLAYERS_LARGE ->
+                                "Only players are pushable by entities, searching in the normal radius";
+                            case NO_COLLISIONS -> "Disables entity collisions entirely";
                         })
                 );
         }
@@ -336,7 +345,9 @@ public class WorldConfig extends Part {
                     );
             }
 
+            @Undocumented("Doesn't require docs.")
             public boolean itemEntitiesImmuneToExplosions = false;
+            @Undocumented("Doesn't require docs.")
             public boolean itemEntitiesImmuneToLightning = false;
             public double itemEntityVelocityOnDeathFactor = 1.0D;
             public boolean itemEntitiesWaitTwoSecondsForMergeCheckAlways = false;
@@ -403,7 +414,9 @@ public class WorldConfig extends Part {
                     );
             }
 
+            @Undocumented("Doesn't require docs.")
             public int maxProjectileChunkLoadsPerTick = 10;
+            @Undocumented("Doesn't require docs.")
             public int maxProjectileChunkLoadsPerProjectileBeforeRemoval = 10;
             public List<String> loadChunks = new ArrayList<>();
             public boolean crossRegionRedirectableProjectileDeflection = false;
@@ -428,6 +441,7 @@ public class WorldConfig extends Part {
         public double skeletonAimAccuracy = 14.0D;
 
         public Villagers villagers = new Villagers();
+        @Undocumented("Doesn't require docs.")
         public static class Villagers extends Part {
 
             {
@@ -441,7 +455,10 @@ public class WorldConfig extends Part {
             public boolean reduceMeetingPointPoiSearchRange = false;
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean experienceOrbsAreFireResistant = false;
+        @Undocumented("Doesn't require docs.")
+        public boolean experienceOrbsImmuneToExplosions = false;
     }
 
     public Combat combat = new Combat();
@@ -468,27 +485,23 @@ public class WorldConfig extends Part {
         }
 
         {
-            // TODO - can we restore this? the issue with this is that plugins can change this, and entities
-            //        can change worlds, which complicates this logic
-            // option("invulnerabilityTicks")
-            //     .docs(
-            //         "When an entity is damaged, it has 10 ticks of \"invulnerability time\" until it can be",
-            //         "damaged next. This configuration lets you control the amount of invulnerability time",
-            //         "that is applied to the entity. 0 meaning invulnerability isn't applied"
-            //     ).greaterThan(0.0F);
             option("criticalHitMultiplier").docs("Configures the damage modifier per critical hit");
             option("removeRedDeathAnimation").docs("Removes the red death animation seen on entities when killed");
             option("useLegacyBlastProtection").docs("Restores the blast protection logic from before 1.21");
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean disableSweepingEdge = false;
+        @Undocumented("Doesn't require docs.")
         public boolean disableCritsWhileSprinting = false;
-        // public int invulnerabilityTicks = 10;
+        @Undocumented("Doesn't require docs.")
         public boolean allowFishingRodsToPullEntities = true;
         public float criticalHitMultiplier = 1.5F;
         public boolean removeRedDeathAnimation = false;
         public boolean useLegacyBlastProtection = false;
+        @Undocumented("Doesn't require docs.")
         public boolean snowballCanKnockbackPlayers = false;
+        @Undocumented("Doesn't require docs.")
         public boolean eggCanKnockbackPlayers = false;
     }
 
@@ -511,7 +524,9 @@ public class WorldConfig extends Part {
                 );
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean chestsCanOpenWithFullBlockAbove = false;
+        @Undocumented("Doesn't require docs.")
         public boolean fullChiseledBookShelvesCountAsValidEnchantPowerSources = false;
 
         public Spawner spawner = new Spawner();
@@ -566,6 +581,8 @@ public class WorldConfig extends Part {
     public boolean enableSuffocationOptimization = false;
 
     public Sleeping sleeping = new Sleeping();
+
+    @SuppressWarnings("FieldMayBeFinal")
     public static class Sleeping extends Part {
 
         // the following options are based of PurpurMC:
@@ -613,6 +630,7 @@ public class WorldConfig extends Part {
             return sleepNotPossible.isBlank();
         }
 
+        @Nullable
         public Component getSleepSkippingNight() {
             if (sleepSkippingNightDisabled()) {
                 return null;
@@ -629,6 +647,7 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Nullable
         public Component getSleepingPlayersPercent(int amountSleeping, int sleepersNeeded) {
             if (sleepingPlayersPercentDisabled()) {
                 return null;
@@ -647,6 +666,7 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Nullable
         public Component getSleepNotPossible() {
             if (sleepNotPossibleDisabled()) {
                return null;
@@ -663,8 +683,11 @@ public class WorldConfig extends Part {
             return message;
         }
 
+        @Undocumented("Doesn't require docs.")
         public boolean sleepIgnoresNearbyMobs = false;
+        @Undocumented("Doesn't require docs.")
         public boolean rainStopsAfterSleep = true;
+        @Undocumented("Doesn't require docs.")
         public boolean thunderStopsAfterSleep = true;
     }
 

@@ -1,7 +1,7 @@
 package io.canvasmc.canvas.util.ticket;
 
+import java.util.Objects;
 import java.util.function.Consumer;
-import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -9,8 +9,11 @@ import org.jspecify.annotations.Nullable;
  *
  * @param <T>
  *     the ticket type, must be a record
+ *
+ * @author dueris
  */
 public class TicketHolder<T extends Record> {
+    @Nullable
     private volatile T ticket;
 
     /**
@@ -30,8 +33,10 @@ public class TicketHolder<T extends Record> {
      */
     @Nullable
     public T pop() {
-        T ticket = this.ticket;
-        this.ticket = null;
+        final T ticket = this.ticket;
+        synchronized (this) {
+            this.ticket = null;
+        }
         return ticket;
     }
 
@@ -43,11 +48,8 @@ public class TicketHolder<T extends Record> {
      * @throws IllegalStateException
      *     if not present
      */
-    @NonNull
     public T popOrThrow() {
-        T popped = pop();
-        if (popped == null) throw new IllegalStateException("Not propagated");
-        return popped;
+        return Objects.requireNonNull(pop(), "not propagated");
     }
 
     /**
@@ -57,7 +59,7 @@ public class TicketHolder<T extends Record> {
      * @param ifContained
      *     the consumer
      */
-    public void consumeIfPresent(final @NonNull Consumer<T> ifContained) {
+    public void consumeIfPresent(final Consumer<T> ifContained) {
         // fetch and remove, if not null consume ticket
         final T popped = pop();
         if (popped != null) {
@@ -83,11 +85,13 @@ public class TicketHolder<T extends Record> {
      * @throws IllegalStateException
      *     when a ticket is already present
      */
-    public void propagate(T ticket) {
-        if (this.ticket != null) {
-            throw new IllegalStateException("Ticket already propagated");
+    public void propagate(final T ticket) {
+        synchronized (this) {
+            if (this.ticket != null) {
+                throw new IllegalStateException("Ticket already propagated");
+            }
+            this.ticket = ticket;
         }
-        this.ticket = ticket;
     }
 
     /**
@@ -98,10 +102,7 @@ public class TicketHolder<T extends Record> {
      * @throws IllegalStateException
      *     if not present
      */
-    @NonNull
     public T getOrThrow() {
-        T popped = get();
-        if (popped == null) throw new IllegalStateException("Not propagated");
-        return popped;
+        return Objects.requireNonNull(get(), "not propagated");
     }
 }

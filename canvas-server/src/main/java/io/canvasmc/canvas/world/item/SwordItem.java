@@ -17,7 +17,7 @@ import org.jspecify.annotations.NullMarked;
 
 @NullMarked
 public class SwordItem extends Item {
-    public static final BlocksAttacks BLOCKS_ATTACKS = new BlocksAttacks(
+    private static final BlocksAttacks BLOCKS_ATTACKS = new BlocksAttacks(
         0.0F, 0.0F,
         List.of(new BlocksAttacks.DamageReduction(90.0F, Optional.empty(), 0.0F, 0.5F)),
         new BlocksAttacks.ItemDamageFunction(Integer.MAX_VALUE, 0.0F, 1.0F),
@@ -25,45 +25,42 @@ public class SwordItem extends Item {
         Optional.empty(),
         Optional.empty()
     );
+
     public SwordItem(final Properties properties) {
         super(properties);
     }
 
     @Override
     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
-        // Vanilla start
-        // we mark this because this is pure Vanilla code injection in a non-vanilla class
-        // so it is appropriate to mark it as such
-        ItemStack itemInHand = player.getItemInHand(hand);
-        Consumable consumable = itemInHand.get(DataComponents.CONSUMABLE);
+        final ItemStack itemInHand = player.getItemInHand(hand);
+        final Consumable consumable = itemInHand.get(DataComponents.CONSUMABLE);
+
         if (consumable != null) {
             return consumable.startConsuming(player, itemInHand, hand);
-        } else {
-            Equippable equippable = itemInHand.get(DataComponents.EQUIPPABLE);
-            if (equippable != null && equippable.swappable()) {
-                return equippable.swapWithEquipmentSlot(itemInHand, player);
-            } else {
-                BlocksAttacks blocksAttacks = itemInHand.get(DataComponents.BLOCKS_ATTACKS);
-                if (blocksAttacks != null) {
-                    player.startUsingItem(hand);
-                    return InteractionResult.CONSUME;
-                } else {
-                    // Canvas start - implement sword blocking
-                    // we already know this is a sword, so we just apply the component for block attacks on this
-                    if (level.canvasConfig().combat.imitateSwordBlocking) {
-                        // this doesn't have block attacks. add it.
-                        itemInHand.set(DataComponents.BLOCKS_ATTACKS, BLOCKS_ATTACKS);
-                        player.inventoryMenu.broadcastChanges();
-                        player.startUsingItem(hand);
-                        player.canvas$isTemporarilyBlocking = true;
-                        return InteractionResult.CONSUME;
-                    }
-                    // Canvas end - implement sword blocking
-                    return InteractionResult.PASS;
-                }
-            }
         }
-        // Vanilla end
+
+        final Equippable equippable = itemInHand.get(DataComponents.EQUIPPABLE);
+        if (equippable != null && equippable.swappable()) {
+            return equippable.swapWithEquipmentSlot(itemInHand, player);
+        }
+
+        final BlocksAttacks blocksAttacks = itemInHand.get(DataComponents.BLOCKS_ATTACKS);
+        if (blocksAttacks != null) {
+            player.startUsingItem(hand);
+            return InteractionResult.CONSUME;
+        }
+
+        // we already know this is a sword, so we just apply the component for block attacks on this
+        if (level.canvasConfig().combat.imitateSwordBlocking) {
+            // this doesn't have block attacks. add it.
+            itemInHand.set(DataComponents.BLOCKS_ATTACKS, BLOCKS_ATTACKS);
+            player.inventoryMenu.broadcastChanges();
+            player.startUsingItem(hand);
+            player.canvas$isTemporarilyBlocking = true;
+            return InteractionResult.CONSUME;
+        }
+
+        return InteractionResult.PASS;
     }
 
     @Override

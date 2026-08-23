@@ -2,6 +2,7 @@ package io.canvasmc.canvas.util;
 
 import com.google.common.base.Preconditions;
 import io.canvasmc.canvas.ClientV2;
+import io.papermc.paper.threadedregions.TickRegionScheduler;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -29,52 +30,56 @@ import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
 import net.minecraft.world.level.levelgen.Xoroshiro128PlusPlus;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import org.bukkit.World;
-import org.jetbrains.annotations.Contract;
-import org.jspecify.annotations.NonNull;
+import org.jetbrains.annotations.ApiStatus;
 import org.jspecify.annotations.Nullable;
 
 import static net.kyori.adventure.text.Component.text;
 
+/**
+ * Generic utilities for Canvas
+ */
 public class Util {
+    /**
+     * The API client for the {@code canvas} project slug
+     */
     public static final ClientV2 CANVAS_CLIENT = ClientV2.getClientFor("canvas");
 
-    private static final ThreadLocal<XoroshiroRandomSource> xoroshiro = ThreadLocal.withInitial(() -> new XoroshiroRandomSource(0L, 0L));
-    private static final ThreadLocal<SingleThreadedRandomSource> simple = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));
+    private static final ThreadLocal<XoroshiroRandomSource> XOROSHIRO = ThreadLocal.withInitial(() -> new XoroshiroRandomSource(0L, 0L));
+    private static final ThreadLocal<SingleThreadedRandomSource> SIMPLE = ThreadLocal.withInitial(() -> new SingleThreadedRandomSource(0L));
 
-    public static void derive(PositionalRandomFactory deriver, RandomSource random, int x, int y, int z) {
+    /**
+     * This method is derived from C2ME as part of the aquifer optimizations
+     *
+     * @author ishland
+     */
+    public static void derive(final PositionalRandomFactory deriver, final RandomSource random, final int x, final int y, final int z) {
         if (deriver instanceof final XoroshiroRandomSource.XoroshiroPositionalRandomFactory deriver1) {
             final Xoroshiro128PlusPlus implementation = ((XoroshiroRandomSource) random).randomNumberGenerator;
+            //noinspection deprecation
             implementation.seedLo = (Mth.getSeed(x, y, z) ^ deriver1.seedLo);
             implementation.seedHi = (deriver1.seedHi);
-            return;
         }
-        if (deriver instanceof final LegacyRandomSource.LegacyPositionalRandomFactory deriver1) {
+        else if (deriver instanceof final LegacyRandomSource.LegacyPositionalRandomFactory deriver1) {
             final SingleThreadedRandomSource random1 = (SingleThreadedRandomSource) random;
+            //noinspection deprecation
             random1.setSeed(Mth.getSeed(x, y, z) ^ deriver1.seed);
-            return;
         }
-        throw new IllegalArgumentException();
+        else throw new IllegalArgumentException("unsupported deriver");
     }
 
-    public static RandomSource getThreadLocalRandom(PositionalRandomFactory deriver) {
-        if (deriver instanceof XoroshiroRandomSource.XoroshiroPositionalRandomFactory) {
-            return xoroshiro.get();
-        }
-        if (deriver instanceof LegacyRandomSource.LegacyPositionalRandomFactory) {
-            return simple.get();
-        }
-        throw new IllegalArgumentException();
-    }
-
-    @Contract("null -> fail")
-    public static @NonNull RandomSource getRandom(PositionalRandomFactory deriver) {
+    /**
+     * This method is derived from C2ME as part of the aquifer optimizations
+     *
+     * @author ishland
+     */
+    public static RandomSource getRandom(final PositionalRandomFactory deriver) {
         if (deriver instanceof XoroshiroRandomSource.XoroshiroPositionalRandomFactory) {
             return new XoroshiroRandomSource(0L, 0L);
         }
         if (deriver instanceof LegacyRandomSource.LegacyPositionalRandomFactory) {
             return new SingleThreadedRandomSource(0L);
         }
-        throw new IllegalArgumentException();
+        throw new IllegalArgumentException("unsupported deriver");
     }
 
     /**
@@ -82,9 +87,9 @@ public class Util {
      *
      * @author ishland
      */
-    public static <T> T joinFuture(@NonNull CompletableFuture<T> future) {
+    public static <T> T joinFuture(final CompletableFuture<T> future) {
         while (!future.isDone()) {
-            LockSupport.parkNanos("Waiting for future", 100000L);
+            LockSupport.parkNanos("Waiting for future", 100_000L);
         }
         return future.join();
     }
@@ -103,11 +108,11 @@ public class Util {
      *
      * @author dueris
      */
-    public static boolean waitFor(@NonNull CompletableFuture<Void> future, @NonNull TimeUnit unit, long wait) {
-        long waitInNanos = unit.toNanos(wait);
-        long targetNanos = System.nanoTime() + waitInNanos;
+    public static boolean waitFor(final CompletableFuture<Void> future, final TimeUnit unit, final long wait) {
+        final long waitInNanos = unit.toNanos(wait);
+        final long targetNanos = System.nanoTime() + waitInNanos;
         while (!future.isDone()) {
-            long remaining = targetNanos - System.nanoTime();
+            final long remaining = targetNanos - System.nanoTime();
             if (remaining <= 0) break;
 
             LockSupport.parkNanos("Waiting for future", Math.min(remaining, 1_000_000L));
@@ -115,7 +120,18 @@ public class Util {
         return future.isDone();
     }
 
-    public static void removeDirectoryContentsIf(final @NonNull File directory, final Predicate<Path> removeIf) {
+    /**
+     * Removes the files from the provided directory if the path predicate passes
+     *
+     * @param directory
+     *     the directory to search
+     * @param removeIf
+     *     the predicate to test with
+     *
+     * @throws java.lang.IllegalArgumentException
+     *     if the file provided is not a directory
+     */
+    public static void removeDirectoryContentsIf(final File directory, final Predicate<Path> removeIf) {
         Preconditions.checkArgument(directory.isDirectory(), "File provided was not a directory");
         try (final Stream<Path> stream = Files.walk(directory.toPath(), 1)) {
             final List<Path> collected = stream.filter(p -> !p.equals(directory.toPath())).toList();
@@ -124,12 +140,24 @@ public class Util {
                     Files.delete(path);
                 }
             }
-        } catch (IOException ioe) {
+        } catch (final IOException ioe) {
             throw new RuntimeException("Couldn't clear directory contents", ioe);
         }
     }
 
-    public static @NonNull Component gradient(final String textContent, final @Nullable Consumer<Style.Builder> style, final TextColor... colors) {
+    /**
+     * Constructs a Kyori text component with a gradient based off the text colors provided
+     *
+     * @param textContent
+     *     the raw text content of the component
+     * @param style
+     *     the nullable style specifications to be applied before the gradient colors are applied
+     * @param colors
+     *     the colors to build a gradient from
+     *
+     * @return the compiled Kyori component with the color gradient text
+     */
+    public static Component gradient(final String textContent, final @Nullable Consumer<Style.Builder> style, final TextColor... colors) {
         final Gradient gradient = new Gradient(colors);
         final TextComponent.Builder builder = text();
         if (style != null) {
@@ -148,12 +176,13 @@ public class Util {
      * {@link net.minecraft.resources.Identifier#toDebugFileName()} return value, but removes the {@code minecraft_}
      * part at the start of the string if the namespace is
      * {@link net.minecraft.resources.Identifier#DEFAULT_NAMESPACE}.
+     *
      * @param level
      *     the level
      *
      * @return the level name used by Canvas internals
      */
-    public static String getLevelName(final @NonNull Level level) {
+    public static String getLevelName(final Level level) {
         final Identifier dimensionId = level.dimension().identifier();
         final String dimensionName = dimensionId.toDebugFileName();
         if (dimensionId.getNamespace().equalsIgnoreCase(Identifier.DEFAULT_NAMESPACE)) {
@@ -173,7 +202,7 @@ public class Util {
      *
      * @return the world name used by Canvas internals
      */
-    public static String getWorldName(final @NonNull World world) {
+    public static String getWorldName(final World world) {
         final Identifier dimensionId = Identifier.parse(world.key().asString());
         final String dimensionName = dimensionId.toDebugFileName();
         if (dimensionId.getNamespace().equalsIgnoreCase(Identifier.DEFAULT_NAMESPACE)) {
@@ -190,11 +219,11 @@ public class Util {
      *
      * @return the capitalized text
      */
-    public static @NonNull String capitalize(final @NonNull String text) {
+    public static String capitalize(final String text) {
         if (text.isEmpty()) {
             return text;
         }
-        return Character.toUpperCase(text.charAt(0)) + text.substring(1).toLowerCase();
+        return Character.toUpperCase(text.charAt(0)) + text.substring(1);
     }
 
     /**
@@ -205,7 +234,7 @@ public class Util {
      *
      * @return the text in camel case
      */
-    public static @NonNull String snakeToCamel(final @NonNull String text) {
+    public static String snakeToCamelCase(final String text) {
         if (text.isEmpty()) {
             return text;
         }
@@ -222,7 +251,135 @@ public class Util {
         return result.toString();
     }
 
-    public static final class Gradient {
+    /**
+     * Formats scheduled time between the base nanoseconds and the target nanoseconds into a readable string to the
+     * largest whole unit
+     *
+     * @param baseNanos
+     *     the base nanoseconds
+     * @param targetNanos
+     *     the target nanoseconds
+     *
+     * @return the pretty-printed scheduled time
+     *
+     * @implNote If the target is less than the base, the output will result in saying {@code <unit> ago}.
+     *     Otherwise, it will output in the future tense, {@code in <unit>}
+     */
+    public static String formatTargetTime(final long baseNanos, final long targetNanos) {
+        final long diffNanos = targetNanos - baseNanos;
+        final boolean past = diffNanos < 0;
+        final long abs = Math.abs(diffNanos);
+        final String amount = formatNanosToLargestWholeUnit(abs);
+
+        return past ? amount + " ago" : "in " + amount;
+    }
+
+    /**
+     * Formats the provided nanoseconds to the largest decimal unit as a string
+     *
+     * @param nanos
+     *     the amount of nanoseconds to convert
+     *
+     * @return the converted nanoseconds to the largest decimal unit. e.g. "5.3s", "10.1ms", etc.
+     */
+    public static String formatNanosToLargestDecimalUnit(final long nanos) {
+        if (nanos < 1_000L)
+            return truncateToSecondDecimal(nanos) + "ns";
+
+        if (nanos < 1_000_000_000L) {
+            final double ms = nanos / 1_000_000D;
+            return truncateToSecondDecimal(ms) + "ms";
+        }
+
+        final double seconds = nanos / 1_000_000_000D;
+
+        if (seconds < 60)
+            return truncateToSecondDecimal(seconds) + "s";
+
+        if (seconds < 3_600)
+            return pluralDecimal(seconds / 60, "minute");
+
+        if (seconds < 86_400)
+            return pluralDecimal(seconds / 3_600, "hour");
+
+        return pluralDecimal(seconds / 86_400, "day");
+    }
+
+    /**
+     * Formats the provided nanoseconds to the largest whole unit as a string
+     *
+     * @param nanos
+     *     the amount of nanoseconds to convert
+     *
+     * @return the converted nanoseconds to the largest whole unit. e.g. "5s", "10ms", etc.
+     */
+    public static String formatNanosToLargestWholeUnit(final long nanos) {
+        if (nanos < 1_000L)
+            return nanos + "ns";
+
+        if (nanos < 1_000_000_000L) {
+            final long ms = nanos / 1_000_000L;
+            return ms + "ms";
+        }
+
+        final long seconds = nanos / 1_000_000_000L;
+
+        if (seconds < 60)
+            return seconds + "s";
+
+        if (seconds < 3_600)
+            return pluralWhole(seconds / 60, "minute");
+
+        if (seconds < 86_400)
+            return pluralWhole(seconds / 3_600, "hour");
+
+        return pluralWhole(seconds / 86_400, "day");
+    }
+
+    /**
+     * Similar to a generic thread-check from {@link ca.spottedleaf.moonrise.common.util.TickThread}, however this
+     * checks for a specific handle instead of data associated with the handle like a location
+     *
+     * @param handle
+     *     the schedulable handle to check for
+     * @param reason
+     *     the reason if this fails
+     */
+    public static void ensureScheduleHandle(final TickRegionScheduler.RegionScheduleHandle handle, final String reason) {
+        if (handle != TickRegionScheduler.getCurrentTickingTask()) {
+            throw new IllegalStateException(reason);
+        }
+    }
+
+    /**
+     * Allows checking if a boolean flag is enabled leniently. This allows for the user to just declare the flag like
+     * {@code -DCanvas.test} instead of {@code -DCanvas.test=true} for example. This accepts both of those, defaulting
+     * to {@code true} when the {@code =<value>} isn't present.
+     *
+     * @param flag
+     *     the property to search for
+     *
+     * @return the leniently parsed property
+     */
+    public static boolean isFlagEnabled(final String flag) {
+        final String property = System.getProperty(flag);
+        return property != null && (property.isEmpty() || Boolean.parseBoolean(property));
+    }
+
+    private static String pluralDecimal(final double value, final String unit) {
+        return truncateToSecondDecimal(value) + " " + unit + (value == 1 ? "" : "s");
+    }
+
+    private static String pluralWhole(final long value, final String unit) {
+        return value + " " + unit + (value == 1 ? "" : "s");
+    }
+
+    private static String truncateToSecondDecimal(final double value) {
+        return String.format("%.2f", value);
+    }
+
+    @ApiStatus.Internal
+    private static final class Gradient {
         private final boolean negativePhase;
         private final TextColor[] colors;
         private int index = 0;
@@ -230,11 +387,11 @@ public class Util {
         private float factorStep = 0;
         private float phase;
 
-        public Gradient(final @NonNull TextColor... colors) {
+        private Gradient(final TextColor... colors) {
             this(0, colors);
         }
 
-        public Gradient(final float phase, final @NonNull TextColor @NonNull ... colors) {
+        private Gradient(final float phase, final TextColor... colors) {
             if (colors.length < 2) {
                 throw new IllegalArgumentException("Gradients must have at least two colors! colors=" + Arrays.toString(colors));
             }
@@ -253,7 +410,7 @@ public class Util {
             }
         }
 
-        public void length(final int size) {
+        private void length(final int size) {
             this.colorIndex = 0;
             this.index = 0;
             final int sectorLength = size / (this.colors.length - 1);
@@ -261,7 +418,7 @@ public class Util {
             this.phase = this.phase * sectorLength;
         }
 
-        public @NonNull TextColor nextColor() {
+        private TextColor nextColor() {
             if (this.factorStep * this.index > 1) {
                 this.colorIndex++;
                 this.index = 0;
@@ -281,7 +438,7 @@ public class Util {
             }
         }
 
-        private @NonNull TextColor interpolate(final @NonNull TextColor color1, final @NonNull TextColor color2, final float factor) {
+        private TextColor interpolate(final TextColor color1, final TextColor color2, final float factor) {
             return TextColor.color(
                 Math.round(color1.red() + factor * (color2.red() - color1.red())),
                 Math.round(color1.green() + factor * (color2.green() - color1.green())),

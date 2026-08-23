@@ -6,7 +6,7 @@ public abstract class AbstractFoliaChunkInfo<E> extends AbstractChunkInfo<E> {
 
     protected final long foliaRegionId;
 
-    protected AbstractFoliaChunkInfo(int x, int z, ChunkRegionCenter center) {
+    protected AbstractFoliaChunkInfo(final int x, final int z, final ChunkRegionCenter center) {
         super(x, z);
         this.foliaRegionId = center.id();
     }

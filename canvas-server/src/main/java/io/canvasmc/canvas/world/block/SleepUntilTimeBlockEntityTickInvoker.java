@@ -3,7 +3,6 @@ package io.canvasmc.canvas.world.block;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.TickingBlockEntity;
-import org.jetbrains.annotations.NotNull;
 
 public record SleepUntilTimeBlockEntityTickInvoker(BlockEntity sleepingBlockEntity, long sleepUntilTickExclusive,
                                                    TickingBlockEntity delegate) implements TickingBlockEntity {
@@ -24,12 +23,12 @@ public record SleepUntilTimeBlockEntityTickInvoker(BlockEntity sleepingBlockEnti
     }
 
     @Override
-    public @NotNull BlockPos getPos() {
+    public BlockPos getPos() {
         return this.sleepingBlockEntity.getBlockPos();
     }
 
     @Override
-    public @NotNull String getType() {
+    public String getType() {
         //noinspection ConstantConditions
         return this.sleepingBlockEntity.typeHolder().getRegisteredName();
     }

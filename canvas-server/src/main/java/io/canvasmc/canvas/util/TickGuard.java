@@ -4,23 +4,29 @@ import ca.spottedleaf.moonrise.common.util.EntityUtil;
 import ca.spottedleaf.moonrise.common.util.TickThread;
 import ca.spottedleaf.moonrise.common.util.WorldUtil;
 import io.canvasmc.canvas.GlobalConfiguration;
+import io.papermc.paper.threadedregions.RegionShutdownThread;
 import io.papermc.paper.threadedregions.RegionizedServer;
 import io.papermc.paper.threadedregions.TickRegions;
+import java.util.function.BooleanSupplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import org.jspecify.annotations.NonNull;
-
-import java.util.function.BooleanSupplier;
 
 import static ca.spottedleaf.moonrise.common.util.TickThread.getThreadContext;
 import static io.canvasmc.canvas.GlobalConfiguration.LOGGER;
 
+/**
+ * Tick guard utilities for extra Canvas thread checks.
+ *
+ * @author dueris
+ * @deprecated to be removed once <a href="https://github.com/PaperMC/Paper/pull/13924">Paper#13924</a> is merged
+ */
+@Deprecated(forRemoval = true, since = "26.2")
 public class TickGuard {
 
-    public static void guard(final @NonNull BlockPos pos, final Level level, final String reason) {
+    public static void guard(final BlockPos pos, final Level level, final String reason) {
         guard(pos.getX() >> 4, pos.getZ() >> 4, level, reason);
     }
 
@@ -45,15 +51,20 @@ public class TickGuard {
                 // ensure tick thread first, since that is required, then we check and log
                 ensureIsTickThread(reason);
                 if (!TickThread.isTickThreadFor(entity)) {
-                    LOGGER.warn("Thread failed main thread check: {}, context={}, entity={}", reason, getThreadContext(), EntityUtil.dumpEntity(entity), new Throwable());
+                    LOGGER.warn("Thread failed main thread check: {}, context={}, entity={}", reason, getThreadContext(), TickThread.getEntityContext(entity), new Throwable());
                 }
             }
             case THROW -> TickThread.ensureTickThread(entity, reason);
         }
     }
 
+    // TODO - move this to Util when https://github.com/PaperMC/Paper/pull/13924 is merged
     public static void ensureGlobalOrStartup(final String reason) {
-        if (TickRegions.started) {
+        if (RegionShutdownThread.isShutdownThread()) {
+            // just pass, the shutdown thread owns all
+            return;
+        }
+        if (TickRegions.hasStarted()) {
             RegionizedServer.ensureGlobalTickThread(reason);
         }
         else {
@@ -67,7 +78,7 @@ public class TickGuard {
     }
 
     public static void hardThrowIfStarted(final BooleanSupplier isTickThreadFor, final String reason) {
-        if (TickRegions.started && !isTickThreadFor.getAsBoolean()) {
+        if (TickRegions.hasStarted() && !isTickThreadFor.getAsBoolean()) {
             LOGGER.error("Thread failed main thread check: {}, context={}", reason, getThreadContext(), new Throwable());
             throw new IllegalStateException(reason);
         }
