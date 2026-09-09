@@ -442,6 +442,17 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean optimizeTreasureMapLocating = false;
+
+        {
+            option("densityFunctionCompiler")
+                .docs(
+                    "JIT-compiles density function trees to bytecode during worldgen. Ported from Leaf's C2ME",
+                    "DensityFunction compiler. Off by default; enabling can reduce worldgen CPU at the cost of",
+                    "compile time when a dimension's noise router is first built"
+                );
+        }
+
+        public boolean densityFunctionCompiler = false;
     }
 
     // TODO - check these on minecraft updates
