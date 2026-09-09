@@ -442,6 +442,17 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean optimizeTreasureMapLocating = false;
+
+        {
+            option("optimizeEndSurfaceGeneration")
+                .docs(
+                    "Skip the End surface pass when the dimension's surface rule is a single block that already",
+                    "matches the default End stone. The noise terrain is unchanged; only the redundant surface",
+                    "walk is avoided. Ported from Leaf / FastNoise. On by default"
+                );
+        }
+
+        public boolean optimizeEndSurfaceGeneration = true;
     }
 
     // TODO - check these on minecraft updates
