@@ -442,6 +442,29 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean optimizeTreasureMapLocating = false;
+
+        public VisualViewDistance visualViewDistance = new VisualViewDistance();
+        public static class VisualViewDistance extends Part {
+
+            {
+                option("vvDistance")
+                    .docs(
+                        "Extends the client view distance with already loaded chunks that don't get fully loaded into",
+                        "the server, AKA \"fake chunks\". Best used on pre-generated worlds, since this system never",
+                        "generates chunks itself, it only reads what's already on disk. Using on non-pregen worlds could",
+                        "cause visual glitches on the client due to \"lazy loading\""
+                    ).greaterThanOrEqualTo(0.0F);
+                option("hollowChunks")
+                    .docs("Hollows out the \"fake chunks\" loaded by the server to reduce bandwidth");
+            }
+
+            // TODO - hide grass - foliage-like blocks are hard to see from far away, not needed
+            // TODO - andesite -> stone config? basically the same from far away
+            // TODO - neighbor-aware chunk hollowing - this will help bandwidth even more
+            public int vvDistance = 0;
+            public boolean hollowChunks = true;
+            public boolean hideOres = true;
+        }
     }
 
     // TODO - check these on minecraft updates
