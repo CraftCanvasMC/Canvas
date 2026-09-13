@@ -1046,44 +1046,136 @@ index 0000000000000000000000000000000000000000..4467b34664a68a37c4f5904ced7532d9
 +}
 diff --git a/io/canvasmc/canvas/extendedview/VVChunkCache.java b/io/canvasmc/canvas/extendedview/VVChunkCache.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..26a32e7e311953add36c67fa935ada7d8be45731
+index 0000000000000000000000000000000000000000..c38705a6c646fcccdd7cf94644d6ca830462b121
 --- /dev/null
 +++ b/io/canvasmc/canvas/extendedview/VVChunkCache.java
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,129 @@
 +package io.canvasmc.canvas.extendedview;
 +
-+import ca.spottedleaf.concurrentutil.map.concurrent.longs.ConcurrentChainedLong2IntHashTable;
++import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 +import ca.spottedleaf.concurrentutil.map.concurrent.longs.ConcurrentChainedLong2ReferenceHashTable;
 +import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.TimeUnit;
 +
 +public final class VVChunkCache {
-+    private final ConcurrentChainedLong2ReferenceHashTable<CompletableFuture<Result>> cache = new ConcurrentChainedLong2ReferenceHashTable<>();
-+    private final ConcurrentChainedLong2IntHashTable watchers = new ConcurrentChainedLong2IntHashTable();
++    private static final long REMOVE_DELAY_NANOS = TimeUnit.SECONDS.toNanos(5);
++    private static final int DRAIN_INTERVAL = 16;
++    private static final int MAX_DRAIN_PER_CALL = 5;
++
++    private final ConcurrentChainedLong2ReferenceHashTable<Entry> cache = new ConcurrentChainedLong2ReferenceHashTable<>();
++    private final MultiThreadedQueue<Long> order = new MultiThreadedQueue<>();
++
++    private long maybeDrainCounter;
 +
 +    public CompletableFuture<Result> computeIfAbsent(
 +        final long chunkKey,
 +        final ConcurrentChainedLong2ReferenceHashTable.BiLongObjectFunction<? extends CompletableFuture<Result>> builder
 +    ) {
-+        return this.cache.computeIfAbsent(chunkKey, builder);
++        this.maybeDrain();
++        return this.cache.computeIfAbsent(chunkKey, (key) -> new Entry(builder.apply(key))).future;
 +    }
 +
 +    public void remove(final long chunkKey, final CompletableFuture<Result> expect) {
-+        this.cache.remove(chunkKey, expect);
++        this.cache.removeIf(chunkKey, (entry) -> entry.future == expect);
 +    }
 +
 +    public void watch(final long chunkKey) {
-+        this.watchers.addTo(chunkKey, 1, 1);
++        this.maybeDrain();
++        this.cache.compute(
++            chunkKey, (_, entry) -> {
++                final Entry current = entry != null ? entry : new Entry(null);
++                ++current.watchers;
++                current.expireAtNanos = 0L;
++                return current;
++            }
++        );
 +    }
 +
 +    public void unwatch(final long chunkKey) {
-+        if (this.watchers.decFrom(chunkKey, 1, 0) <= 0) {
-+            this.cache.remove(chunkKey);
-+        }
++        this.maybeDrain();
++        this.cache.computeIfPresent(
++            chunkKey, (_, entry) -> {
++                if (--entry.watchers <= 0 && entry.expireAtNanos == 0L) {
++                    entry.expireAtNanos = System.nanoTime() + REMOVE_DELAY_NANOS;
++                    this.order.add(chunkKey);
++                }
++                return entry;
++            }
++        );
 +    }
 +
 +    public void evictIfUnwatched(final long chunkKey) {
-+        if (!this.watchers.containsKey(chunkKey)) {
-+            this.cache.remove(chunkKey);
++        this.maybeDrain();
++        this.cache.computeIfPresent(
++            chunkKey, (_, entry) -> {
++                if (entry.watchers <= 0 && entry.expireAtNanos == 0L) {
++                    entry.expireAtNanos = System.nanoTime() + REMOVE_DELAY_NANOS;
++                    this.order.add(chunkKey);
++                }
++                return entry;
++            }
++        );
++    }
++
++    private void maybeDrain() {
++        if ((this.maybeDrainCounter++ % DRAIN_INTERVAL) == 0) {
++            this.drainExpired();
++        }
++    }
++
++    public void drainExpired() {
++        this.drainExpired(MAX_DRAIN_PER_CALL);
++    }
++
++    public void tick() {
++        this.drainExpired(Integer.MAX_VALUE);
++    }
++
++    private void drainExpired(final int maxToProcess) {
++        final long now = System.nanoTime();
++        final boolean[] notDue = {false};
++
++        final ConcurrentChainedLong2ReferenceHashTable.BiLongObjectObjectFunction<Entry, Entry> check = (_, entry) -> {
++            if (entry.expireAtNanos == 0L) {
++                // cancelled, it got rewatched or already processed
++                return entry;
++            }
++
++            // check if it's due
++            if (now - entry.expireAtNanos < 0L) {
++                notDue[0] = true;
++                return entry;
++            }
++
++            // it's due, remove if there are still no watchers
++            return entry.watchers <= 0 ? null : entry;
++        };
++
++        for (int remaining = maxToProcess; remaining > 0; --remaining) {
++            final Long chunkKey = this.order.poll();
++            if (chunkKey == null) {
++                return;
++            }
++
++            //noinspection DataFlowIssue - "redundant assignment" - bad IntelliJ
++            notDue[0] = false;
++            this.cache.computeIfPresent(chunkKey, check);
++
++            if (notDue[0]) {
++                // not due yet
++                this.order.add(chunkKey);
++                return;
++            }
++        }
++    }
++
++    private static final class Entry {
++        final CompletableFuture<Result> future;
++        int watchers;
++        long expireAtNanos;
++
++        Entry(final CompletableFuture<Result> future) {
++            this.future = future;
 +        }
 +    }
 +}
@@ -1097,6 +1189,21 @@ index 0000000000000000000000000000000000000000..0f544dd39307dd7cf8f441365b1161bf
 +package io.canvasmc.canvas.extendedview;
 +
 +import org.jspecify.annotations.NullMarked;
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 53dbff5600c325c54f8fb45bc25f2ab21782bca2..063229dc564b5e66b625ad9e3dd290ccebb5c93e 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -594,6 +594,10 @@ public final class RegionizedServer {
+ 
+         world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates(); // required to eventually process ticket updates
+ 
++        // Canvas start - extended view distance
++        world.extendedViewDistance().cache.tick();
++
++        // Canvas end - extended view distance
+         this.autoSaveMaps(world);
+     }
+ 
 diff --git a/net/minecraft/network/protocol/game/ClientboundLevelChunkWithLightPacket.java b/net/minecraft/network/protocol/game/ClientboundLevelChunkWithLightPacket.java
 index a1018e9ca9dfb978d6e6633577abd7d5d0960fa6..d9e446c6330204e8d0abaeb554387bacf35957b9 100644
 --- a/net/minecraft/network/protocol/game/ClientboundLevelChunkWithLightPacket.java
