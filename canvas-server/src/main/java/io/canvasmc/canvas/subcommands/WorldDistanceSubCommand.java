@@ -28,7 +28,7 @@ import static net.minecraft.commands.Commands.literal;
 public class WorldDistanceSubCommand implements SubCommand {
 
     private static final SimpleCommandExceptionType ILLEGAL_TYPE_ARG = new SimpleCommandExceptionType(
-        Component.literal("Illegal type argument. Must be [\"view\", \"simulation\", \"v\", \"s\", or \"sim\"]")
+        Component.literal("Illegal type argument. Must be [\"view\", \"simulation\", \"visual\", \"visual_view\", \"v\", \"vv\", \"s\", or \"sim\"]")
     );
     private static final SimpleCommandExceptionType INVALID_DISTANCE = new SimpleCommandExceptionType(
         Component.literal("New value must be above 0")
@@ -46,6 +46,7 @@ public class WorldDistanceSubCommand implements SubCommand {
                 .suggests((_, builder) -> {
                     builder.suggest("view");
                     builder.suggest("simulation");
+                    builder.suggest("visual");
                     return builder.buildFuture();
                 })
                 .then(argument("dimension", DimensionArgument.dimension())
@@ -74,7 +75,7 @@ public class WorldDistanceSubCommand implements SubCommand {
     private static int setDistance(final CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
         final Type type = Type.from(StringArgumentType.getString(context, "type").toUpperCase(Locale.ROOT));
         final ServerLevel level = DimensionArgument.getDimension(context, "dimension");
-        final int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE - 3);
+        final int distance = Math.min(context.getArgument("distance", int.class), MoonriseConstants.MAX_VIEW_DISTANCE);
 
         if (distance <= 0) {
             throw INVALID_DISTANCE.create();
@@ -87,22 +88,25 @@ public class WorldDistanceSubCommand implements SubCommand {
     }
 
     private static void applyOperation(final Type type, final ServerLevel level, final int distance) {
+        final int clampTo = type != Type.VISUAL_VIEW ? MoonriseConstants.MAX_VIEW_DISTANCE - 3 : MoonriseConstants.MAX_VIEW_DISTANCE;
+        final int clamped = Math.clamp(distance, -1, clampTo);
+
         // update the distance override that we can use later on
-        type.set(level, distance);
+        type.set(level, clamped);
 
         final PerWorldDistanceConfig state = level.serverLevelData.canvas$distanceConfig;
-        final int updated = Math.min(
-            (type.equals(Type.VIEW)
-                ? state.viewDistanceOrDefault()
-                : state.simulationDistanceOrDefault()),
-            MoonriseConstants.MAX_VIEW_DISTANCE - 3
-        );
+        final int updated = switch (type) {
+            case VIEW -> state.viewDistanceOrDefault();
+            case SIMULATION -> state.simulationDistanceOrDefault();
+            case VISUAL_VIEW -> state.visualViewDistanceOrDefault();
+        };
 
         switch (type) {
             // we go straight through here because FeatureHooks hard-clamps at 32, which is technically wrong
             // since it should abide by the MAX_VIEW_DISTANCE arg
             case VIEW -> level.getChunkSource().chunkMap.setServerViewDistance(updated);
             case SIMULATION -> level.getChunkSource().chunkMap.getDistanceManager().updateSimulationDistance(updated);
+            case VISUAL_VIEW -> level.moonrise$getPlayerChunkLoader().setVisualViewDistance(updated);
         }
     }
 
@@ -129,6 +133,11 @@ public class WorldDistanceSubCommand implements SubCommand {
             (world) -> world.serverLevelData.canvas$distanceConfig.simulationDistanceOrDefault(),
             (world, dist) -> world.serverLevelData.canvas$distanceConfig.setSimulationDistance(dist),
             "Simulation"
+        ),
+        VISUAL_VIEW(
+            (world) -> world.serverLevelData.canvas$distanceConfig.visualViewDistanceOrDefault(),
+            (world, dist) -> world.serverLevelData.canvas$distanceConfig.setVisualViewDistance(dist),
+            "VVDistance"
         );
 
         private final Function<ServerLevel, Integer> getter;
@@ -146,6 +155,7 @@ public class WorldDistanceSubCommand implements SubCommand {
             return switch (lower) {
                 case "view", "v" -> VIEW;
                 case "simulation", "sim", "s" -> SIMULATION;
+                case "visual", "visual_view", "vv" -> VISUAL_VIEW;
                 default -> throw ILLEGAL_TYPE_ARG.create();
             };
         }
