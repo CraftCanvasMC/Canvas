@@ -13,7 +13,7 @@ val canvasMavenPublicUrl = "https://maven.canvasmc.io/public/"
 
 paperweight {
     filterPatches = false
-    gitFilePatches = true
+    gitFilePatches = false
     upstreams.paper {
         ref = providers.gradleProperty("paperRef")
 
