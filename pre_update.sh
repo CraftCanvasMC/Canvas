@@ -20,7 +20,7 @@ for file in "${BUILD_FILES[@]}"; do
 done
 
 echo "=== Rebuilding single-file patches ==="
-./gradlew rebuildFoliaSingleFilePatches --quiet
+./gradlew rebuildPaperSingleFilePatches --quiet
 
 echo "=== Rebuilding file patches as Git patches ==="
 ./gradlew rebuildAllServerFilePatches --quiet
@@ -30,9 +30,7 @@ echo "=== Moving file patches to _unapplied ==="
 dirs=(
   "canvas-server/minecraft-patches/sources canvas-server/minecraft-patches/sources_unapplied"
   "canvas-server/paper-patches/files canvas-server/paper-patches/files_unapplied"
-  "canvas-server/folia-patches/files canvas-server/folia-patches/files_unapplied"
   "canvas-api/paper-patches/files canvas-api/paper-patches/files_unapplied"
-  "canvas-api/folia-patches/files canvas-api/folia-patches/files_unapplied"
 )
 
 for dir in "${dirs[@]}"; do

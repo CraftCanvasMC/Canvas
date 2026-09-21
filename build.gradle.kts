@@ -4,8 +4,8 @@ import io.papermc.paperweight.core.tasks.patchroulette.AbstractPatchRouletteTask
 
 plugins {
     java
-    id("io.canvasmc.weaver.patcher") version "2.4.5"
-    id("xyz.jpenilla.resource-factory-paper-convention") version "1.3.1" apply false
+    id("io.canvasmc.weaver.patcher") version "2.5.1"
+    id("xyz.jpenilla.resource-factory-paper-convention") version "1.4.0" apply false
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"

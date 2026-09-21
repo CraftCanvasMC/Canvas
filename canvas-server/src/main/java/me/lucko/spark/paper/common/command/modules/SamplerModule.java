@@ -58,6 +58,7 @@ import me.lucko.spark.paper.common.sampler.source.ClassSourceLookup;
 import me.lucko.spark.paper.common.tick.TickHook;
 import me.lucko.spark.paper.common.util.FormatUtil;
 import me.lucko.spark.paper.common.util.MediaTypes;
+import me.lucko.spark.paper.common.ws.SamplerViewerSocket;
 import me.lucko.spark.paper.common.ws.ViewerSocket;
 import me.lucko.spark.paper.lib.bytesocks.BytesocksClient;
 import me.lucko.spark.paper.proto.SparkSamplerProtos;
@@ -93,7 +94,7 @@ public class SamplerModule implements CommandModule {
                 .argumentUsage("stop", "", null)
                 .argumentUsage("cancel", "", null)
                 .executor(this::profiler)
-                .tabCompleter((platform, sender, arguments) -> {
+                .tabCompleter((_, _, arguments) -> {
                     List<String> opts = Collections.emptyList();
 
                     if (arguments.size() > 0) {
@@ -291,7 +292,7 @@ public class SamplerModule implements CommandModule {
         CompletableFuture<Sampler> future = sampler.getFuture();
 
         // send message if profiling fails
-        future.whenCompleteAsync((s, throwable) -> {
+        future.whenCompleteAsync((_, throwable) -> {
             if (throwable != null) {
                 Runnable callback = () -> { // Canvas - region profiler
                 resp.broadcastPrefixed(text("Profiler operation failed unexpectedly. Error: " + throwable, RED));
@@ -596,7 +597,7 @@ public class SamplerModule implements CommandModule {
 
     private void handleOpen(SparkPlatform platform, BytesocksClient bytesocksClient, CommandResponseHandler resp, Sampler sampler, Sampler.ExportProps exportProps) {
         try {
-            ViewerSocket socket = new ViewerSocket(platform, bytesocksClient, exportProps);
+            SamplerViewerSocket socket = new SamplerViewerSocket(platform, bytesocksClient, exportProps);
             sampler.attachSocket(socket);
             exportProps.channelInfo(socket.getPayload());
 

@@ -438,6 +438,7 @@ public class WorldConfig extends Part {
                 );
         }
 
+        // TODO - restore
         public double skeletonAimAccuracy = 14.0D;
 
         public Villagers villagers = new Villagers();

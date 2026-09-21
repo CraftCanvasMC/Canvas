@@ -9,6 +9,7 @@ import io.canvasmc.canvas.configuration.Style;
 import io.canvasmc.canvas.configuration.Undocumented;
 import io.canvasmc.canvas.configuration.Validator;
 import io.canvasmc.canvas.simd.SIMDDetection;
+import io.canvasmc.canvas.subcommands.MobCapsSubCommand;
 import io.canvasmc.canvas.subcommands.RegionBarSubCommand;
 import io.canvasmc.canvas.subcommands.RegionTickSubCommand;
 import io.canvasmc.canvas.subcommands.ReloadSubCommand;
@@ -246,6 +247,7 @@ public class GlobalConfiguration extends Part {
                 RegionBarSubCommand.class,
                 WorldDistanceSubCommand.class,
                 ReloadSubCommand.class,
+                MobCapsSubCommand.class,
                 RegionTickSubCommand.class // TODO - merge this into regiondata command
                 // RegionDataCommand.class // TODO - regiondata command
             );
