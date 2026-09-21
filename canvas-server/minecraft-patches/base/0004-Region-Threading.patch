@@ -5756,10 +5756,10 @@ index 0000000000000000000000000000000000000000..6a6d46b55bd25103638fbb84de781ff3
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..268cc18bed234befb829ddf0bf5d8ee1671d65cc
+index 0000000000000000000000000000000000000000..29a814d5b972171e854373bd056230f841b9fcd5
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
-@@ -0,0 +1,355 @@
+@@ -0,0 +1,356 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -5780,6 +5780,7 @@ index 0000000000000000000000000000000000000000..268cc18bed234befb829ddf0bf5d8ee1
 +import net.minecraft.server.level.ServerLevel;
 +import net.minecraft.server.level.ServerPlayer;
 +import net.minecraft.server.players.PlayerList;
++import net.minecraft.util.Prediction;
 +import net.minecraft.world.entity.Entity;
 +import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 +import net.minecraft.world.item.ItemStack;
@@ -5916,7 +5917,7 @@ index 0000000000000000000000000000000000000000..268cc18bed234befb829ddf0bf5d8ee1
 +                    if (!player.containerMenu.getCarried().isEmpty()) {
 +                        ItemStack carried = player.containerMenu.getCarried();
 +                        player.containerMenu.setCarried(ItemStack.EMPTY);
-+                        player.drop(carried, false);
++                        player.drop(carried, false, Prediction.SERVER_ONLY);
 +                    }
 +                } catch (final Throwable thrown) {
 +                    LOGGER.error("Failed to close player inventory for player: {}", player, thrown);
@@ -7887,7 +7888,7 @@ index 0000000000000000000000000000000000000000..00956aa81da437a2f3e19252a86e0aee
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..d2de8519338fb6e9cd09d9c7b5d6ae895c0c0bef
+index 0000000000000000000000000000000000000000..3865b2c3f53bde4d39eca4f887ac4755cc8355b1
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
 @@ -0,0 +1,868 @@
@@ -7948,7 +7949,7 @@ index 0000000000000000000000000000000000000000..d2de8519338fb6e9cd09d9c7b5d6ae89
 +import net.minecraft.world.level.ServerExplosion;
 +import net.minecraft.world.level.block.Block;
 +import net.minecraft.world.level.block.Blocks;
-+import net.minecraft.world.level.block.RedStoneWireBlock;
++import net.minecraft.world.level.block.RedstoneWireBlock;
 +import net.minecraft.world.level.block.entity.BlockEntity;
 +import net.minecraft.world.level.block.entity.TickingBlockEntity;
 +import net.minecraft.world.level.chunk.LevelChunk;
@@ -8365,7 +8366,7 @@ index 0000000000000000000000000000000000000000..d2de8519338fb6e9cd09d9c7b5d6ae89
 +        this.neighborUpdater = new CollectingNeighborUpdater(world, world.neighbourUpdateMax);
 +        this.nearbyPlayers = new NearbyPlayers(world);
 +        this.wireHandler = new alternate.current.wire.WireHandler(world);
-+        this.turbo = new io.papermc.paper.redstone.RedstoneWireTurbo((RedStoneWireBlock)Blocks.REDSTONE_WIRE);
++        this.turbo = new io.papermc.paper.redstone.RedstoneWireTurbo((RedstoneWireBlock)Blocks.REDSTONE_WIRE);
 +        this.regionData = regionData;
 +
 +        // tasks may be drained before the region ticks, so we must set up the tick data early just in case
@@ -19191,7 +19192,7 @@ index 81d21b23932fb7b4887cfcc16381d348385a3bf8..5baf9488a1ae78081dfe2c5494abe6bb
      }
  }
 diff --git a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
-index be6db3be2353a97d66c1cafc4e98032610220d28..cec2fc7f45d9a1372f7432005120c0dfe96b6999 100644
+index be6db3be2353a97d66c1cafc4e98032610220d28..f84eb028a1867b278b711c0145982288f9590257 100644
 --- a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
 +++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
 @@ -34,7 +34,16 @@ public class MinecraftServerStateServiceImpl implements MinecraftServerStateServ
@@ -19200,7 +19201,7 @@ index be6db3be2353a97d66c1cafc4e98032610220d28..cec2fc7f45d9a1372f7432005120c0df
          this.jsonrpcLogger.log(clientInfo, "Save everything. SuppressLogs: {}, flush: {}, force: {}", suppressLogs, flush, force);
 -        return this.server().saveEverything(suppressLogs, flush, force);
 +        // Canvas start - region threading
-+        net.minecraft.server.commands.SaveAllCommand.triggerSaveEverything(
++        net.minecraft.server.commands.SaveAllCommand.saveAllAsync(
 +            MinecraftServer.getServer().createCommandSourceStack(),
 +            MinecraftServer.getServer(),
 +            flush
@@ -20116,7 +20117,7 @@ index cc6f4e2845ef1e95c765d65f17c8aa1b06652927..7316c756f1c228eef710219a659c7968
                  foundPlayers.add(player);
              }
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index db6576c530b32a3ac4cfbdd8add227ed9bf81191..8b9ded4fd49df2224497b88befcb807a82c1a174 100644
+index db6576c530b32a3ac4cfbdd8add227ed9bf81191..3d6ea94bbe2afd3a9b481676a039c018fb9be6e5 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -191,11 +191,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
@@ -20600,7 +20601,7 @@ index db6576c530b32a3ac4cfbdd8add227ed9bf81191..8b9ded4fd49df2224497b88befcb807a
 +            if (this.getGameRules().get(GameRules.ADVANCE_TIME) && defaultClock.isPresent()) {
 +                // Paper start - per-world time
 +                ServerClockManager.TimerMove timerMove = this.clockManager().resolveTimerMove(
-+                    defaultClock.get(),  clock.ClockTimeMarkers.WAKE_UP_FROM_SLEEP
++                    defaultClock.get(), ClockTimeMarkers.WAKE_UP_FROM_SLEEP
 +                );
 +                if (timerMove != null) {
 +                    event = new org.bukkit.event.world.TimeSkipEvent(
@@ -30712,7 +30713,7 @@ index a1b0168077b83575f16dd377da2e1ba520d3bd19..a2e349bb5ab2860f67a7fda4e56f95ca
  
      @Override
 diff --git a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
-index 0eb38edc4cea67390f998eb5cff4c55146e811d6..7cf2251bf5b8c255d3ab73587fb857ddd03fe183 100644
+index 0eb38edc4cea67390f998eb5cff4c55146e811d6..81f2905f69e980f8ad1d6e85f8ba76dd20d5845d 100644
 --- a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
 +++ b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
 @@ -36,9 +36,14 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
@@ -30752,10 +30753,10 @@ index 0eb38edc4cea67390f998eb5cff4c55146e811d6..7cf2251bf5b8c255d3ab73587fb857dd
 +
 +        ca.spottedleaf.concurrentutil.completable.CallbackCompletable<BlockPos> complete = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
 +
-+        complete.addWaiter((tpLoc, throwable) -> {
++        complete.addWaiter((tpLoc, _) -> {
 +            // create the exit portal
 +            TheEndGatewayBlockEntity.LOGGER.debug("Creating portal at {}", tpLoc);
-+            TheEndGatewayBlockEntity.spawnGatewayPortal(world, tpLoc, EndGatewayConfiguration.knownExit(fromPos, false));
++            TheEndGatewayBlockEntity.spawnGatewayPortal(world, tpLoc, EndGatewayFeature.knownExit(fromPos, false));
 +
 +            // need to go onto the tick thread to avoid saving issues
 +            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
@@ -30837,23 +30838,25 @@ index 0eb38edc4cea67390f998eb5cff4c55146e811d6..7cf2251bf5b8c255d3ab73587fb857dd
      public @Nullable Vec3 getPortalPosition(final ServerLevel currentLevel, final BlockPos portalEntryPos) {
          if (this.exitPortal == null && currentLevel.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END) { // CraftBukkit - work in alternate worlds
              BlockPos exitPortalPos = findOrCreateValidTeleportPos(currentLevel, portalEntryPos);
-@@ -172,6 +276,124 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
+@@ -172,6 +276,126 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
          return findTallestBlock(level, exitPortalPos, 16, true);
      }
  
 +    // Folia start - region threading
-+    private static void findOrCreateValidTeleportPosRegionThreading(final ServerLevel world, final BlockPos pos,
-+                                                                    final ca.spottedleaf.concurrentutil.completable.CallbackCompletable<BlockPos> complete) {
-+        ca.spottedleaf.concurrentutil.completable.CallbackCompletable<Vec3> tentativeSelection = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
-+
++    private static void findOrCreateValidTeleportPosRegionThreading(
++        final ServerLevel world, final BlockPos pos, final ca.spottedleaf.concurrentutil.completable.CallbackCompletable<BlockPos> complete
++    ) {
++        final ca.spottedleaf.concurrentutil.completable.CallbackCompletable<Vec3>
++            tentativeSelection = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
 +        tentativeSelection.addWaiter((vec3d, _) -> {
-+            LevelChunk chunk = TheEndGatewayBlockEntity.getChunk(world, vec3d);
++            final LevelChunk chunk = TheEndGatewayBlockEntity.getChunk(world, vec3d);
++
 +            BlockPos blockposition1 = TheEndGatewayBlockEntity.findValidSpawnInChunk(chunk);
 +            if (blockposition1 == null) {
-+                BlockPos blockposition2 = BlockPos.containing(vec3d.x + 0.5D, 75.0D, vec3d.z + 0.5D);
++                final BlockPos blockposition2 = BlockPos.containing(vec3d.x + 0.5D, 75.0D, vec3d.z + 0.5D);
 +
 +                TheEndGatewayBlockEntity.LOGGER.debug("Failed to find a suitable block to teleport to, spawning an island on {}", blockposition2);
-+                world.registryAccess().lookup(Registries.CONFIGURED_FEATURE).flatMap((iregistry) -> {
++                world.registryAccess().lookup(Registries.FEATURE).flatMap((iregistry) -> {
 +                    return iregistry.get(EndFeatures.END_ISLAND);
 +                }).ifPresent((holder_c) -> {
 +                    holder_c.value().place(world, world.getChunkSource().getGenerator(), RandomSource.create(blockposition2.asLong()), blockposition2);
@@ -30867,16 +30870,16 @@ index 0eb38edc4cea67390f998eb5cff4c55146e811d6..7cf2251bf5b8c255d3ab73587fb857dd
 +            // possibly 16x chunk loads along an axis (findExitPortalXZPosTentativeRegionThreading) using the chunk queue
 +            // (regioniser only guarantees at least 8 chunks along a single axis)
 +            // so, we need to schedule for the next tick
-+            int posX = blockposition1.getX();
-+            int posZ = blockposition1.getZ();
-+            int radius = 16;
++            final int posX = blockposition1.getX();
++            final int posZ = blockposition1.getZ();
++            final int radius = 16;
++            final BlockPos finalBlockPosition1 = blockposition1;
 +
-+            BlockPos finalBlockPosition1 = blockposition1;
 +            world.moonrise$loadChunksAsync(blockposition1, radius,
 +                ca.spottedleaf.concurrentutil.util.Priority.NORMAL,
 +                (java.util.List<net.minecraft.world.level.chunk.ChunkAccess> chunks) -> {
 +                    // make sure chunks are kept loaded
-+                    for (net.minecraft.world.level.chunk.ChunkAccess access : chunks) {
++                    for (final net.minecraft.world.level.chunk.ChunkAccess access : chunks) {
 +                        world.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
 +                            net.minecraft.server.level.TicketType.DELAYED, access.getPos(),
 +                            ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager.FULL_LOADED_TICKET_LEVEL,
@@ -30887,7 +30890,7 @@ index 0eb38edc4cea67390f998eb5cff4c55146e811d6..7cf2251bf5b8c255d3ab73587fb857dd
 +                    io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
 +                        world, posX >> 4, posZ >> 4, () -> {
 +                            // find final location
-+                            BlockPos tpLoc = TheEndGatewayBlockEntity.findTallestBlock(world, finalBlockPosition1, radius, true).above(GATEWAY_HEIGHT_ABOVE_SURFACE);
++                            final BlockPos tpLoc = TheEndGatewayBlockEntity.findTallestBlock(world, finalBlockPosition1, radius, true).above(GATEWAY_HEIGHT_ABOVE_SURFACE);
 +
 +                            // done
 +                            complete.complete(tpLoc);
@@ -30903,17 +30906,17 @@ index 0eb38edc4cea67390f998eb5cff4c55146e811d6..7cf2251bf5b8c255d3ab73587fb857dd
 +
 +    private static void findExitPortalXZPosTentativeRegionThreading(final ServerLevel world, final BlockPos pos,
 +                                                                    final ca.spottedleaf.concurrentutil.completable.CallbackCompletable<Vec3> complete) {
-+        Vec3 posDirFromOrigin = new Vec3(pos.getX(), 0.0D, pos.getZ()).normalize();
-+        Vec3 posDirExtruded = posDirFromOrigin.scale(1024.0D);
++        final Vec3 posDirFromOrigin = new Vec3(pos.getX(), 0.0D, pos.getZ()).normalize();
++        final Vec3 posDirExtruded = posDirFromOrigin.scale(1024.0D);
 +
 +        class Vars {
 +            int i = 16;
 +            boolean mode = false;
 +            Vec3 currPos = posDirExtruded;
 +        }
-+        Vars vars = new Vars();
++        final Vars vars = new Vars();
 +
-+        Runnable handle = new Runnable() {
++        final Runnable handle = new Runnable() {
 +            @Override
 +            public void run() {
 +                if (vars.mode != TheEndGatewayBlockEntity.isChunkEmpty(world, vars.currPos)) {
