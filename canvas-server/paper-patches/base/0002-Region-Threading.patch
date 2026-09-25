@@ -1127,6 +1127,68 @@ index 2d41914a6a1f61b1c100b27bc0ea230332f8f243..ecded94d13f50b61d93adda9c2bc8997
              if (reason != null) {
                  MinecraftServer.LOGGER.warn("Asynchronous " + reason + "! Blocking thread until it returns ", new IllegalStateException());
              }
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java b/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java
+index 1aa8f1e0a3093a8b9e77213c56f987cd6ca7df86..3b13608c326ef1f85048018e96ac5cedb2cfef39 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java
+@@ -383,6 +383,57 @@ public class CraftOfflinePlayer implements OfflinePlayer, ConfigurationSerializa
+             .map(resolvedPos -> CraftLocation.toBukkit(resolvedPos.position(), level, resolvedPos.yaw(), resolvedPos.pitch()))
+             .orElse(null);
+     }
++    // Canvas start - region threading
++
++    @Override
++    public java.util.concurrent.CompletableFuture<java.util.Optional<org.bukkit.Location>> getRespawnLocationAsync(final boolean loadLocationAndValidate) {
++        final java.util.concurrent.CompletableFuture<java.util.Optional<org.bukkit.Location>> future = new java.util.concurrent.CompletableFuture<>();
++        final CompoundTag data = this.getData();
++
++        if (data == null) {
++            // no data available
++            future.complete(java.util.Optional.empty());
++            return future;
++        };
++
++        final ServerPlayer.RespawnConfig respawnConfig = data.read("respawn", ServerPlayer.RespawnConfig.CODEC).orElse(null);
++        if (respawnConfig == null) {
++            // respawn config doesnt exist, unable to get location
++            future.complete(java.util.Optional.empty());
++            return future;
++        }
++
++        final net.minecraft.world.level.storage.LevelData.RespawnData respawnData = respawnConfig.respawnData();
++        final ServerLevel world = this.server.console.getLevel(respawnData.dimension());
++        if (world == null) {
++            // world doesnt exist, unable to get location
++            future.complete(java.util.Optional.empty());
++            return future;
++        }
++
++        if (!loadLocationAndValidate) {
++            // just return the unvalidated result
++            future.complete(java.util.Optional.of(CraftLocation.toBukkit(respawnData.pos(), world, respawnData.yaw(), respawnData.pitch())));
++            return future;
++        }
++
++        // schedule or execute the tick task at the position of the
++        // respawn location so we can pass thread checks, then complete
++
++        final net.minecraft.core.BlockPos blockPos = respawnData.pos();
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(
++            world, blockPos.getX() >> 4, blockPos.getZ() >> 4, () -> {
++                future.complete(
++                    ServerPlayer.findRespawnAndUseSpawnBlock(world, respawnConfig, false)
++                        .map(pos -> CraftLocation.toBukkit(pos.position(), world, pos.yaw(), pos.pitch()))
++                );
++            }
++        );
++
++        // return future(may be incomplete)
++        return future;
++    }
++    // Canvas end - region threading
+ 
+     private ServerStatsCounter getStatisticManager() {
+         return this.server.getHandle().getPlayerStats(this.nameAndId.toUncompletedGameProfile());
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 index bf00e1f0f957d75d2242c3f33e51284738168b10..308a7c221167898210f9f3c331064597ce4db164 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
@@ -3952,7 +4014,7 @@ index 999ccf4acdb50be8a7ef0fe4a7f687508fadcde1..80dafb9ce02b7ac7307eb8ea6fa22a76
      }
  
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
-index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e624fdfec 100644
+index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..d4f570bd710ecaa782e9f79f66dc00ff0abf031b 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
 @@ -241,7 +241,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
@@ -4058,11 +4120,62 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
          if (world == null) return null;
  
 -        if (!loadLocationAndValidate) {
-+        if (!loadLocationAndValidate || true) { // Canvas - region threading - we cannot validate safely if the respawn pos is out of region // TODO - make new API for this
++        if (!loadLocationAndValidate || true) { // Canvas - region threading - we cannot validate safely if the respawn pos is out of region
              return CraftLocation.toBukkit(respawnData.pos(), world, respawnData.yaw(), respawnData.pitch());
          }
  
-@@ -1412,6 +1448,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1388,6 +1424,50 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+             .map(pos -> CraftLocation.toBukkit(pos.position(), world, pos.yaw(), pos.pitch()))
+             .orElse(null);
+     }
++    // Canvas start - region threading
++
++    @Override
++    public CompletableFuture<Optional<Location>> getRespawnLocationAsync(final boolean loadLocationAndValidate) {
++        final CompletableFuture<Optional<Location>> future = new CompletableFuture<>();
++
++        final ServerPlayer.RespawnConfig respawnConfig = this.getHandle().getRespawnConfig();
++        if (respawnConfig == null) {
++            // respawn config is null, unable to get location
++            future.complete(Optional.empty());
++            return future;
++        }
++
++        final LevelData.RespawnData respawnData = respawnConfig.respawnData();
++        final ServerLevel world = this.server.getServer().getLevel(respawnData.dimension());
++        if (world == null) {
++            // world doesnt exist, unable to get location
++            future.complete(Optional.empty());
++            return future;
++        }
++
++        if (!loadLocationAndValidate) {
++            // just return the unvalidated result
++            future.complete(Optional.of(CraftLocation.toBukkit(respawnData.pos(), world, respawnData.yaw(), respawnData.pitch())));
++            return future;
++        }
++
++        // schedule or execute the tick task at the position of the
++        // respawn location so we can pass thread checks, then complete
++
++        final BlockPos blockPos = respawnData.pos();
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(
++            world, blockPos.getX() >> 4, blockPos.getZ() >> 4, () -> {
++                future.complete(
++                    ServerPlayer.findRespawnAndUseSpawnBlock(world, respawnConfig, false)
++                        .map(pos -> CraftLocation.toBukkit(pos.position(), world, pos.yaw(), pos.pitch()))
++                );
++            }
++        );
++
++        // return future(may be incomplete)
++        return future;
++    }
++    // Canvas end - region threading
+ 
+     @Override
+     public void setRespawnLocation(Location location, boolean override) {
+@@ -1412,6 +1492,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
  
      @Override
      public Collection<EnderPearl> getEnderPearls() {
@@ -4070,7 +4183,7 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
          return this.getHandle().getEnderPearls().stream().map((e) -> (EnderPearl) e.getBukkitEntity()).collect(Collectors.toList());
      }
  
-@@ -1665,6 +1702,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1665,6 +1746,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      @Override
      public void setGameMode(GameMode mode) {
          Preconditions.checkArgument(mode != null, "GameMode cannot be null");
@@ -4078,7 +4191,7 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
          if (this.getHandle().connection == null) return;
  
          this.getHandle().setGameMode(GameType.byId(mode.getValue()), org.bukkit.event.player.PlayerGameModeChangeEvent.Cause.PLUGIN, null); // Paper - Expand PlayerGameModeChangeEvent
-@@ -1859,16 +1897,30 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1859,16 +1941,30 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      }
  
      private boolean addInvertedVisibility(@Nullable Plugin plugin, org.bukkit.entity.Entity entity) {
@@ -4095,11 +4208,8 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
 +
 +        if (set != null) {
 +            set.add(CraftPlayer.getPluginWeakReference(plugin));
-             return false;
-         }
--        invertedPlugins = new HashSet<>();
--        invertedPlugins.add(CraftPlayer.getPluginWeakReference(plugin));
--        this.invertedVisibilityEntities.put(entity.getUniqueId(), invertedPlugins);
++            return false;
++        }
 +
 +        it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<WeakReference<Plugin>> newSet =
 +            new it.unimi.dsi.fastutil.objects.ObjectOpenHashSet<>();
@@ -4111,13 +4221,16 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
 +
 +        if (existing != null) {
 +            existing.add(CraftPlayer.getPluginWeakReference(plugin));
-+            return false;
-+        }
+             return false;
+         }
+-        invertedPlugins = new HashSet<>();
+-        invertedPlugins.add(CraftPlayer.getPluginWeakReference(plugin));
+-        this.invertedVisibilityEntities.put(entity.getUniqueId(), invertedPlugins);
 +        // Canvas end - fix folia visibility api
  
          return true;
      }
-@@ -1884,7 +1936,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1884,7 +1980,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      private void unregisterEntity(Entity other) {
          // Paper end
          ChunkMap tracker = ((ServerLevel) this.getHandle().level()).getChunkSource().chunkMap;
@@ -4126,7 +4239,7 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
          if (entry != null) {
              entry.removePlayer(this.getHandle());
          }
-@@ -1941,16 +1993,24 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1941,16 +2037,24 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      }
  
      private boolean removeInvertedVisibility(@Nullable Plugin plugin, org.bukkit.entity.Entity entity) {
@@ -4158,7 +4271,7 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
          return true;
      }
  
-@@ -1973,7 +2033,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1973,7 +2077,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
              if (original != null) otherPlayer.setUUID(original); // Paper - uuid override
          }
  
@@ -4167,7 +4280,7 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
          if (entry != null && !entry.seenBy.contains(this.getHandle().connection)) {
              entry.updatePlayer(this.getHandle());
          }
-@@ -2057,6 +2117,13 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -2057,6 +2161,13 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
          this.invertedVisibilityEntities.remove(entity.getUUID());
      }
  
@@ -4181,7 +4294,7 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
      @Override
      public boolean canSee(Player player) {
          return this.canSee((org.bukkit.entity.Entity) player);
-@@ -2544,6 +2611,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -2544,6 +2655,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
          if (!(scoreboard instanceof CraftScoreboard craftScoreboard)) {
              throw new IllegalArgumentException("Cannot set player scoreboard to an unregistered Scoreboard");
          }
@@ -4189,7 +4302,7 @@ index f11ad0f2cdbb128dfa1f572903ad1b16b80c3e87..4b7cbc8b5941303a726adbeec7a5810e
  
          this.server.getScoreboardManager().setPlayerBoard(this, craftScoreboard);
      }
-@@ -3053,8 +3121,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -3053,8 +3165,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
          @Override
          public void respawn() {
              if (CraftPlayer.this.getHealth() <= 0 && CraftPlayer.this.isOnline()) {
