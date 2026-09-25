@@ -21,16 +21,20 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
     private static final HandlerList HANDLER_LIST = new HandlerList();
 
     private final Location from;
-    private final TeleportType type;
     private final PlayerTeleportEvent.TeleportCause cause;
     private Location to;
     private boolean cancelled;
 
     @ApiStatus.Internal
-    public EntityTeleportAsyncEvent(Entity entity, Location from, @Nullable Location to, PlayerTeleportEvent.TeleportCause cause, TeleportType type) {
+    public EntityTeleportAsyncEvent(
+        final Entity entity,
+        final Location from,
+        @Nullable
+        final Location to,
+        final PlayerTeleportEvent.TeleportCause cause
+    ) {
         super(entity);
         this.from = from;
-        this.type = type;
         this.to = (to != null) ? to : from;
         this.cause = cause;
     }
@@ -74,15 +78,6 @@ public class EntityTeleportAsyncEvent extends EntityEvent implements Cancellable
      */
     public PlayerTeleportEvent.TeleportCause getCause() {
         return cause;
-    }
-
-    /**
-     * Gets the type of teleport this is
-     *
-     * @return the teleport type
-     */
-    public TeleportType getType() {
-        return type;
     }
 
     @Override
