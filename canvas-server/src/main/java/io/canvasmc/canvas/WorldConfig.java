@@ -429,7 +429,13 @@ public class WorldConfig extends Part {
         }
 
         {
-            option("skeletonAimAccuracy").docs("Defines the inaccuracy of skeleton bow shots. 14 is Vanilla, higher is more inaccurate and lower is more accurate");
+            option("rangedAttackMobUncertaintyBaseValue")
+                .docs(
+                    "The value of which ranged attack mobs are \"uncertain\" when shooting their ranged attack.",
+                    "The default is 14. Take into account the difficulty reduces this number when calculated, making",
+                    "higher world difficulties make mobs more \"certain\" of their aim. Increase this value to make",
+                    "mobs more uncertain and less accurate, and decrease this value to make them more accurate."
+                );
             option("villagers")
                 .docs(
                     "Options regarding villagers. The options for reducing POI search ranges shrink the search radius(in blocks)",
@@ -438,8 +444,7 @@ public class WorldConfig extends Part {
                 );
         }
 
-        // TODO - restore
-        public double skeletonAimAccuracy = 14.0D;
+        public int rangedAttackMobUncertaintyBaseValue = 14;
 
         public Villagers villagers = new Villagers();
         @Undocumented("Doesn't require docs.")
