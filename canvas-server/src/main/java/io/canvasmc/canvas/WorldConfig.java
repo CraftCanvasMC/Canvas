@@ -560,6 +560,21 @@ public class WorldConfig extends Part {
         }
     }
 
+    public Hoppers hoppers = new Hoppers();
+    public static class Hoppers extends Part {
+
+        {
+            option("transferCooldown")
+                .docs(
+                    "How many ticks a hopper waits after moving items before it can move again.",
+                    "1 is the fastest, 8 is the Vanilla/Spigot default.",
+                    "Overrides \"ticks-per.hopper-transfer\" in spigot.yml"
+                ).greaterThanOrEqualTo(1.0F);
+        }
+
+        public int transferCooldown = 1;
+    }
+
     {
         option("waypointUpdateScale")
             .docs(
