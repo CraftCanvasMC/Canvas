@@ -4,7 +4,7 @@ import io.papermc.paperweight.core.tasks.patchroulette.AbstractPatchRouletteTask
 
 plugins {
     java
-    id("io.canvasmc.weaver.patcher") version "2.5.1"
+    id("io.canvasmc.weaver.patcher") version "2.5.2"
     id("xyz.jpenilla.resource-factory-paper-convention") version "1.4.0" apply false
 }
 
