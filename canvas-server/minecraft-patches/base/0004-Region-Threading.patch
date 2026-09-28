@@ -6373,10 +6373,10 @@ index 0000000000000000000000000000000000000000..ccfbec958e65b8cccabd5d6421ab9de5
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f3d4a07d0e81bc60e43818a7619136056f4c78cd
+index 0000000000000000000000000000000000000000..756604c60975d4ce69bdcd251508ec7864a507bd
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -0,0 +1,653 @@
+@@ -0,0 +1,664 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.common.util.TimeUtil;
@@ -6395,6 +6395,7 @@ index 0000000000000000000000000000000000000000..f3d4a07d0e81bc60e43818a761913605
 +import java.util.concurrent.CopyOnWriteArrayList;
 +import java.util.concurrent.atomic.AtomicBoolean;
 +import java.util.function.BooleanSupplier;
++import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 +import net.minecraft.CrashReport;
 +import net.minecraft.ReportedException;
 +import net.minecraft.network.Connection;
@@ -6419,6 +6420,7 @@ index 0000000000000000000000000000000000000000..f3d4a07d0e81bc60e43818a761913605
 +import net.minecraft.world.level.saveddata.WeatherData;
 +import net.minecraft.world.level.saveddata.maps.MapIndex;
 +import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
++import net.minecraft.world.level.storage.CommandStorage;
 +import net.minecraft.world.scores.ScoreboardSaveData;
 +import org.apache.commons.lang3.mutable.MutableLong;
 +import org.bukkit.Bukkit;
@@ -6732,14 +6734,15 @@ index 0000000000000000000000000000000000000000..f3d4a07d0e81bc60e43818a761913605
 +            // stopwatches
 +            // custom boss events
 +            // world clocks - only if affects all worlds
++            // command storage
 +
 +            // we have to do this for the scoreboard system or else the scoreboard
 +            // system won't actually save. see MinecraftServer#saveGlobalData
 +
 +            server.getScoreboard().storeToSaveDataIfDirty(server.getDataStorage().computeIfAbsent(ScoreboardSaveData.TYPE));
 +
-+            CompletableFuture<?> future = server.getDataStorage().saveSpecific(() -> {
-+                final ArrayList<Class<? extends SavedData>> toSave = new ArrayList<>();
++            final CompletableFuture<?> future = server.getDataStorage().saveSpecific(() -> {
++                final ObjectArrayList<Class<? extends SavedData>> toSave = new ObjectArrayList<>();
 +
 +                // both of these are SWMR, only mutatable on the global tick
 +                if (autosaveConfig.autosaveScoreboards) {
@@ -6762,6 +6765,11 @@ index 0000000000000000000000000000000000000000..f3d4a07d0e81bc60e43818a761913605
 +                // only should be saved globally if affects all worlds
 +                if (autosaveConfig.autosaveTime && GlobalConfiguration.get().time.affectsAllWorlds) {
 +                    toSave.add(ServerClockManager.class);
++                }
++
++                // autosave command storage
++                if (autosaveConfig.autosaveCommandStorage) {
++                    toSave.add(CommandStorage.Container.class);
 +                }
 +
 +                return toSave;
@@ -6800,8 +6808,8 @@ index 0000000000000000000000000000000000000000..f3d4a07d0e81bc60e43818a761913605
 +
 +            // note: wandering trader data is regionized now, can't autosave
 +
-+            CompletableFuture<?> future = level.getDataStorage().saveSpecific(() -> {
-+                final ArrayList<Class<? extends SavedData>> toSave = new ArrayList<>();
++            final CompletableFuture<?> future = level.getDataStorage().saveSpecific(() -> {
++                final ObjectArrayList<Class<? extends SavedData>> toSave = new ObjectArrayList<>();
 +
 +                // maps is represented in 2 data types, the index and the item
 +                if (autosaveConfig.autosaveMaps) {
@@ -6819,11 +6827,14 @@ index 0000000000000000000000000000000000000000..f3d4a07d0e81bc60e43818a761913605
 +
 +                // folia already only ticks this on the global tick and both canvas
 +                // and folia have thread checks against modifying this data async, so this is fine
++
 +                if (autosaveConfig.autosaveWeather) {
 +                    toSave.add(WeatherData.class);
 +                }
++
 +                // already made threadsafe from folia, just needed the codec adjusted to copy the
 +                // backing map to prevent exceptions or torn read/write issues
++
 +                if (autosaveConfig.autosaveGamerules) {
 +                    toSave.add(GameRuleMap.class);
 +                }
@@ -32429,6 +32440,54 @@ index 1c8b9c0a1f615dedca9028379a1d8f60e9c39947..1328a3efa9ca4ab90110bb7a7a23d87b
          }
      }
  
+diff --git a/net/minecraft/world/level/storage/CommandStorage.java b/net/minecraft/world/level/storage/CommandStorage.java
+index 007ec3025fc73c950319a08472e1a25dcb2d50d6..8d624cdd32a476ff8725f84b341c34bf3613bb45 100644
+--- a/net/minecraft/world/level/storage/CommandStorage.java
++++ b/net/minecraft/world/level/storage/CommandStorage.java
+@@ -62,7 +62,13 @@ public class CommandStorage {
+ 
+     public static class Container extends SavedData {
+         public static final Codec<CommandStorage.Container> CODEC = RecordCodecBuilder.create(
+-            i -> i.group(Codec.unboundedMap(ExtraCodecs.RESOURCE_PATH_CODEC, CompoundTag.CODEC).fieldOf("contents").forGetter(container -> container.storage))
++            // Canvas start - region threading
++            i -> i.group(Codec.unboundedMap(ExtraCodecs.RESOURCE_PATH_CODEC, CompoundTag.CODEC).fieldOf("contents").forGetter(container -> {
++                    synchronized (container.storage) {
++                        return container.storage;
++                    }
++                }))
++            // Canvas end - region threading
+                 .apply(i, CommandStorage.Container::new)
+         );
+         private final Map<String, CompoundTag> storage;
+@@ -82,11 +88,14 @@ public class CommandStorage {
+         }
+ 
+         public CompoundTag get(final String id) {
++            synchronized (this.storage) { // Canvas - region threading
+             CompoundTag result = this.storage.get(id);
+             return result != null ? result : new CompoundTag();
++            } // Canvas - region threading
+         }
+ 
+         public void put(final String id, final CompoundTag contents) {
++            synchronized (this.storage) { // Canvas - region threading
+             if (contents.isEmpty()) {
+                 this.storage.remove(id);
+             } else {
+@@ -94,10 +103,13 @@ public class CommandStorage {
+             }
+ 
+             this.setDirty();
++            } // Canvas - region threading
+         }
+ 
+         public Stream<Identifier> getKeys(final String namespace) {
++            synchronized (this.storage) { // Canvas - region threading
+             return this.storage.keySet().stream().map(p -> Identifier.fromNamespaceAndPath(namespace, p));
++            } // Canvas - region threading
+         }
+     }
+ }
 diff --git a/net/minecraft/world/level/storage/LevelStorageSource.java b/net/minecraft/world/level/storage/LevelStorageSource.java
 index 01b4ea4159d1885c4f409cca85297342bf485d56..aed3fba7cd87d4295ea23a85952b90f5a8dce553 100644
 --- a/net/minecraft/world/level/storage/LevelStorageSource.java

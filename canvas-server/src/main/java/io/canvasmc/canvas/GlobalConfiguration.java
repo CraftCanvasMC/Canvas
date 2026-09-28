@@ -665,6 +665,7 @@ public class GlobalConfiguration extends Part {
         public boolean autosaveCustomBossEvents = true;
         public boolean autosaveTime = true;
         public boolean autosaveMaps = true;
+        public boolean autosaveCommandStorage = true;
         public boolean autosaveWeather = true;
         public boolean autosaveGamerules = true;
         public boolean autosavePlayers = true;
