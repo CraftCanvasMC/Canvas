@@ -8,7 +8,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
  * @author dueris
  */
 @FunctionalInterface
-public interface CSEIntSupplier {
+public interface CSESupplier<T> {
     /**
      * Runs the function, supplying an {@code int} return value
      *
@@ -17,5 +17,5 @@ public interface CSEIntSupplier {
      * @throws CommandSyntaxException
      *     if execution fails
      */
-    int act() throws CommandSyntaxException;
+    T act() throws CommandSyntaxException;
 }
