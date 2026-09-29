@@ -16248,13 +16248,187 @@ index 8c1721318a8e21f92e53ac900b823a3a99e28fef..6eec8edbfa5e1be4672f2e8b31a22d42
      }
  }
 diff --git a/net/minecraft/server/commands/ExecuteCommand.java b/net/minecraft/server/commands/ExecuteCommand.java
-index 1a3de1a672b3157e7433b83252b798aa08ca8ed5..a9b729cc957f278ea1d426fb8b5044a450bdd990 100644
+index 1a3de1a672b3157e7433b83252b798aa08ca8ed5..963d4ee017dda805c1cb0558d052fe8ed95fbb2c 100644
 --- a/net/minecraft/server/commands/ExecuteCommand.java
 +++ b/net/minecraft/server/commands/ExecuteCommand.java
-@@ -648,14 +648,7 @@ public class ExecuteCommand {
+@@ -315,8 +315,10 @@ public class ExecuteCommand {
+                                         .redirect(
+                                             execute,
+                                             c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
++                                                // Canvas start - region threading
++                                                c,
++                                                provider,
++                                                // Canvas end - region threading
+                                                 NbtPathArgument.getPath(c, "path"),
+                                                 v -> IntTag.valueOf((int)(v * DoubleArgumentType.getDouble(c, "scale"))),
+                                                 storeResult
+@@ -331,8 +333,10 @@ public class ExecuteCommand {
+                                         .redirect(
+                                             execute,
+                                             c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
++                                                // Canvas start - region threading
++                                                c,
++                                                provider,
++                                                // Canvas end - region threading
+                                                 NbtPathArgument.getPath(c, "path"),
+                                                 v -> FloatTag.valueOf((float)(v * DoubleArgumentType.getDouble(c, "scale"))),
+                                                 storeResult
+@@ -347,8 +351,10 @@ public class ExecuteCommand {
+                                         .redirect(
+                                             execute,
+                                             c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
++                                                // Canvas start - region threading
++                                                c,
++                                                provider,
++                                                // Canvas end - region threading
+                                                 NbtPathArgument.getPath(c, "path"),
+                                                 v -> ShortTag.valueOf((short)(v * DoubleArgumentType.getDouble(c, "scale"))),
+                                                 storeResult
+@@ -363,8 +369,10 @@ public class ExecuteCommand {
+                                         .redirect(
+                                             execute,
+                                             c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
++                                                // Canvas start - region threading
++                                                c,
++                                                provider,
++                                                // Canvas end - region threading
+                                                 NbtPathArgument.getPath(c, "path"),
+                                                 v -> LongTag.valueOf((long)(v * DoubleArgumentType.getDouble(c, "scale"))),
+                                                 storeResult
+@@ -379,8 +387,10 @@ public class ExecuteCommand {
+                                         .redirect(
+                                             execute,
+                                             c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
++                                                // Canvas start - region threading
++                                                c,
++                                                provider,
++                                                // Canvas end - region threading
+                                                 NbtPathArgument.getPath(c, "path"),
+                                                 v -> DoubleTag.valueOf(v * DoubleArgumentType.getDouble(c, "scale")),
+                                                 storeResult
+@@ -395,8 +405,10 @@ public class ExecuteCommand {
+                                         .redirect(
+                                             execute,
+                                             c -> storeData(
+-                                                c.getSource(),
+-                                                provider.access(c),
++                                                // Canvas start - region threading
++                                                c,
++                                                provider,
++                                                // Canvas end - region threading
+                                                 NbtPathArgument.getPath(c, "path"),
+                                                 v -> ByteTag.valueOf((byte)(v * DoubleArgumentType.getDouble(c, "scale"))),
+                                                 storeResult
+@@ -438,18 +450,22 @@ public class ExecuteCommand {
+     }
+ 
+     private static CommandSourceStack storeData(
+-        final CommandSourceStack source,
+-        final DataAccessor accessor,
++        // Canvas start - region threading
++        final CommandContext<CommandSourceStack> context,
++        final ArgProvider<DataAccessor> argProvider,
++        // Canvas end - region threading
+         final NbtPathArgument.NbtPath path,
+         final IntFunction<Tag> constructor,
+         final boolean storeResult
+     ) {
+-        return source.withCallback((success, result) -> {
++        return context.getSource().withCallback((success, result) -> { // Canvas - region threading
+             try {
++                argProvider.scheduleAndAccess(context, (accessor) -> { // Canvas - region threading
+                 CompoundTag data = accessor.getData();
+                 int value = storeResult ? result : (success ? 1 : 0);
+                 path.set(data, constructor.apply(value));
+                 accessor.setData(data);
++                return Command.SINGLE_SUCCESS; }); // Canvas - region threading
+             } catch (CommandSyntaxException var8) {
+             }
+         }, CommandResultCallback::chain);
+@@ -476,8 +492,21 @@ public class ExecuteCommand {
+                                     execute,
+                                     Commands.argument("block", BlockPredicateArgument.blockPredicate(context)),
+                                     expected,
+-                                    c -> BlockPredicateArgument.getBlockPredicate(c, "block")
+-                                        .test(new BlockInWorld(c.getSource().getLevel(), BlockPosArgument.getLoadedBlockPos(c, "pos"), true))
++                                    // Canvas start - region threading
++                                    c -> {
++                                        final ServerLevel world = c.getSource().getLevel();
++                                        final BlockInWorld blockInWorld = new BlockInWorld(world, BlockPosArgument.getLoadedBlockPos(c, "pos"), false);
++                                        if (
++                                            !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, blockInWorld.getPos()) ||
++                                            !isChunkLoaded(world, blockInWorld.getPos())
++                                        ) {
++                                            // if the block isn't in the same region, we cannot reliably test, so we fail it
++                                            return false;
++                                        }
++
++                                        return BlockPredicateArgument.getBlockPredicate(c, "block").test(blockInWorld);
++                                    }
++                                    // Canvas end - region threading
+                                 )
+                             )
+                     )
+@@ -508,6 +537,34 @@ public class ExecuteCommand {
                          )
                      )
              )
++            // Canvas start - region threading - add "regionof" arg
++            .then(
++                Commands.literal("regionof")
++                    .then(
++                        addConditional(
++                            execute,
++                            Commands.argument("pos", BlockPosArgument.blockPos()),
++                            expected,
++                            c -> {
++                                final ServerLevel world = c.getSource().getLevel();
++                                final BlockPos blockPos = BlockPosArgument.getBlockPos(c, "pos");
++                                return isChunkLoaded(world, blockPos) && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, blockPos);
++                            }
++                        )
++                    )
++                    .then(
++                        addConditional(
++                            execute,
++                            Commands.argument("entity", EntityArgument.entity()),
++                            expected,
++                            c -> {
++                                final Entity entity = EntityArgument.getEntity(c, "entity");
++                                return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity);
++                            }
++                        )
++                    )
++            )
++            // Canvas end - region threading - add "regionof" arg
+             .then(
+                 Commands.literal("dimension")
+                     .then(
+@@ -637,25 +694,20 @@ public class ExecuteCommand {
+                             .executes(createNumericConditionalHandler(expected, c -> EntityArgument.getOptionalEntities(c, "entities").size()))
+                     )
+             )
+-            .then(
+-                Commands.literal("predicate")
+-                    .then(
+-                        addConditional(
+-                            execute,
+-                            Commands.argument("predicate", ResourceOrIdArgument.lootPredicate(context)),
+-                            expected,
+-                            c -> checkCustomPredicate(c.getSource(), ResourceOrIdArgument.getLootPredicate(c, "predicate"))
+-                        )
+-                    )
+-            )
 -            .then(
 -                Commands.literal("function")
 -                    .then(
@@ -16263,10 +16437,68 @@ index 1a3de1a672b3157e7433b83252b798aa08ca8ed5..a9b729cc957f278ea1d426fb8b5044a4
 -                            .fork(execute, new ExecuteCommand.ExecuteIfFunctionCustomModifier(expected))
 -                    )
 -            )
++            // Canvas start - region threading - TODO - can we kinda fix? or at least make it confined to the executing region?
++            // .then(
++            //     Commands.literal("predicate")
++            //         .then(
++            //             addConditional(
++            //                 execute,
++            //                 Commands.argument("predicate", ResourceOrIdArgument.lootPredicate(context)),
++            //                 expected,
++            //                 c -> checkCustomPredicate(c.getSource(), ResourceOrIdArgument.getLootPredicate(c, "predicate"))
++            //             )
++            //         )
++            // )
++            // Canvas end - region threading - TODO - can we kinda fix? or at least make it confined to the executing region?
 +            // Canvas - region threading - purge functions
              .then(
                  Commands.literal("stopwatch")
                      .then(
+@@ -673,6 +725,7 @@ public class ExecuteCommand {
+             );
+ 
+         for (ArgProvider<DataAccessor> provider : DataCommands.SOURCE_PROVIDERS) {
++            if (true) break; // Canvas - region threading - not safe
+             parent.then(
+                 provider.wrap(
+                     Commands.literal("data"),
+@@ -686,6 +739,7 @@ public class ExecuteCommand {
+         }
+ 
+         for (ArgProvider<ItemAccessor<?>> provider : ItemCommands.SOURCE_PROVIDERS) {
++            if (true) break; // Canvas - region threading - not safe
+             parent.then(
+                     provider.wrap(
+                         Commands.literal("items"),
+@@ -891,6 +945,20 @@ public class ExecuteCommand {
+             throw ERROR_AREA_TOO_LARGE.create(32768, area);
+         }
+ 
++        // Canvas start - region threading
++        // we gotta thread check "from" and "destination"
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            level, from.minX() >> 4, from.minZ() >> 4, from.maxX() >> 4, from.maxZ() >> 4
++        )) {
++            throw DataAccessor.CSE_TARGET_NOT_SAME_REGION.create("Cannot check source region async");
++        }
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(
++            level, destination.minX() >> 4, destination.minZ() >> 4, destination.maxX() >> 4, destination.maxZ() >> 4
++        )) {
++            throw DataAccessor.CSE_TARGET_NOT_SAME_REGION.create("Cannot check destination region async");
++        }
++
++        // Canvas end - region threading
+         int count = 0;
+         RegistryAccess registryAccess = level.registryAccess();
+ 
+@@ -1025,6 +1093,7 @@ public class ExecuteCommand {
+         final InCommandFunction<CommandContext<T>, Collection<CommandFunction<T>>> functionGetter,
+         final ChainModifiers modifiers
+     ) {
++        if (true) throw new UnsupportedOperationException("Unsupported in region threading"); // Canvas - region threading
+         List<T> filteredSources = new ArrayList<>(currentSources.size());
+ 
+         Collection<CommandFunction<T>> functionsToRun;
 diff --git a/net/minecraft/server/commands/ExperienceCommand.java b/net/minecraft/server/commands/ExperienceCommand.java
 index c94f96440b9ccd3754c0e88a012237dfdff8aef5..29066dc4e416e58a21ec22aa21d5448202d1f3a8 100644
 --- a/net/minecraft/server/commands/ExperienceCommand.java
