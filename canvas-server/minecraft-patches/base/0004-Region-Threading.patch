@@ -1697,230 +1697,6 @@ index 0000000000000000000000000000000000000000..c4b6a31888e6e23daedcb2ed67111ec6
 +        }
 +    }
 +}
-diff --git a/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..0978987453a4c40fbc76de5be2440679b0368f11
---- /dev/null
-+++ b/io/canvasmc/canvas/threadedregions/WorldShutdownThread.java
-@@ -0,0 +1,218 @@
-+package io.canvasmc.canvas.threadedregions;
-+
-+import com.google.common.base.Preconditions;
-+import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState;
-+import io.canvasmc.canvas.util.ServerLocation;
-+import io.canvasmc.canvas.util.Util;
-+import io.papermc.paper.threadedregions.RegionShutdownThread;
-+import io.papermc.paper.threadedregions.RegionizedServer;
-+import io.papermc.paper.threadedregions.ThreadedRegionizer;
-+import io.papermc.paper.threadedregions.TickRegions;
-+import java.util.List;
-+import java.util.concurrent.locks.LockSupport;
-+import java.util.function.Supplier;
-+import net.minecraft.network.chat.Component;
-+import net.minecraft.server.MinecraftServer;
-+import net.minecraft.server.level.ServerLevel;
-+import net.minecraft.server.level.ServerPlayer;
-+import org.bukkit.event.player.PlayerKickEvent;
-+import org.slf4j.Logger;
-+
-+public class WorldShutdownThread extends RegionShutdownThread {
-+
-+    private static final Logger LOGGER = LogUtils.getClassLogger();
-+
-+    private final String debugName;
-+    private final ServerLevel level;
-+    private final Supplier<List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>> theWaiter;
-+
-+    public WorldShutdownThread(
-+        final ServerLevel level,
-+        final Supplier<List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>> theWaiter
-+    ) {
-+        final String worldName = Util.getLevelName(level);
-+
-+        super(worldName + " shutdown thread");
-+        this.setUncaughtExceptionHandler((_, thrown) -> {
-+
-+            // we have to schedule to the global tick for this, since this
-+            // is a WORLD shutdown thread, not the server shutdown thread,
-+            // and as such it will cause shutdown of the server to occur
-+            // on this thread if not scheduled, so we schedule to the global
-+            // tick to ensure shutdown is executed on the proper thread
-+
-+            LOGGER.error("Error shutting down world {}, alerting global tick to shutdown", worldName, thrown);
-+            RegionizedServer.getInstance().addTask(MinecraftServer.getServer()::stopServer);
-+        });
-+
-+        this.debugName = worldName;
-+        this.level = level;
-+        this.theWaiter = theWaiter;
-+    }
-+
-+    private String getWorldName() {
-+        return debugName;
-+    }
-+
-+    @Override
-+    public void run() {
-+        LOGGER.info("Awaiting termination of {} regions", getWorldName());
-+        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
-+            regions = theWaiter.get();
-+        LOGGER.info("Beginning shutdown of {}", getWorldName());
-+
-+        // we have to do the following in the following order:
-+
-+        // - halt world chunk system
-+
-+        // we do teleports and save players swapped from shutdown thread
-+        // because we have to complete all teleport requests first
-+
-+        // - finish pending teleports
-+        // - process players
-+
-+        // - save chunks
-+        // - save level data
-+        // - close saved data storage
-+        // - remove world from maps
-+        // - complete ticket callback
-+
-+        // halting the chunk system comes before pending teleports in
-+        // the region shutdown thread, so we mimic that here
-+
-+        LOGGER.info("Halting chunk system for {}", getWorldName());
-+
-+        try {
-+            // we don't need to try and soft halt the chunk system first,
-+            // this does the exact same thing, but waits 60s
-+            haltChunkSystem(this.level);
-+        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to halt chunk system for {}", getWorldName(), thrown);
-+            throw thrown;
-+        }
-+
-+        boolean processedAnyTeleports = false;
-+
-+        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
-+            processedAnyTeleports |= finishTeleportations(region, this.level);
-+        }
-+
-+        if (processedAnyTeleports) {
-+            LOGGER.info("Finished pending teleports in {}", getWorldName());
-+        }
-+
-+        // cover a race condition with portaling and teleporting
-+        // that way we don't get players stuck in limbo ever
-+
-+        // first we check world-local players, then all players
-+
-+        int fixedPlayers = 0;
-+
-+        for (final ServerPlayer worldPlayer : this.level.players()) {
-+            final EntityRegionTransferState transferState = worldPlayer.getRegionTransferState();
-+
-+            // inc fixed players, we are fixing any players that are in this list
-+            fixedPlayers += 1;
-+
-+            if (transferState == null) {
-+                LOGGER.warn("Player doesn't contain transfer state, kicking");
-+                worldPlayer.connection.disconnect(Component.literal("Destination world is unloading"), PlayerKickEvent.Cause.UNKNOWN);
-+                continue;
-+            }
-+
-+            // the teleport origin methods should never have null return values
-+            teleportPlayer(worldPlayer, transferState.getOrigin());
-+        }
-+
-+        for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().getPlayers()) {
-+            final EntityRegionTransferState transferState = player.getRegionTransferState();
-+
-+            // if they don't have a transfer state, we don't care
-+            if (transferState == null) {
-+                continue;
-+            }
-+
-+            final ServerLocation teleportingFrom = transferState.getOrigin();
-+            final ServerLevel teleportingToDimension = transferState.getDestinationDimension();
-+
-+            if (teleportingToDimension == this.level) {
-+                // someone is trying to teleport here... no
-+
-+                if (player.isRemoved()) {
-+                    teleportPlayer(player, teleportingFrom);
-+                }
-+                else {
-+
-+                    // if the player isn't removed yet, they are still processing
-+                    // the initial teleport/portal, so we should delay this a bit
-+
-+                    // we HAVE to block and then execute here, since this thread owns
-+                    // the entity once it's removed
-+
-+                    LOGGER.info("Player \"{}\" not removed yet but trying to teleport to unloading world, blocking waiting for removal", player.getScoreboardName());
-+
-+                    while (!transferState.hasFinishedInitialRemoval()) {
-+                        // park 1ms on each iteration waiting for removal
-+                        LockSupport.parkNanos("waiting for removal", 1_000_000);
-+                    }
-+
-+                    teleportPlayer(player, teleportingFrom);
-+                }
-+
-+                fixedPlayers += 1;
-+            }
-+        }
-+
-+        if (fixedPlayers > 0) {
-+            LOGGER.info("Fixed {} players for unload", fixedPlayers);
-+        }
-+
-+        // we don't need to do inventory closing, there should be no players here
-+        // so we skip to saving the regions in the world
-+
-+        try {
-+            for (int i = 0; i < regions.size(); i++) {
-+                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
-+                    region = regions.get(i);
-+                saveRegionChunks(region, (i + 1) == regions.size());
-+            }
-+        } catch (final Throwable thrown) {
-+            LOGGER.error("Failed to save chunks in {}", getWorldName(), thrown);
-+            throw thrown;
-+        } finally {
-+            LOGGER.info("Saved chunks in {}", getWorldName());
-+        }
-+
-+        // now we save level data and force pearl data save
-+
-+        saveLevelData(this.level);
-+        this.level.getChunkSource().getDataStorage().close();
-+
-+        LOGGER.info("Saved {} level data", getWorldName());
-+
-+        RegionizedServer.getInstance().worlds.remove(this.level);
-+        MinecraftServer.getServer().removeLevel(this.level);
-+        MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
-+
-+        LOGGER.info("Completed {} unload", getWorldName());
-+
-+        this.level.canvas$unloadTicket.getOrThrow().callback().accept(io.canvasmc.canvas.WorldUnloadResult.SUCCESS);
-+    }
-+
-+    private static void teleportPlayer(final ServerPlayer entityPlayer, final ServerLocation target) {
-+        Preconditions.checkNotNull(target.pos(), "Target position not defined");
-+        entityPlayer.teleportAsync(
-+            target.level(),
-+            target.pos(),
-+            // note: yaw and pitch CAN be null in the ServerLocation instance, this is ok, this is handled
-+            //       by the teleportAsync function
-+            target.yaw(), target.pitch(),
-+            null, // don't care about velocity
-+            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
-+            net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK,
-+            null, // we don't need a callback
-+            false // do not call events for this, too unsafe
-+        );
-+    }
-+}
 diff --git a/io/canvasmc/canvas/threadedregions/commands/AbstractCommandExecution.java b/io/canvasmc/canvas/threadedregions/commands/AbstractCommandExecution.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..a89180e95de7d596622a3083a0fff18b78a445ce
@@ -5130,7 +4906,7 @@ index 0000000000000000000000000000000000000000..668c9433f7cbc57e1f0de49b0fa5a0db
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/ticket/UnloadTicket.java b/io/canvasmc/canvas/threadedregions/ticket/UnloadTicket.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..0ff6296651cf8b5b4348ccb73c1ae329968b0f01
+index 0000000000000000000000000000000000000000..ba1621553491e10468a7cefb92c2c06705e07100
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/ticket/UnloadTicket.java
 @@ -0,0 +1,22 @@
@@ -5143,7 +4919,7 @@ index 0000000000000000000000000000000000000000..0ff6296651cf8b5b4348ccb73c1ae329
 + * Represents a ticket propagated to a {@link net.minecraft.server.level.ServerLevel} instance when the world should be
 + * marked for unloading. Regions read this ticket and mark themselves as non-schedulable via
 + * {@link io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle#markNonSchedulable} while the
-+ * {@link io.canvasmc.canvas.threadedregions.WorldShutdownThread} instance that is handling the world unload waits for
++ * {@link io.canvasmc.canvas.threadedregions.world.WorldShutdownThread} instance that is handling the world unload waits for
 + * all regions to deschedule or be killed by the regionizer
 + *
 + * @param callback
@@ -5170,6 +4946,230 @@ index 0000000000000000000000000000000000000000..6bbd878f80cf9f94c67ba42993b5619b
 +package io.canvasmc.canvas.threadedregions.ticket;
 +
 +import org.jspecify.annotations.NullMarked;
+diff --git a/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..aef432101260f29105f7a9e60ae83814bd0d0b35
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java
+@@ -0,0 +1,218 @@
++package io.canvasmc.canvas.threadedregions.world;
++
++import com.google.common.base.Preconditions;
++import com.mojang.logging.LogUtils;
++import io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState;
++import io.canvasmc.canvas.util.ServerLocation;
++import io.canvasmc.canvas.util.Util;
++import io.papermc.paper.threadedregions.RegionShutdownThread;
++import io.papermc.paper.threadedregions.RegionizedServer;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
++import io.papermc.paper.threadedregions.TickRegions;
++import java.util.List;
++import java.util.concurrent.locks.LockSupport;
++import java.util.function.Supplier;
++import net.minecraft.network.chat.Component;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
++import org.bukkit.event.player.PlayerKickEvent;
++import org.slf4j.Logger;
++
++public class WorldShutdownThread extends RegionShutdownThread {
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++
++    private final String debugName;
++    private final ServerLevel level;
++    private final Supplier<List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>> theWaiter;
++
++    public WorldShutdownThread(
++        final ServerLevel level,
++        final Supplier<List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>> theWaiter
++    ) {
++        final String worldName = Util.getLevelName(level);
++
++        super(worldName + " shutdown thread");
++        this.setUncaughtExceptionHandler((_, thrown) -> {
++
++            // we have to schedule to the global tick for this, since this
++            // is a WORLD shutdown thread, not the server shutdown thread,
++            // and as such it will cause shutdown of the server to occur
++            // on this thread if not scheduled, so we schedule to the global
++            // tick to ensure shutdown is executed on the proper thread
++
++            LOGGER.error("Error shutting down world {}, alerting global tick to shutdown", worldName, thrown);
++            RegionizedServer.getInstance().addTask(MinecraftServer.getServer()::stopServer);
++        });
++
++        this.debugName = worldName;
++        this.level = level;
++        this.theWaiter = theWaiter;
++    }
++
++    private String getWorldName() {
++        return debugName;
++    }
++
++    @Override
++    public void run() {
++        LOGGER.info("Awaiting termination of {} regions", getWorldName());
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
++            regions = theWaiter.get();
++        LOGGER.info("Beginning shutdown of {}", getWorldName());
++
++        // we have to do the following in the following order:
++
++        // - halt world chunk system
++
++        // we do teleports and save players swapped from shutdown thread
++        // because we have to complete all teleport requests first
++
++        // - finish pending teleports
++        // - process players
++
++        // - save chunks
++        // - save level data
++        // - close saved data storage
++        // - remove world from maps
++        // - complete ticket callback
++
++        // halting the chunk system comes before pending teleports in
++        // the region shutdown thread, so we mimic that here
++
++        LOGGER.info("Halting chunk system for {}", getWorldName());
++
++        try {
++            // we don't need to try and soft halt the chunk system first,
++            // this does the exact same thing, but waits 60s
++            haltChunkSystem(this.level);
++        } catch (final Throwable thrown) {
++            LOGGER.error("Failed to halt chunk system for {}", getWorldName(), thrown);
++            throw thrown;
++        }
++
++        boolean processedAnyTeleports = false;
++
++        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++            processedAnyTeleports |= finishTeleportations(region, this.level);
++        }
++
++        if (processedAnyTeleports) {
++            LOGGER.info("Finished pending teleports in {}", getWorldName());
++        }
++
++        // cover a race condition with portaling and teleporting
++        // that way we don't get players stuck in limbo ever
++
++        // first we check world-local players, then all players
++
++        int fixedPlayers = 0;
++
++        for (final ServerPlayer worldPlayer : this.level.players()) {
++            final EntityRegionTransferState transferState = worldPlayer.getRegionTransferState();
++
++            // inc fixed players, we are fixing any players that are in this list
++            fixedPlayers += 1;
++
++            if (transferState == null) {
++                LOGGER.warn("Player doesn't contain transfer state, kicking");
++                worldPlayer.connection.disconnect(Component.literal("Destination world is unloading"), PlayerKickEvent.Cause.UNKNOWN);
++                continue;
++            }
++
++            // the teleport origin methods should never have null return values
++            teleportPlayer(worldPlayer, transferState.getOrigin());
++        }
++
++        for (final ServerPlayer player : MinecraftServer.getServer().getPlayerList().getPlayers()) {
++            final EntityRegionTransferState transferState = player.getRegionTransferState();
++
++            // if they don't have a transfer state, we don't care
++            if (transferState == null) {
++                continue;
++            }
++
++            final ServerLocation teleportingFrom = transferState.getOrigin();
++            final ServerLevel teleportingToDimension = transferState.getDestinationDimension();
++
++            if (teleportingToDimension == this.level) {
++                // someone is trying to teleport here... no
++
++                if (player.isRemoved()) {
++                    teleportPlayer(player, teleportingFrom);
++                }
++                else {
++
++                    // if the player isn't removed yet, they are still processing
++                    // the initial teleport/portal, so we should delay this a bit
++
++                    // we HAVE to block and then execute here, since this thread owns
++                    // the entity once it's removed
++
++                    LOGGER.info("Player \"{}\" not removed yet but trying to teleport to unloading world, blocking waiting for removal", player.getScoreboardName());
++
++                    while (!transferState.hasFinishedInitialRemoval()) {
++                        // park 1ms on each iteration waiting for removal
++                        LockSupport.parkNanos("waiting for removal", 1_000_000);
++                    }
++
++                    teleportPlayer(player, teleportingFrom);
++                }
++
++                fixedPlayers += 1;
++            }
++        }
++
++        if (fixedPlayers > 0) {
++            LOGGER.info("Fixed {} players for unload", fixedPlayers);
++        }
++
++        // we don't need to do inventory closing, there should be no players here
++        // so we skip to saving the regions in the world
++
++        try {
++            for (int i = 0; i < regions.size(); i++) {
++                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++                    region = regions.get(i);
++                saveRegionChunks(region, (i + 1) == regions.size());
++            }
++        } catch (final Throwable thrown) {
++            LOGGER.error("Failed to save chunks in {}", getWorldName(), thrown);
++            throw thrown;
++        } finally {
++            LOGGER.info("Saved chunks in {}", getWorldName());
++        }
++
++        // now we save level data and force pearl data save
++
++        saveLevelData(this.level);
++        this.level.getChunkSource().getDataStorage().close();
++
++        LOGGER.info("Saved {} level data", getWorldName());
++
++        RegionizedServer.getInstance().worlds.remove(this.level);
++        MinecraftServer.getServer().removeLevel(this.level);
++        MinecraftServer.getServer().server.worlds.remove(this.level.getWorld().getName().toLowerCase(java.util.Locale.ROOT));
++
++        LOGGER.info("Completed {} unload", getWorldName());
++
++        this.level.canvas$unloadTicket.getOrThrow().callback().accept(io.canvasmc.canvas.WorldUnloadResult.SUCCESS);
++    }
++
++    private static void teleportPlayer(final ServerPlayer entityPlayer, final ServerLocation target) {
++        Preconditions.checkNotNull(target.pos(), "Target position not defined");
++        entityPlayer.teleportAsync(
++            target.level(),
++            target.pos(),
++            // note: yaw and pitch CAN be null in the ServerLocation instance, this is ok, this is handled
++            //       by the teleportAsync function
++            target.yaw(), target.pitch(),
++            null, // don't care about velocity
++            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
++            net.minecraft.world.entity.Entity.TELEPORT_FLAG_LOAD_CHUNK,
++            null, // we don't need a callback
++            false // do not call events for this, too unsafe
++        );
++    }
++}
 diff --git a/io/canvasmc/canvas/threadedregions/world/package-info.java b/io/canvasmc/canvas/threadedregions/world/package-info.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..7494f93bcc79931720e55a2ffcaab2a90cae44f1
