@@ -2420,586 +2420,6 @@ index 0000000000000000000000000000000000000000..6aef9128633787de145054999648d8d2
 +package io.canvasmc.canvas.threadedregions.commands;
 +
 +import org.jspecify.annotations.NullMarked;
-diff --git a/io/canvasmc/canvas/threadedregions/entities/EnderPearls.java b/io/canvasmc/canvas/threadedregions/entities/EnderPearls.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..5e2d63ff2ba94135bbb519f7c892bef8d27b18b6
---- /dev/null
-+++ b/io/canvasmc/canvas/threadedregions/entities/EnderPearls.java
-@@ -0,0 +1,244 @@
-+package io.canvasmc.canvas.threadedregions.entities;
-+
-+import ca.spottedleaf.concurrentutil.util.Priority;
-+import com.mojang.logging.LogUtils;
-+import com.mojang.serialization.Codec;
-+import com.mojang.serialization.DataResult;
-+import com.mojang.serialization.codecs.RecordCodecBuilder;
-+import io.canvasmc.canvas.GlobalConfiguration;
-+import io.canvasmc.canvas.util.Codecs;
-+import io.canvasmc.canvas.util.Util;
-+import io.papermc.paper.threadedregions.RegionShutdownThread;
-+import java.util.ArrayList;
-+import java.util.List;
-+import java.util.Map;
-+import java.util.UUID;
-+import java.util.concurrent.ConcurrentHashMap;
-+import java.util.concurrent.CopyOnWriteArrayList;
-+import java.util.function.Function;
-+import net.minecraft.nbt.CompoundTag;
-+import net.minecraft.resources.Identifier;
-+import net.minecraft.server.MinecraftServer;
-+import net.minecraft.server.level.ServerLevel;
-+import net.minecraft.server.level.ServerPlayer;
-+import net.minecraft.util.ProblemReporter;
-+import net.minecraft.util.datafix.DataFixTypes;
-+import net.minecraft.world.entity.Entity;
-+import net.minecraft.world.entity.EntityProcessor;
-+import net.minecraft.world.entity.EntitySpawnReason;
-+import net.minecraft.world.entity.EntityType;
-+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
-+import net.minecraft.world.level.Level;
-+import net.minecraft.world.level.saveddata.SavedData;
-+import net.minecraft.world.level.saveddata.SavedDataType;
-+import net.minecraft.world.level.storage.TagValueInput;
-+import net.minecraft.world.level.storage.TagValueOutput;
-+import net.minecraft.world.level.storage.ValueInput;
-+import org.apache.commons.lang3.mutable.MutableBoolean;
-+import org.jetbrains.annotations.Contract;
-+import org.jspecify.annotations.NullMarked;
-+import org.slf4j.Logger;
-+
-+public final class EnderPearls extends SavedData {
-+    public static final Codec<Pearl> PEARL_CODEC = CompoundTag.CODEC.comapFlatMap(
-+        (Function<CompoundTag, DataResult<Pearl>>) compoundTag -> DataResult.success(new Pearl(compoundTag)), pearl -> pearl.serialized
-+    );
-+    public static final Codec<EnderPearls> CODEC = RecordCodecBuilder.create(i -> i.group(
-+        Codec.unboundedMap(
-+            Codecs.UUID_CODEC, Codecs.copyOnWriteArrayListCodec(PEARL_CODEC.listOf())
-+        ).optionalFieldOf("Data", new ConcurrentHashMap<>()).forGetter(EnderPearls::pearls)
-+    ).apply(i, EnderPearls::new));
-+
-+    public static final SavedDataType<EnderPearls> TYPE = new SavedDataType<>(
-+        Identifier.fromNamespaceAndPath("canvas", "pearls"),
-+        EnderPearls::new,
-+        CODEC,
-+        DataFixTypes.NONE
-+    );
-+
-+    private static final Logger LOGGER = LogUtils.getClassLogger();
-+
-+    private final Map<UUID, List<Pearl>> pearls;
-+
-+    public EnderPearls() {
-+        this(new ConcurrentHashMap<>());
-+    }
-+
-+    public EnderPearls(final Map<UUID, List<Pearl>> pearls) {
-+        this.pearls = new ConcurrentHashMap<>(pearls);
-+        setDirty(); // the data may be populated with unsaved data
-+    }
-+
-+    @Override
-+    public boolean isDirty() {
-+        // assume dirty in shutdown to ensure that all data is saved correctly
-+        return super.isDirty() || RegionShutdownThread.isShuttingDown();
-+    }
-+
-+    public void spawnPearls(final ServerPlayer player) {
-+        final MutableBoolean setDirty = new MutableBoolean(false);
-+
-+        // if the map has the player UUID, we should spawn pearls
-+        pearls.computeIfPresent(player.getUUID(), (_, enderPearls) -> {
-+            for (final Pearl enderPearl : new ArrayList<>(enderPearls)) {
-+                enderPearl.spawn();
-+                enderPearls.remove(enderPearl);
-+            }
-+            setDirty.setTrue();
-+            return null;
-+        });
-+
-+        // we should only set dirty if we spawned pearls
-+        if (setDirty.isTrue()) {
-+            setDirty();
-+        }
-+    }
-+
-+    public void addPearl(final UUID uuid, final ThrownEnderpearl thrownEnderpearl) {
-+        if (thrownEnderpearl.hasNullCallback()) {
-+            LOGGER.warn("Trying to add pearl with null callback, skipping", new Throwable());
-+            return;
-+        }
-+        else if (thrownEnderpearl.isRemoved()) {
-+            LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason(), new Throwable());
-+            return;
-+        }
-+
-+        final List<Pearl> pearlsForUUID = pearls.computeIfAbsent(uuid, (ignored) -> new CopyOnWriteArrayList<>());
-+        final Pearl encoded = Pearl.of(thrownEnderpearl);
-+
-+        // remove if it's already in the list, we don't want duplicates
-+        pearlsForUUID.remove(encoded);
-+        pearlsForUUID.add(encoded);
-+
-+        // mark dirty, we added a pearl(even if the pearl was present already)
-+        setDirty();
-+
-+        if (GlobalConfiguration.getInstance().logs.logEnderPearlRewriteActions) {
-+            LOGGER.info("Saved pearl at [{}] for {}", thrownEnderpearl.blockPosition().toShortString(), uuid);
-+        }
-+    }
-+
-+    private Map<UUID, List<Pearl>> pearls() {
-+        return pearls;
-+    }
-+
-+    @Override
-+    public int hashCode() {
-+        return pearls.hashCode();
-+    }
-+
-+    @Override
-+    public boolean equals(final Object obj) {
-+        return obj == this || obj instanceof EnderPearls other && this.pearls.equals(other.pearls);
-+    }
-+
-+    @Override
-+    public String toString() {
-+        return "EnderPearls[" +
-+            "pearls=" + pearls + ']';
-+    }
-+
-+    /**
-+     * The serializable ender pearl instance, containing a {@link net.minecraft.nbt.CompoundTag} which is the main save
-+     * data, formatted as:
-+     * <pre>{@code
-+     * {
-+     *     "uuid": <the entity uuid>,
-+     *     "data": <the entity data, without the id>,
-+     *     "level": <dimension>
-+     * }
-+     * }</pre>
-+     *
-+     * @param uuid
-+     *     the UUID of the ender pearl
-+     * @param serialized
-+     *     the serialized save data
-+     *
-+     * @author dueris
-+     */
-+    public record Pearl(UUID uuid, CompoundTag serialized) {
-+
-+        public Pearl(final CompoundTag tag) {
-+            this(tag.read("uuid", Codecs.UUID_CODEC).orElseThrow(), tag);
-+        }
-+
-+        @Contract("_ -> new")
-+        public static Pearl of(final ThrownEnderpearl pearl) {
-+            final CompoundTag tag;
-+            try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
-+                () -> "pearl-serialize", LOGGER
-+            )) {
-+                final TagValueOutput tagValueOutput = TagValueOutput.createWithContext(
-+                    problemReporter,
-+                    pearl.registryAccess()
-+                );
-+
-+                tagValueOutput.store("uuid", Codecs.UUID_CODEC, pearl.getUUID());
-+                tagValueOutput.store("level", Level.RESOURCE_KEY_CODEC, pearl.level().dimension());
-+                pearl.save(tagValueOutput.child("data"));
-+
-+                tag = tagValueOutput.buildResult();
-+            }
-+            return new Pearl(pearl.getUUID(), tag);
-+        }
-+
-+        public void spawn() {
-+            final CompoundTag data = serialized.getCompound("data").orElseThrow();
-+            final ServerLevel level = serialized.read("level", Level.RESOURCE_KEY_CODEC)
-+                .map(MinecraftServer.getServer()::getLevel)
-+                .orElse(null);
-+
-+            // the level can be null if the target world gets removed or something
-+            // between runtimes or even during runtime, so we check to be sure it's nonnull
-+
-+            if (level == null) {
-+                LOGGER.error("Level ({}) did not exist, skipping pearl spawn", serialized.getString("level"));
-+                return;
-+            }
-+
-+            final String levelName = Util.getLevelName(level);
-+            try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
-+                () -> "pearl-spawn", LOGGER
-+            )) {
-+                final ValueInput tagValueInput = TagValueInput.create(
-+                    problemReporter,
-+                    MinecraftServer.getServer().registryAccess(),
-+                    data
-+                );
-+                final Entity loadedEntity = EntityType.loadEntityRecursive(tagValueInput, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
-+
-+                if (loadedEntity != null) {
-+                    level.canvas$loadOrRunAtChunksAsync(loadedEntity.blockPosition(), 16, Priority.NORMAL, () -> {
-+                        if (level.tryAddFreshEntityWithPassengers(loadedEntity)) {
-+                            ServerPlayer.placeEnderPearlTicket(level, loadedEntity.chunkPosition());
-+                            if (GlobalConfiguration.getInstance().logs.logEnderPearlRewriteActions) {
-+                                LOGGER.info("Spawned saved pearl [{}] in level ({})", loadedEntity.blockPosition().toShortString(), levelName);
-+                            }
-+                        }
-+                        else {
-+                            LOGGER.warn("Unable to spawn saved pearl in level ({})", levelName);
-+                        }
-+                    });
-+                }
-+                else {
-+                    LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", levelName);
-+                }
-+            } catch (final Throwable thrown) {
-+                LOGGER.error("Failed to spawn player pearl in level ({})", levelName, thrown);
-+            }
-+        }
-+
-+        @Override
-+        public boolean equals(final Object o) {
-+            // if uuids match, same pearl
-+            return o == this || o instanceof Pearl(UUID otherUuid, _) &&
-+                uuid.equals(otherUuid);
-+        }
-+
-+        @Override
-+        public int hashCode() {
-+            return uuid.hashCode();
-+        }
-+    }
-+}
-diff --git a/io/canvasmc/canvas/threadedregions/entities/EntityMoveOutOfRegionException.java b/io/canvasmc/canvas/threadedregions/entities/EntityMoveOutOfRegionException.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..b31bddda0cd9888596c2d59d2fcb2e35d083d783
---- /dev/null
-+++ b/io/canvasmc/canvas/threadedregions/entities/EntityMoveOutOfRegionException.java
-@@ -0,0 +1,39 @@
-+package io.canvasmc.canvas.threadedregions.entities;
-+
-+import net.minecraft.world.entity.Entity;
-+import net.minecraft.world.entity.MoverType;
-+import net.minecraft.world.phys.Vec3;
-+import org.jspecify.annotations.NullMarked;
-+
-+public final class EntityMoveOutOfRegionException extends RuntimeException {
-+    private final Entity entity;
-+    private final MoverType moverType;
-+    private final Vec3 movement;
-+
-+    public EntityMoveOutOfRegionException(
-+        final Entity entity,
-+        final MoverType moverType,
-+        final Vec3 movement
-+    ) {
-+        this.entity = entity;
-+        this.moverType = moverType;
-+        this.movement = movement;
-+    }
-+
-+    public Entity entity() {
-+        return this.entity;
-+    }
-+
-+    public MoverType moverType() {
-+        return this.moverType;
-+    }
-+
-+    public Vec3 movement() {
-+        return this.movement;
-+    }
-+
-+    @Override
-+    public Throwable fillInStackTrace() {
-+        return this;
-+    }
-+}
-diff --git a/io/canvasmc/canvas/threadedregions/entities/EntityRegionTransferState.java b/io/canvasmc/canvas/threadedregions/entities/EntityRegionTransferState.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..e7d8a5398b008a6963d22a94b134dea695876767
---- /dev/null
-+++ b/io/canvasmc/canvas/threadedregions/entities/EntityRegionTransferState.java
-@@ -0,0 +1,269 @@
-+package io.canvasmc.canvas.threadedregions.entities;
-+
-+import com.google.common.collect.ImmutableList;
-+import io.canvasmc.canvas.util.ServerLocation;
-+import io.canvasmc.canvas.util.Util;
-+import io.papermc.paper.util.StackWalkerUtil;
-+import java.util.List;
-+import net.minecraft.server.level.ServerLevel;
-+import org.bukkit.plugin.java.JavaPlugin;
-+import org.jspecify.annotations.Nullable;
-+
-+public interface EntityRegionTransferState {
-+
-+    String getReason();
-+
-+    String getType();
-+
-+    List<StackTraceElement> getCallTrace();
-+
-+    String getExtra();
-+
-+    ServerLocation getOrigin();
-+
-+    ServerLevel getDestinationDimension();
-+
-+    void markFinishedRemoval();
-+
-+    boolean hasFinishedInitialRemoval();
-+
-+    abstract class AbstractTransferState implements EntityRegionTransferState {
-+
-+        @Nullable
-+        protected final JavaPlugin firstPluginCaller;
-+
-+        private final String reason;
-+        private final List<StackTraceElement> elements;
-+
-+        private volatile boolean finishedRemove;
-+
-+        public AbstractTransferState(final String reason) {
-+            final ImmutableList.Builder<StackTraceElement> stackElements = ImmutableList.builder();
-+            final StackWalker stackWalker = StackWalker.getInstance();
-+
-+            stackWalker.walk(frames -> {
-+                // we should skip the constructor frame at least
-+                frames.skip(1)
-+                    .forEach(frame -> stackElements.add(frame.toStackTraceElement()));
-+                return null;
-+            });
-+
-+            this(reason, stackElements.build(), StackWalkerUtil.getFirstPluginCaller());
-+        }
-+
-+        public AbstractTransferState(
-+            final String reason,
-+            final List<StackTraceElement> elements,
-+            @Nullable
-+            final JavaPlugin firstPluginCaller
-+        ) {
-+            this.reason = reason;
-+            this.elements = elements;
-+            this.firstPluginCaller = firstPluginCaller;
-+        }
-+
-+        public abstract String getStateSpecificData();
-+
-+        @Override
-+        public final String getReason() {
-+            return reason;
-+        }
-+
-+        @Override
-+        public final List<StackTraceElement> getCallTrace() {
-+            return elements;
-+        }
-+
-+        @Override
-+        public final String getExtra() {
-+            return "{first_plugin_caller=[" + (firstPluginCaller == null ? "null" : firstPluginCaller.getName()) + "],state=[" + getStateSpecificData() + "]}";
-+        }
-+
-+        @Override
-+        public void markFinishedRemoval() {
-+            this.finishedRemove = true;
-+        }
-+
-+        @Override
-+        public boolean hasFinishedInitialRemoval() {
-+            return finishedRemove;
-+        }
-+
-+        @Override
-+        public String toString() {
-+            final StringBuilder builder = new StringBuilder("\"" + getType() + "\":" + getExtra());
-+            final List<StackTraceElement> callTrace = getCallTrace();
-+
-+            for (int i = 0; i < callTrace.size(); i++) {
-+                if (i == 0) {
-+                    builder.append("\n");
-+                }
-+
-+                final StackTraceElement ste = callTrace.get(i);
-+
-+                builder.append("\t\tat ").append(ste);
-+
-+                if (i < callTrace.size() - 1) {
-+                    builder.append("\n");
-+                }
-+            }
-+
-+            return builder.toString();
-+        }
-+    }
-+
-+    /**
-+     * Set by the
-+     * {@link org.bukkit.craftbukkit.entity.CraftEntity#teleportAsync(org.bukkit.Location,
-+     * org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, io.papermc.paper.entity.TeleportFlag...)} function
-+     * <b>ONLY</b>
-+     */
-+    final class PluginTeleportAsyncState extends AbstractTransferState {
-+
-+        private final ServerLocation origin;
-+        private final ServerLocation target;
-+
-+        // note: we don't need to construct a plugin ref, already done in super
-+        public PluginTeleportAsyncState(
-+            final String reason, final ServerLocation origin, final ServerLocation target
-+        ) {
-+            super(reason);
-+
-+            this.origin = origin;
-+            this.target = target;
-+        }
-+
-+        @Override
-+        public String getStateSpecificData() {
-+            return "origin=" + origin + ",target=" + target;
-+        }
-+
-+        @Override
-+        public String getType() {
-+            return "api_teleport_call";
-+        }
-+
-+        @Override
-+        public ServerLocation getOrigin() {
-+            return origin;
-+        }
-+
-+        @Override
-+        public ServerLevel getDestinationDimension() {
-+            return target.level();
-+        }
-+    }
-+
-+    /**
-+     * A generic teleport via
-+     * {@link net.minecraft.world.entity.Entity#teleportAsync(net.minecraft.server.level.ServerLevel,
-+     * net.minecraft.world.phys.Vec3, Float, Float, net.minecraft.world.phys.Vec3,
-+     * org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, long, java.util.function.Consumer, boolean)}
-+     */
-+    final class GenericTeleportTransferState extends AbstractTransferState {
-+
-+        private final ServerLocation origin;
-+        private final ServerLocation target;
-+
-+        public GenericTeleportTransferState(
-+            final String reason, final ServerLocation origin, final ServerLocation target
-+        ) {
-+            super(reason);
-+            this.origin = origin;
-+            this.target = target;
-+        }
-+
-+        @Override
-+        public String getStateSpecificData() {
-+            return "origin=" + origin + ",target=" + target;
-+        }
-+
-+        @Override
-+        public String getType() {
-+            return "generic_teleport";
-+        }
-+
-+        @Override
-+        public ServerLocation getOrigin() {
-+            return origin;
-+        }
-+
-+        @Override
-+        public ServerLevel getDestinationDimension() {
-+            return target.level();
-+        }
-+    }
-+
-+    /**
-+     * For when the entity is still portaling but has now found a placement location
-+     */
-+    final class PortalFinishTransferState extends AbstractTransferState {
-+
-+        private final PortalStartTransferState firstState;
-+        private final ServerLocation newTarget;
-+
-+        public PortalFinishTransferState(final PortalStartTransferState firstState, final ServerLocation newTarget) {
-+            super(firstState.getReason(), firstState.getCallTrace(), firstState.firstPluginCaller);
-+            this.firstState = firstState;
-+            this.newTarget = newTarget;
-+        }
-+
-+        @Override
-+        public String getStateSpecificData() {
-+            return "origin=" + firstState.origin + ",portaling_to=" + newTarget;
-+        }
-+
-+        @Override
-+        public String getType() {
-+            return "portal_finish";
-+        }
-+
-+        @Override
-+        public ServerLocation getOrigin() {
-+            return firstState.origin;
-+        }
-+
-+        @Override
-+        public ServerLevel getDestinationDimension() {
-+            return newTarget.level();
-+        }
-+    }
-+
-+    /**
-+     * For when the entity has started portaling but hasn't found a target location yet
-+     */
-+    final class PortalStartTransferState extends AbstractTransferState {
-+
-+        private final ServerLocation origin;
-+        private final ServerLevel destination;
-+
-+        public PortalStartTransferState(
-+            final String reason, final ServerLocation origin, final ServerLevel destination
-+        ) {
-+            super(reason);
-+
-+            this.origin = origin;
-+            this.destination = destination;
-+        }
-+
-+        @Override
-+        public String getStateSpecificData() {
-+            return "origin=" + origin + ",portaling_to=" + Util.getLevelName(destination);
-+        }
-+
-+        @Override
-+        public String getType() {
-+            return "portal_start";
-+        }
-+
-+        @Override
-+        public ServerLocation getOrigin() {
-+            return origin;
-+        }
-+
-+        @Override
-+        public ServerLevel getDestinationDimension() {
-+            return destination;
-+        }
-+    }
-+}
-diff --git a/io/canvasmc/canvas/threadedregions/entities/package-info.java b/io/canvasmc/canvas/threadedregions/entities/package-info.java
-new file mode 100644
-index 0000000000000000000000000000000000000000..08af26f679c1cc06569d50a6cd7338a0413f2dd1
---- /dev/null
-+++ b/io/canvasmc/canvas/threadedregions/entities/package-info.java
-@@ -0,0 +1,4 @@
-+@NullMarked
-+package io.canvasmc.canvas.threadedregions.entities;
-+
-+import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/package-info.java b/io/canvasmc/canvas/threadedregions/package-info.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..9cf204dc06fd2d22d73abe40b05695cc142d29c0
@@ -4948,7 +4368,7 @@ index 0000000000000000000000000000000000000000..6bbd878f80cf9f94c67ba42993b5619b
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..aef432101260f29105f7a9e60ae83814bd0d0b35
+index 0000000000000000000000000000000000000000..74f9166e8a0e8ececf9c54de22c137f940a41a95
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java
 @@ -0,0 +1,218 @@
@@ -4956,7 +4376,7 @@ index 0000000000000000000000000000000000000000..aef432101260f29105f7a9e60ae83814
 +
 +import com.google.common.base.Preconditions;
 +import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState;
++import io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState;
 +import io.canvasmc.canvas.util.ServerLocation;
 +import io.canvasmc.canvas.util.Util;
 +import io.papermc.paper.threadedregions.RegionShutdownThread;
@@ -5170,6 +4590,585 @@ index 0000000000000000000000000000000000000000..aef432101260f29105f7a9e60ae83814
 +        );
 +    }
 +}
+diff --git a/io/canvasmc/canvas/threadedregions/world/entities/EnderPearls.java b/io/canvasmc/canvas/threadedregions/world/entities/EnderPearls.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..df638cef3b9d17019e1b53a7c680e9e3251fad77
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/world/entities/EnderPearls.java
+@@ -0,0 +1,243 @@
++package io.canvasmc.canvas.threadedregions.world.entities;
++
++import ca.spottedleaf.concurrentutil.util.Priority;
++import com.mojang.logging.LogUtils;
++import com.mojang.serialization.Codec;
++import com.mojang.serialization.DataResult;
++import com.mojang.serialization.codecs.RecordCodecBuilder;
++import io.canvasmc.canvas.GlobalConfiguration;
++import io.canvasmc.canvas.util.Codecs;
++import io.canvasmc.canvas.util.Util;
++import io.papermc.paper.threadedregions.RegionShutdownThread;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.CopyOnWriteArrayList;
++import java.util.function.Function;
++import net.minecraft.nbt.CompoundTag;
++import net.minecraft.resources.Identifier;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.util.ProblemReporter;
++import net.minecraft.util.datafix.DataFixTypes;
++import net.minecraft.world.entity.Entity;
++import net.minecraft.world.entity.EntityProcessor;
++import net.minecraft.world.entity.EntitySpawnReason;
++import net.minecraft.world.entity.EntityType;
++import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
++import net.minecraft.world.level.Level;
++import net.minecraft.world.level.saveddata.SavedData;
++import net.minecraft.world.level.saveddata.SavedDataType;
++import net.minecraft.world.level.storage.TagValueInput;
++import net.minecraft.world.level.storage.TagValueOutput;
++import net.minecraft.world.level.storage.ValueInput;
++import org.apache.commons.lang3.mutable.MutableBoolean;
++import org.jetbrains.annotations.Contract;
++import org.slf4j.Logger;
++
++public final class EnderPearls extends SavedData {
++    public static final Codec<Pearl> PEARL_CODEC = CompoundTag.CODEC.comapFlatMap(
++        (Function<CompoundTag, DataResult<Pearl>>) compoundTag -> DataResult.success(new Pearl(compoundTag)), pearl -> pearl.serialized
++    );
++    public static final Codec<EnderPearls> CODEC = RecordCodecBuilder.create(i -> i.group(
++        Codec.unboundedMap(
++            Codecs.UUID_CODEC, Codecs.copyOnWriteArrayListCodec(PEARL_CODEC.listOf())
++        ).optionalFieldOf("Data", new ConcurrentHashMap<>()).forGetter(EnderPearls::pearls)
++    ).apply(i, EnderPearls::new));
++
++    public static final SavedDataType<EnderPearls> TYPE = new SavedDataType<>(
++        Identifier.fromNamespaceAndPath("canvas", "pearls"),
++        EnderPearls::new,
++        CODEC,
++        DataFixTypes.NONE
++    );
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++
++    private final Map<UUID, List<Pearl>> pearls;
++
++    public EnderPearls() {
++        this(new ConcurrentHashMap<>());
++    }
++
++    public EnderPearls(final Map<UUID, List<Pearl>> pearls) {
++        this.pearls = new ConcurrentHashMap<>(pearls);
++        setDirty(); // the data may be populated with unsaved data
++    }
++
++    @Override
++    public boolean isDirty() {
++        // assume dirty in shutdown to ensure that all data is saved correctly
++        return super.isDirty() || RegionShutdownThread.isShuttingDown();
++    }
++
++    public void spawnPearls(final ServerPlayer player) {
++        final MutableBoolean setDirty = new MutableBoolean(false);
++
++        // if the map has the player UUID, we should spawn pearls
++        pearls.computeIfPresent(player.getUUID(), (_, enderPearls) -> {
++            for (final Pearl enderPearl : new ArrayList<>(enderPearls)) {
++                enderPearl.spawn();
++                enderPearls.remove(enderPearl);
++            }
++            setDirty.setTrue();
++            return null;
++        });
++
++        // we should only set dirty if we spawned pearls
++        if (setDirty.isTrue()) {
++            setDirty();
++        }
++    }
++
++    public void addPearl(final UUID uuid, final ThrownEnderpearl thrownEnderpearl) {
++        if (thrownEnderpearl.hasNullCallback()) {
++            LOGGER.warn("Trying to add pearl with null callback, skipping", new Throwable());
++            return;
++        }
++        else if (thrownEnderpearl.isRemoved()) {
++            LOGGER.warn("Trying to add removed ({}) ender pearl, skipping", thrownEnderpearl.getRemovalReason(), new Throwable());
++            return;
++        }
++
++        final List<Pearl> pearlsForUUID = pearls.computeIfAbsent(uuid, (ignored) -> new CopyOnWriteArrayList<>());
++        final Pearl encoded = Pearl.of(thrownEnderpearl);
++
++        // remove if it's already in the list, we don't want duplicates
++        pearlsForUUID.remove(encoded);
++        pearlsForUUID.add(encoded);
++
++        // mark dirty, we added a pearl(even if the pearl was present already)
++        setDirty();
++
++        if (GlobalConfiguration.getInstance().logs.logEnderPearlRewriteActions) {
++            LOGGER.info("Saved pearl at [{}] for {}", thrownEnderpearl.blockPosition().toShortString(), uuid);
++        }
++    }
++
++    private Map<UUID, List<Pearl>> pearls() {
++        return pearls;
++    }
++
++    @Override
++    public int hashCode() {
++        return pearls.hashCode();
++    }
++
++    @Override
++    public boolean equals(final Object obj) {
++        return obj == this || obj instanceof EnderPearls other && this.pearls.equals(other.pearls);
++    }
++
++    @Override
++    public String toString() {
++        return "EnderPearls[" +
++            "pearls=" + pearls + ']';
++    }
++
++    /**
++     * The serializable ender pearl instance, containing a {@link net.minecraft.nbt.CompoundTag} which is the main save
++     * data, formatted as:
++     * <pre>{@code
++     * {
++     *     "uuid": <the entity uuid>,
++     *     "data": <the entity data, without the id>,
++     *     "level": <dimension>
++     * }
++     * }</pre>
++     *
++     * @param uuid
++     *     the UUID of the ender pearl
++     * @param serialized
++     *     the serialized save data
++     *
++     * @author dueris
++     */
++    public record Pearl(UUID uuid, CompoundTag serialized) {
++
++        public Pearl(final CompoundTag tag) {
++            this(tag.read("uuid", Codecs.UUID_CODEC).orElseThrow(), tag);
++        }
++
++        @Contract("_ -> new")
++        public static Pearl of(final ThrownEnderpearl pearl) {
++            final CompoundTag tag;
++            try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
++                () -> "pearl-serialize", LOGGER
++            )) {
++                final TagValueOutput tagValueOutput = TagValueOutput.createWithContext(
++                    problemReporter,
++                    pearl.registryAccess()
++                );
++
++                tagValueOutput.store("uuid", Codecs.UUID_CODEC, pearl.getUUID());
++                tagValueOutput.store("level", Level.RESOURCE_KEY_CODEC, pearl.level().dimension());
++                pearl.save(tagValueOutput.child("data"));
++
++                tag = tagValueOutput.buildResult();
++            }
++            return new Pearl(pearl.getUUID(), tag);
++        }
++
++        public void spawn() {
++            final CompoundTag data = serialized.getCompound("data").orElseThrow();
++            final ServerLevel level = serialized.read("level", Level.RESOURCE_KEY_CODEC)
++                .map(MinecraftServer.getServer()::getLevel)
++                .orElse(null);
++
++            // the level can be null if the target world gets removed or something
++            // between runtimes or even during runtime, so we check to be sure it's nonnull
++
++            if (level == null) {
++                LOGGER.error("Level ({}) did not exist, skipping pearl spawn", serialized.getString("level"));
++                return;
++            }
++
++            final String levelName = Util.getLevelName(level);
++            try (final ProblemReporter.ScopedCollector problemReporter = new ProblemReporter.ScopedCollector(
++                () -> "pearl-spawn", LOGGER
++            )) {
++                final ValueInput tagValueInput = TagValueInput.create(
++                    problemReporter,
++                    MinecraftServer.getServer().registryAccess(),
++                    data
++                );
++                final Entity loadedEntity = EntityType.loadEntityRecursive(tagValueInput, level, EntitySpawnReason.LOAD, EntityProcessor.NOP);
++
++                if (loadedEntity != null) {
++                    level.canvas$loadOrRunAtChunksAsync(loadedEntity.blockPosition(), 16, Priority.NORMAL, () -> {
++                        if (level.tryAddFreshEntityWithPassengers(loadedEntity)) {
++                            ServerPlayer.placeEnderPearlTicket(level, loadedEntity.chunkPosition());
++                            if (GlobalConfiguration.getInstance().logs.logEnderPearlRewriteActions) {
++                                LOGGER.info("Spawned saved pearl [{}] in level ({})", loadedEntity.blockPosition().toShortString(), levelName);
++                            }
++                        }
++                        else {
++                            LOGGER.warn("Unable to spawn saved pearl in level ({})", levelName);
++                        }
++                    });
++                }
++                else {
++                    LOGGER.warn("Failed to spawn player ender pearl in level ({}), skipping", levelName);
++                }
++            } catch (final Throwable thrown) {
++                LOGGER.error("Failed to spawn player pearl in level ({})", levelName, thrown);
++            }
++        }
++
++        @Override
++        public boolean equals(final Object o) {
++            // if uuids match, same pearl
++            return o == this || o instanceof Pearl(UUID otherUuid, _) &&
++                uuid.equals(otherUuid);
++        }
++
++        @Override
++        public int hashCode() {
++            return uuid.hashCode();
++        }
++    }
++}
+diff --git a/io/canvasmc/canvas/threadedregions/world/entities/EntityMoveOutOfRegionException.java b/io/canvasmc/canvas/threadedregions/world/entities/EntityMoveOutOfRegionException.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..f36c47698985c2ca1747b5d676daaf654fa2e2bc
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/world/entities/EntityMoveOutOfRegionException.java
+@@ -0,0 +1,39 @@
++package io.canvasmc.canvas.threadedregions.world.entities;
++
++import net.minecraft.world.entity.Entity;
++import net.minecraft.world.entity.MoverType;
++import net.minecraft.world.phys.Vec3;
++import org.jspecify.annotations.NullMarked;
++
++public final class EntityMoveOutOfRegionException extends RuntimeException {
++    private final Entity entity;
++    private final MoverType moverType;
++    private final Vec3 movement;
++
++    public EntityMoveOutOfRegionException(
++        final Entity entity,
++        final MoverType moverType,
++        final Vec3 movement
++    ) {
++        this.entity = entity;
++        this.moverType = moverType;
++        this.movement = movement;
++    }
++
++    public Entity entity() {
++        return this.entity;
++    }
++
++    public MoverType moverType() {
++        return this.moverType;
++    }
++
++    public Vec3 movement() {
++        return this.movement;
++    }
++
++    @Override
++    public Throwable fillInStackTrace() {
++        return this;
++    }
++}
+diff --git a/io/canvasmc/canvas/threadedregions/world/entities/EntityRegionTransferState.java b/io/canvasmc/canvas/threadedregions/world/entities/EntityRegionTransferState.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..f72dc8648cf1588c58b47ba2161f796a937d4663
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/world/entities/EntityRegionTransferState.java
+@@ -0,0 +1,269 @@
++package io.canvasmc.canvas.threadedregions.world.entities;
++
++import com.google.common.collect.ImmutableList;
++import io.canvasmc.canvas.util.ServerLocation;
++import io.canvasmc.canvas.util.Util;
++import io.papermc.paper.util.StackWalkerUtil;
++import java.util.List;
++import net.minecraft.server.level.ServerLevel;
++import org.bukkit.plugin.java.JavaPlugin;
++import org.jspecify.annotations.Nullable;
++
++public interface EntityRegionTransferState {
++
++    String getReason();
++
++    String getType();
++
++    List<StackTraceElement> getCallTrace();
++
++    String getExtra();
++
++    ServerLocation getOrigin();
++
++    ServerLevel getDestinationDimension();
++
++    void markFinishedRemoval();
++
++    boolean hasFinishedInitialRemoval();
++
++    abstract class AbstractTransferState implements EntityRegionTransferState {
++
++        @Nullable
++        protected final JavaPlugin firstPluginCaller;
++
++        private final String reason;
++        private final List<StackTraceElement> elements;
++
++        private volatile boolean finishedRemove;
++
++        public AbstractTransferState(final String reason) {
++            final ImmutableList.Builder<StackTraceElement> stackElements = ImmutableList.builder();
++            final StackWalker stackWalker = StackWalker.getInstance();
++
++            stackWalker.walk(frames -> {
++                // we should skip the constructor frame at least
++                frames.skip(1)
++                    .forEach(frame -> stackElements.add(frame.toStackTraceElement()));
++                return null;
++            });
++
++            this(reason, stackElements.build(), StackWalkerUtil.getFirstPluginCaller());
++        }
++
++        public AbstractTransferState(
++            final String reason,
++            final List<StackTraceElement> elements,
++            @Nullable
++            final JavaPlugin firstPluginCaller
++        ) {
++            this.reason = reason;
++            this.elements = elements;
++            this.firstPluginCaller = firstPluginCaller;
++        }
++
++        public abstract String getStateSpecificData();
++
++        @Override
++        public final String getReason() {
++            return reason;
++        }
++
++        @Override
++        public final List<StackTraceElement> getCallTrace() {
++            return elements;
++        }
++
++        @Override
++        public final String getExtra() {
++            return "{first_plugin_caller=[" + (firstPluginCaller == null ? "null" : firstPluginCaller.getName()) + "],state=[" + getStateSpecificData() + "]}";
++        }
++
++        @Override
++        public void markFinishedRemoval() {
++            this.finishedRemove = true;
++        }
++
++        @Override
++        public boolean hasFinishedInitialRemoval() {
++            return finishedRemove;
++        }
++
++        @Override
++        public String toString() {
++            final StringBuilder builder = new StringBuilder("\"" + getType() + "\":" + getExtra());
++            final List<StackTraceElement> callTrace = getCallTrace();
++
++            for (int i = 0; i < callTrace.size(); i++) {
++                if (i == 0) {
++                    builder.append("\n");
++                }
++
++                final StackTraceElement ste = callTrace.get(i);
++
++                builder.append("\t\tat ").append(ste);
++
++                if (i < callTrace.size() - 1) {
++                    builder.append("\n");
++                }
++            }
++
++            return builder.toString();
++        }
++    }
++
++    /**
++     * Set by the
++     * {@link org.bukkit.craftbukkit.entity.CraftEntity#teleportAsync(org.bukkit.Location,
++     * org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, io.papermc.paper.entity.TeleportFlag...)} function
++     * <b>ONLY</b>
++     */
++    final class PluginTeleportAsyncState extends AbstractTransferState {
++
++        private final ServerLocation origin;
++        private final ServerLocation target;
++
++        // note: we don't need to construct a plugin ref, already done in super
++        public PluginTeleportAsyncState(
++            final String reason, final ServerLocation origin, final ServerLocation target
++        ) {
++            super(reason);
++
++            this.origin = origin;
++            this.target = target;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + origin + ",target=" + target;
++        }
++
++        @Override
++        public String getType() {
++            return "api_teleport_call";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return target.level();
++        }
++    }
++
++    /**
++     * A generic teleport via
++     * {@link net.minecraft.world.entity.Entity#teleportAsync(net.minecraft.server.level.ServerLevel,
++     * net.minecraft.world.phys.Vec3, Float, Float, net.minecraft.world.phys.Vec3,
++     * org.bukkit.event.player.PlayerTeleportEvent.TeleportCause, long, java.util.function.Consumer, boolean)}
++     */
++    final class GenericTeleportTransferState extends AbstractTransferState {
++
++        private final ServerLocation origin;
++        private final ServerLocation target;
++
++        public GenericTeleportTransferState(
++            final String reason, final ServerLocation origin, final ServerLocation target
++        ) {
++            super(reason);
++            this.origin = origin;
++            this.target = target;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + origin + ",target=" + target;
++        }
++
++        @Override
++        public String getType() {
++            return "generic_teleport";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return target.level();
++        }
++    }
++
++    /**
++     * For when the entity is still portaling but has now found a placement location
++     */
++    final class PortalFinishTransferState extends AbstractTransferState {
++
++        private final PortalStartTransferState firstState;
++        private final ServerLocation newTarget;
++
++        public PortalFinishTransferState(final PortalStartTransferState firstState, final ServerLocation newTarget) {
++            super(firstState.getReason(), firstState.getCallTrace(), firstState.firstPluginCaller);
++            this.firstState = firstState;
++            this.newTarget = newTarget;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + firstState.origin + ",portaling_to=" + newTarget;
++        }
++
++        @Override
++        public String getType() {
++            return "portal_finish";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return firstState.origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return newTarget.level();
++        }
++    }
++
++    /**
++     * For when the entity has started portaling but hasn't found a target location yet
++     */
++    final class PortalStartTransferState extends AbstractTransferState {
++
++        private final ServerLocation origin;
++        private final ServerLevel destination;
++
++        public PortalStartTransferState(
++            final String reason, final ServerLocation origin, final ServerLevel destination
++        ) {
++            super(reason);
++
++            this.origin = origin;
++            this.destination = destination;
++        }
++
++        @Override
++        public String getStateSpecificData() {
++            return "origin=" + origin + ",portaling_to=" + Util.getLevelName(destination);
++        }
++
++        @Override
++        public String getType() {
++            return "portal_start";
++        }
++
++        @Override
++        public ServerLocation getOrigin() {
++            return origin;
++        }
++
++        @Override
++        public ServerLevel getDestinationDimension() {
++            return destination;
++        }
++    }
++}
+diff --git a/io/canvasmc/canvas/threadedregions/world/entities/package-info.java b/io/canvasmc/canvas/threadedregions/world/entities/package-info.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b18fbe3d83a779dde3a1c358449b911a3b3b141
+--- /dev/null
++++ b/io/canvasmc/canvas/threadedregions/world/entities/package-info.java
+@@ -0,0 +1,4 @@
++@NullMarked
++package io.canvasmc.canvas.threadedregions.world.entities;
++
++import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/world/package-info.java b/io/canvasmc/canvas/threadedregions/world/package-info.java
 new file mode 100644
 index 0000000000000000000000000000000000000000..7494f93bcc79931720e55a2ffcaab2a90cae44f1
@@ -6755,7 +6754,7 @@ index 0000000000000000000000000000000000000000..ccfbec958e65b8cccabd5d6421ab9de5
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..b6762174a9650a6f2c1c0d9e6da157c82d2972ea
+index 0000000000000000000000000000000000000000..341aab7c2eb0bdc9d430d3463daadf109dd3f434
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -0,0 +1,666 @@
@@ -6766,7 +6765,7 @@ index 0000000000000000000000000000000000000000..b6762174a9650a6f2c1c0d9e6da157c8
 +import ca.spottedleaf.concurrentutil.completable.Completable;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import com.mojang.logging.LogUtils;
-+import io.canvasmc.canvas.threadedregions.entities.EnderPearls;
++import io.canvasmc.canvas.threadedregions.world.entities.EnderPearls;
 +import io.papermc.paper.adventure.providers.ClickCallbackProviderImpl;
 +import io.papermc.paper.configuration.GlobalConfiguration;
 +import io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler;
@@ -14103,7 +14102,7 @@ index 144c18c08bf8f03d907b97f968aa171a9fbf997f..be9fdca704391f8d77b87b4d75e67bb6
          }
      }
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 448396fc6a6c68bd39ec04956286b81a3d8fd5fe..2ebfb44c35f3be3253cc42b2a57012391b759363 100644
+index 448396fc6a6c68bd39ec04956286b81a3d8fd5fe..3e306bb29f7b824398e389f62b36a7395614cf7d 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -216,7 +216,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -14147,7 +14146,7 @@ index 448396fc6a6c68bd39ec04956286b81a3d8fd5fe..2ebfb44c35f3be3253cc42b2a5701239
      public boolean isIteratingOverLevels = false; // Paper - Throw exception on world create while being ticked
      private final Set<String> pluginsBlockingSleep = new java.util.HashSet<>(); // Paper - API to allow/disallow tick sleeping
      public static final long SERVER_INIT = System.nanoTime(); // Paper - Lag compensation
-+    public final io.canvasmc.canvas.threadedregions.entities.EnderPearls pearls; // Canvas - region threading
++    public final io.canvasmc.canvas.threadedregions.world.entities.EnderPearls pearls; // Canvas - region threading
      // Paper start - improve tick loop
      public final ca.spottedleaf.common.time.TickData tickTimes1s  = new ca.spottedleaf.common.time.TickData(java.util.concurrent.TimeUnit.SECONDS.toNanos(1L));
      public final ca.spottedleaf.common.time.TickData tickTimes5s  = new ca.spottedleaf.common.time.TickData(java.util.concurrent.TimeUnit.SECONDS.toNanos(5L));
@@ -14258,7 +14257,7 @@ index 448396fc6a6c68bd39ec04956286b81a3d8fd5fe..2ebfb44c35f3be3253cc42b2a5701239
          this.clockManager = this.getDataStorage().computeIfAbsent(ServerClockManager.TYPE);
          this.clockManager.init(this);
          this.customBossEvents = this.savedDataStorage.computeIfAbsent(CustomBossEvents.TYPE);
-+        this.pearls = this.savedDataStorage.computeIfAbsent(io.canvasmc.canvas.threadedregions.entities.EnderPearls.TYPE); // Canvas - region threading
++        this.pearls = this.savedDataStorage.computeIfAbsent(io.canvasmc.canvas.threadedregions.world.entities.EnderPearls.TYPE); // Canvas - region threading
          // Paper - per-level scheduledEvents
          // CraftBukkit start
          this.options = options;
@@ -26156,7 +26155,7 @@ index bb5f66c62c9541bb76a9faad9e9ee91c1466fc6a..66d7bb9418832638c220a08d06c01ef0
              return blockToFallLocation(blockState);
          } else {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94ed934b69 100644
+index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..f7242e60c10d0f48de6a3dfcf4c2034f8481156c 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -172,7 +172,7 @@ public abstract class Entity
@@ -26184,18 +26183,18 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +
 +    // note: this is still placed for SAME-REGION teleports!
 +
-+    private io.canvasmc.canvas.threadedregions.entities.@Nullable EntityRegionTransferState regionTransferState;
++    private io.canvasmc.canvas.threadedregions.world.entities.@Nullable EntityRegionTransferState regionTransferState;
 +    private final Object transferStateLock = new Object();
 +
 +    public void setRegionTransferState(
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState newState
++        final io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState newState
 +    ) {
 +        synchronized (transferStateLock) {
 +            regionTransferState = newState;
 +        }
 +    }
 +
-+    public io.canvasmc.canvas.threadedregions.entities.@Nullable EntityRegionTransferState getRegionTransferState() {
++    public io.canvasmc.canvas.threadedregions.world.entities.@Nullable EntityRegionTransferState getRegionTransferState() {
 +        synchronized (transferStateLock) {
 +            return regionTransferState;
 +        }
@@ -26209,8 +26208,8 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +
 +    public void advancePortalTransferState(final io.canvasmc.canvas.util.ServerLocation newTarget) {
 +        synchronized (transferStateLock) {
-+            if (regionTransferState instanceof io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PortalStartTransferState portalStartState) {
-+                regionTransferState = new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PortalFinishTransferState(
++            if (regionTransferState instanceof io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState.PortalStartTransferState portalStartState) {
++                regionTransferState = new io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState.PortalFinishTransferState(
 +                    portalStartState, newTarget
 +                );
 +            }
@@ -26313,7 +26312,7 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +                && !this.isVehicle()
 +                && !this.isPassenger()
 +                && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), pos, delta, 0)) {
-+                throw new io.canvasmc.canvas.threadedregions.entities.EntityMoveOutOfRegionException(this, moverType, delta);
++                throw new io.canvasmc.canvas.threadedregions.world.entities.EntityMoveOutOfRegionException(this, moverType, delta);
 +            }
 +            // Canvas end - region threading
              this.setPos(this.getX() + delta.x, this.getY() + delta.y, this.getZ() + delta.z);
@@ -26361,7 +26360,7 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +                    && !this.isVehicle()
 +                    && !this.isPassenger()
 +                    && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), pos, movement, 0)) {
-+                    throw new io.canvasmc.canvas.threadedregions.entities.EntityMoveOutOfRegionException(this, moverType, movement);
++                    throw new io.canvasmc.canvas.threadedregions.world.entities.EntityMoveOutOfRegionException(this, moverType, movement);
 +                }
 +                // Canvas end - region threading
                  this.addMovementThisTick(new Entity.Movement(pos, newPosition, delta));
@@ -26808,7 +26807,7 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +            );
 +        };
 +
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState regionTransferState = getRegionTransferState();
++        final io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState regionTransferState = getRegionTransferState();
 +        if (regionTransferState != null) {
 +            regionTransferState.markFinishedRemoval();
 +        }
@@ -27130,8 +27129,8 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +                // event was cancelled
 +
 +                // essentially, there shouldn't be a transfer state already here unless it's a plugin transfer state
-+                final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
-+                if (previousTransferState instanceof io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState) {
++                final io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
++                if (previousTransferState instanceof io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState.PluginTeleportAsyncState) {
 +                    clearRegionTransferState();
 +                }
 +                else if (previousTransferState != null) {
@@ -27157,7 +27156,7 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +        }
 +
 +        // verify and set the transfer state
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
++        final io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
 +        if (previousTransferState == null) {
 +            // no transfer state set currently, place one
 +            final String teleportReason = "teleporting " + (isSameRegion ? "sync-region" : "cross-region " + (
@@ -27166,7 +27165,7 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +            ));
 +
 +            // LOGGER.info("Teleporting entity {}, {}", this, teleportReason);
-+            setRegionTransferState(new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.GenericTeleportTransferState(
++            setRegionTransferState(new io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState.GenericTeleportTransferState(
 +                teleportReason,
 +                // origin
 +                new io.canvasmc.canvas.util.ServerLocation(
@@ -27184,7 +27183,7 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +                )
 +            ));
 +        }
-+        else if (!(previousTransferState instanceof io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PluginTeleportAsyncState)) {
++        else if (!(previousTransferState instanceof io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState.PluginTeleportAsyncState)) {
 +            throw new IllegalStateException("Transfer state was already set? Current: " + previousTransferState.getType());
 +        }
 +
@@ -27690,13 +27689,13 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +        );
 +
 +        // we need to set the portal state now, specifically START state
-+        final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
++        final io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState previousTransferState = getRegionTransferState();
 +        if (previousTransferState == null) {
 +            // no state already set, perfect, set the start portal state
 +            final String portalReason = "portaling from " + io.canvasmc.canvas.util.Util.getLevelName(originWorld) + " -> " + io.canvasmc.canvas.util.Util.getLevelName(finalDestination);
 +
 +            // LOGGER.info("Portaling entity {}, {}", this, portalReason);
-+            setRegionTransferState(new io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState.PortalStartTransferState(
++            setRegionTransferState(new io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState.PortalStartTransferState(
 +                portalReason,
 +                new io.canvasmc.canvas.util.ServerLocation(
 +                    originWorld,
@@ -27769,7 +27768,7 @@ index 1c5c32d3c08ed6be6c8891add02e6fcdb6e16aa1..e8b3dd6bee01fcdcb173de72797fca94
 +
 +            // we need to advance the transfer state now from START -> FINISH
 +
-+            final io.canvasmc.canvas.threadedregions.entities.EntityRegionTransferState existingTransferState = getRegionTransferState();
++            final io.canvasmc.canvas.threadedregions.world.entities.EntityRegionTransferState existingTransferState = getRegionTransferState();
 +            if (existingTransferState == null) {
 +                throw new IllegalStateException("Existing transfer state was null?");
 +            }
@@ -30707,7 +30706,7 @@ index cc938f43c4a5e947ed87ca2001cbaca4084bf64c..e6c47a0332c8313c30f2f90cd030f1e8
                  return player;
              }
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index 6314e87611aac4a6a0d7f5ee20ffaeb76cf8f1e3..aaf397c4ea7240dbb7de525ce645744a05392e22 100644
+index 6314e87611aac4a6a0d7f5ee20ffaeb76cf8f1e3..563453cdac54d97d474782ca2d82f48ab65e6951 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -116,10 +116,13 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
@@ -31054,7 +31053,7 @@ index 6314e87611aac4a6a0d7f5ee20ffaeb76cf8f1e3..aaf397c4ea7240dbb7de525ce645744a
 +        // https://github.com/CraftCanvasMC/Canvas/pull/164
 +        // This is also a modified version of Luminol's approach to deal with this issue. See:
 +        // https://github.com/LuminolMC/Luminol/commit/41df3b26452fc9df6cfea1cc205503924cb364e4
-+        } catch (final io.canvasmc.canvas.threadedregions.entities.EntityMoveOutOfRegionException moore) {
++        } catch (final io.canvasmc.canvas.threadedregions.world.entities.EntityMoveOutOfRegionException moore) {
 +            final Entity movingEntity = moore.entity();
 +            final Vec3 currentPosition = movingEntity.position();
 +            final Vec3 destinationPosition = currentPosition.add(moore.movement());
