@@ -8436,10 +8436,10 @@ index 0000000000000000000000000000000000000000..00956aa81da437a2f3e19252a86e0aee
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f7bb5346ba7a81a481756aa2747fed5f5b317d44
+index 0000000000000000000000000000000000000000..a6a16ed8db143f16f7cd010a33a07d5292277178
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
-@@ -0,0 +1,917 @@
+@@ -0,0 +1,915 @@
 +package io.papermc.paper.threadedregions;
 +
 +import alternate.current.wire.WireHandler;
@@ -8935,8 +8935,6 @@ index 0000000000000000000000000000000000000000..f7bb5346ba7a81a481756aa2747fed5f
 +    public final ServerDebugSubscribers debugSubscribers;
 +    public final LevelDebugSynchronizers debugSynchronizers;
 +
-+    // TODO - implement tick time logger function
-+    @Nullable
 +    public RemoteSampleLogger tickTimeLogger;
 +    private boolean isTickTimeLoggingEnabled;
 +
@@ -11666,10 +11664,10 @@ index 0000000000000000000000000000000000000000..eac0186c0f5271a090cd9fd75d6ca114
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 8424cf9d4617b4732d44cc460d25b04481068989..c513b40bb7c732afec689acfcfd1b475f40942f8 100644
+index 8424cf9d4617b4732d44cc460d25b04481068989..2d4be1f7674c732debb9459c722ced3517d67f4d 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -1,10 +1,651 @@
+@@ -1,10 +1,682 @@
  package io.papermc.paper.threadedregions;
  
 -// placeholder class for Folia
@@ -11703,6 +11701,8 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..c513b40bb7c732afec689acfcfd1b475
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;
 +import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.util.debugchart.RemoteSampleLogger;
++import net.minecraft.util.debugchart.TpsDebugDimensions;
 +import org.bukkit.World;
 +import org.jetbrains.annotations.Contract;
 +import org.jspecify.annotations.NonNull;
@@ -12020,7 +12020,10 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..c513b40bb7c732afec689acfcfd1b475
 +        private final RegionStats regionStats;
 +
 +        private final AtomicBoolean hasPackets = new AtomicBoolean(false);
-+        public final TicketHolder<SaveAllTicket> canvas$saveAllTicket = new TicketHolder<>(); // Canvas - region threading
++        // Canvas start - region threading
++        public final TicketHolder<SaveAllTicket> canvas$saveAllTicket = new TicketHolder<>();
++        private long lastTickEndNanos;
++        // Canvas end - region threading
 +
 +        private TickRegionData(final ThreadedRegionizer.@NonNull ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
 +            this.region = region;
@@ -12292,6 +12295,32 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..c513b40bb7c732afec689acfcfd1b475
 +        @Override
 +        protected void tickRegion(final long tickCount, final long startTime, final long scheduledEnd) {
 +            MinecraftServer.getServer().tickServer(startTime, scheduledEnd, TimeUnit.MILLISECONDS.toMillis(10L), this.region);
++            // Canvas start - region threading
++            final long endTime = System.nanoTime();
++            final RegionizedWorldData regionizedWorldData = TickRegionScheduler.getCurrentRegionizedWorldData();
++
++            // check tick time logging enabled, then start sampling
++            if (regionizedWorldData.isTickTimeLoggingEnabled()) {
++                final long regionTickTime = endTime - startTime;
++                final long taskExecutionTime = this.currentTickData.intermediateTaskExecutionTime();
++                final long lastTickEnd = this.region.lastTickEndNanos;
++                final long fullTime = lastTickEnd == 0L ? regionTickTime : endTime - lastTickEnd;
++                final long idleTime = Math.max(0L, fullTime - regionTickTime - taskExecutionTime);
++                final RemoteSampleLogger logger = regionizedWorldData.tickTimeLogger;
++
++                // log all samples now
++                logger.logPartialSample(regionTickTime, TpsDebugDimensions.TICK_SERVER_METHOD.ordinal());
++                logger.logPartialSample(taskExecutionTime, TpsDebugDimensions.SCHEDULED_TASKS.ordinal());
++                logger.logPartialSample(idleTime, TpsDebugDimensions.IDLE.ordinal());
++                logger.logSample(fullTime);
++            }
++
++            // idk why but Vanilla updates this flag after logging the sample
++            regionizedWorldData.updateTickTimeLoggingFlag();
++
++            // update last tick end timestamp
++            this.region.lastTickEndNanos = endTime;
++            // Canvas end - region threading
 +        }
 +
 +        @Override
