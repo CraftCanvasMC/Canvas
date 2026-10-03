@@ -24366,7 +24366,7 @@ index 2f3b58491ef7be8cd2e081f2c44869cd1e50e6a6..32c9ef59f40ffc155db5db15ea0f32b7
              }
              // Spigot end
 diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa109c1682 100644
+index 4fca856994985f04cb777363f5e14d3450a2b285..9064b764e3ca59682f3042f3d6b95a908077c279 100644
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 @@ -305,10 +305,10 @@ public class ServerGamePacketListenerImpl
@@ -24571,6 +24571,42 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
          if (!this.player.canUseGameMasterBlocks() && (!this.player.isCreative() || !this.player.getBukkitEntity().hasPermission("minecraft.commandblock"))) { // Paper - command block permission
              this.player.sendSystemMessage(Component.translatable("advMode.notAllowed"));
          } else {
+@@ -1179,7 +1269,7 @@ public class ServerGamePacketListenerImpl
+     @Override
+     public void handleSetStructureBlock(final ServerboundSetStructureBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.canUseGameMasterBlocks()) {
++        if (this.player.canUseGameMasterBlocks() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player.level(), packet.getPos())) { // Canvas - region threading
+             BlockPos blockPos = packet.getPos();
+             BlockState state = this.player.level().getBlockState(blockPos);
+             if (this.player.level().getBlockEntity(blockPos) instanceof StructureBlockEntity structure) {
+@@ -1232,7 +1322,7 @@ public class ServerGamePacketListenerImpl
+     @Override
+     public void handleSetTestBlock(final ServerboundSetTestBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.canUseGameMasterBlocks()) {
++        if (this.player.canUseGameMasterBlocks() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player.level(), packet.position())) { // Canvas - region threading
+             BlockPos blockPos = packet.position();
+             BlockState initialState = this.player.level().getBlockState(blockPos);
+             if (this.player.level().getBlockEntity(blockPos) instanceof TestBlockEntity testBlock) {
+@@ -1248,7 +1338,7 @@ public class ServerGamePacketListenerImpl
+     public void handleTestInstanceBlockAction(final ServerboundTestInstanceBlockActionPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+         BlockPos pos = packet.pos();
+-        if (this.player.canUseGameMasterBlocks() && this.player.level().getBlockEntity(pos) instanceof TestInstanceBlockEntity blockEntity) {
++        if (this.player.canUseGameMasterBlocks() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player.level(), packet.pos()) && this.player.level().getBlockEntity(pos) instanceof TestInstanceBlockEntity blockEntity) { // Canvas - region threading
+             if (packet.action() != ServerboundTestInstanceBlockActionPacket.Action.QUERY
+                 && packet.action() != ServerboundTestInstanceBlockActionPacket.Action.INIT) {
+                 blockEntity.set(packet.data());
+@@ -1291,7 +1381,7 @@ public class ServerGamePacketListenerImpl
+     @Override
+     public void handleSetJigsawBlock(final ServerboundSetJigsawBlockPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+-        if (this.player.canUseGameMasterBlocks()) {
++        if (this.player.canUseGameMasterBlocks() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.player.level(), packet.getPos())) { // Canvas - region threading
+             BlockPos blockPos = packet.getPos();
+             BlockState state = this.player.level().getBlockState(blockPos);
+             if (this.player.level().getBlockEntity(blockPos) instanceof JigsawBlockEntity jigsaw) {
 @@ -1345,7 +1435,7 @@ public class ServerGamePacketListenerImpl
      public void handleEditBook(final ServerboundEditBookPacket packet) {
          // Paper start - Book size limits
@@ -24609,7 +24645,47 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
          }
      }
  
-@@ -1556,13 +1652,14 @@ public class ServerGamePacketListenerImpl
+@@ -1437,12 +1533,16 @@ public class ServerGamePacketListenerImpl
+         if (this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
+             Entity entity = this.player.level().getEntity(packet.getEntityId());
+             if (entity != null) {
+-                try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(entity.problemPath(), LOGGER)) {
+-                    TagValueOutput output = TagValueOutput.createWithContext(reporter, entity.registryAccess());
+-                    entity.saveWithoutId(output);
++                // Canvas start - region threading
++                entity.getBukkitEntity().taskScheduler.scheduleOrExecute((newEntity) -> {
++                try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(newEntity.problemPath(), LOGGER)) {
++                    TagValueOutput output = TagValueOutput.createWithContext(reporter, newEntity.registryAccess());
++                    newEntity.saveWithoutId(output);
++                // Canvas end - region threading
+                     CompoundTag result = output.buildResult();
+                     this.send(new ClientboundTagQueryPacket(packet.getTransactionId(), result));
+                 }
++                }); // Canvas - region threading
+             }
+         }
+     }
+@@ -1461,9 +1561,19 @@ public class ServerGamePacketListenerImpl
+     public void handleBlockEntityTagQuery(final ServerboundBlockEntityTagQueryPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+         if (this.player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
++            // Canvas start - region threading
++            final int chunkX = packet.getPos().getX() >> 4;
++            final int chunkZ = packet.getPos().getZ() >> 4;
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueOrExecuteTickTask(
++                this.player.level(), chunkX, chunkZ, () -> {
++            // Canvas end - region threading
+             BlockEntity blockEntity = this.player.level().getBlockEntity(packet.getPos());
+             CompoundTag tag = blockEntity != null ? blockEntity.saveWithoutMetadata(this.player.registryAccess()) : null;
+             this.send(new ClientboundTagQueryPacket(packet.getTransactionId(), tag));
++            // Canvas start - region threading
++                }
++            );
++            // Canvas end - region threading
+         }
+     }
+ 
+@@ -1556,13 +1666,14 @@ public class ServerGamePacketListenerImpl
              } else {
                  boolean isFallFlying = this.player.isFallFlying();
                  ServerLevel level = this.player.level();
@@ -24627,57 +24703,57 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
  
                      if (deltaPackets > Math.max(this.allowedPlayerTicks, 5)) {
                      // CraftBukkit end - handle custom speeds and skipped ticks
-@@ -1728,7 +1825,23 @@ public class ServerGamePacketListenerImpl
+@@ -1728,7 +1839,23 @@ public class ServerGamePacketListenerImpl
  
                          // If the event is cancelled we move the player back to their old location.
                          if (event.isCancelled()) {
 -                            this.internalTeleport(from);
 +                            // Canvas start - region threading
-+                                            // TODO - should we prevent teleportAsync calls in the move event?
-+                                            this.player.teleportAsync(
-+                                                ((org.bukkit.craftbukkit.CraftWorld) from.getWorld()).getHandle(),
-+                                                CraftLocation.toVec3(from),
-+                                                from.getYaw(),
-+                                                from.getPitch(),
-+                                                Vec3.ZERO,
-+                                                PlayerTeleportEvent.TeleportCause.PLUGIN,
++                            // TODO - should we prevent teleportAsync calls in the move event?
++                            this.player.teleportAsync(
++                                ((org.bukkit.craftbukkit.CraftWorld) from.getWorld()).getHandle(),
++                                CraftLocation.toVec3(from),
++                                from.getYaw(),
++                                from.getPitch(),
++                                Vec3.ZERO,
++                                PlayerTeleportEvent.TeleportCause.PLUGIN,
 +
-+                                                // use these flags specifically because that's what the Paper
-+                                                // CraftEntity#teleportAsync method would do, so we should match
++                                // use these flags specifically because that's what the Paper
++                                // CraftEntity#teleportAsync method would do, so we should match
 +
-+                                                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
-+                                                null // no callback necessary
-+                                            );
-+                                            // Canvas end - region threading
++                                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                                null // no callback necessary
++                            );
++                            // Canvas end - region threading
                              return;
                          }
  
-@@ -1736,7 +1849,23 @@ public class ServerGamePacketListenerImpl
+@@ -1736,7 +1863,23 @@ public class ServerGamePacketListenerImpl
                          // there to avoid any 'Moved wrongly' or 'Moved too quickly' errors.
                          // We only do this if the Event was not cancelled.
                          if (!oldTo.equals(event.getTo()) && !event.isCancelled()) {
 -                            this.player.getBukkitEntity().teleport(event.getTo(), PlayerTeleportEvent.TeleportCause.PLUGIN);
 +                            // Canvas start - region threading
-+                                            // TODO - should we prevent teleportAsync calls in the move event?
-+                                            this.player.teleportAsync(
-+                                                ((org.bukkit.craftbukkit.CraftWorld) event.getTo().getWorld()).getHandle(),
-+                                                CraftLocation.toVec3(event.getTo()),
-+                                                event.getTo().getYaw(),
-+                                                event.getTo().getPitch(),
-+                                                Vec3.ZERO,
-+                                                PlayerTeleportEvent.TeleportCause.PLUGIN,
++                            // TODO - should we prevent teleportAsync calls in the move event?
++                            this.player.teleportAsync(
++                                ((org.bukkit.craftbukkit.CraftWorld) event.getTo().getWorld()).getHandle(),
++                                CraftLocation.toVec3(event.getTo()),
++                                event.getTo().getYaw(),
++                                event.getTo().getPitch(),
++                                Vec3.ZERO,
++                                PlayerTeleportEvent.TeleportCause.PLUGIN,
 +
-+                                                // use these flags specifically because that's what the Paper
-+                                                // CraftEntity#teleportAsync method would do, so we should match
++                                // use these flags specifically because that's what the Paper
++                                // CraftEntity#teleportAsync method would do, so we should match
 +
-+                                                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
-+                                                null // no callback necessary
-+                                            );
-+                                            // Canvas end - region threading
++                                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++                                null // no callback necessary
++                            );
++                            // Canvas end - region threading
                              return;
                          }
  
-@@ -2046,9 +2175,9 @@ public class ServerGamePacketListenerImpl
+@@ -2046,9 +2189,9 @@ public class ServerGamePacketListenerImpl
                      if (!this.player.isSpectator()) {
                          // limit how quickly items can be dropped
                          // If the ticks aren't the same then the count starts from 0 and we update the lastDropTick.
@@ -24689,7 +24765,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                          } else {
                              // Else we increment the drop count and check the amount.
                              this.dropCount++;
-@@ -2080,7 +2209,7 @@ public class ServerGamePacketListenerImpl
+@@ -2080,7 +2223,7 @@ public class ServerGamePacketListenerImpl
                  case ABORT_DESTROY_BLOCK:
                  case STOP_DESTROY_BLOCK:
                      // Paper start - Don't allow digging into unloaded chunks
@@ -24698,7 +24774,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                          this.player.connection.ackBlockChangesUpTo(packet.getSequence());
                          return;
                      }
-@@ -2169,7 +2298,7 @@ public class ServerGamePacketListenerImpl
+@@ -2169,7 +2312,7 @@ public class ServerGamePacketListenerImpl
                  }
                  // Paper end - improve distance check
                  BlockPos pos = blockHit.getBlockPos();
@@ -24707,7 +24783,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                      Vec3 distance = location.subtract(Vec3.atCenterOf(pos));
                      double limit = 1.0000001;
                      if (Math.abs(distance.x()) < 1.0000001 && Math.abs(distance.y()) < 1.0000001 && Math.abs(distance.z()) < 1.0000001) {
-@@ -2309,7 +2438,7 @@ public class ServerGamePacketListenerImpl
+@@ -2309,7 +2452,7 @@ public class ServerGamePacketListenerImpl
              for (ServerLevel level : this.server.getAllLevels()) {
                  Entity entity = packet.getEntity(level);
                  if (entity != null) {
@@ -24716,7 +24792,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                      return;
                  }
              }
-@@ -2329,7 +2458,7 @@ public class ServerGamePacketListenerImpl
+@@ -2329,7 +2472,7 @@ public class ServerGamePacketListenerImpl
          LOGGER.info("{} lost connection: {}", this.player.getPlainTextName(), details.reason().getString());
          // Paper start - Fix kick event leave message not being sent
          final net.kyori.adventure.text.Component quitMessage = details.quitMessage().map(io.papermc.paper.adventure.PaperAdventure::asAdventure).orElse(null);
@@ -24725,7 +24801,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
          // Paper end - Fix kick event leave message not being sent
          super.onDisconnect(details);
      }
-@@ -2339,6 +2468,7 @@ public class ServerGamePacketListenerImpl
+@@ -2339,6 +2482,7 @@ public class ServerGamePacketListenerImpl
          this.removePlayerFromWorld(null);
      }
  
@@ -24733,7 +24809,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
      private void removePlayerFromWorld(net.kyori.adventure.text.@Nullable Component quitMessage) {
          // Paper end - Fix kick event leave message not being sent
          this.chatMessageChain.close();
-@@ -2352,6 +2482,13 @@ public class ServerGamePacketListenerImpl
+@@ -2352,6 +2496,13 @@ public class ServerGamePacketListenerImpl
          this.player.disconnect();
          // Paper start - Adventure
          quitMessage = quitMessage == null ? this.server.getPlayerList().remove(this.player) : this.server.getPlayerList().remove(this.player, quitMessage); // Paper - pass in quitMessage to fix kick message not being used
@@ -24747,7 +24823,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
          if ((quitMessage != null) && !quitMessage.equals(net.kyori.adventure.text.Component.empty())) {
              this.server.getPlayerList().broadcastSystemMessage(PaperAdventure.asVanilla(quitMessage), false);
              // Paper end - Adventure
-@@ -2400,7 +2537,7 @@ public class ServerGamePacketListenerImpl
+@@ -2400,7 +2551,7 @@ public class ServerGamePacketListenerImpl
      public void handleChat(final ServerboundChatPacket packet) {
          // CraftBukkit start - async chat
          // SPIGOT-3638
@@ -24756,7 +24832,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
              return;
          }
          // CraftBukkit end
-@@ -2591,7 +2728,7 @@ public class ServerGamePacketListenerImpl
+@@ -2591,7 +2742,7 @@ public class ServerGamePacketListenerImpl
              this.player.resetLastActionTime();
              // CraftBukkit start
              if (sync) {
@@ -24765,7 +24841,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
              } else {
                  chatHandler.run();
              }
-@@ -2671,6 +2808,7 @@ public class ServerGamePacketListenerImpl
+@@ -2671,6 +2822,7 @@ public class ServerGamePacketListenerImpl
          if (rawMessage.isEmpty()) {
              LOGGER.warn("{} tried to send an empty message", this.player.getScoreboardName());
          } else if (this.getCraftPlayer().isConversing()) {
@@ -24773,7 +24849,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
              final String conversationInput = rawMessage;
              this.server.processQueue.add(() -> ServerGamePacketListenerImpl.this.getCraftPlayer().acceptConversationInput(conversationInput));
          } else if (this.player.getChatVisibility() == ChatVisiblity.SYSTEM) { // Re-add "Command Only" flag check
-@@ -2878,8 +3016,26 @@ public class ServerGamePacketListenerImpl
+@@ -2878,8 +3030,26 @@ public class ServerGamePacketListenerImpl
      // Spigot end
  
      public void switchToConfig() {
@@ -24801,7 +24877,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
          this.send(ClientboundStartConfigurationPacket.INSTANCE);
          this.connection.setupOutboundProtocol(ConfigurationProtocols.CLIENTBOUND);
      }
-@@ -2903,7 +3059,7 @@ public class ServerGamePacketListenerImpl
+@@ -2903,7 +3073,7 @@ public class ServerGamePacketListenerImpl
              }
              // Spigot end
              this.player.resetLastActionTime();
@@ -24810,7 +24886,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                  AABB targetBounds = target.getBoundingBox();
                  ItemStack mainHandItem = this.player.getMainHandItem();
                  if (this.player.isWithinAttackRange(mainHandItem, targetBounds, io.papermc.paper.configuration.GlobalConfiguration.get().misc.clientInteractionLeniencyDistance.or(3.0))) { // Paper - configurable lenience
-@@ -2946,7 +3102,7 @@ public class ServerGamePacketListenerImpl
+@@ -2946,7 +3116,7 @@ public class ServerGamePacketListenerImpl
              // Spigot end
              this.player.resetLastActionTime();
              this.player.setShiftKeyDown(packet.usingSecondaryAction());
@@ -24819,7 +24895,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                  AABB targetBounds = target.getBoundingBox();
                  if (this.player.isWithinEntityInteractionRange(targetBounds, io.papermc.paper.configuration.GlobalConfiguration.get().misc.clientInteractionLeniencyDistance.or(3.0))) { // Paper - configurable lenience value for interact range
                      InteractionHand hand = packet.hand();
-@@ -3051,6 +3207,13 @@ public class ServerGamePacketListenerImpl
+@@ -3051,6 +3221,13 @@ public class ServerGamePacketListenerImpl
          switch (action) {
              case PERFORM_RESPAWN:
                  if (this.player.wonGame) {
@@ -24833,7 +24909,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                      this.player.wonGame = false;
                      this.player = this.server.getPlayerList().respawn(this.player, true, Entity.RemovalReason.CHANGED_DIMENSION, RespawnReason.END_PORTAL); // CraftBukkit
                      this.resetPosition();
-@@ -3061,6 +3224,17 @@ public class ServerGamePacketListenerImpl
+@@ -3061,6 +3238,17 @@ public class ServerGamePacketListenerImpl
                          return;
                      }
  
@@ -24851,7 +24927,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                      this.player = this.server.getPlayerList().respawn(this.player, false, Entity.RemovalReason.KILLED, RespawnReason.DEATH); // CraftBukkit
                      this.resetPosition();
                      this.restartClientLoadTimerAfterRespawn();
-@@ -3609,7 +3783,13 @@ public class ServerGamePacketListenerImpl
+@@ -3609,7 +3797,13 @@ public class ServerGamePacketListenerImpl
          };
          List<String> lines = packet.lines().stream().map(lineLimiter).map(ChatFormatting::stripFormatting).collect(Collectors.toList());
          // Paper end - limit client sign length
@@ -24866,7 +24942,16 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
      }
  
      private void updateSignText(final ServerboundSignUpdatePacket packet, final List<FilteredText> lines) {
-@@ -3766,7 +3946,7 @@ public class ServerGamePacketListenerImpl
+@@ -3617,7 +3811,7 @@ public class ServerGamePacketListenerImpl
+         this.player.resetLastActionTime();
+         ServerLevel level = this.player.level();
+         BlockPos pos = packet.pos();
+-        if (level.hasChunkAt(pos)) {
++        if (level.hasChunkAt(pos) && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos)) { // Canvas - region threading
+             // Paper start - Add API for client-side signs
+             if (!new io.papermc.paper.event.packet.UncheckedSignChangeEvent(
+                 this.player.getBukkitEntity(),
+@@ -3766,7 +3960,7 @@ public class ServerGamePacketListenerImpl
          this.chatMessageChain
              .append(
                  () -> {
@@ -24875,7 +24960,7 @@ index 4fca856994985f04cb777363f5e14d3450a2b285..2f25154013bebc4bdee5f1afe29e32aa
                      this.player.setChatSession(chatSession);
                      this.server
                          .getPlayerList()
-@@ -3873,19 +4053,7 @@ public class ServerGamePacketListenerImpl
+@@ -3873,19 +4067,7 @@ public class ServerGamePacketListenerImpl
  
      @Override
      public void disconnectAsync(final net.minecraft.network.DisconnectionDetails disconnectionInfo) {
