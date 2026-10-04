@@ -6836,7 +6836,7 @@ index 0000000000000000000000000000000000000000..ccfbec958e65b8cccabd5d6421ab9de5
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f14aa9b22f5b6f78aaf05fbd24250b1e2c5bde26
+index 0000000000000000000000000000000000000000..3493916a5f64e8d930a6144be3d72136392da184
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
 @@ -0,0 +1,670 @@
@@ -6899,7 +6899,7 @@ index 0000000000000000000000000000000000000000..f14aa9b22f5b6f78aaf05fbd24250b1e
 +    public final RegionizedTaskQueue taskQueue = new RegionizedTaskQueue();
 +
 +    public final CopyOnWriteArrayList<ServerLevel> worlds = new CopyOnWriteArrayList<>();
-+    private final CopyOnWriteArrayList<Connection> connections = new CopyOnWriteArrayList<>();
++    public final CopyOnWriteArrayList<Connection> connections = new CopyOnWriteArrayList<>();
 +
 +    private final MultiThreadedQueue<Runnable> globalTickQueue = new MultiThreadedQueue<>();
 +
@@ -13629,7 +13629,7 @@ index 7cbcc8865893ea4f7fae8da13f534c65fcdcd216..fa52d458d402ae9121eaa8b876d8d6b4
      }
  
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
-index 6bd93d3426b0ea781eeb10e8e98128f201e235bd..9dc82afddeda363da455160f9600a28e56d3ca9a 100644
+index 6bd93d3426b0ea781eeb10e8e98128f201e235bd..6f59fbd63eb5699f42cdead03dd5281ff5a61e79 100644
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java
 @@ -201,7 +201,7 @@ public class Commands {
@@ -13674,7 +13674,7 @@ index 6bd93d3426b0ea781eeb10e8e98128f201e235bd..9dc82afddeda363da455160f9600a28e
          ScoreboardCommand.register(this.dispatcher, context);
          SeedCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
          VersionCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
-@@ -257,23 +257,23 @@ public class Commands {
+@@ -257,19 +257,19 @@ public class Commands {
          TeamMsgCommand.register(this.dispatcher);
          TeleportCommand.register(this.dispatcher);
          TellRawCommand.register(this.dispatcher, context);
@@ -13698,11 +13698,6 @@ index 6bd93d3426b0ea781eeb10e8e98128f201e235bd..9dc82afddeda363da455160f9600a28e
              ChaseCommand.register(this.dispatcher);
          }
  
--        if (SharedConstants.DEBUG_DEV_COMMANDS || SharedConstants.IS_RUNNING_IN_IDE) {
-+        if (false && (SharedConstants.DEBUG_DEV_COMMANDS || SharedConstants.IS_RUNNING_IN_IDE)) { // Canvas - region threading - TODO later
-             RaidCommand.register(this.dispatcher, context);
-             DebugPathCommand.register(this.dispatcher);
-             DebugMobSpawningCommand.register(this.dispatcher);
 @@ -293,7 +293,7 @@ public class Commands {
              OpCommand.register(this.dispatcher);
              PardonCommand.register(this.dispatcher);
@@ -16596,6 +16591,163 @@ index 0da1e4ada8616af825ddd4678e61246c672f9c4f..7758943c53dd5845ef7229f51ab2d050
          Collection<? extends Pack> selectedPacks = repository.getSelectedPacks();
          if (selectedPacks.isEmpty()) {
              source.sendSuccess(() -> Component.translatable("commands.datapack.list.enabled.none"), false);
+diff --git a/net/minecraft/server/commands/DebugConfigCommand.java b/net/minecraft/server/commands/DebugConfigCommand.java
+index 6a062b16150d077cead8ea25043b91943635c5f8..db75905b879386adc352a82d6042ab2c51a3c50d 100644
+--- a/net/minecraft/server/commands/DebugConfigCommand.java
++++ b/net/minecraft/server/commands/DebugConfigCommand.java
+@@ -63,7 +63,7 @@ public class DebugConfigCommand {
+     private static Iterable<String> getUuidsInConfig(final MinecraftServer server) {
+         Set<String> result = new HashSet<>();
+ 
+-        for (Connection connection : server.getConnection().getConnections()) {
++        for (Connection connection : io.papermc.paper.threadedregions.RegionizedServer.getInstance().connections) { // Canvas - region threading
+             if (connection.getPacketListener() instanceof ServerConfigurationPacketListenerImpl configListener) {
+                 result.add(configListener.getOwner().id().toString());
+             }
+@@ -73,43 +73,76 @@ public class DebugConfigCommand {
+     }
+ 
+     private static int config(final CommandSourceStack source, final ServerPlayer target) {
+-        GameProfile gameProfile = target.getGameProfile();
+-        target.connection.switchToConfig();
+-        source.sendSuccess(() -> Component.literal("Switched player " + gameProfile.name() + "(" + gameProfile.id() + ") to config mode"), false);
++        // Canvas start - region threading
++        final Boolean scheduled = target.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer entityPlayer) -> {
++            final GameProfile gameProfile = entityPlayer.getGameProfile();
++            entityPlayer.connection.switchToConfig();
++            source.sendSuccess(() -> Component.literal("Switched player " + gameProfile.name() + "(" + gameProfile.id() + ") to config mode"), false);
++        });
++        if (scheduled != null && !scheduled) {
++            source.sendFailure(Component.literal("Target player scheduler is retired, cannot switch to config mode"));
++            return 0;
++        }
++        // Canvas end - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 
+-    private static @Nullable ServerConfigurationPacketListenerImpl findConfigPlayer(final MinecraftServer server, final UUID target) {
+-        for (Connection connection : server.getConnection().getConnections()) {
+-            if (connection.getPacketListener() instanceof ServerConfigurationPacketListenerImpl configListener && configListener.getOwner().id().equals(target)
+-                )
+-             {
+-                return configListener;
++    // Canvas start - region threading
++    private static java.util.concurrent.CompletableFuture<java.util.Optional<ServerConfigurationPacketListenerImpl>> findConfigPlayer(
++        final MinecraftServer server, final UUID target
++    ) {
++        final java.util.concurrent.CompletableFuture<java.util.Optional<ServerConfigurationPacketListenerImpl>>
++            future = new java.util.concurrent.CompletableFuture<>();
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().scheduleToOrExecute(() -> {
++            for (final Connection connection : io.papermc.paper.threadedregions.RegionizedServer.getInstance().connections) {
++                if (!(
++                    connection.getPacketListener() instanceof ServerConfigurationPacketListenerImpl configListener &&
++                    configListener.getOwner().id().equals(target)
++                )) {
++                    continue;
++                }
++
++                future.complete(java.util.Optional.of(configListener));
++                return;
+             }
+-        }
+ 
+-        return null;
++            // not found
++            future.complete(java.util.Optional.empty());
++        });
++
++        return future;
++    // Canvas end - region threading
+     }
+ 
+     private static int unconfig(final CommandSourceStack source, final UUID target) {
+-        ServerConfigurationPacketListenerImpl listener = findConfigPlayer(source.getServer(), target);
+-        if (listener != null) {
++        // Canvas start - region threading
++        findConfigPlayer(source.getServer(), target).thenAccept((maybeListener) -> {
++            final ServerConfigurationPacketListenerImpl listener = maybeListener.orElse(null);
++            if (listener == null) {
++                source.sendFailure(Component.literal("Can't find player to unconfig"));
++                return;
++            }
++
+             listener.returnToWorld();
+-            return Command.SINGLE_SUCCESS;
+-        } else {
+-            source.sendFailure(Component.literal("Can't find player to unconfig"));
+-            return 0;
+-        }
++        });
++
++        return Command.SINGLE_SUCCESS;
++        // Canvas end - region threading
+     }
+ 
+     private static int showDialog(final CommandSourceStack source, final UUID target, final Holder<Dialog> dialog) {
+-        ServerConfigurationPacketListenerImpl listener = findConfigPlayer(source.getServer(), target);
+-        if (listener != null) {
++        // Canvas start - region threading
++        findConfigPlayer(source.getServer(), target).thenAccept((maybeListener) -> {
++            final ServerConfigurationPacketListenerImpl listener = maybeListener.orElse(null);
++            if (listener == null) {
++                source.sendFailure(Component.literal("Can't find player to talk to"));
++                return;
++            }
++
+             listener.send(new ClientboundShowDialogPacket(dialog));
+-            return Command.SINGLE_SUCCESS;
+-        } else {
+-            source.sendFailure(Component.literal("Can't find player to talk to"));
+-            return 0;
+-        }
++        });
++
++        return Command.SINGLE_SUCCESS;
++        // Canvas end - region threading
+     }
+ }
+diff --git a/net/minecraft/server/commands/DebugMobSpawningCommand.java b/net/minecraft/server/commands/DebugMobSpawningCommand.java
+index 6d44801e435201625d8aa106a345b98cb3f5bf3c..34e46d6f34a577f7d22a3016845adf602158830d 100644
+--- a/net/minecraft/server/commands/DebugMobSpawningCommand.java
++++ b/net/minecraft/server/commands/DebugMobSpawningCommand.java
+@@ -28,7 +28,9 @@ public class DebugMobSpawningCommand {
+     }
+ 
+     private static int spawnMobs(final CommandSourceStack source, final MobCategory mobCategory, final BlockPos at) {
++        return io.canvasmc.canvas.threadedregions.command.AbstractCommandExecution.executeAtPos(() -> { // Canvas - region threading
+         NaturalSpawner.spawnCategoryForPosition(mobCategory, source.getLevel(), at);
+         return Command.SINGLE_SUCCESS;
++        }, at, source.getLevel(), source); // Canvas - region threading
+     }
+ }
+diff --git a/net/minecraft/server/commands/DebugPathCommand.java b/net/minecraft/server/commands/DebugPathCommand.java
+index c8b38e35f16357ea3bd47fe330d26afcdc43b6cb..79e3a42d78e428459a49e96d305fd4776df44e11 100644
+--- a/net/minecraft/server/commands/DebugPathCommand.java
++++ b/net/minecraft/server/commands/DebugPathCommand.java
+@@ -30,7 +30,14 @@ public class DebugPathCommand {
+     }
+ 
+     private static int fillBlocks(final CommandSourceStack source, final BlockPos target) throws CommandSyntaxException {
+-        if (source.getEntity() instanceof Mob mob) {
++        // Canvas start - region threading
++        if (source.getEntity() instanceof Mob mobEntity) {
++            return io.canvasmc.canvas.threadedregions.command.AbstractCommandExecution.executeOnEntity((Mob mob) -> {
++                if (mob.level() != source.getLevel()) {
++                    // how the fuck do we make a path across dimensions
++                    throw ERROR_NO_PATH.create();
++                }
++        // Canvas end - region threading
+             PathNavigation pathNavigation = new GroundPathNavigation(mob, source.getLevel());
+             Path path = pathNavigation.createPath(target, 0);
+             if (path == null) {
+@@ -43,6 +50,7 @@ public class DebugPathCommand {
+ 
+             source.sendSuccess(() -> Component.literal("Made path"), true);
+             return Command.SINGLE_SUCCESS;
++            }, source, mobEntity); // Canvas - region threading
+         } else {
+             throw ERROR_NOT_MOB.create();
+         }
 diff --git a/net/minecraft/server/commands/DefaultGameModeCommands.java b/net/minecraft/server/commands/DefaultGameModeCommands.java
 index 7bdeda13c9f9fdaccf462286712713bae277e6e5..9c121096d5a3e77cae91b630a8a066693d26ea14 100644
 --- a/net/minecraft/server/commands/DefaultGameModeCommands.java
@@ -18050,6 +18202,30 @@ index f47e5120339b26246ddbf412e35dcf0982f4a709..d548ae955e6ca901971a373895c02a90
 +        // Canvas end - region threading
      }
  }
+diff --git a/net/minecraft/server/commands/RaidCommand.java b/net/minecraft/server/commands/RaidCommand.java
+index d9246651628b5dac54c673aea07eefa2302ff705..8fd6fd3a0da960311da01edf5e30b82009594611 100644
+--- a/net/minecraft/server/commands/RaidCommand.java
++++ b/net/minecraft/server/commands/RaidCommand.java
+@@ -62,9 +62,16 @@ public class RaidCommand {
+     private static int glow(final CommandSourceStack source) throws CommandSyntaxException {
+         Raid raid = getRaid(source.getPlayerOrException());
+         if (raid != null) {
+-            for (Raider raider : raid.getAllRaiders()) {
+-                raider.addEffect(new MobEffectInstance(MobEffects.GLOWING, 1000, 1));
+-            }
++            // Canvas start - region threading
++            io.canvasmc.canvas.threadedregions.command.AbstractCommandExecution.<Raider>_void()
++                .with(raid.getAllRaiders())
++                .executes((raider) -> {
++                    raider.addEffect(new MobEffectInstance(MobEffects.GLOWING, 1000, 1));
++                    return (_) -> null;
++                })
++                .noCompletion()
++                .start(source);
++            // Canvas end - region threading
+         }
+ 
+         return Command.SINGLE_SUCCESS;
 diff --git a/net/minecraft/server/commands/RecipeCommand.java b/net/minecraft/server/commands/RecipeCommand.java
 index 4b542121c5c774ddb20a0709e29b99dbc6d84dad..8772e0d2151108a6271ec68ad4c6572c711f6e9e 100644
 --- a/net/minecraft/server/commands/RecipeCommand.java
@@ -18761,6 +18937,28 @@ index 533063209d22ddbda0095e329c86d88ab15910fd..9ddbcc57ca30fef59af244e6bf58d920
      }
  
      @FunctionalInterface
+diff --git a/net/minecraft/server/commands/ServerPackCommand.java b/net/minecraft/server/commands/ServerPackCommand.java
+index bb95e2eb32d0c25a9dfac0f8b15cd2215600262d..98944eff7c53c41e3a5f87f3d7c108b9871fc8ba 100644
+--- a/net/minecraft/server/commands/ServerPackCommand.java
++++ b/net/minecraft/server/commands/ServerPackCommand.java
+@@ -54,7 +54,16 @@ public class ServerPackCommand {
+     }
+ 
+     private static void sendToAllConnections(final CommandSourceStack source, final Packet<?> packet) {
+-        source.getServer().getConnection().getConnections().forEach(connection -> connection.send(packet));
++        // Canvas start - region threading
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().scheduleToOrExecute(() -> {
++            for (final net.minecraft.network.Connection connection : io.papermc.paper.threadedregions.RegionizedServer.getInstance().connections) {
++                if (!connection.isConnected()) {
++                    continue;
++                }
++                connection.send(packet);
++            }
++        });
++        // Canvas end - region threading
+     }
+ 
+     private static int pushPack(final CommandSourceStack source, final String url, final Optional<UUID> maybeId, final Optional<String> maybeHash) {
 diff --git a/net/minecraft/server/commands/SetBlockCommand.java b/net/minecraft/server/commands/SetBlockCommand.java
 index 785112128803792e1ce821d3da37d6bac6cd3f44..478b5e65483070bace11a033ccf6a4c95ab8dec7 100644
 --- a/net/minecraft/server/commands/SetBlockCommand.java
@@ -18860,6 +19058,32 @@ index 2ec59a43af72a40dcacda4d3bff11b19fc21fd69..3d10df413672e4371b6e3a98ccc20fd7
 +        }, source); // Canvas - region threading
      }
  }
+diff --git a/net/minecraft/server/commands/SpawnArmorTrimsCommand.java b/net/minecraft/server/commands/SpawnArmorTrimsCommand.java
+index 1432a45461e22aa8cf4286edac6ecd117540ffbf..484cdc27f09edfecb5717e33ba061456c2343dff 100644
+--- a/net/minecraft/server/commands/SpawnArmorTrimsCommand.java
++++ b/net/minecraft/server/commands/SpawnArmorTrimsCommand.java
+@@ -110,6 +110,13 @@ public class SpawnArmorTrimsCommand {
+         List<Holder.Reference<Item>> equippableItems = findEquippableItemsWithAssets(level.registryAccess().lookupOrThrow(Registries.ITEM));
+         BlockPos origin = player.blockPosition().relative(player.getDirection(), 5);
+         double padding = 3.0;
++        // Canvas start - region threading
++        final int minChunkX = (int) Math.floor(origin.getX() + 0.5 - Math.max((equippableItems.size() - 1), 0) * 3.0) >> 4;
++        final int maxChunkX = (int) Math.floor(origin.getX() + 0.5) >> 4;
++        final int minChunkZ = (int) Math.floor(origin.getZ() + 0.5) >> 4;
++        final int maxChunkZ = (int) Math.floor(origin.getZ() + 0.5 + Math.max((sortedPatterns.size() - 1), 0) * 10) >> 4;
++        level.canvas$loadOrRunAtChunksAsync(minChunkX, maxChunkX, minChunkZ, maxChunkZ, ca.spottedleaf.concurrentutil.util.Priority.NORMAL, () -> {
++        // Canvas end - region threading
+ 
+         for (int materialIndex = 0; materialIndex < sortedMaterials.size(); materialIndex++) {
+             Holder.Reference<TrimMaterial> material = sortedMaterials.get(materialIndex);
+@@ -145,6 +152,7 @@ public class SpawnArmorTrimsCommand {
+         }
+ 
+         source.sendSuccess(() -> Component.literal("Armorstands with trimmed armor spawned around you"), true);
++        }); // Canvas - region threading
+         return Command.SINGLE_SUCCESS;
+     }
+ 
 diff --git a/net/minecraft/server/commands/SpectateCommand.java b/net/minecraft/server/commands/SpectateCommand.java
 index 3cb3b93851ccbbb8879fc871954da30a12dd54a4..515dcdb065ac09eb9212a9181fb739f06fa6a71d 100644
 --- a/net/minecraft/server/commands/SpectateCommand.java
@@ -20030,6 +20254,55 @@ index 088b7b91154546fc9c020cab5cefbb4b89762ac8..889b27e3fb2de45f0e6a48659f782a81
      }
  
      private static ScoreAccess getScore(final Scoreboard scoreboard, final ScoreHolder scoreHolder, final Objective objective) throws CommandSyntaxException {
+diff --git a/net/minecraft/server/commands/WardenSpawnTrackerCommand.java b/net/minecraft/server/commands/WardenSpawnTrackerCommand.java
+index 1c30982cab7f9f14d6bfe54e77c24f8d9e95582e..86545796e71c5c486aef00b4a0025de136b74dd1 100644
+--- a/net/minecraft/server/commands/WardenSpawnTrackerCommand.java
++++ b/net/minecraft/server/commands/WardenSpawnTrackerCommand.java
+@@ -42,24 +42,28 @@ public class WardenSpawnTrackerCommand {
+     }
+ 
+     private static int setWarningLevel(final CommandSourceStack source, final Collection<ServerPlayer> players, final int warningLevel) throws CommandSyntaxException {
+-        CommandResponseTracker<ServerPlayer> tracker = CommandResponseTracker.create();
+-
+-        for (ServerPlayer player : players) {
+-            player.getWardenSpawnTracker().setWarningLevel(warningLevel);
+-            tracker.track(player);
+-        }
+-
+-        return tracker.sendFeedback(source, true, RESPONSE_SET_LEVEL);
++        // Canvas start - region threading
++        return io.canvasmc.canvas.threadedregions.command.AbstractCommandExecution.<ServerPlayer>_tracker()
++            .with(players)
++            .executes((player) -> {
++                player.getWardenSpawnTracker().setWarningLevel(warningLevel);
++                return (tracker) -> tracker.track(player);
++            })
++            .onComplete((tracker, _, css) -> tracker.sendFeedback(css, true, RESPONSE_SET_LEVEL))
++            .start(source);
++        // Canvas end - region threading
+     }
+ 
+     private static int resetTracker(final CommandSourceStack source, final Collection<ServerPlayer> players) throws CommandSyntaxException {
+-        CommandResponseTracker<ServerPlayer> tracker = CommandResponseTracker.create();
+-
+-        for (ServerPlayer player : players) {
+-            player.getWardenSpawnTracker().reset();
+-            tracker.track(player);
+-        }
+-
+-        return tracker.sendFeedback(source, true, RESPONSE_RESET);
++        // Canvas start - region threading
++        return io.canvasmc.canvas.threadedregions.command.AbstractCommandExecution.<ServerPlayer>_tracker()
++            .with(players)
++            .executes((player) -> {
++                player.getWardenSpawnTracker().reset();
++                return (tracker) -> tracker.track(player);
++            })
++            .onComplete((tracker, _, css) -> tracker.sendFeedback(css, true, RESPONSE_RESET))
++            .start(source);
++        // Canvas end - region threading
+     }
+ }
 diff --git a/net/minecraft/server/commands/WaypointCommand.java b/net/minecraft/server/commands/WaypointCommand.java
 index 1a826c3d697ab01a84a4b182d4185b1001b8d0fa..81e246aa3b60a5e63cbc791a9a7860d4c8a740e4 100644
 --- a/net/minecraft/server/commands/WaypointCommand.java
@@ -30791,24 +31064,30 @@ index 4abbb6a8029f6c77fdbeda9376d3d5cc5970896d..638a790443e92ed120ff2ab37b05bc47
      }
  
 diff --git a/net/minecraft/world/entity/raid/Raid.java b/net/minecraft/world/entity/raid/Raid.java
-index 16d789ffce1f645505f51a1e61944cd2bc0672c5..81fad7a2101414bdcb1de23b0416f941a58e78cf 100644
+index 16d789ffce1f645505f51a1e61944cd2bc0672c5..c67e72898ec440d579b69cce4465a52bf611d587 100644
 --- a/net/minecraft/world/entity/raid/Raid.java
 +++ b/net/minecraft/world/entity/raid/Raid.java
-@@ -133,6 +133,13 @@ public class Raid {
+@@ -133,6 +133,19 @@ public class Raid {
      private int celebrationTicks;
      private Optional<BlockPos> waveSpawnPos = Optional.empty();
  
-+    // Folia start - make raids thread-safe
-+    public boolean ownsRaid(ServerLevel world) {
-+        BlockPos center = this.getCenter();
++    // Folia & Canvas start - make raids thread-safe
++    public boolean ownsRaid(final ServerLevel world) {
++        final BlockPos center = this.getCenter();
 +        return center != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, center.getX() >> 4, center.getZ() >> 4, 8);
 +    }
 +
-+    // Folia end - make raids thread-safe
++    public void ensureTickThread(final ServerLevel world, final String reason) {
++        if (!ownsRaid(world)) {
++            throw new IllegalStateException(reason);
++        }
++    }
++
++    // Folia & Canvas end - make raids thread-safe
      public Raid(final BlockPos center, final Difficulty difficulty) {
          this.active = true;
          this.raidCooldownTicks = 300;
-@@ -228,7 +235,7 @@ public class Raid {
+@@ -228,7 +241,7 @@ public class Raid {
      private Predicate<ServerPlayer> validPlayer() {
          return player -> {
              BlockPos pos = player.blockPosition();
@@ -30817,7 +31096,7 @@ index 16d789ffce1f645505f51a1e61944cd2bc0672c5..81fad7a2101414bdcb1de23b0416f941
          };
      }
  
-@@ -423,12 +430,21 @@ public class Raid {
+@@ -423,12 +436,21 @@ public class Raid {
                          for (UUID heroUUID : this.heroesOfTheVillage) {
                              Entity entity = level.getEntity(heroUUID);
                              if (entity instanceof LivingEntity hero && !entity.isSpectator()) {
@@ -30842,7 +31121,7 @@ index 16d789ffce1f645505f51a1e61944cd2bc0672c5..81fad7a2101414bdcb1de23b0416f941
                              }
                          }
                          org.bukkit.craftbukkit.event.CraftEventFactory.callRaidFinishEvent(level, this, winners); // CraftBukkit
-@@ -532,7 +548,7 @@ public class Raid {
+@@ -532,7 +554,7 @@ public class Raid {
          Collection<ServerPlayer> playersInRaid = this.raidEvent.getPlayers();
          long seed = this.random.nextLong();
  
@@ -30851,7 +31130,7 @@ index 16d789ffce1f645505f51a1e61944cd2bc0672c5..81fad7a2101414bdcb1de23b0416f941
              Vec3 playerLoc = player.position();
              Vec3 raidLoc = Vec3.atCenterOf(soundOrigin);
              double distBtwn = Math.sqrt((raidLoc.x - playerLoc.x) * (raidLoc.x - playerLoc.x) + (raidLoc.z - playerLoc.z) * (raidLoc.z - playerLoc.z));
-@@ -721,6 +737,11 @@ public class Raid {
+@@ -721,6 +743,11 @@ public class Raid {
      }
  
      private boolean addWaveMob(final ServerLevel level, final int wave, final Raider raider) {
