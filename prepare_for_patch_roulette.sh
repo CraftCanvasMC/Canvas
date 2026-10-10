@@ -26,7 +26,7 @@ fi
 sed -i 's/gitFilePatches *= *true/gitFilePatches = false/' "$BUILD_FILE"
 
 echo "=== Rebuilding single file patches ==="
-./gradlew rebuildFoliaSingleFilePatches --quiet
+./gradlew rebuildPaperSingleFilePatches --quiet
 
 echo "=== Rebuilding applied Minecraft source patches as per-file patches ==="
 ./gradlew rebuildMinecraftSourcePatches --quiet

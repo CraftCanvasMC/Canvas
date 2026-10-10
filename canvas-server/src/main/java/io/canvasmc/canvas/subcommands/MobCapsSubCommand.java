@@ -10,7 +10,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.DynamicCommandExceptionType;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import io.canvasmc.canvas.commands.SubCommand;
-import io.canvasmc.canvas.threadedregions.commands.AbstractCommandExecution;
+import io.canvasmc.canvas.threadedregions.command.AbstractCommandExecution;
 import io.canvasmc.canvas.util.StringSuggestionProvider;
 import java.util.Arrays;
 import java.util.stream.Collectors;

@@ -30,18 +30,14 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.random.RandomGeneratorFactory;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.BrandPayload;
-import net.minecraft.resources.Identifier;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.RandomSupport;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.jetbrains.annotations.UnknownNullability;
@@ -49,7 +45,7 @@ import org.jspecify.annotations.NullMarked;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@SuppressWarnings({"FieldMayBeFinal", "unused"})
+@SuppressWarnings({"FieldMayBeFinal"})
 @NullMarked
 public class GlobalConfiguration extends Part {
 
@@ -461,7 +457,6 @@ public class GlobalConfiguration extends Part {
             });
 
             option("mc261810").docs("Fixes low firework propulsion in the void");
-            option("mc298464").docs("Fixes a memory leak related to Hoglin removal due to CHANGED_DIMENSION");
             option("mc223153").docs("Fixes blocks of raw copper using stone sounds instead of copper sounds");
             option("mc200418").docs("Fixes cured baby zombies staying as jockey variants");
             // NOTE: Marked as fixed but isn't; look at affected versions instead
@@ -481,7 +476,6 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean mc261810 = false;
-        public boolean mc298464 = false;
         public boolean mc223153 = false;
         public boolean mc200418 = false;
         public boolean mc94054 = false;
@@ -509,7 +503,6 @@ public class GlobalConfiguration extends Part {
                     "consume major amounts of network usage, often being up to 60% on large production servers",
                     "This option filters the unnecessary packets sent, while still maintaining Vanilla visual effects"
                 );
-            option("filterMovePackets").docs("Filters useless move packets that don't need to be sent");
 
             option("alternativePlayerListTick").docs("Splits players into buckets to be spread evenly across the playerlist tick");
             option("playerInfoSendInterval")
@@ -532,7 +525,6 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean filterVelocityPacket = false;
-        public boolean filterMovePackets = false;
         public boolean alternativePlayerListTick = false;
         public int playerInfoSendInterval = 600;
         public boolean purpurAlternativeKeepalive = false;
@@ -665,6 +657,7 @@ public class GlobalConfiguration extends Part {
         public boolean autosaveCustomBossEvents = true;
         public boolean autosaveTime = true;
         public boolean autosaveMaps = true;
+        public boolean autosaveCommandStorage = true;
         public boolean autosaveWeather = true;
         public boolean autosaveGamerules = true;
         public boolean autosavePlayers = true;

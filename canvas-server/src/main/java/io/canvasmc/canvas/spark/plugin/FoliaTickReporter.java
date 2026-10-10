@@ -1,6 +1,7 @@
 package io.canvasmc.canvas.spark.plugin;
 
-import io.canvasmc.canvas.threadedregions.SchedulerUtil;
+import io.canvasmc.canvas.threadedregions.scheduler.callback.SchedulerCallbacks;
+import io.papermc.paper.threadedregions.TickRegions;
 import me.lucko.spark.paper.common.tick.AbstractTickReporter;
 import me.lucko.spark.paper.common.tick.TickReporter;
 
@@ -18,13 +19,19 @@ public class FoliaTickReporter extends AbstractTickReporter implements TickRepor
 
     @Override
     public void onTick(final double duration) {
-        final SchedulerUtil.SchedulerHandler handler = SchedulerUtil.getHandle();
-        if (handler.isRunningRegionProfiler()) {
-            final Thread thread = Thread.currentThread();
-            if (!handler.isRunningRegionProfilerOnThread(thread.threadId(), thread.getName())) {
-                return;
-            }
-            super.onTick(duration);
+        final SchedulerCallbacks callbacks = TickRegions.getScheduler().getSchedulerCallbacks();
+
+        // check if we are profiling at all
+        if (!callbacks.isRegionProfiling()) {
+            return;
         }
+
+        final Thread thread = Thread.currentThread();
+        if (!callbacks.isProfilingThread(thread.threadId(), thread.getName())) {
+            return;
+        }
+
+        // is running region profiler on this thread, tick
+        super.onTick(duration);
     }
 }
