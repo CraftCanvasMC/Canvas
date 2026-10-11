@@ -5,7 +5,7 @@ Subject: [PATCH] Replace Moonrise Executor
 
 
 diff --git a/ca/spottedleaf/concurrentutil/executor/thread/BalancedPrioritisedThreadPool.java b/ca/spottedleaf/concurrentutil/executor/thread/BalancedPrioritisedThreadPool.java
-index e95f6aa3cb197e1de0d1f82b59cf5741e91cb91e..25485c9d9dcb343ab50a9431ba213825ae3b8181 100644
+index e95f6aa3cb197e1de0d1f82b59cf5741e91cb91e..2938677a395227e5404a1781f93e8fb228ff12dc 100644
 --- a/ca/spottedleaf/concurrentutil/executor/thread/BalancedPrioritisedThreadPool.java
 +++ b/ca/spottedleaf/concurrentutil/executor/thread/BalancedPrioritisedThreadPool.java
 @@ -309,7 +309,7 @@ public class BalancedPrioritisedThreadPool {
@@ -22,39 +22,16 @@ index e95f6aa3cb197e1de0d1f82b59cf5741e91cb91e..25485c9d9dcb343ab50a9431ba213825
          }
  
 -        public final class Queue implements PrioritisedExecutor {
-+        public final class Queue implements io.canvasmc.canvas.world.chunk_system.ChunkSystemExecutor { // Canvas - replace moonrise executor
++        public class Queue implements io.canvasmc.canvas.world.chunk_system.ChunkSystemExecutor { // Canvas - replace moonrise executor - non-final, extended by BalancedChunkSystem queues
  
              private final PrioritisedTaskQueue wrapped;
              private volatile boolean halt;
-diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
-index ae395be397ca303c9d88b1a2dc72123a2f5ce1e5..5abf7982ec114042ed4c7fe3f970eb7b53fb4cb7 100644
---- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
-+++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
-@@ -108,11 +108,13 @@ public final class ChunkTaskScheduler {
- 
-     public final ServerLevel world;
-     public final AreaDependentQueue radiusAwareScheduler;
--    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue parallelGenExecutor;
--    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue loadExecutor;
--    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue ioExecutor;
--    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue compressionExecutor;
--    public final BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue saveExecutor;
-+    // Canvas start - replace moonrise executor
-+    public final io.canvasmc.canvas.world.chunk_system.ChunkSystemExecutor parallelGenExecutor;
-+    public final io.canvasmc.canvas.world.chunk_system.ChunkSystemExecutor loadExecutor;
-+    public final io.canvasmc.canvas.world.chunk_system.ChunkSystemExecutor compressionExecutor;
-+    public final io.canvasmc.canvas.world.chunk_system.ChunkSystemExecutor saveExecutor;
-+    public final io.canvasmc.canvas.world.chunk_system.ChunkSystemExecutor ioExecutor;
-+    // Canvas end - replace moonrise executor
- 
-     // Folia - region threading
- 
 diff --git a/io/canvasmc/canvas/world/chunk_system/BalancedChunkSystem.java b/io/canvasmc/canvas/world/chunk_system/BalancedChunkSystem.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..279e98d2d7fc395940dba6cf483fda6381730406
+index 0000000000000000000000000000000000000000..231488d36e6fc04702efd8a8223de5093a9097af
 --- /dev/null
 +++ b/io/canvasmc/canvas/world/chunk_system/BalancedChunkSystem.java
-@@ -0,0 +1,559 @@
+@@ -0,0 +1,563 @@
 +package io.canvasmc.canvas.world.chunk_system;
 +
 +import ca.spottedleaf.concurrentutil.executor.PrioritisedExecutor;
@@ -88,6 +65,8 @@ index 0000000000000000000000000000000000000000..279e98d2d7fc395940dba6cf483fda63
 +    private final COWArrayList<WorkerThread> threads = new COWArrayList<>(WorkerThread.class);
 +    private final COWArrayList<WorkerThread> aliveThreads = new COWArrayList<>(WorkerThread.class);
 +    private final BalancedChunkSystem.OrderedStreamGroup stream = new OrderedStreamGroup(new AtomicLong());
++    /// Never registerd or executes tasks, just for the sake of upstream compat
++    private final BalancedPrioritisedThreadPool.OrderedStreamGroup upstreamGroup = ((BalancedPrioritisedThreadPool) this).new OrderedStreamGroup(new AtomicLong(), false);
 +
 +    private boolean shutdown;
 +
@@ -372,13 +351,15 @@ index 0000000000000000000000000000000000000000..279e98d2d7fc395940dba6cf483fda63
 +            }
 +        }
 +
-+        public final class Queue implements ChunkSystemExecutor {
++        public final class Queue extends BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue {
 +
 +            private final PrioritisedTaskQueue wrapped;
 +            private final AtomicLong executors = new AtomicLong();
 +            private volatile boolean halt;
 +
 +            public Queue(final AtomicLong subOrderGenerator) {
++                // all functions are overridden, the upstream queue state is unused
++                BalancedChunkSystem.this.upstreamGroup.super(subOrderGenerator, false);
 +                this.wrapped = new PrioritisedTaskQueue(subOrderGenerator);
 +            }
 +
@@ -648,11 +629,13 @@ index 0000000000000000000000000000000000000000..83b61838afb9acd63794d243c2f7b4fc
 +}
 diff --git a/io/canvasmc/canvas/world/chunk_system/StreamGroup.java b/io/canvasmc/canvas/world/chunk_system/StreamGroup.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..eecbefafd9f441069dbf942bab8f62b8ee01201e
+index 0000000000000000000000000000000000000000..a96223693ff91385273ef9718772cb789a024bbc
 --- /dev/null
 +++ b/io/canvasmc/canvas/world/chunk_system/StreamGroup.java
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,23 @@
 +package io.canvasmc.canvas.world.chunk_system;
++
++import ca.spottedleaf.concurrentutil.executor.thread.BalancedPrioritisedThreadPool;
 +
 +/**
 + * A group of {@link ChunkSystemExecutor} queues that share a single priority-ordered task stream, allowing tasks from
@@ -664,10 +647,14 @@ index 0000000000000000000000000000000000000000..eecbefafd9f441069dbf942bab8f62b8
 +
 +    /**
 +     * Creates and registers a new {@link ChunkSystemExecutor} queue in this group.
++     * <p>
++     * The queue is always a {@link BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue} so that the
++     * {@link ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkTaskScheduler} executor fields keep their
++     * upstream type, which plugins may access directly.
 +     *
 +     * @return the new executor.
 +     */
-+    ChunkSystemExecutor createExecutor();
++    BalancedPrioritisedThreadPool.OrderedStreamGroup.Queue createExecutor();
 +}
 diff --git a/io/canvasmc/canvas/world/chunk_system/package-info.java b/io/canvasmc/canvas/world/chunk_system/package-info.java
 new file mode 100644
