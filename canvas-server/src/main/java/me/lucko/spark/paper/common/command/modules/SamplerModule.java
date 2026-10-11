@@ -23,7 +23,6 @@ package me.lucko.spark.paper.common.command.modules;
 import com.google.common.collect.Iterables;
 import io.canvasmc.canvas.threadedregions.profiler.ByNameThreadGrouper;
 import io.canvasmc.canvas.threadedregions.profiler.RegionProfiler;
-import io.canvasmc.canvas.threadedregions.SchedulerUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -38,6 +37,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import io.canvasmc.canvas.threadedregions.profiler.RegionScheduleHandlePinner;
+import io.papermc.paper.threadedregions.TickRegions;
 import me.lucko.spark.paper.common.SparkPlatform;
 import me.lucko.spark.paper.common.activitylog.Activity;
 import me.lucko.spark.paper.common.command.Arguments;
@@ -239,7 +239,7 @@ public class SamplerModule implements CommandModule {
         TickHook tickHook = null;
         if (ticksOver != -1) {
             tickHook = platform.getTickHook();
-            if (tickHook == null || !SchedulerUtil.getHandle().isRunningRegionProfiler()) { // Canvas - region profiler
+            if (tickHook == null || !TickRegions.getScheduler().getSchedulerCallbacks().isRegionProfiling()) { // Canvas - region profiler
                 resp.replyPrefixed(text("Tick counting is not supported!", RED));
                 return;
             }

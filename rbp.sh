@@ -23,6 +23,8 @@ set -e
 force_run=false
 gradle_run=false
 debug=false
+feature_run=false
+patch_kind="File"
 
 for arg in "$@"; do
   case "$arg" in
@@ -33,6 +35,12 @@ for arg in "$@"; do
     --gradle)
       gradle_run=true
       echo "--gradle flag detected. Will run single file patch rebuild."
+      ;;
+    --all)
+      feature_run=true
+      force_run=true
+      patch_kind="Feature"
+      echo "--all flag detected. Forcing rebuild of feature patches (no fixup)."
       ;;
     --debug)
       debug=true
@@ -55,8 +63,8 @@ process_changes() {
   cd "$dir"
 
   if $force_run || ! git diff --quiet || ! git diff --cached --quiet; then
-    gradle_tasks["fixup${project}FilePatches"]="true"
-    gradle_tasks["rebuild${project}FilePatches"]="true"
+    $feature_run || gradle_tasks["fixup${project}${patch_kind}Patches"]="true"
+    gradle_tasks["rebuild${project}${patch_kind}Patches"]="true"
   fi
 
   cd - > /dev/null
@@ -89,19 +97,19 @@ if $gradle_run || ! git diff --quiet "./canvas-api/build.gradle.kts" || ! git di
   gradle_rebuild_task=true
 fi
 
-if $gradle_rebuild_task || $gradle_run; then
+if ! $feature_run && { $gradle_rebuild_task || $gradle_run; }; then
   gradle_tasks["rebuildPaperSingleFilePatches"]="true"
 fi
 
 echo "running fixup"
-run_gradle_task "fixupPaperApiFilePatches"
-run_gradle_task "fixupPaperServerFilePatches"
-run_gradle_task "fixupMinecraftFilePatches"
+run_gradle_task "fixupPaperApi${patch_kind}Patches"
+run_gradle_task "fixupPaperServer${patch_kind}Patches"
+run_gradle_task "fixupMinecraft${patch_kind}Patches"
 
 echo "rebuilding"
-run_gradle_task "rebuildPaperApiFilePatches"
-run_gradle_task "rebuildPaperServerFilePatches"
-run_gradle_task "rebuildMinecraftFilePatches"
+run_gradle_task "rebuildPaperApi${patch_kind}Patches"
+run_gradle_task "rebuildPaperServer${patch_kind}Patches"
+run_gradle_task "rebuildMinecraft${patch_kind}Patches"
 run_gradle_task "rebuildPaperSingleFilePatches"
 
 echo "done :)"

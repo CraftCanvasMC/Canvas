@@ -1,64 +1,23 @@
 --- a/net/minecraft/server/level/ServerEntity.java
 +++ b/net/minecraft/server/level/ServerEntity.java
-@@ -169,7 +_,7 @@
-                 boolean positionChanged = (vec3_dx * vec3_dx + vec3_dy * vec3_dy + vec3_dz * vec3_dz) >= 7.62939453125E-6D;
-                 // Paper end - reduce allocation of Vec3D here
-                 Packet<ClientGamePacketListener> packet = null;
--                boolean pos = positionChanged || this.tickCount % 60 == 0;
-+                // boolean pos = positionChanged || this.tickCount % 60 == 0; // Canvas - reduce useless move packets
-                 boolean sentPosition = false;
-                 boolean sentRotation = false;
-                 long xa = this.positionCodec.encodeX(currentPosition);
-@@ -186,21 +_,36 @@
-                     packet = ClientboundEntityPositionSyncPacket.of(this.entity);
-                     sentPosition = true;
-                     sentRotation = true;
--                } else if ((!pos || !shouldSendRotation) && !(this.entity instanceof AbstractArrow)) {
--                    if (pos) {
--                        packet = new ClientboundMoveEntityPacket.Pos(this.entity.getId(), (short)xa, (short)ya, (short)za, this.entity.onGround());
--                        sentPosition = true;
--                    } else if (shouldSendRotation) {
--                        packet = new ClientboundMoveEntityPacket.Rot(this.entity.getId(), yRotn, xRotn, this.entity.onGround());
--                        sentRotation = true;
--                    }
-+                // Canvas start - reduce useless move packets
+@@ -176,6 +_,7 @@
+                 PositionPath position = this.interpolationTracker.getPositionPath(currentPosition);
+                 this.interpolationTracker.clear();
+                 MovementPacket<ClientGamePacketListener> packet;
++                boolean isSendingPosition = false; // Canvas - filter ClientboundSetEntityMotionPacket
+                 if (this.entity instanceof AbstractArrow) {
+                     packet = this.createMovePacket(position, yRotn, xRotn, true, true);
                  } else {
--                    packet = new ClientboundMoveEntityPacket.PosRot(this.entity.getId(), (short)xa, (short)ya, (short)za, yRotn, xRotn, this.entity.onGround());
--                    sentPosition = true;
--                    sentRotation = true;
-+                    if (positionChanged || shouldSendRotation || this.entity instanceof AbstractArrow) {
-+                        if (this.entity instanceof AbstractArrow || (positionChanged && shouldSendRotation)) {
-+                            packet = new ClientboundMoveEntityPacket.PosRot(
-+                                this.entity.getId(), (short)xa, (short)ya, (short)za, yRotn, xRotn, this.entity.onGround()
-+                            );
-+                            sentPosition = true;
-+                            sentRotation = true;
-+                        } else if (positionChanged) {
-+                            packet = new ClientboundMoveEntityPacket.Pos(
-+                                this.entity.getId(), (short)xa, (short)ya, (short)za, this.entity.onGround()
-+                            );
-+                            sentPosition = true;
-+                        } else {
-+                            packet = new ClientboundMoveEntityPacket.Rot(
-+                                this.entity.getId(), yRotn, xRotn, this.entity.onGround()
-+                            );
-+                            sentRotation = true;
-+                        }
-+                    }
-+
-+                    if (io.canvasmc.canvas.GlobalConfiguration.getInstance().networking.filterMovePackets
-+                        && canvas$isUselessMoveEntityPacket(packet)) {
-+                        packet = null;
-+                    }
+@@ -186,7 +_,7 @@
+                     double dz = currentPosition.z - base.z;
+                     boolean positionChanged = (dx * dx + dy * dy + dz * dz) >= 7.62939453125E-6D;
+                     // Paper end - reduce allocation of Vec3 here
+-                    boolean shouldSendPosition = positionChanged || this.tickCount % 60 == 0;
++                    boolean shouldSendPosition = isSendingPosition = positionChanged || this.tickCount % 60 == 0; // Canvas - filter ClientboundSetEntityMotionPacket
+                     packet = this.createMovePacket(position, yRotn, xRotn, shouldSendPosition, shouldSendRotation);
                  }
  
--                if (this.entity.needsSync || this.trackDelta || this.entity instanceof LivingEntity livingEntity && livingEntity.isFallFlying()) {
-+                if (this.entity.needsSync || this.trackDelta || this.entity instanceof LivingEntity livingEntity && livingEntity.isFallFlying() && this.entity.getDeltaMovement() != this.lastSentMovement) {
-+                // Canvas end - reduce useless move packets
-                     Vec3 movement = this.entity.getDeltaMovement();
-                     double diff = movement.distanceToSqr(this.lastSentMovement);
-                     if (diff > 1.0E-7 || diff > 0.0 && movement.lengthSqr() == 0.0) {
-@@ -215,9 +_,44 @@
+@@ -205,9 +_,44 @@
                                          )
                                      )
                                  );
@@ -91,7 +50,7 @@
 +                               This filter helps keep unneeded packets reduced, but also ensures that we keep smooth visual gameplay
 +                            */
 +                            if (
-+                                (this.entity instanceof net.minecraft.world.entity.item.ItemEntity && positionChanged) ||
++                                (this.entity instanceof net.minecraft.world.entity.item.ItemEntity && isSendingPosition) ||
 +                                this.entity instanceof net.minecraft.world.entity.projectile.EyeOfEnder ||
 +                                this.entity instanceof net.minecraft.world.entity.animal.squid.Squid ||
 +                                this.entity instanceof net.minecraft.world.entity.projectile.ShulkerBullet ||
@@ -104,19 +63,3 @@
                      }
                  }
  
-@@ -273,6 +_,15 @@
-             this.synchronizer.sendToTrackingPlayersAndSelf(new ClientboundSetEntityMotionPacket(this.entity));
-         }
-     }
-+    // Canvas start - reduce useless move packets
-+
-+    private boolean canvas$isUselessMoveEntityPacket(@Nullable Packet<?> packet) {
-+        if (packet instanceof ClientboundMoveEntityPacket.Pos posPacket) {
-+            return posPacket.getXa() == 0 && posPacket.getYa() == 0 && posPacket.getZa() == 0;
-+        }
-+        return false;
-+    }
-+    // Canvas end - reduce useless move packets
- 
-     private void handleMinecartPosRot(final NewMinecartBehavior newMinecartBehavior, final byte yRotn, final byte xRotn, final boolean shouldSendRotation) {
-         this.sendDirtyEntityData();

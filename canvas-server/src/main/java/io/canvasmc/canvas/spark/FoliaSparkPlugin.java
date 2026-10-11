@@ -22,6 +22,7 @@ import me.lucko.spark.paper.api.PaperScheduler;
 import me.lucko.spark.paper.api.PaperSparkModule;
 import me.lucko.spark.paper.common.SparkPlatform;
 import me.lucko.spark.paper.common.SparkPlugin;
+import me.lucko.spark.paper.common.metric.Metrics;
 import me.lucko.spark.paper.common.monitor.ping.PlayerPingProvider;
 import me.lucko.spark.paper.common.monitor.tick.TickStatistics;
 import me.lucko.spark.paper.common.platform.PlatformInfo;
@@ -152,7 +153,7 @@ public class FoliaSparkPlugin implements PaperSparkModule, SparkPlugin {
     }
 
     @Override
-    public TickStatistics createTickStatistics() {
+    public TickStatistics createTickStatistics(final Metrics metrics) {
         return new FoliaTickStatistics();
     }
 
