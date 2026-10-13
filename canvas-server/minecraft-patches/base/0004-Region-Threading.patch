@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dueris <duerismc@gmail.com>
-Date: Mon, 5 Oct 2026 09:33:41 -0700
+Date: Tue, 13 Oct 2026 11:20:14 -0700
 Subject: [PATCH] Region Threading
 
 This patch and its contents is comprised of the following:
@@ -5318,10 +5318,10 @@ index 0000000000000000000000000000000000000000..7494f93bcc79931720e55a2ffcaab2a9
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/world/scores/ObjectiveData.java b/io/canvasmc/canvas/threadedregions/world/scores/ObjectiveData.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..ad6cd3b4d150f5e6a485f407ef56528d993dc283
+index 0000000000000000000000000000000000000000..2cca40cf86aa696261a7129b962f6d11c6c803a6
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/world/scores/ObjectiveData.java
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,105 @@
 +package io.canvasmc.canvas.threadedregions.world.scores;
 +
 +import java.util.Optional;
@@ -5334,34 +5334,46 @@ index 0000000000000000000000000000000000000000..ad6cd3b4d150f5e6a485f407ef56528d
 +
 +@SuppressWarnings("UnusedReturnValue")
 +public class ObjectiveData {
++
++    @Nullable
 +    private Component formattedDisplayName;
++
 +    private ObjectiveCriteria.RenderType renderType;
 +    private boolean displayAutoUpdate;
-+    private @Nullable NumberFormat numberFormat;
++
 +    private Component displayName;
++    private final Objective objective;
++
++    @Nullable
++    private NumberFormat numberFormat;
 +
 +    public ObjectiveData(
++        @Nullable
 +        final Component formattedDisplayName,
 +        final ObjectiveCriteria.RenderType renderType,
 +        final boolean displayAutoUpdate,
-+        final @Nullable NumberFormat numberFormat,
-+        final Component displayName
++        @Nullable
++        final NumberFormat numberFormat,
++        final Component displayName,
++        final Objective objective
 +    ) {
 +        this.formattedDisplayName = formattedDisplayName;
 +        this.renderType = renderType;
 +        this.displayAutoUpdate = displayAutoUpdate;
 +        this.numberFormat = numberFormat;
 +        this.displayName = displayName;
++        this.objective = objective;
 +    }
 +
 +    @Contract("_ -> new")
 +    public static ObjectiveData copyOf(final ObjectiveData toCopy) {
 +        return new ObjectiveData(
-+            toCopy.getFormattedDisplayName(),
++            toCopy.formattedDisplayName,
 +            toCopy.getRenderType(),
 +            toCopy.doesDisplayAutoUpdate(),
 +            toCopy.getNumberFormat(),
-+            toCopy.getDisplayName()
++            toCopy.getDisplayName(),
++            toCopy.objective
 +        );
 +    }
 +
@@ -5375,10 +5387,10 @@ index 0000000000000000000000000000000000000000..ad6cd3b4d150f5e6a485f407ef56528d
 +    }
 +
 +    public Component getFormattedDisplayName() {
-+        return formattedDisplayName;
++        return this.formattedDisplayName != null ? this.formattedDisplayName : (this.formattedDisplayName = this.objective.createFormattedDisplayName(this.displayName));
 +    }
 +
-+    public ObjectiveData setFormattedDisplayName(final Component formattedDisplayName) {
++    public ObjectiveData setFormattedDisplayName(final @Nullable Component formattedDisplayName) {
 +        this.formattedDisplayName = formattedDisplayName;
 +        return this;
 +    }
@@ -22077,7 +22089,7 @@ index cc6f4e2845ef1e95c765d65f17c8aa1b06652927..7316c756f1c228eef710219a659c7968
                  foundPlayers.add(player);
              }
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index a2d5a9b453e86c2f89131adf0acd0f752ac0c9a7..beee97a9cf863c9357e519adaa2b02b6a5d73ccf 100644
+index 3b5966e5580a1413d464f3a0dd5eacb6ad28e348..5cb3e37c5b472f14b6d48ffd0daf41039b984ef7 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -191,11 +191,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
@@ -23264,23 +23276,23 @@ index a2d5a9b453e86c2f89131adf0acd0f752ac0c9a7..beee97a9cf863c9357e519adaa2b02b6
 +                regionizedWorldData = ServerLevel.this.getCurrentWorldData();
 +            regionizedWorldData.removeLoadedEntity(entity);
 +            // Folia & Canvas end - region threading
-             // Spigot start // TODO I don't think this is needed anymore
+             // Spigot start
              if (entity instanceof Player player) {
-                 for (final ServerLevel level : ServerLevel.this.getServer().getAllLevels()) {
+                 SavedDataStorage storage = getServer().getDataStorage();
 @@ -3097,10 +3313,12 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
-                             continue;
-                         }
- 
-+                        synchronized (map) { // Folia - make map data thread-safe
-                         map.carriedByPlayers.remove(player);
-                         if (map.carriedBy.removeIf(holdingPlayer -> holdingPlayer.player == player)) {
-                             map.decorations.remove(player.getName().getString());
-                         }
-+                        } // Folia - make map data thread-safe
+                         continue;
                      }
+ 
++                    synchronized (map) { // Folia - make map data thread-safe
+                     net.minecraft.world.level.saveddata.maps.MapItemSavedData.HoldingPlayer holder = map.carriedByPlayers.remove(player);
+                     if (holder != null && map.carriedBy.remove(holder)) {
+                         map.decorations.remove(player.getName().getString());
+                     }
++                    } // Folia - make map data thread-safe
                  }
              }
-@@ -3132,17 +3350,17 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+             // Spigot end
+@@ -3131,17 +3349,17 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
                      );
                  }
  
@@ -23301,7 +23313,7 @@ index a2d5a9b453e86c2f89131adf0acd0f752ac0c9a7..beee97a9cf863c9357e519adaa2b02b6
              // CraftBukkit start
              entity.valid = false;
              if (!(entity instanceof ServerPlayer) && entity.getRemovalReason() != net.minecraft.world.entity.Entity.RemovalReason.CHANGED_DIMENSION) {
-@@ -3172,15 +3390,15 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+@@ -3171,15 +3389,15 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
      private long lagCompensationTick = currentLagCompensationTick();
  
      public long getLagCompensationTick() {
@@ -23321,7 +23333,7 @@ index a2d5a9b453e86c2f89131adf0acd0f752ac0c9a7..beee97a9cf863c9357e519adaa2b02b6
      // Paper end - lag compensation
  }
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583d2caec61 100644
+index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..95bb8c0bf50dea406c253f997de6877557b85e25 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
 @@ -210,7 +210,7 @@ import org.slf4j.Logger;
@@ -23730,7 +23742,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
              }
              final Runnable finalConsumeAnchorCharge = consumeAnchorCharge; // Paper - Fix SPIGOT-5989
  
-@@ -1529,8 +1778,506 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1529,8 +1778,507 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          }
      }
  
@@ -24111,6 +24123,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
 +            // pre-add logic
 +            PlayerList playerlist = this.server.getPlayerList();
 +            net.minecraft.world.level.storage.LevelData worlddata = destination.getLevelData();
++            this.connection.restartClientLoadTimerAfterRespawn(); // Paper - reset client world load status on cross-dimension teleport
 +            this.connection.send(
 +                new ClientboundRespawnPacket(
 +                    this.createCommonSpawnInfo(destination),
@@ -24164,9 +24177,9 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
 +            this.setHealth(this.getHealth());
 +            playerlist.sendAllPlayerInfo(this);
 +            this.onUpdateAbilities();
-+            /*for (MobEffectInstance mobEffect : this.getActiveEffects()) {
++            /* for (MobEffectInstance mobEffect : this.getActiveEffects()) {
 +                this.connection.send(new ClientboundUpdateMobEffectPacket(this.getId(), mobEffect, false));
-+            }*/ // handled by sendActivePlayerEffects
++            } */ // handled by sendActivePlayerEffects
 +
 +            this.lastSentExp = -1;
 +            this.lastSentHealth = -1.0F;
@@ -24237,7 +24250,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
          if (this.isSleeping()) return null; // CraftBukkit - SPIGOT-3154
          if (this.isRemoved()) {
              return null;
-@@ -1626,7 +2373,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1626,7 +2374,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          this.connection.send(new ClientboundPlayerRotationPacket(yRot, relativeY, xRot, relativeX));
      }
  
@@ -24246,7 +24259,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
          ResourceKey<Level> oldKey = oldLevel.dimension();
          ResourceKey<Level> newKey = this.level().dimension();
          // CraftBukkit start
-@@ -1645,7 +2392,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1645,7 +2393,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
          if (oldMainDimensionKey == Level.NETHER && newMainDimensionKey == Level.OVERWORLD && this.enteredNetherPosition != null) {
              // CraftBukkit end
@@ -24255,7 +24268,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
          }
  
          if (newMainDimensionKey != Level.NETHER) { // CraftBukkit
-@@ -1654,6 +2401,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1654,6 +2402,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          this.gameMode.hasDelayedDestroy = false; // Paper
      }
  
@@ -24268,7 +24281,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
      @Override
      public boolean broadcastToPlayer(final ServerPlayer player) {
          return player.isSpectator() ? this.getCamera() == this : !this.isSpectator() && super.broadcastToPlayer(player);
-@@ -1837,7 +2590,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1837,7 +2591,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
      @Override
      protected void pushEntities() {
@@ -24277,7 +24290,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
              super.pushEntities();
          }
      }
-@@ -1860,6 +2613,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1860,6 +2614,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
  
      @Override
      public OptionalInt openMenu(final @Nullable MenuProvider provider) {
@@ -24285,7 +24298,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
          if (provider == null) {
              return OptionalInt.empty();
          }
-@@ -1999,6 +2753,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1999,6 +2754,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      }
      @Override
      public void closeContainer(org.bukkit.event.inventory.InventoryCloseEvent.Reason reason) {
@@ -24293,7 +24306,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
          org.bukkit.craftbukkit.event.CraftEventFactory.handleInventoryCloseEvent(this, reason); // CraftBukkit
          // Paper end - Inventory close reason
          this.connection.send(new ClientboundContainerClosePacket(this.containerMenu.containerId));
-@@ -2588,7 +3343,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2588,7 +3344,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          return this.camera == null ? this : this.camera;
      }
  
@@ -24324,7 +24337,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
          Entity oldCamera = this.getCamera();
          this.camera = newCamera == null ? this : newCamera;
          if (oldCamera != this.camera) {
-@@ -2607,16 +3385,21 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2607,16 +3386,21 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
                  }
              }
              // Paper end - Add PlayerStartSpectatingEntityEvent and PlayerStopSpectatingEntity
@@ -24353,7 +24366,7 @@ index 2f464dd9b47cbb7f6abf99411bc4beb6b347d70a..0367fdf03ce0abbfaa9962b3abe5e583
          }
      }
  
-@@ -3165,7 +3948,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -3165,7 +3949,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          this.experienceLevel = this.newLevel;
          this.totalExperience = this.newTotalExp;
          this.experienceProgress = 0;
@@ -25573,7 +25586,7 @@ index 6f18226ea5e01900d4d7683567e33d65a8baf384..46315f29c6415f949023d45947e38dac
              parsedDate = defaultValue;
          }
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934846a6c42 100644
+index b22b0110cc62b160b70ceeac9490b4b424639d66..7937256c9e0173694b44adc6d3added6530637bd 100644
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
 @@ -113,11 +113,13 @@ public abstract class PlayerList {
@@ -25593,7 +25606,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
      private final UserBanList bans;
      private final IpBanList ipBans;
      private final ServerOpList ops;
-@@ -134,9 +136,74 @@ public abstract class PlayerList {
+@@ -134,9 +136,78 @@ public abstract class PlayerList {
  
      // CraftBukkit start
      private org.bukkit.craftbukkit.CraftServer cserver;
@@ -25603,35 +25616,38 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
  
 +    // Folia start - region threading
 +    private final Object connectionsStateLock = new Object();
-+    private final Map<String, Connection> connectionByName = new java.util.HashMap<>();
-+    private final Map<UUID, Connection> connectionById = new java.util.HashMap<>();
++    private final Map<String, Connection> connectionByName = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
++    private final Map<UUID, Connection> connectionById = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<>();
 +    private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<Connection> usersCountedAgainstLimit = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
 +
-+    public boolean pushPendingJoin(String userName, UUID byId, Connection conn) {
++    public boolean pushPendingJoin(String userName, final UUID byId, final Connection conn) {
 +        userName = userName.toLowerCase(java.util.Locale.ROOT);
-+        Connection conflictingName, conflictingId;
++
++        final Connection conflictingName, conflictingId;
 +        synchronized (this.connectionsStateLock) {
 +            conflictingName = this.connectionByName.get(userName);
 +            conflictingId = this.connectionById.get(byId);
 +
 +            if (conflictingName == null && conflictingId == null) {
-+                // Folia start - max concurrent login
-+                int loggedInCount = 0;
-+                for (Connection value : this.connectionById.values()) {
-+                    if (value.getPacketListener() instanceof ServerGamePacketListenerImpl) {
-+                        ++loggedInCount;
++                // Folia & Canvas start - max concurrent login
++                int loggingIn = 0;
++                for (final Connection value : this.connectionById.values()) {
++                    // only login phase players should count towards current logins
++                    if (value.getPacketListener() instanceof net.minecraft.server.network.ServerLoginPacketListenerImpl) {
++                        ++loggingIn;
 +                    }
 +                }
-+                if ((this.connectionById.size() - loggedInCount) >= io.papermc.paper.configuration.GlobalConfiguration.get().misc.maxJoinsPerTick) {
++
++                if (loggingIn >= io.papermc.paper.configuration.GlobalConfiguration.get().misc.maxJoinsPerTick) {
 +                    return false;
 +                }
-+                // Folia end - max concurrent login
++                // Folia & Canvas end - max concurrent login
 +                this.connectionByName.put(userName, conn);
 +                this.connectionById.put(byId, conn);
 +            }
 +        }
 +
-+        Component message = Component.translatable("multiplayer.disconnect.duplicate_login", new Object[0]);
++        final Component message = Component.translatable("multiplayer.disconnect.duplicate_login", new Object[0]);
 +
 +        if (conflictingId != null || conflictingName != null) {
 +            if (conflictingName != null && conflictingName.isPlayerConnected()) {
@@ -25645,8 +25661,9 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
 +        return conflictingName == null && conflictingId == null;
 +    }
 +
-+    public void removeConnection(String userName, UUID byId, Connection conn) {
++    public void removeConnection(String userName, final UUID byId, final Connection conn) {
 +        userName = userName.toLowerCase(java.util.Locale.ROOT);
++
 +        synchronized (this.connectionsStateLock) {
 +            this.connectionByName.remove(userName, conn);
 +            this.connectionById.remove(byId, conn);
@@ -25654,9 +25671,9 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
 +        }
 +    }
 +
-+    private boolean countConnection(Connection conn, int limit) {
++    private boolean countConnection(final Connection conn, final int limit) {
 +        synchronized (this.connectionsStateLock) {
-+            int count = this.usersCountedAgainstLimit.size();
++            final int count = this.usersCountedAgainstLimit.size();
 +            if (count > limit) { // Canvas - fix Folia max player count breaking Vanilla
 +                return false;
 +            }
@@ -25669,7 +25686,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
      public PlayerList(
          final MinecraftServer server,
          final LayeredRegistryAccess<RegistryLayer> registries,
-@@ -170,6 +237,10 @@ public abstract class PlayerList {
+@@ -170,6 +241,10 @@ public abstract class PlayerList {
          String address = connection.getLoggableAddress(this.server.logIPs());
          LevelData levelData = level.getLevelData();
          ServerGamePacketListenerImpl playerConnection = new ServerGamePacketListenerImpl(this.server, connection, player, cookie);
@@ -25680,7 +25697,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          connection.setupInboundProtocol(
              GameProtocols.SERVERBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess()), playerConnection), playerConnection
          );
-@@ -232,6 +303,7 @@ public abstract class PlayerList {
+@@ -232,6 +307,7 @@ public abstract class PlayerList {
          player.suppressTrackerForLogin = true;
          this.sendLevelInfo(player, level);
          level.addNewPlayer(player);
@@ -25688,7 +25705,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          this.server.getCustomBossEvents().onPlayerConnect(player); // see commented out section below serverLevel.addPlayerJoin(player);
          // Paper end - Fire PlayerJoinEvent when Player is actually ready
          player.initInventoryMenu();
-@@ -245,7 +317,7 @@ public abstract class PlayerList {
+@@ -245,7 +321,7 @@ public abstract class PlayerList {
          this.cserver.getPluginManager().callEvent(playerJoinEvent);
  
          if (!player.connection.isAcceptingMessages()) {
@@ -25697,7 +25714,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          }
  
          final net.kyori.adventure.text.Component jm = playerJoinEvent.joinMessage();
-@@ -260,8 +332,7 @@ public abstract class PlayerList {
+@@ -260,8 +336,7 @@ public abstract class PlayerList {
          ClientboundPlayerInfoUpdatePacket packet = ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(List.of(player)); // Paper - Add Listing API for Player
  
          final List<ServerPlayer> onlinePlayers = Lists.newArrayListWithExpectedSize(this.players.size() - 1); // Paper - Use single player info update packet on join
@@ -25707,7 +25724,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
  
              if (entityplayer1.getBukkitEntity().canSee(bukkitPlayer)) {
                  // Paper start - Add Listing API for Player
-@@ -312,7 +383,7 @@ public abstract class PlayerList {
+@@ -312,7 +387,7 @@ public abstract class PlayerList {
          // Paper start - Configurable player collision; Add to collideRule team if needed
          final net.minecraft.world.scores.Scoreboard scoreboard = this.getServer().getLevel(Level.OVERWORLD).getScoreboard();
          final PlayerTeam collideRuleTeam = scoreboard.getPlayerTeam(this.collideRuleTeamName);
@@ -25716,7 +25733,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              scoreboard.addPlayerToTeam(player.getScoreboardName(), collideRuleTeam);
          }
          // Paper end - Configurable player collision
-@@ -417,7 +488,7 @@ public abstract class PlayerList {
+@@ -417,7 +492,7 @@ public abstract class PlayerList {
  
      public void save(final ServerPlayer player) {
          if (!player.getBukkitEntity().isPersistent()) return; // CraftBukkit
@@ -25725,7 +25742,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          this.playerIo.save(player);
          ServerStatsCounter stats = player.getStats(); // CraftBukkit
          if (stats != null) {
-@@ -451,7 +522,7 @@ public abstract class PlayerList {
+@@ -451,7 +526,7 @@ public abstract class PlayerList {
          // CraftBukkit end
  
          // Paper start - Configurable player collision; Remove from collideRule team if needed
@@ -25734,7 +25751,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              final net.minecraft.world.scores.Scoreboard scoreBoard = this.server.getLevel(Level.OVERWORLD).getScoreboard();
              final PlayerTeam team = scoreBoard.getPlayersTeam(this.collideRuleTeamName);
              if (player.getTeam() == team && team != null) {
-@@ -489,16 +560,11 @@ public abstract class PlayerList {
+@@ -489,16 +564,11 @@ public abstract class PlayerList {
  
          player.unRide();
  
@@ -25753,7 +25770,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          player.getAdvancements().clearTriggers();
          this.players.remove(player);
          this.playersByName.remove(player.getScoreboardName().toLowerCase(java.util.Locale.ROOT)); // Spigot
-@@ -517,8 +583,7 @@ public abstract class PlayerList {
+@@ -517,8 +587,7 @@ public abstract class PlayerList {
          // CraftBukkit start
          // this.broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
          ClientboundPlayerInfoRemovePacket packet = new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID()));
@@ -25763,7 +25780,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
  
              if (otherPlayer.getBukkitEntity().canSee(player.getBukkitEntity())) {
                  otherPlayer.connection.send(packet);
-@@ -541,7 +606,7 @@ public abstract class PlayerList {
+@@ -541,7 +610,7 @@ public abstract class PlayerList {
          }
      }
      // Paper end - PlayerLoginEvent
@@ -25772,7 +25789,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          LoginResult whitelistEventResult; // Paper
          // Paper start - Fix MC-158900
          UserBanListEntry ban1;
-@@ -550,7 +615,7 @@ public abstract class PlayerList {
+@@ -550,7 +619,7 @@ public abstract class PlayerList {
              // Paper end - Fix MC-158900
              MutableComponent reason = Component.translatable("multiplayer.disconnect.banned.reason", ban.getReasonMessage());
              if (ban.getExpires() != null) {
@@ -25781,7 +25798,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              }
  
              return new LoginResult(reason, org.bukkit.event.player.PlayerLoginEvent.Result.KICK_BANNED); // Paper - PlayerLoginEvent
-@@ -563,12 +628,12 @@ public abstract class PlayerList {
+@@ -563,12 +632,12 @@ public abstract class PlayerList {
                  IpBanListEntry ban = this.ipBans.get(address);
                  MutableComponent reason = Component.translatable("multiplayer.disconnect.banned_ip.reason", ban.getReasonMessage());
                  if (ban.getExpires() != null) {
@@ -25796,7 +25813,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              }
          }
      }
-@@ -588,15 +653,18 @@ public abstract class PlayerList {
+@@ -588,15 +657,18 @@ public abstract class PlayerList {
              dupes.add(serverPlayer);
          }
  
@@ -25818,7 +25835,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          ServerPlayer.RespawnResult result = serverPlayer.findRespawnPositionAndUseSpawnBlock0(!keepAllPlayerData, TeleportTransition.DO_NOTHING, respawnReason);
          if (result == null) { // disconnected player during the respawn event
              return serverPlayer;
-@@ -744,10 +812,12 @@ public abstract class PlayerList {
+@@ -744,10 +816,12 @@ public abstract class PlayerList {
      public void tick() {
          if (++this.sendAllPlayerInfoIn > 600) {
              // CraftBukkit start
@@ -25834,7 +25851,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              }
              // CraftBukkit end
              this.sendAllPlayerInfoIn = 0;
-@@ -765,8 +835,8 @@ public abstract class PlayerList {
+@@ -765,8 +839,8 @@ public abstract class PlayerList {
      }
  
      public void broadcastAll(Packet packet, Level world) {
@@ -25845,7 +25862,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          }
  
      }
-@@ -803,8 +873,7 @@ public abstract class PlayerList {
+@@ -803,8 +877,7 @@ public abstract class PlayerList {
          if (team == null) {
              this.broadcastSystemMessage(message, false);
          } else {
@@ -25855,7 +25872,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
                  if (targetPlayer.getTeam() != team) {
                      targetPlayer.sendSystemMessage(message);
                  }
-@@ -813,10 +882,13 @@ public abstract class PlayerList {
+@@ -813,10 +886,13 @@ public abstract class PlayerList {
      }
  
      public String[] getPlayerNamesArray() {
@@ -25872,7 +25889,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          }
  
          return names;
-@@ -843,7 +915,11 @@ public abstract class PlayerList {
+@@ -843,7 +919,11 @@ public abstract class PlayerList {
              );
          ServerPlayer player = this.getPlayer(nameAndId.id());
          if (player != null) {
@@ -25885,7 +25902,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          }
      }
  
-@@ -851,7 +927,11 @@ public abstract class PlayerList {
+@@ -851,7 +931,11 @@ public abstract class PlayerList {
          if (this.ops.remove(nameAndId)) {
              ServerPlayer player = this.getPlayer(nameAndId.id());
              if (player != null) {
@@ -25898,7 +25915,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              }
          }
      }
-@@ -881,8 +961,11 @@ public abstract class PlayerList {
+@@ -881,8 +965,11 @@ public abstract class PlayerList {
      }
  
      // Paper start - whitelist verify event / login event
@@ -25912,7 +25929,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          final io.papermc.paper.event.player.PlayerServerFullCheckEvent fullCheckEvent = new io.papermc.paper.event.player.PlayerServerFullCheckEvent(
              new com.destroystokyo.paper.profile.CraftPlayerProfile(nameAndId),
              io.papermc.paper.adventure.PaperAdventure.asAdventure(currentResult.message),
-@@ -937,8 +1020,7 @@ public abstract class PlayerList {
+@@ -937,8 +1024,7 @@ public abstract class PlayerList {
          final ResourceKey<Level> dimension,
          final Packet<?> packet
      ) {
@@ -25922,7 +25939,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              // CraftBukkit start - Test if player receiving packet can see the source of the packet
              if (except != null && !player.getBukkitEntity().canSee(except.getBukkitEntity())) {
                 continue;
-@@ -961,20 +1043,36 @@ public abstract class PlayerList {
+@@ -961,20 +1047,36 @@ public abstract class PlayerList {
      }
      public void saveAll(final int interval) {
          // Paper end - Incremental chunk and player saving
@@ -25964,7 +25981,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
      }
  
      public UserWhiteList getWhiteList() {
-@@ -1019,7 +1117,7 @@ public abstract class PlayerList {
+@@ -1019,7 +1121,7 @@ public abstract class PlayerList {
          }
  
          player.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.LEVEL_CHUNKS_LOAD_START, 0.0F));
@@ -25973,7 +25990,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
      }
  
      public void sendAllPlayerInfo(final ServerPlayer player) {
-@@ -1083,6 +1181,20 @@ public abstract class PlayerList {
+@@ -1083,6 +1185,20 @@ public abstract class PlayerList {
      }
  
      public void removeAll(boolean isRestarting) {
@@ -25994,7 +26011,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          // Paper end
          // CraftBukkit start - disconnect safely
          for (ServerPlayer player : this.players) {
-@@ -1092,7 +1204,7 @@ public abstract class PlayerList {
+@@ -1092,7 +1208,7 @@ public abstract class PlayerList {
          // CraftBukkit end
  
          // Paper start - Configurable player collision; Remove collideRule team if it exists
@@ -26003,7 +26020,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
              final net.minecraft.world.scores.Scoreboard scoreboard = this.getServer().getLevel(Level.OVERWORLD).getScoreboard();
              final PlayerTeam team = scoreboard.getPlayersTeam(this.collideRuleTeamName);
              if (team != null) scoreboard.removePlayerTeam(team);
-@@ -1274,8 +1386,17 @@ public abstract class PlayerList {
+@@ -1274,8 +1390,17 @@ public abstract class PlayerList {
          //     playerAdvancements.reload(this.server.getAdvancements());
          // }
          for (ServerPlayer player : this.players) {
@@ -26023,7 +26040,7 @@ index b22b0110cc62b160b70ceeac9490b4b424639d66..c4e2c12e3e7a2e1f7e7ee1aeccc83934
          }
          // CraftBukkit end
  
-@@ -1296,8 +1417,17 @@ public abstract class PlayerList {
+@@ -1296,8 +1421,17 @@ public abstract class PlayerList {
          );
  
          for (ServerPlayer player : this.players) {
@@ -27088,7 +27105,7 @@ index bb5f66c62c9541bb76a9faad9e9ee91c1466fc6a..66d7bb9418832638c220a08d06c01ef0
              return blockToFallLocation(blockState);
          } else {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b622706ec40 100644
+index be82ab46f805a70c1d920ec7f16ae5ef64579ca0..753a4b7720e82b5585cd676f47d7377345cd591a 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -172,7 +172,7 @@ public abstract class Entity
@@ -27419,7 +27436,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
      }
  
      public int getDimensionChangingDelay() {
-@@ -4139,12 +4257,20 @@ public abstract class Entity
+@@ -4135,12 +4253,20 @@ public abstract class Entity
      }
  
      public void restoreFrom(final Entity oldEntity) {
@@ -27440,7 +27457,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
          // Paper end - Forward CraftEntity in teleport command
          try (ProblemReporter.ScopedCollector reporter = new ProblemReporter.ScopedCollector(this.problemPath(), LOGGER)) {
              TagValueOutput entityData = TagValueOutput.createWithContext(reporter, oldEntity.registryAccess());
-@@ -4156,7 +4282,1405 @@ public abstract class Entity
+@@ -4152,7 +4278,1405 @@ public abstract class Entity
          this.portalProcess = oldEntity.portalProcess;
      }
  
@@ -28846,7 +28863,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
          // Paper start - Fix item duplication and teleport issues
          if ((!this.isAlive() || !this.valid) && (transition.newLevel() != this.level)) {
              LOGGER.warn("Illegal Entity Teleport {} to {}:{}", this, transition.newLevel(), transition.position(), new Throwable());
-@@ -4368,6 +5892,12 @@ public abstract class Entity
+@@ -4364,6 +5888,12 @@ public abstract class Entity
          }
      }
  
@@ -28859,7 +28876,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
      protected void removeAfterChangingDimensions() {
          this.setRemoved(Entity.RemovalReason.CHANGED_DIMENSION, null); // CraftBukkit - add Bukkit remove cause
          if (this instanceof Leashable leashable && leashable.isLeashed()) { // Paper - only call if it is leashed
-@@ -4712,6 +6242,12 @@ public abstract class Entity
+@@ -4708,6 +6238,12 @@ public abstract class Entity
      }
  
      public void startSeenByPlayer(final ServerPlayer player) {
@@ -28872,7 +28889,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
      }
  
      public void stopSeenByPlayer(final ServerPlayer player) {
-@@ -4721,6 +6257,12 @@ public abstract class Entity
+@@ -4717,6 +6253,12 @@ public abstract class Entity
              new io.papermc.paper.event.player.PlayerUntrackEntityEvent(player.getBukkitEntity(), this.getBukkitEntity()).callEvent();
          }
          // Paper end - entity tracking events
@@ -28885,7 +28902,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
      }
  
      public float rotate(final Rotation rotation) {
-@@ -5128,7 +6670,10 @@ public abstract class Entity
+@@ -5124,7 +6666,10 @@ public abstract class Entity
              return;
          }
          // Paper end - Block invalid positions and bounding box
@@ -28897,7 +28914,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
              this.position = new Vec3(x, y, z);
              int fx = Mth.floor(x);
              int fy = Mth.floor(y);
-@@ -5159,7 +6704,7 @@ public abstract class Entity
+@@ -5155,7 +6700,7 @@ public abstract class Entity
          }
          // Paper start - Block invalid positions and bounding box; don't allow desync of pos and AABB
          // hanging has its own special logic
@@ -28906,7 +28923,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
              this.setBoundingBox(this.makeBoundingBox());
          }
          // Paper end - Block invalid positions and bounding box
-@@ -5234,6 +6779,7 @@ public abstract class Entity
+@@ -5230,6 +6775,7 @@ public abstract class Entity
              Util.logAndPauseIfInIde("Invalid entity rotation: " + yRot + ", discarding.");
          } else {
              this.yRot = yRot;
@@ -28914,7 +28931,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
          }
      }
  
-@@ -5246,6 +6792,7 @@ public abstract class Entity
+@@ -5242,6 +6788,7 @@ public abstract class Entity
              Util.logAndPauseIfInIde("Invalid entity rotation: " + xRot + ", discarding.");
          } else {
              this.xRot = Math.clamp(xRot % 360.0F, -90.0F, 90.0F);
@@ -28922,7 +28939,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
          }
      }
  
-@@ -5278,6 +6825,12 @@ public abstract class Entity
+@@ -5274,6 +6821,12 @@ public abstract class Entity
          return this.removalReason != null;
      }
  
@@ -28935,7 +28952,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
      public Entity.@Nullable RemovalReason getRemovalReason() {
          return this.removalReason;
      }
-@@ -5292,6 +6845,7 @@ public abstract class Entity
+@@ -5288,6 +6841,7 @@ public abstract class Entity
          // Paper end - rewrite chunk system
          org.bukkit.craftbukkit.event.CraftEventFactory.callEntityRemoveEvent(this, cause); // CraftBukkit
          final boolean alreadyRemoved = this.removalReason != null; // Paper - Folia schedulers
@@ -28943,7 +28960,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
          if (this.removalReason == null) {
              this.removalReason = reason;
              this.removeEventCause = cause; // Paper
-@@ -5320,6 +6874,10 @@ public abstract class Entity
+@@ -5316,6 +6870,10 @@ public abstract class Entity
          // Paper end
      }
  
@@ -28954,7 +28971,7 @@ index eabb8ca21a77829c83856c1022e62686858fc960..b5f15fed81cf40782343baa19cf42b62
      // Paper start - Folia schedulers
      /**
       * Invoked only when the entity is truly removed from the server, never to be added to any world.
-@@ -5331,7 +6889,7 @@ public abstract class Entity
+@@ -5327,7 +6885,7 @@ public abstract class Entity
      // Paper end - Folia schedulers
      // Paper start - optimise Folia entity scheduler
      public final void registerScheduler() {
@@ -34820,7 +34837,7 @@ index f359e53024019f35aaa5cd8477da708bda2fc57a..65bb86910f333ee41aec2347a1a9ce87
          return tag;
      }
 diff --git a/net/minecraft/world/scores/Objective.java b/net/minecraft/world/scores/Objective.java
-index 64ea4741b7ed58fe7914b9431353abd1f658a935..886883cf81c813e3faac8aae951615e56011ae51 100644
+index ab620a3a674c30ee74e2319a9223cd6dbea6ffa4..b7f1d798dba1683a1a0eb6122bd99d01fcbf0aa5 100644
 --- a/net/minecraft/world/scores/Objective.java
 +++ b/net/minecraft/world/scores/Objective.java
 @@ -17,11 +17,16 @@ public class Objective {
@@ -34828,7 +34845,7 @@ index 64ea4741b7ed58fe7914b9431353abd1f658a935..886883cf81c813e3faac8aae951615e5
      private final String name;
      private final ObjectiveCriteria criteria;
 -    private Component displayName;
--    private Component formattedDisplayName;
+-    private @Nullable Component lazyFormattedDisplayName; // Paper - Lazy initialization because only used internally by commands
 -    private ObjectiveCriteria.RenderType renderType;
 -    private boolean displayAutoUpdate;
 -    private @Nullable NumberFormat numberFormat;
@@ -34845,18 +34862,17 @@ index 64ea4741b7ed58fe7914b9431353abd1f658a935..886883cf81c813e3faac8aae951615e5
  
      public Objective(
          final Scoreboard scoreboard,
-@@ -35,15 +40,15 @@ public class Objective {
+@@ -35,14 +40,15 @@ public class Objective {
          this.scoreboard = scoreboard;
          this.name = name;
          this.criteria = criteria;
 -        this.displayName = displayName;
--        this.formattedDisplayName = this.createFormattedDisplayName();
 -        this.renderType = renderType;
 -        this.displayAutoUpdate = displayAutoUpdate;
 -        this.numberFormat = numberFormat;
 +        // Canvas start - region threading
 +        this.objectiveData = new io.canvasmc.canvas.util.LockedReference<>(new io.canvasmc.canvas.threadedregions.world.scores.ObjectiveData(
-+            createFormattedDisplayName(displayName), renderType, displayAutoUpdate, numberFormat, displayName
++            null, renderType, displayAutoUpdate, numberFormat, displayName, Objective.this
 +        ));
 +        // Canvas end - region threading
      }
@@ -34867,7 +34883,7 @@ index 64ea4741b7ed58fe7914b9431353abd1f658a935..886883cf81c813e3faac8aae951615e5
      }
  
      public Scoreboard getScoreboard() {
-@@ -59,53 +64,76 @@ public class Objective {
+@@ -58,53 +64,76 @@ public class Objective {
      }
  
      public Component getDisplayName() {
@@ -34888,14 +34904,15 @@ index 64ea4741b7ed58fe7914b9431353abd1f658a935..886883cf81c813e3faac8aae951615e5
      public NumberFormat numberFormatOrDefault(final NumberFormat _default) {
 -        return Objects.requireNonNullElse(this.numberFormat, _default);
 +        return Objects.requireNonNullElse(numberFormat(), _default); // Canvas - region threading
-     }
- 
-     private Component createFormattedDisplayName() {
-+    // Canvas start - region threading
-+        return createFormattedDisplayName(getDisplayName());
 +    }
 +
-+    private Component createFormattedDisplayName(final Component displayName) {
++    // Canvas start - region threading
++    public Component createFormattedDisplayName() {
++        return createFormattedDisplayName(getDisplayName());
+     }
+ 
+-    private Component createFormattedDisplayName() {
++    public Component createFormattedDisplayName(final Component displayName) {
 +    // Canvas end - region threading
          return ComponentUtils.wrapInSquareBrackets(
 -            this.displayName.copy().withStyle(s -> s.withHoverEvent(new HoverEvent.ShowText(Component.literal(this.name))))
@@ -34904,20 +34921,20 @@ index 64ea4741b7ed58fe7914b9431353abd1f658a935..886883cf81c813e3faac8aae951615e5
      }
  
      public Component getFormattedDisplayName() {
--        return this.formattedDisplayName;
+-        return this.lazyFormattedDisplayName != null ? this.lazyFormattedDisplayName : (this.lazyFormattedDisplayName = this.createFormattedDisplayName()); // Paper - Lazy initialization because only used internally by commands
 +        return this.objectiveData.getValue().getFormattedDisplayName(); // Canvas - region threading
      }
  
      public void setDisplayName(final Component name) {
 -        this.displayName = name;
--        this.formattedDisplayName = this.createFormattedDisplayName();
+-        this.lazyFormattedDisplayName = null; // Paper - Lazy initialization because only used internally by commands
 +        // Canvas start - region threading
 +        ensureMainThread("Cannot set display name of objective async");
 +        this.objectiveData.swapValue((data) -> {
 +            final io.canvasmc.canvas.threadedregions.world.scores.ObjectiveData newData =
 +                io.canvasmc.canvas.threadedregions.world.scores.ObjectiveData.copyOf(data);
 +            newData.setDisplayName(name);
-+            newData.setFormattedDisplayName(createFormattedDisplayName(name));
++            newData.setFormattedDisplayName(null);
 +            return newData;
 +        });
 +        // Canvas end - region threading
