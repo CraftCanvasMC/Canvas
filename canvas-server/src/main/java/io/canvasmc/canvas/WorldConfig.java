@@ -586,6 +586,20 @@ public class WorldConfig extends Part {
     public boolean cactusCheckSurvivalBeforeGrowth = false;
     public boolean enableSuffocationOptimization = false;
 
+    public Redstone redstone = new Redstone();
+    public static class Redstone extends Part {
+
+        {
+            option("disableSignals")
+                .docs(
+                    "Disables all redstone signals in this world. Nothing can be powered, so pistons, hopper locks,",
+                    "dispensers, lamps and wires stay off. Levers and buttons can still be used, they just power nothing"
+                );
+        }
+
+        public boolean disableSignals = false;
+    }
+
     public Sleeping sleeping = new Sleeping();
 
     @SuppressWarnings("FieldMayBeFinal")
