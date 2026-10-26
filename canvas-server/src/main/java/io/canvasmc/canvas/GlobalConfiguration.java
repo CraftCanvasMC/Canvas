@@ -522,6 +522,12 @@ public class GlobalConfiguration extends Part {
 
             option("flushLocationWhileKnockback")
                 .docs("Derived from Leaf, this synchronizes the player immediately when knocked back");
+            option("cacheEncodedComponents")
+                .docs(
+                    "Caches the bytes text components encode to, so names, lore and scoreboard lines sent again are",
+                    "copied instead of encoded through the component codec again. Holds at most 64 MB and drops entries",
+                    "not sent for five minutes. Can be changed with \"/canvas reload\", turning it off clears the cache"
+                );
         }
 
         public boolean filterVelocityPacket = false;
@@ -532,6 +538,7 @@ public class GlobalConfiguration extends Part {
         // Originally from Leaf: https://github.com/Winds-Studio/Leaf/blob/58a4a9cb7994474e63ba49205cd21e89f8dacc9a/leaf-server/minecraft-patches/features/0216-Flush-location-while-knockback.patch
         // License described in Leaf-Flush-location-while-knockback.patch
         public boolean flushLocationWhileKnockback = false;
+        public boolean cacheEncodedComponents = false;
     }
 
     {
