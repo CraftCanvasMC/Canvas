@@ -1,5 +1,51 @@
 --- a/net/minecraft/world/entity/item/ItemEntity.java
 +++ b/net/minecraft/world/entity/item/ItemEntity.java
+@@ -56,6 +_,12 @@
+     public boolean canMobPickup = true; // Paper - Item#canEntityPickup
+     private int despawnRate = -1; // Paper - Alternative item-despawn-rate
+     public net.kyori.adventure.util.TriState frictionState = net.kyori.adventure.util.TriState.NOT_SET; // Paper - Friction API
++    // Canvas start - skip physics for resting items
++    private double restX = Double.NaN;
++    private double restY = Double.NaN;
++    private double restZ = Double.NaN;
++    private int restBlocksHash;
++    // Canvas end - skip physics for resting items
+ 
+     public ItemEntity(final EntityType<? extends ItemEntity> type, final Level level) {
+         super(type, level);
+@@ -155,27 +_,29 @@
+             this.yo = this.getY();
+             this.zo = this.getZ();
+             Vec3 oldMovement = this.getDeltaMovement();
++            final boolean resting = this.isResting(); // Canvas - skip physics for resting items
+             if (this.isInWater() && this.getFluidHeight(FluidTags.WATER) > 0.1F) {
+                 this.setUnderwaterMovement();
+             } else if (this.isInLava() && this.getFluidHeight(FluidTags.LAVA) > 0.1F) {
+                 this.setUnderLavaMovement();
+-            } else {
++            } else if (!resting) { // Canvas - skip physics for resting items
+                 this.applyGravity();
+             }
+ 
+             if (this.level().isClientSide()) {
+                 this.noPhysics = false;
+-            } else {
++            } else if (!resting) { // Canvas - skip physics for resting items
+                 this.noPhysics = !this.level().noCollision(this, this.getBoundingBox().deflate(1.0E-7));
+                 if (this.noPhysics) {
+                     this.moveTowardsClosestSpace(this.getX(), (this.getBoundingBox().minY + this.getBoundingBox().maxY) / 2.0, this.getZ());
+                 }
+             }
+ 
+-            if (this.onGround() && !(this.getDeltaMovement().horizontalDistanceSqr() > 1.0E-5F) && (this.tickCount + this.getId()) % 4 != 0) { // Paper - Diff on change; ActivationRange immunity
++            if (this.onGround() && !(this.getDeltaMovement().horizontalDistanceSqr() > 1.0E-5F) && (resting || (this.tickCount + this.getId()) % 4 != 0)) { // Paper - Diff on change; ActivationRange immunity // Canvas - skip physics for resting items
+                 this.applyEffectsFromBlocksForLastMovements();
+             } else {
+                 this.move(MoverType.SELF, this.getDeltaMovement());
++                this.updateRestingState(); // Canvas - skip physics for resting items
+                 this.applyEffectsFromBlocks();
+                 float airDrag = this.getAirDrag();
+                 float groundFriction = airDrag;
 @@ -199,7 +_,7 @@
              boolean moved = Mth.floor(this.xo) != Mth.floor(this.getX())
                  || Mth.floor(this.yo) != Mth.floor(this.getY())
@@ -9,6 +55,67 @@
              if (this.tickCount % rate == 0 && !this.level().isClientSide() && this.isMergable()) {
                  this.mergeWithNeighbours();
              }
+@@ -228,6 +_,60 @@
+         }
+     }
+ 
++    // Canvas start - skip physics for resting items
++    private void updateRestingState() {
++        if (!this.level().isClientSide() && this.level().canvasConfig().entities.itemEntities.skipPhysicsForRestingItems
++            && this.onGround() && this.mainSupportingBlockPos.isPresent() && !this.isInWater() && !this.isInLava()) {
++            this.restX = this.getX();
++            this.restY = this.getY();
++            this.restZ = this.getZ();
++            this.restBlocksHash = this.touchingBlocksHash();
++        } else {
++            this.restX = Double.NaN;
++        }
++    }
++
++    // still where it settled, not pushed, and every block it touches unchanged, so moving it would do nothing
++    private boolean isResting() {
++        if (Double.isNaN(this.restX)) {
++            return false;
++        }
++
++        final Vec3 movement = this.getDeltaMovement();
++        if (!this.level().canvasConfig().entities.itemEntities.skipPhysicsForRestingItems
++            || !this.onGround() || this.noPhysics || movement.y > 0.0D || movement.horizontalDistanceSqr() > 1.0E-5F
++            || this.getX() != this.restX || this.getY() != this.restY || this.getZ() != this.restZ
++            || this.isInWater() || this.isInLava() || this.touchingBlocksHash() != this.restBlocksHash) {
++            this.restX = Double.NaN;
++            return false;
++        }
++
++        return true;
++    }
++
++    private int touchingBlocksHash() {
++        final net.minecraft.world.phys.AABB box = this.getBoundingBox();
++        final int minX = Mth.floor(box.minX);
++        final int maxX = Mth.floor(box.maxX);
++        final int minY = Mth.floor(box.minY - 1.0E-6D);
++        final int maxY = Mth.floor(box.maxY);
++        final int minZ = Mth.floor(box.minZ);
++        final int maxZ = Mth.floor(box.maxZ);
++        final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
++        final Level level = this.level();
++        int hash = 1;
++        for (int x = minX; x <= maxX; x++) {
++            for (int y = minY; y <= maxY; y++) {
++                for (int z = minZ; z <= maxZ; z++) {
++                    hash = 31 * hash + System.identityHashCode(level.getBlockState(pos.set(x, y, z)));
++                }
++            }
++        }
++
++        return hash;
++    }
++    // Canvas end - skip physics for resting items
++
+     @Override
+     public BlockPos getBlockPosBelowThatAffectsMyMovement() {
+         return this.getOnPos(0.999999F);
 @@ -261,7 +_,7 @@
                      }
                      // Paper end - Fix items merging through walls
