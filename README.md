@@ -29,9 +29,6 @@ various performance enhancements to the dedicated server
   - While Canvas is a fork of Folia, Canvas upstreams from Paper, meaning we can update the region threading patch on
     our own without having to rely on Folia for an update first. This allows us to even update to newer Minecraft
     versions before Folia even starts updating
-- ### Spark region profiling
-  - Canvas includes a modified version of the Spark profiler allowing you to profile specific regions rather than the
-    whole server with Spark, replacing the Folia profiler provided in LeafPile.
 - ### Knowledgeable team
   - Our development team is comprised of skilled developers, dedicating hundreds of hours of our personal time and
     effort working on Canvas and other projects under our organization
