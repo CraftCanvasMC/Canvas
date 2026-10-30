@@ -522,9 +522,17 @@ public class GlobalConfiguration extends Part {
 
             option("flushLocationWhileKnockback")
                 .docs("Derived from Leaf, this synchronizes the player immediately when knocked back");
+
+            option("stripLoreFromEntityItems")
+                .docs(
+                    "Doesn't send the lore of items shown by entities, like dropped items, item frames and item displays.",
+                    "No entity renders it, and encoding lore text is most of the cost of sending such an item. The item",
+                    "itself keeps its lore"
+                );
         }
 
         public boolean filterVelocityPacket = false;
+        public boolean stripLoreFromEntityItems = false;
         public boolean alternativePlayerListTick = false;
         public int playerInfoSendInterval = 600;
         public boolean purpurAlternativeKeepalive = false;
