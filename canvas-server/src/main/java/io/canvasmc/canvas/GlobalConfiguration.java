@@ -399,6 +399,27 @@ public class GlobalConfiguration extends Part {
         }
 
         public boolean preventExcessiveVelocityMoveOutOfRegion = false;
+
+        {
+            option("tickHistory")
+                .docs(
+                    "Which long tick time windows regions keep for TPS and MSPT readouts. The 5m and 15m windows are most",
+                    "of that memory, about 1.1MB per region. A window that is not kept is answered from the longest kept",
+                    "window instead. Requires a restart"
+                );
+        }
+
+        public TickHistory tickHistory = new TickHistory();
+        public static class TickHistory extends Part {
+
+            {
+                option("keepFiveMinutes").docs("Whether regions keep the 5 minute tick time window");
+                option("keepFifteenMinutes").docs("Whether regions keep the 15 minute tick time window");
+            }
+
+            public boolean keepFiveMinutes = true;
+            public boolean keepFifteenMinutes = true;
+        }
     }
 
     public ChunkSystem chunkSystem = new ChunkSystem();
