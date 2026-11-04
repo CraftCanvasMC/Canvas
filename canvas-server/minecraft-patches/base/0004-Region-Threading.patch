@@ -4523,7 +4523,7 @@ index 0000000000000000000000000000000000000000..6bbd878f80cf9f94c67ba42993b5619b
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java b/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..27f79588b1995670fd5a857f2eb43fbfcd71f711
+index 0000000000000000000000000000000000000000..6e2c035dcaac0206aae1e1af1d94642cc7565db8
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/world/WorldShutdownThread.java
 @@ -0,0 +1,221 @@
@@ -4562,7 +4562,7 @@ index 0000000000000000000000000000000000000000..27f79588b1995670fd5a857f2eb43fbf
 +    ) {
 +        final String worldName = Util.getLevelName(level);
 +
-+        super(worldName + " shutdown thread");
++        super(worldName + " shutdown thread", false);
 +        this.setUncaughtExceptionHandler((_, thrown) -> {
 +
 +            // we have to schedule to the global tick for this, since this
@@ -6319,10 +6319,10 @@ index 0000000000000000000000000000000000000000..6a6d46b55bd25103638fbb84de781ff3
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..59882ab61a21b2458f4c4adc0d93a8a24a112df3
+index 0000000000000000000000000000000000000000..e88352c4685e8d8fe4ea9ff7e3cebab1e726bcc6
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
-@@ -0,0 +1,373 @@
+@@ -0,0 +1,428 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -6337,6 +6337,9 @@ index 0000000000000000000000000000000000000000..59882ab61a21b2458f4c4adc0d93a8a2
 +import java.util.UUID;
 +import java.util.concurrent.CompletableFuture;
 +import java.util.concurrent.TimeUnit;
++import java.util.function.Consumer;
++import io.canvasmc.canvas.ServerShutdownHandler;
++import io.canvasmc.canvas.region.WorldRegionizer;
 +import io.canvasmc.canvas.util.Util;
 +import net.minecraft.network.Connection;
 +import net.minecraft.server.MinecraftServer;
@@ -6349,8 +6352,12 @@ index 0000000000000000000000000000000000000000..59882ab61a21b2458f4c4adc0d93a8a2
 +import net.minecraft.world.item.ItemStack;
 +import net.minecraft.world.level.ChunkPos;
 +import org.apache.commons.lang3.mutable.MutableInt;
++import org.bukkit.Bukkit;
++import org.bukkit.World;
++import org.bukkit.craftbukkit.CraftWorld;
 +import org.bukkit.event.entity.EntityRemoveEvent;
 +import org.bukkit.event.inventory.InventoryCloseEvent;
++import org.bukkit.plugin.Plugin;
 +import org.jetbrains.annotations.Contract;
 +import org.jspecify.annotations.Nullable;
 +import org.slf4j.Logger;
@@ -6359,14 +6366,17 @@ index 0000000000000000000000000000000000000000..59882ab61a21b2458f4c4adc0d93a8a2
 +
 +    protected Logger LOGGER = LogUtils.getClassLogger(); // Canvas - non-static
 +
++    public final ServerShutdownHandler shutdownHandler;
++
 +    public ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> shuttingDown;
 +
-+    public RegionShutdownThread(final String name) {
++    public RegionShutdownThread(final String name, final boolean createHandler) {
 +        super(name);
-+        this.setUncaughtExceptionHandler((thread, thr) -> {
-+            LOGGER.error("Error shutting down server", thr);
++        this.setUncaughtExceptionHandler((_, thrown) -> {
++            LOGGER.error("Error shutting down server", thrown);
 +        });
 +        this.setPriority(10); // Canvas - region threading - bump priority
++        this.shutdownHandler = createHandler ? new RegionShutdownHandler(this) : null;
 +    }
 +
 +    @Contract(pure = true)
@@ -6694,6 +6704,51 @@ index 0000000000000000000000000000000000000000..59882ab61a21b2458f4c4adc0d93a8a2
 +
 +        MinecraftServer.getServer().stopPart2(); // stop part 2: close other resources (io thread, etc)
 +        // done, part 2 should call exit()
++    }
++
++    public static class RegionShutdownHandler implements ServerShutdownHandler {
++        private final RegionShutdownThread handle;
++
++        private RegionShutdownHandler(final RegionShutdownThread handle) {
++            this.handle = handle;
++        }
++
++        @Override
++        public void runShutdownAt(
++            final Plugin plugin,
++            final World world,
++            final int chunkX,
++            final int chunkZ,
++            final Consumer<WorldRegionizer.ChunkRegion> scheduledTask
++        ) {
++            final ServerLevel serverLevel = ((CraftWorld) world).getHandle();
++            final ThreadedRegionizer<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++                regionizer = serverLevel.regioniser;
++            final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
++                regionAt = regionizer.getRegionAtUnsynchronised(chunkX, chunkZ);
++
++            // while we could just do a before/after set, i dont think this is wise
++            if (this.handle.shuttingDown != null) {
++                throw new IllegalStateException("Cannot run shutdown task when the shutdown thread already has a context set");
++            }
++
++            // if the region doesnt exist we shouldnt run
++            if (regionAt == null) {
++                throw new IllegalArgumentException("No region exists at " + new ChunkPos(chunkX, chunkZ));
++            }
++
++            try {
++                this.handle.shuttingDown = regionAt;
++                scheduledTask.accept(regionAt);
++            } finally {
++                this.handle.shuttingDown = null;
++            }
++        }
++
++        @Override
++        public List<World> getWorlds() {
++            return Bukkit.getWorlds();
++        }
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionizedData.java b/io/papermc/paper/threadedregions/RegionizedData.java
@@ -14346,7 +14401,7 @@ index 144c18c08bf8f03d907b97f968aa171a9fbf997f..be9fdca704391f8d77b87b4d75e67bb6
          }
      }
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index 17a3acb0fb166736b1a7610b333b01fa5c072af1..2c32626594ad2af8e953578ddfa3db22c370d45a 100644
+index 17a3acb0fb166736b1a7610b333b01fa5c072af1..5ac4bf7653c36d8819f18cd6c7dc894f1037cc5d 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -216,7 +216,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -14587,7 +14642,7 @@ index 17a3acb0fb166736b1a7610b333b01fa5c072af1..2c32626594ad2af8e953578ddfa3db22
 +            // already started shutdown
 +            return;
 +        }
-+        new io.papermc.paper.threadedregions.RegionShutdownThread("Region shutdown thread").start();
++        new io.papermc.paper.threadedregions.RegionShutdownThread("Region shutdown thread", true).start();
 +    }
 +
 +    public void stopServer() {
