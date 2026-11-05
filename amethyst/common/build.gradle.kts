@@ -11,6 +11,13 @@ dependencies {
     compileOnly("com.google.code.gson:gson:2.13.2")
     compileOnly("org.yaml:snakeyaml:2.3")
     compileOnly("org.apache.logging.log4j:log4j-api:2.26.0")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 sourceSets {
