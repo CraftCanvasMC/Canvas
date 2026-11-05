@@ -586,6 +586,21 @@ public class WorldConfig extends Part {
     public boolean cactusCheckSurvivalBeforeGrowth = false;
     public boolean enableSuffocationOptimization = false;
 
+    public Players players = new Players();
+    public static class Players extends Part {
+
+        {
+            option("maxVisible")
+                .docs(
+                    "The maximum amount of other players each player is shown in this world, keeping the nearest ones.",
+                    "Use -1 to disable. Useful for busy hubs. Players with \"canvas.players.max-visible.bypass\" see",
+                    "everybody, players with \"canvas.players.max-visible.exempt\" are always shown and don't count"
+                ).greaterThanOrEqualTo(-1.0F);
+        }
+
+        public int maxVisible = -1;
+    }
+
     public Sleeping sleeping = new Sleeping();
 
     @SuppressWarnings("FieldMayBeFinal")
