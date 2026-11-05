@@ -44,6 +44,10 @@ for (name in listOf("canvas-api", "canvas-server")) {
     findProject(":$projName")!!.projectDir = file(name)
 }
 
+// ammethyst needs to live in its own folder so we can split it to its own repo later
+include("amethyst-common")
+findProject(":amethyst-common")!!.projectDir = file("amethyst/common")
+
 rootDir.listFiles()
     ?.filter { it.isDirectory && (it.name.endsWith("-debug", ignoreCase = true) || it.name.endsWith("-plugin", ignoreCase = true)) }
     ?.forEach { dir ->
