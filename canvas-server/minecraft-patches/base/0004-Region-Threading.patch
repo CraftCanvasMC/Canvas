@@ -4441,10 +4441,10 @@ index 0000000000000000000000000000000000000000..9ad8dfa3dba691b702575ea3330c5af6
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/ticket/SaveAllTicket.java b/io/canvasmc/canvas/threadedregions/ticket/SaveAllTicket.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..a463e62263c8eebfa447e4abf7019811080609b1
+index 0000000000000000000000000000000000000000..9c9496ea17124b9832ebcaf960cdd2f8385a12b7
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/ticket/SaveAllTicket.java
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,35 @@
 +package io.canvasmc.canvas.threadedregions.ticket;
 +
 +import java.util.function.Consumer;
@@ -4465,16 +4465,31 @@ index 0000000000000000000000000000000000000000..a463e62263c8eebfa447e4abf7019811
 + * @author dueris
 + */
 +public record SaveAllTicket(Runnable callback, Consumer<Throwable> exceptionPropagator, boolean flush) {
++
++    public SaveAllTicket and(final SaveAllTicket other) {
++        return new SaveAllTicket(
++            () -> {
++                this.callback.run();
++                other.callback.run();
++            },
++            (thrown) -> {
++                this.exceptionPropagator.accept(thrown);
++                other.exceptionPropagator.accept(thrown);
++            },
++            this.flush || other.flush
++        );
++    }
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/ticket/TicketHolder.java b/io/canvasmc/canvas/threadedregions/ticket/TicketHolder.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..668c9433f7cbc57e1f0de49b0fa5a0dba9fdc3a7
+index 0000000000000000000000000000000000000000..f7f8d048a37d3666d6131c430581b4f7affe9132
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/ticket/TicketHolder.java
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,115 @@
 +package io.canvasmc.canvas.threadedregions.ticket;
 +
 +import java.util.Objects;
++import java.util.function.BinaryOperator;
 +import java.util.function.Consumer;
 +import org.jspecify.annotations.Nullable;
 +
@@ -4507,11 +4522,11 @@ index 0000000000000000000000000000000000000000..668c9433f7cbc57e1f0de49b0fa5a0db
 +     */
 +    @Nullable
 +    public T pop() {
-+        final T ticket = this.ticket;
 +        synchronized (this) {
++            final T ticket = this.ticket;
 +            this.ticket = null;
++            return ticket;
 +        }
-+        return ticket;
 +    }
 +
 +    /**
@@ -4565,6 +4580,12 @@ index 0000000000000000000000000000000000000000..668c9433f7cbc57e1f0de49b0fa5a0db
 +                throw new IllegalStateException("Ticket already propagated");
 +            }
 +            this.ticket = ticket;
++        }
++    }
++
++    public void propagate(final T ticket, final BinaryOperator<T> combiner) {
++        synchronized (this) {
++            this.ticket = this.ticket == null ? ticket : combiner.apply(this.ticket, ticket);
 +        }
 +    }
 +
@@ -11881,10 +11902,10 @@ index 0000000000000000000000000000000000000000..c32dc8ffc1b60849c3200f0685a50230
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 8424cf9d4617b4732d44cc460d25b04481068989..d4722539465d56cb375ad9b7962f483abc31024d 100644
+index 8424cf9d4617b4732d44cc460d25b04481068989..6b9b7bb2a08eb0803183eac293077d94b51b7952 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -1,10 +1,685 @@
+@@ -1,10 +1,702 @@
  package io.papermc.paper.threadedregions;
  
 -// placeholder class for Folia
@@ -12054,13 +12075,30 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..d4722539465d56cb375ad9b7962f483a
 +    @Override
 +    public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
 +                         final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
-+
++        // Canvas start - move save tickets
++        final SaveAllTicket ticket = from.getData().canvas$saveAllTicket.pop();
++        if (ticket != null) {
++            into.getData().canvas$saveAllTicket.propagate(ticket, SaveAllTicket::and);
++        }
++        // Canvas end - move save tickets
 +    }
 +
 +    @Override
 +    public void preSplit(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
 +                         final java.util.List<ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData>> into) {
-+
++        // Canvas start - split save tickets
++        final SaveAllTicket ticket = from.getData().canvas$saveAllTicket.pop();
++        if (ticket != null) {
++            final AtomicInteger remaining = new AtomicInteger(into.size());
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region : into) {
++                region.getData().canvas$saveAllTicket.propagate(new SaveAllTicket(() -> {
++                    if (remaining.decrementAndGet() == 0) {
++                        ticket.callback().run();
++                    }
++                }, ticket.exceptionPropagator(), ticket.flush()), SaveAllTicket::and);
++            }
++        }
++        // Canvas end - split save tickets
 +    }
 +
 +    public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
@@ -18638,10 +18676,10 @@ index 8bacd793822528f2b96387b2264dbf42fab5d8f7..1081ea65a23c1a4ecf53c84a078a3df7
      }
  }
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index 299991905c24a7018f8ac60d0c16e56fa43cd710..e30bc561597914df25f55907085fb21d3f79f1ac 100644
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..a638e4c60c66e2ad73315132875dcf36cb6b6f0b 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -24,12 +24,109 @@ public class SaveAllCommand {
+@@ -24,12 +24,110 @@ public class SaveAllCommand {
      private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
@@ -18741,7 +18779,8 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..e30bc561597914df25f55907085fb21d
 +                        new io.canvasmc.canvas.threadedregions.ticket.SaveAllTicket(callback, (Throwable thrown) -> {
 +                            source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
 +                            MinecraftServer.LOGGER.error(ERROR_FAILED.create().getMessage(), thrown);
-+                        }, flush)
++                        }, flush),
++                        io.canvasmc.canvas.threadedregions.ticket.SaveAllTicket::and
 +                    );
 +                });
 +            }
