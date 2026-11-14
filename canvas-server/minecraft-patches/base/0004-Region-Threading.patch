@@ -3010,10 +3010,10 @@ index 0000000000000000000000000000000000000000..4e92caea35cd65eb5ca7000350d76e06
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927f1dc13ca
+index 0000000000000000000000000000000000000000..ce33c51f72604316724858217f72146f1c1db11d
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
-@@ -0,0 +1,868 @@
+@@ -0,0 +1,949 @@
 +package io.canvasmc.canvas.threadedregions.scheduler;
 +
 +import ca.spottedleaf.common.util.TimeUtil;
@@ -3438,17 +3438,86 @@ index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927
 +            ret = this.poll(runner);
 +        }
 +
-+        if (ret == null && linkedToRunner == null) {
-+            this.idleThreads.set(runner.id);
++        if (ret == null) {
++            if (linkedToRunner == null) {
++                this.idleThreads.set(runner.id);
 +
-+            final int s = runner.localQueue.size();
++                final int s = runner.localQueue.size();
 +
-+            if (s != 0) {
-+                throw new IllegalStateException("Local queue must be drained before going idle. Currently " + s);
++                if (s != 0) {
++                    throw new IllegalStateException("Local queue must be drained before going idle. Currently " + s);
++                }
++
++                runner.idleWakeAt = this.nextStealableTime(runner);
++            }
++            else {
++                runner.idleWakeAt = TimeUtil.DEADLINE_NOT_SET;
++            }
++        }
++
++        final ScheduledState head = this.idleThreads.isEmpty() ? null : runner.localQueue.peekEdf();
++        if (head != null) {
++            final long stealableAt = head.tick.getScheduledStart() + this.stealThresh;
++            for (int i = this.idleThreads.nextSetBit(0); i >= 0; i = this.idleThreads.nextSetBit(i + 1)) {
++                final TickThreadRunner idle = this.runners[i];
++                final long wakeAt = idle.idleWakeAt;
++                if (wakeAt == TimeUtil.DEADLINE_NOT_SET || stealableAt - wakeAt < 0L) {
++                    idle.idleWakeAt = stealableAt;
++                    LockSupport.unpark(idle.getRunnerThread());
++                }
 +            }
 +        }
 +
 +        return ret;
++    }
++
++    private long nextStealableTime(final TickThreadRunner idle) {
++        long earliest = TimeUtil.DEADLINE_NOT_SET;
++        for (final TickThreadRunner other : this.runners) {
++            if (other == idle) {
++                continue;
++            }
++            final ScheduledState head = other.localQueue.peekEdf();
++            if (head == null) {
++                continue;
++            }
++            final long stealableAt = head.tick.getScheduledStart() + this.stealThresh;
++            if (earliest == TimeUtil.DEADLINE_NOT_SET || stealableAt - earliest < 0L) {
++                earliest = stealableAt;
++            }
++        }
++        return earliest;
++    }
++
++    private void stealWhileIdle(final TickThreadRunner runner) {
++        synchronized (this.scheduleLock) {
++            if (!this.idleThreads.get(runner.id) || runner.state.state != TickThreadRunner.STATE_IDLE) {
++                runner.idleWakeAt = TimeUtil.DEADLINE_NOT_SET;
++                return;
++            }
++
++            final long now = System.nanoTime();
++            TickThreadRunner stealFrom = null;
++            ScheduledState steal = null;
++            for (final TickThreadRunner other : this.runners) {
++                if (other == runner) {
++                    continue;
++                }
++                final ScheduledState head = other.localQueue.peekEdf();
++                if (head != null && head.isStealable(now) && (steal == null || TICK_COMPARATOR_BY_TIME.compare(head, steal) < 0)) {
++                    steal = head;
++                    stealFrom = other;
++                }
++            }
++
++            if (steal != null && stealFrom.localQueue.remove(steal)) {
++                this.idleThreads.clear(runner.id);
++                runner.acceptTask(steal);
++                return;
++            }
++
++            runner.idleWakeAt = this.nextStealableTime(runner);
++        }
 +    }
 +
 +    public static final class ScheduledState {
@@ -3554,6 +3623,8 @@ index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927
 +
 +        @Nullable
 +        private volatile SchedulableTick linked;
++
++        private volatile long idleWakeAt = TimeUtil.DEADLINE_NOT_SET;
 +
 +        public TickThreadRunner(final int id, final AffinitySchedulerThreadPool scheduler, final int affinity) {
 +            this.id = id;
@@ -3679,10 +3750,20 @@ index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927
 +                            while (this.state.state == STATE_IDLE) {
 +                                //noinspection ResultOfMethodCallIgnored
 +                                Thread.interrupted();
-+                                LockSupport.park();
++                                final long wakeAt = this.idleWakeAt;
++                                if (wakeAt == TimeUtil.DEADLINE_NOT_SET) {
++                                    LockSupport.park();
++                                }
++                                else {
++                                    final long wait = wakeAt - System.nanoTime();
++                                    if (wait > 0L) {
++                                        LockSupport.parkNanos(this, wait);
++                                    }
++                                }
 +                                if (this.scheduler.halted) {
 +                                    return;
 +                                }
++                                this.scheduler.stealWhileIdle(this);
 +                            }
 +                            continue main_state_loop;
 +                        }
