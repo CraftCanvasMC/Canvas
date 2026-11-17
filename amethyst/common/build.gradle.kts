@@ -13,6 +13,8 @@ dependencies {
     compileOnly("org.apache.logging.log4j:log4j-api:2.26.0")
 
     testImplementation("org.junit.jupiter:junit-jupiter:6.0.3")
+    testImplementation("org.jspecify:jspecify:1.0.0")
+    testImplementation("it.unimi.dsi:fastutil:8.5.18")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")
 }
 
