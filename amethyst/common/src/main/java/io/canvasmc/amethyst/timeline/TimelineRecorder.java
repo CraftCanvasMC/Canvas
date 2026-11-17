@@ -2,19 +2,23 @@ package io.canvasmc.amethyst.timeline;
 
 import io.canvasmc.amethyst.AmethystUtils;
 import io.canvasmc.amethyst.ProfileClock;
+import io.canvasmc.amethyst.proto.Handle;
 import io.canvasmc.amethyst.proto.RegionEvent;
 import io.canvasmc.amethyst.proto.RegionSections;
 import io.canvasmc.amethyst.proto.RegionSnapshot;
 import io.canvasmc.amethyst.proto.Timeline;
 import io.canvasmc.amethyst.proto.World;
 import io.canvasmc.amethyst.table.IndexTable;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongPredicate;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
@@ -33,6 +37,7 @@ public final class TimelineRecorder implements RegionListener {
     private final IndexTable<String> worlds = new IndexTable<>();
     private final List<RegionEvent> events = new ObjectArrayList<>();
     private final List<RegionSnapshot> snapshots = new ObjectArrayList<>();
+    private final Long2ObjectOpenHashMap<@Nullable HandleTicks> ticks = new Long2ObjectOpenHashMap<>();
 
     // the focus split, and the new region holding the area isn't created yet
     private boolean focusSplitting;
@@ -76,11 +81,17 @@ public final class TimelineRecorder implements RegionListener {
             follow(handle);
         }
 
+        ticks(handle, world);
         record(RegionEvent.Type.TYPE_CREATE, world, handle, new long[0], sections);
     }
 
     @Override
     public synchronized void destroyed(final String world, final long handle) {
+        final HandleTicks dead = ticks.get(handle);
+        if (dead != null) {
+            dead.finish(nanoTime.getAsLong());
+        }
+
         record(RegionEvent.Type.TYPE_DESTROY, world, handle, new long[0], null);
     }
 
@@ -121,6 +132,20 @@ public final class TimelineRecorder implements RegionListener {
         record(RegionEvent.Type.TYPE_SPLIT, world, from, into, null);
     }
 
+    public synchronized HandleTicks ticks(
+        final long handle,
+        @Nullable
+        final String world
+    ) {
+        HandleTicks existing = ticks.get(handle);
+        if (existing == null) {
+            existing = new HandleTicks(clock, handle, world == null ? -1 : worlds.add(world), nanoTime.getAsLong());
+            ticks.put(handle, existing);
+        }
+
+        return existing;
+    }
+
     public synchronized void snapshot(final String world, final Collection<Region> regions) {
         final RegionSnapshot.Builder snapshot = RegionSnapshot.newBuilder()
             .setTimeUs(clock.sinceStartUs(nanoTime.getAsLong()))
@@ -153,6 +178,20 @@ public final class TimelineRecorder implements RegionListener {
         final Timeline.Builder out = Timeline.newBuilder().setSectionShift(sectionShift);
         for (final String world : worlds.unwritten()) {
             out.addWorlds(World.newBuilder().setKey(world));
+        }
+
+        // area mode still drains the handles it drops, so they dont pile up
+        final ObjectIterator<@Nullable HandleTicks> iterator = ticks.values().iterator();
+        while (iterator.hasNext()) {
+            final HandleTicks handle = Objects.requireNonNull(iterator.next());
+            final Handle written = handle.write();
+            if (keeps(handle.id())) {
+                out.addHandles(written);
+            }
+
+            if (handle.finished()) {
+                iterator.remove();
+            }
         }
 
         out.addAllEvents(events).addAllSnapshots(snapshots);
