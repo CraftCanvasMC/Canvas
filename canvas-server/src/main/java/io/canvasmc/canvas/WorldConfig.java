@@ -343,6 +343,7 @@ public class WorldConfig extends Part {
                         "of which then this interval is 2 ticks. This forces the interval to always be 2 ticks, reducing the amount",
                         "of times item entities check to merge"
                     );
+                option("skipPhysicsForRestingItems").docs("Skips gravity, collision and movement for item entities lying still on a block while nothing they touch changes");
             }
 
             @Undocumented("Doesn't require docs.")
@@ -351,6 +352,7 @@ public class WorldConfig extends Part {
             public boolean itemEntitiesImmuneToLightning = false;
             public double itemEntityVelocityOnDeathFactor = 1.0D;
             public boolean itemEntitiesWaitTwoSecondsForMergeCheckAlways = false;
+            public boolean skipPhysicsForRestingItems = false;
         }
 
         public EntityCollisionMode entityCollisionMode = EntityCollisionMode.VANILLA;
