@@ -15,7 +15,7 @@ import io.canvasmc.amethyst.AmethystUtils;
  */
 public record FocusArea(String world, int minChunkX, int minChunkZ, int maxChunkX, int maxChunkZ, long handle) {
     public long anchorSection(final int sectionShift) {
-        return AmethystUtils.packInts(minChunkX >> sectionShift, minChunkZ >> sectionShift);
+        return AmethystUtils.coordinateKey(minChunkX >> sectionShift, minChunkZ >> sectionShift);
     }
 
     public io.canvasmc.amethyst.proto.FocusArea toProto() {

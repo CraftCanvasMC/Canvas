@@ -19,4 +19,16 @@ public final class AmethystUtils {
     public static int unpackLow(final long packed) {
         return (int) packed;
     }
+
+    public static long coordinateKey(final int x, final int z) {
+        return packInts(z, x);
+    }
+
+    public static int keyX(final long key) {
+        return unpackLow(key);
+    }
+
+    public static int keyZ(final long key) {
+        return unpackHigh(key);
+    }
 }

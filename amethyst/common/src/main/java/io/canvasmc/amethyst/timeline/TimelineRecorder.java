@@ -316,7 +316,7 @@ public final class TimelineRecorder implements RegionListener {
     private static RegionSections sections(final long handle, final long[] sections) {
         final RegionSections.Builder out = RegionSections.newBuilder().setHandle(handle);
         for (final long section : sections) {
-            out.addSectionX(AmethystUtils.unpackHigh(section)).addSectionZ(AmethystUtils.unpackLow(section));
+            out.addSectionX(AmethystUtils.keyX(section)).addSectionZ(AmethystUtils.keyZ(section));
         }
 
         return out.build();
