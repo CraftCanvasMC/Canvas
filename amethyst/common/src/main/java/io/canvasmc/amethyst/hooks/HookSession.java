@@ -6,10 +6,19 @@ import io.canvasmc.amethyst.sampler.Sampler;
 import io.canvasmc.amethyst.timeline.TimelineRecorder;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.jspecify.annotations.Nullable;
 
 public final class HookSession {
+    public static final long DEFAULT_METRIC_INTERVAL_NS = TimeUnit.SECONDS.toNanos(1L);
+
+    // no snapshot taken yet, so the first check is always due
+    private static final long NO_SNAPSHOT = Long.MIN_VALUE;
+
     private final TimelineRecorder timeline;
+    private final AtomicLong lastSnapshot = new AtomicLong(NO_SNAPSHOT);
+    private final long metricIntervalNs;
 
     @Nullable
     private final Sampler sampler;
@@ -22,8 +31,22 @@ public final class HookSession {
         @Nullable
         final Sampler sampler
     ) {
+        this(timeline, sampler, DEFAULT_METRIC_INTERVAL_NS);
+    }
+
+    public HookSession(
+        final TimelineRecorder timeline,
+        @Nullable
+        final Sampler sampler,
+        final long metricIntervalNs
+    ) {
+        if (metricIntervalNs <= 0L) {
+            throw new IllegalArgumentException("The metric interval must be positive, got " + metricIntervalNs);
+        }
+
         this.timeline = timeline;
         this.sampler = sampler;
+        this.metricIntervalNs = metricIntervalNs;
     }
 
     public TimelineRecorder timeline() {
@@ -32,6 +55,19 @@ public final class HookSession {
 
     public List<ThreadIntervals> threads() {
         return threads;
+    }
+
+    public long metricIntervalNs() {
+        return metricIntervalNs;
+    }
+
+    public boolean snapshotDue(final long nanoTime) {
+        final long last = lastSnapshot.get();
+        if (last != NO_SNAPSHOT && nanoTime - last < metricIntervalNs) {
+            return false;
+        }
+
+        return lastSnapshot.compareAndSet(last, nanoTime);
     }
 
     public void tickStart(

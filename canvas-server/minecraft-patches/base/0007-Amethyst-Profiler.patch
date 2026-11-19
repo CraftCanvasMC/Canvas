@@ -45,20 +45,24 @@ index 0000000000000000000000000000000000000000..3ad99749d3035338eefc22ea305c2637
 +}
 diff --git a/io/canvasmc/canvas/profiler/RegionHooks.java b/io/canvasmc/canvas/profiler/RegionHooks.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..12fefab2447c201e18c3ae61987b45e8d32b131b
+index 0000000000000000000000000000000000000000..6db2c0f7c7f4832119901c8e93a7a24f930d5d69
 --- /dev/null
 +++ b/io/canvasmc/canvas/profiler/RegionHooks.java
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,192 @@
 +package io.canvasmc.canvas.profiler;
 +
 +import io.canvasmc.amethyst.hooks.HookSession;
 +import io.canvasmc.amethyst.hooks.ProfilerHooks;
++import io.canvasmc.amethyst.timeline.TimelineRecorder;
 +import io.canvasmc.canvas.util.Util;
 +import io.papermc.paper.threadedregions.ThreadedRegionizer;
 +import io.papermc.paper.threadedregions.TickRegionScheduler;
 +import io.papermc.paper.threadedregions.TickRegions;
 +import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
++import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 +import java.util.List;
++import it.unimi.dsi.fastutil.objects.ObjectArrayList;
++import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;
 +import org.jspecify.annotations.Nullable;
 +
@@ -136,6 +140,48 @@ index 0000000000000000000000000000000000000000..12fefab2447c201e18c3ae61987b45e8
 +        session.timeline().split(world(from.getData().world), handle(from), handles);
 +    }
 +
++    public static void globalTick(final List<ServerLevel> worlds) {
++        final HookSession session = ProfilerHooks.active();
++        if (session == null || !session.snapshotDue(System.nanoTime())) {
++            return;
++        }
++
++        int regionCount = 0;
++        for (final ServerLevel level : worlds) {
++            final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>>
++                live = new ObjectArrayList<>();
++            level.regioniser.computeForAllRegionsUnsynchronised(live::add);
++
++            final List<TimelineRecorder.Region> regions = new ObjectArrayList<>(live.size());
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : live) {
++                final long[] sections = region.getOwnedSections().toLongArray();
++                if (sections.length == 0) {
++                    // died after we listed it
++                    continue;
++                }
++
++                // updated by the owning region, safe to read from any thread
++                final TickRegions.RegionStats stats = region.getData().getRegionStats();
++                final Object2LongOpenHashMap<String> metrics = new Object2LongOpenHashMap<>(3);
++
++                metrics.put("chunks", stats.getChunkCount());
++                metrics.put("entities", stats.getEntityCount());
++                metrics.put("players", stats.getPlayerCount());
++
++                regions.add(new TimelineRecorder.Region(handle(region), sections, metrics));
++            }
++
++            regionCount += regions.size();
++            session.timeline().snapshot(world(level), regions);
++        }
++
++        final Object2LongOpenHashMap<String> global = new Object2LongOpenHashMap<>(3);
++        global.put("players", MinecraftServer.getServer().getPlayerCount());
++        global.put("regions", regionCount);
++        global.put("worlds", worlds.size());
++        session.timeline().globalMetrics(global);
++    }
++
 +    public static void tickStart(
 +        @Nullable
 +        final HookSession session,
@@ -205,6 +251,19 @@ index 0000000000000000000000000000000000000000..cfb1c5e1a8b73a6a301eb171c55d3124
 +package io.canvasmc.canvas.profiler;
 +
 +import org.jspecify.annotations.NullMarked;
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 3493916a5f64e8d930a6144be3d72136392da184..5717a7a91af707e1672a67fd10c1fa57a8353826 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -297,6 +297,8 @@ public final class RegionizedServer {
+             this.globalTick(world, tickCount);
+         }
+ 
++        io.canvasmc.canvas.profiler.RegionHooks.globalTick(this.worlds); // Canvas - amethyst profiler
++
+         // tick connections
+         this.tickConnections();
+ 
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 index edc41807539f02299264ffdbacf2c47bca355389..aba6ad60017db94d19a70366cf692dd073b72e25 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
