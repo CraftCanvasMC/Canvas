@@ -209,8 +209,11 @@ public class SamplerModule implements CommandModule {
         final double finalInterval = interval;
         Runnable pinCallback = () -> {
         ThreadDumper threadDumper;
-        boolean usingPinnedThreadDumper = RegionProfiler.isProfiling();
-        if (threads.isEmpty() || usingPinnedThreadDumper) {
+        RegionProfiler.ProfilingState profilingState = RegionProfiler.STATE.get();
+        boolean usingPinnedThreadDumper = profilingState != null;
+        if (usingPinnedThreadDumper) {
+            threadDumper = new ThreadDumper.Specific(profilingState.threadRunner().getRunnerThread());
+        } else if (threads.isEmpty()) {
             // use the server thread
             threadDumper = platform.getPlugin().getDefaultThreadDumper();
         } else if (threads.contains("*")) {
