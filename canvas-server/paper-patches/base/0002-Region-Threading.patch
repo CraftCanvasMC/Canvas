@@ -5365,11 +5365,30 @@ index 01271bd7484f75664ac14bc10ad7abc78fa88b8c..9a86743b5fd79365a261e8da8f13694f
  
      static {
          instance = new CraftItemFactory();
+diff --git a/src/main/java/org/bukkit/craftbukkit/map/CraftMapRenderer.java b/src/main/java/org/bukkit/craftbukkit/map/CraftMapRenderer.java
+index a573499fb96cb08d96e0b20602fc423bfd0e2f52..e272a32fa809d13afd522ae981bab3cee2392c5b 100644
+--- a/src/main/java/org/bukkit/craftbukkit/map/CraftMapRenderer.java
++++ b/src/main/java/org/bukkit/craftbukkit/map/CraftMapRenderer.java
+@@ -35,6 +35,7 @@ public class CraftMapRenderer extends MapRenderer {
+         }
+ 
+         for (String key : this.worldMap.decorations.keySet()) {
++            if (io.papermc.paper.FeatureHooks.isMapMarkerHiddenFrom(this.worldMap, key, player.getName())) continue;
+             // If this cursor is for a player check visibility with vanish system
+             Player other = Bukkit.getPlayerExact(key);
+             if (other != null && !player.canSee(other)) {
 diff --git a/src/main/java/org/bukkit/craftbukkit/map/CraftMapView.java b/src/main/java/org/bukkit/craftbukkit/map/CraftMapView.java
-index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4668df336 100644
+index e576bca9ceec9a79c5234faeb7a294d9841bcd41..95ad79aadf965320d9d99b25f7baf4b52627ad1e 100644
 --- a/src/main/java/org/bukkit/craftbukkit/map/CraftMapView.java
 +++ b/src/main/java/org/bukkit/craftbukkit/map/CraftMapView.java
-@@ -37,21 +37,28 @@ public final class CraftMapView implements MapView {
+@@ -1,5 +1,6 @@
+ package org.bukkit.craftbukkit.map;
+ 
++import io.papermc.paper.FeatureHooks;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.HashMap;
+@@ -37,21 +38,29 @@ public final class CraftMapView implements MapView {
  
      @Override
      public boolean isVirtual() {
@@ -5389,6 +5408,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
      public void setScale(Scale scale) {
 +        synchronized (this.worldMap) { // Folia - region threading
          this.worldMap.scale = scale.getValue();
++        this.markDirty();
 +        } // Folia - region threading
      }
  
@@ -5398,7 +5418,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
          ResourceKey<net.minecraft.world.level.Level> dimension = this.worldMap.dimension;
          ServerLevel world = MinecraftServer.getServer().getLevel(dimension);
  
-@@ -63,50 +70,66 @@ public final class CraftMapView implements MapView {
+@@ -63,50 +72,81 @@ public final class CraftMapView implements MapView {
              return Bukkit.getServer().getWorld(this.worldMap.uniqueId);
          }
          return null;
@@ -5410,6 +5430,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
 +        synchronized (this.worldMap) { // Folia - region threading
          this.worldMap.dimension = ((CraftWorld) world).getHandle().dimension();
          this.worldMap.uniqueId = world.getUID();
++        this.markDirty();
 +        } // Folia - region threading
      }
  
@@ -5431,6 +5452,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
      public void setCenterX(int x) {
 +        synchronized (this.worldMap) { // Folia - region threading
          this.worldMap.centerX = x;
++        this.markDirty();
 +        } // Folia - region threading
      }
  
@@ -5438,7 +5460,16 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
      public void setCenterZ(int z) {
 +        synchronized (this.worldMap) { // Folia - region threading
          this.worldMap.centerZ = z;
++        this.markDirty();
 +        } // Folia - region threading
++    }
++
++    private void markDirty() {
++        FeatureHooks.markMapDirty(this.worldMap);
++    }
++
++    public boolean hasOnlyDefaultRenderer() {
++        return this.renderers.size() == 1 && this.renderers.getFirst().getClass() == CraftMapRenderer.class;
      }
  
      @Override
@@ -5455,6 +5486,10 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
              this.renderers.add(renderer);
              this.canvases.put(renderer, new WeakHashMap<>());
              renderer.initialize(this);
++            if (this.worldMap.id != null) {
++                // Plugin renderers keep the map loaded, load it again in case it was just unloaded
++                FeatureHooks.markMapUsed(this.worldMap);
++            }
          }
 +        } // Folia - region threading
      }
@@ -5465,7 +5500,15 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
          if (this.renderers.contains(renderer)) {
              this.renderers.remove(renderer);
              for (Map.Entry<CraftPlayer, CraftMapCanvas> entry : this.canvases.get(renderer).entrySet()) {
-@@ -121,6 +144,7 @@ public final class CraftMapView implements MapView {
+@@ -117,10 +157,15 @@ public final class CraftMapView implements MapView {
+                 }
+             }
+             this.canvases.remove(renderer);
++            if (this.worldMap.id != null) {
++                // Changed renderers keep the map loaded, load it again in case it was just unloaded
++                FeatureHooks.markMapUsed(this.worldMap);
++            }
+             return true;
          } else {
              return false;
          }
@@ -5473,7 +5516,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
      }
  
      private boolean isContextual() {
-@@ -131,6 +155,7 @@ public final class CraftMapView implements MapView {
+@@ -131,6 +176,7 @@ public final class CraftMapView implements MapView {
      }
  
      public RenderData render(CraftPlayer player) {
@@ -5481,7 +5524,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
          boolean context = this.isContextual();
          RenderData render = this.renderCache.get(context ? player : null);
  
-@@ -173,35 +198,48 @@ public final class CraftMapView implements MapView {
+@@ -173,35 +219,51 @@ public final class CraftMapView implements MapView {
          }
  
          return render;
@@ -5499,6 +5542,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
      public void setTrackingPosition(boolean trackingPosition) {
 +        synchronized (this.worldMap) { // Folia - region threading
          this.worldMap.trackingPosition = trackingPosition;
++        this.markDirty();
 +        } // Folia - region threading
      }
  
@@ -5513,6 +5557,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
      public void setUnlimitedTracking(boolean unlimited) {
 +        synchronized (this.worldMap) { // Folia - region threading
          this.worldMap.unlimitedTracking = unlimited;
++        this.markDirty();
 +        } // Folia - region threading
      }
  
@@ -5527,6 +5572,7 @@ index e576bca9ceec9a79c5234faeb7a294d9841bcd41..c8e0efb1f01feb32d4eba4338ca34aa4
      public void setLocked(boolean locked) {
 +        synchronized (this.worldMap) { // Folia - region threading
          this.worldMap.locked = locked;
++        this.markDirty();
 +        } // Folia - region threading
      }
  }
