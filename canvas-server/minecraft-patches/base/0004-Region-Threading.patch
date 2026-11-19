@@ -1021,10 +1021,10 @@ index 11d4f2d5caba52b492b8e130faa4701f3980b0f1..82b442ba290dedcd2c76ef5830ed0f8a
                  if (chunk == null) {
 diff --git a/io/canvasmc/canvas/threadedregions/ScheduledHandleTickState.java b/io/canvasmc/canvas/threadedregions/ScheduledHandleTickState.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..999f985053020769c71c558c256fd9198487fbe9
+index 0000000000000000000000000000000000000000..99634a485ced94796f82a6010a24361684c8e6a7
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/ScheduledHandleTickState.java
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,221 @@
 +package io.canvasmc.canvas.threadedregions;
 +
 +import io.canvasmc.canvas.GlobalConfiguration;
@@ -1117,6 +1117,26 @@ index 0000000000000000000000000000000000000000..999f985053020769c71c558c256fd919
 +
 +    public void tickEnd(final long nanos) {
 +        lastTickTimeEndNanos = nanos;
++    }
++
++    public void inheritFrom(final ScheduledHandleTickState from) {
++        this.runsGameElements = from.runsGameElements;
++        this.tickCountToSprintTo = from.tickCountToSprintTo;
++        this.startSprintNanos = from.startSprintNanos;
++        this.lastTickTimeEndNanos = from.lastTickTimeEndNanos;
++        this.actionQueue.addAll(from.actionQueue);
++    }
++
++    public void mergeFrom(final ScheduledHandleTickState from) {
++        this.runsGameElements &= from.runsGameElements;
++        if (from.tickCountToSprintTo != UNSET) {
++            final long sprintTo = this.scheduleHandle.getCurrentTick() + (from.tickCountToSprintTo - from.scheduleHandle.getCurrentTick());
++            if (this.tickCountToSprintTo == UNSET || sprintTo > this.tickCountToSprintTo) {
++                this.tickCountToSprintTo = sprintTo;
++                this.startSprintNanos = from.startSprintNanos;
++            }
++        }
++        this.actionQueue.addAll(from.actionQueue);
 +    }
 +
 +    public void sendStateToPlayer(final ServerPlayer player) {
@@ -3010,10 +3030,10 @@ index 0000000000000000000000000000000000000000..4e92caea35cd65eb5ca7000350d76e06
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927f1dc13ca
+index 0000000000000000000000000000000000000000..ce33c51f72604316724858217f72146f1c1db11d
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/scheduler/AffinitySchedulerThreadPool.java
-@@ -0,0 +1,868 @@
+@@ -0,0 +1,949 @@
 +package io.canvasmc.canvas.threadedregions.scheduler;
 +
 +import ca.spottedleaf.common.util.TimeUtil;
@@ -3438,17 +3458,86 @@ index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927
 +            ret = this.poll(runner);
 +        }
 +
-+        if (ret == null && linkedToRunner == null) {
-+            this.idleThreads.set(runner.id);
++        if (ret == null) {
++            if (linkedToRunner == null) {
++                this.idleThreads.set(runner.id);
 +
-+            final int s = runner.localQueue.size();
++                final int s = runner.localQueue.size();
 +
-+            if (s != 0) {
-+                throw new IllegalStateException("Local queue must be drained before going idle. Currently " + s);
++                if (s != 0) {
++                    throw new IllegalStateException("Local queue must be drained before going idle. Currently " + s);
++                }
++
++                runner.idleWakeAt = this.nextStealableTime(runner);
++            }
++            else {
++                runner.idleWakeAt = TimeUtil.DEADLINE_NOT_SET;
++            }
++        }
++
++        final ScheduledState head = this.idleThreads.isEmpty() ? null : runner.localQueue.peekEdf();
++        if (head != null) {
++            final long stealableAt = head.tick.getScheduledStart() + this.stealThresh;
++            for (int i = this.idleThreads.nextSetBit(0); i >= 0; i = this.idleThreads.nextSetBit(i + 1)) {
++                final TickThreadRunner idle = this.runners[i];
++                final long wakeAt = idle.idleWakeAt;
++                if (wakeAt == TimeUtil.DEADLINE_NOT_SET || stealableAt - wakeAt < 0L) {
++                    idle.idleWakeAt = stealableAt;
++                    LockSupport.unpark(idle.getRunnerThread());
++                }
 +            }
 +        }
 +
 +        return ret;
++    }
++
++    private long nextStealableTime(final TickThreadRunner idle) {
++        long earliest = TimeUtil.DEADLINE_NOT_SET;
++        for (final TickThreadRunner other : this.runners) {
++            if (other == idle) {
++                continue;
++            }
++            final ScheduledState head = other.localQueue.peekEdf();
++            if (head == null) {
++                continue;
++            }
++            final long stealableAt = head.tick.getScheduledStart() + this.stealThresh;
++            if (earliest == TimeUtil.DEADLINE_NOT_SET || stealableAt - earliest < 0L) {
++                earliest = stealableAt;
++            }
++        }
++        return earliest;
++    }
++
++    private void stealWhileIdle(final TickThreadRunner runner) {
++        synchronized (this.scheduleLock) {
++            if (!this.idleThreads.get(runner.id) || runner.state.state != TickThreadRunner.STATE_IDLE) {
++                runner.idleWakeAt = TimeUtil.DEADLINE_NOT_SET;
++                return;
++            }
++
++            final long now = System.nanoTime();
++            TickThreadRunner stealFrom = null;
++            ScheduledState steal = null;
++            for (final TickThreadRunner other : this.runners) {
++                if (other == runner) {
++                    continue;
++                }
++                final ScheduledState head = other.localQueue.peekEdf();
++                if (head != null && head.isStealable(now) && (steal == null || TICK_COMPARATOR_BY_TIME.compare(head, steal) < 0)) {
++                    steal = head;
++                    stealFrom = other;
++                }
++            }
++
++            if (steal != null && stealFrom.localQueue.remove(steal)) {
++                this.idleThreads.clear(runner.id);
++                runner.acceptTask(steal);
++                return;
++            }
++
++            runner.idleWakeAt = this.nextStealableTime(runner);
++        }
 +    }
 +
 +    public static final class ScheduledState {
@@ -3554,6 +3643,8 @@ index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927
 +
 +        @Nullable
 +        private volatile SchedulableTick linked;
++
++        private volatile long idleWakeAt = TimeUtil.DEADLINE_NOT_SET;
 +
 +        public TickThreadRunner(final int id, final AffinitySchedulerThreadPool scheduler, final int affinity) {
 +            this.id = id;
@@ -3679,10 +3770,20 @@ index 0000000000000000000000000000000000000000..71725a3ee7f26d2d39d6410eeb010927
 +                            while (this.state.state == STATE_IDLE) {
 +                                //noinspection ResultOfMethodCallIgnored
 +                                Thread.interrupted();
-+                                LockSupport.park();
++                                final long wakeAt = this.idleWakeAt;
++                                if (wakeAt == TimeUtil.DEADLINE_NOT_SET) {
++                                    LockSupport.park();
++                                }
++                                else {
++                                    final long wait = wakeAt - System.nanoTime();
++                                    if (wait > 0L) {
++                                        LockSupport.parkNanos(this, wait);
++                                    }
++                                }
 +                                if (this.scheduler.halted) {
 +                                    return;
 +                                }
++                                this.scheduler.stealWhileIdle(this);
 +                            }
 +                            continue main_state_loop;
 +                        }
@@ -4340,10 +4441,10 @@ index 0000000000000000000000000000000000000000..9ad8dfa3dba691b702575ea3330c5af6
 +import org.jspecify.annotations.NullMarked;
 diff --git a/io/canvasmc/canvas/threadedregions/ticket/SaveAllTicket.java b/io/canvasmc/canvas/threadedregions/ticket/SaveAllTicket.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..a463e62263c8eebfa447e4abf7019811080609b1
+index 0000000000000000000000000000000000000000..9c9496ea17124b9832ebcaf960cdd2f8385a12b7
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/ticket/SaveAllTicket.java
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,35 @@
 +package io.canvasmc.canvas.threadedregions.ticket;
 +
 +import java.util.function.Consumer;
@@ -4364,16 +4465,31 @@ index 0000000000000000000000000000000000000000..a463e62263c8eebfa447e4abf7019811
 + * @author dueris
 + */
 +public record SaveAllTicket(Runnable callback, Consumer<Throwable> exceptionPropagator, boolean flush) {
++
++    public SaveAllTicket and(final SaveAllTicket other) {
++        return new SaveAllTicket(
++            () -> {
++                this.callback.run();
++                other.callback.run();
++            },
++            (thrown) -> {
++                this.exceptionPropagator.accept(thrown);
++                other.exceptionPropagator.accept(thrown);
++            },
++            this.flush || other.flush
++        );
++    }
 +}
 diff --git a/io/canvasmc/canvas/threadedregions/ticket/TicketHolder.java b/io/canvasmc/canvas/threadedregions/ticket/TicketHolder.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..668c9433f7cbc57e1f0de49b0fa5a0dba9fdc3a7
+index 0000000000000000000000000000000000000000..f7f8d048a37d3666d6131c430581b4f7affe9132
 --- /dev/null
 +++ b/io/canvasmc/canvas/threadedregions/ticket/TicketHolder.java
-@@ -0,0 +1,108 @@
+@@ -0,0 +1,115 @@
 +package io.canvasmc.canvas.threadedregions.ticket;
 +
 +import java.util.Objects;
++import java.util.function.BinaryOperator;
 +import java.util.function.Consumer;
 +import org.jspecify.annotations.Nullable;
 +
@@ -4406,11 +4522,11 @@ index 0000000000000000000000000000000000000000..668c9433f7cbc57e1f0de49b0fa5a0db
 +     */
 +    @Nullable
 +    public T pop() {
-+        final T ticket = this.ticket;
 +        synchronized (this) {
++            final T ticket = this.ticket;
 +            this.ticket = null;
++            return ticket;
 +        }
-+        return ticket;
 +    }
 +
 +    /**
@@ -4464,6 +4580,12 @@ index 0000000000000000000000000000000000000000..668c9433f7cbc57e1f0de49b0fa5a0db
 +                throw new IllegalStateException("Ticket already propagated");
 +            }
 +            this.ticket = ticket;
++        }
++    }
++
++    public void propagate(final T ticket, final BinaryOperator<T> combiner) {
++        synchronized (this) {
++            this.ticket = this.ticket == null ? ticket : combiner.apply(this.ticket, ticket);
 +        }
 +    }
 +
@@ -6360,10 +6482,10 @@ index 0000000000000000000000000000000000000000..6a6d46b55bd25103638fbb84de781ff3
 +}
 diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..e88352c4685e8d8fe4ea9ff7e3cebab1e726bcc6
+index 0000000000000000000000000000000000000000..085757b5d3834b7763402ece5a06596c99a73b7b
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
-@@ -0,0 +1,428 @@
+@@ -0,0 +1,431 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.moonrise.common.util.TickThread;
@@ -6601,7 +6723,7 @@ index 0000000000000000000000000000000000000000..e88352c4685e8d8fe4ea9ff7e3cebab1
 +                final int chunkX = thrownEnderpearl.getBlockX() >> 4;
 +                final int chunkZ = thrownEnderpearl.getBlockZ() >> 4;
 +                final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>
-+                    regionAtChunk = entityPlayer.level().regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++                    regionAtChunk = ((net.minecraft.server.level.ServerLevel) thrownEnderpearl.level()).regioniser.getRegionAtUnsynchronised(chunkX, chunkZ); // Canvas - use the pearl's level
 +                if (regionAtChunk == null) {
 +                    // if region isn't loaded, skip
 +                    continue;
@@ -6615,23 +6737,26 @@ index 0000000000000000000000000000000000000000..e88352c4685e8d8fe4ea9ff7e3cebab1
 +        }
 +
 +        region2Pearls.forEach((region, listOfPearls) -> {
-+            ChunkPos center = null;
++            final ChunkPos center = region.getCenterChunk(); // Canvas - save pearls separately
 +            try {
 +                this.shuttingDown = region;
-+                center = region.getCenterChunk();
 +                for (final Pair<UUID, ThrownEnderpearl> pair : listOfPearls) {
-+                    MinecraftServer.getServer().pearls.addPearl(pair.getFirst(), pair.getSecond());
++                    // Canvas start - save pearls separately
++                    try {
++                        MinecraftServer.getServer().pearls.addPearl(pair.getFirst(), pair.getSecond());
 +
-+                    // remove the pearl or else we end up with a bug in our system
-+                    // that causes the pearl to be retained in the set until the next
-+                    // login, since the entity UUID exists so it just adds to the
-+                    // pearl set and then never gets removed so it gets caught on save
++                        // remove the pearl or else we end up with a bug in our system
++                        // that causes the pearl to be retained in the set until the next
++                        // login, since the entity UUID exists so it just adds to the
++                        // pearl set and then never gets removed so it gets caught on save
 +
-+                    pair.getSecond().setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, EntityRemoveEvent.Cause.PLAYER_QUIT);
-+                    savedPearlCount.increment();
++                        pair.getSecond().setRemoved(Entity.RemovalReason.UNLOADED_WITH_PLAYER, EntityRemoveEvent.Cause.PLAYER_QUIT);
++                        savedPearlCount.increment();
++                    } catch (final Throwable thrown) {
++                        LOGGER.error("Failed to save pearl {} of player {} in region around chunk {} in level '{}'", pair.getSecond().getUUID(), pair.getFirst(), center, region.regioniser.world.getWorld().getName(), thrown);
++                    }
++                    // Canvas end - save pearls separately
 +                }
-+            } catch (final Throwable thrown) {
-+                LOGGER.error("Failed to save pearls for region around chunk {} in level '{}'", center, region.regioniser.world.getWorld().getName(), thrown);
 +            } finally {
 +                this.shuttingDown = null;
 +            }
@@ -11111,10 +11236,10 @@ index 0000000000000000000000000000000000000000..08195949008ca315be761a4e84ba75a8
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..eac0186c0f5271a090cd9fd75d6ca11434e7e643
+index 0000000000000000000000000000000000000000..c32dc8ffc1b60849c3200f0685a5023051c7f7da
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -0,0 +1,697 @@
+@@ -0,0 +1,703 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.common.time.Schedule;
@@ -11177,16 +11302,22 @@ index 0000000000000000000000000000000000000000..eac0186c0f5271a090cd9fd75d6ca114
 +    private static final float DEFAULT_TICK_RATE = GlobalConfiguration.getInstance().regionScheduler.defaultTickRate;
 +    private static final long DEFAULT_TICK_TIME_NANOS = (long) (1_000_000_000 / DEFAULT_TICK_RATE);
 +
++    public static final float MIN_TICK_RATE = 0.01F;
++    public static final float MAX_TICK_RATE = 10_000.0F;
++
 +    private static volatile float CURRENT_TICK_RATE = DEFAULT_TICK_RATE;
 +    private static volatile long CURRENT_TIME_BETWEEN_TICKS = DEFAULT_TICK_TIME_NANOS;
 +
 +    // note: used for setting new tick time nanos, not really for anything else, utility method
 +    //       this is fine for decimal rates, as we round it so if anything, we are like 1 nanosecond off... which isn't bad
 +    private static long tickTimeNanosFromRate(float rate) {
-+        return Math.round(1_000_000_000 / rate);
++        return Math.round(1_000_000_000.0D / (double) rate);
 +    }
 +
 +    public static void setTickRate(final float newRate) {
++        if (!(newRate >= MIN_TICK_RATE && newRate <= MAX_TICK_RATE)) {
++            throw new IllegalArgumentException("Tick rate must be between " + MIN_TICK_RATE + " and " + MAX_TICK_RATE + ", got " + newRate);
++        }
 +        CURRENT_TICK_RATE = newRate;
 +        CURRENT_TIME_BETWEEN_TICKS = tickTimeNanosFromRate(newRate);
 +        ScheduledHandleTickState.sendStateToAllPlayers();
@@ -11813,10 +11944,10 @@ index 0000000000000000000000000000000000000000..eac0186c0f5271a090cd9fd75d6ca114
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 8424cf9d4617b4732d44cc460d25b04481068989..1652b21bbaa3b2e8ec6aa45f0c9bccc67c2ef3e7 100644
+index 8424cf9d4617b4732d44cc460d25b04481068989..6b9b7bb2a08eb0803183eac293077d94b51b7952 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -1,10 +1,682 @@
+@@ -1,10 +1,702 @@
  package io.papermc.paper.threadedregions;
  
 -// placeholder class for Folia
@@ -11986,13 +12117,30 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..1652b21bbaa3b2e8ec6aa45f0c9bccc6
 +    @Override
 +    public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
 +                         final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
-+
++        // Canvas start - move save tickets
++        final SaveAllTicket ticket = from.getData().canvas$saveAllTicket.pop();
++        if (ticket != null) {
++            into.getData().canvas$saveAllTicket.propagate(ticket, SaveAllTicket::and);
++        }
++        // Canvas end - move save tickets
 +    }
 +
 +    @Override
 +    public void preSplit(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
 +                         final java.util.List<ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData>> into) {
-+
++        // Canvas start - split save tickets
++        final SaveAllTicket ticket = from.getData().canvas$saveAllTicket.pop();
++        if (ticket != null) {
++            final AtomicInteger remaining = new AtomicInteger(into.size());
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region : into) {
++                region.getData().canvas$saveAllTicket.propagate(new SaveAllTicket(() -> {
++                    if (remaining.decrementAndGet() == 0) {
++                        ticket.callback().run();
++                    }
++                }, ticket.exceptionPropagator(), ticket.flush()), SaveAllTicket::and);
++            }
++        }
++        // Canvas end - split save tickets
 +    }
 +
 +    public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
@@ -12280,6 +12428,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..1652b21bbaa3b2e8ec6aa45f0c9bccc6
 +            for (final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region : regions) {
 +                final TickRegionData data = region.getData();
 +                data.tickHandle.copyDeadlineAndTickCount(this.tickHandle);
++                data.tickHandle.getTickManager().inheritFrom(this.tickHandle.getTickManager()); // Canvas - keep tick state
 +                // just be lazy about this one, it's not very important
 +                if (this.hasPackets.getOpaque()) {
 +                    data.hasPackets.setOpaque(true);
@@ -12353,6 +12502,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..1652b21bbaa3b2e8ec6aa45f0c9bccc6
 +            // there's not really a great solution to the tick problem, no matter what it'll be messed up
 +            // we will pick the greatest time delay so that tps will not exceed TICK_RATE
 +            data.tickHandle.updateSchedulingToMax(this.tickHandle);
++            data.tickHandle.getTickManager().mergeFrom(this.tickHandle.getTickManager()); // Canvas - keep tick state
 +            // just be lazy about this one, it's not very important
 +            if (this.hasPackets.getOpaque()) {
 +                data.hasPackets.setOpaque(true);
@@ -12397,6 +12547,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..1652b21bbaa3b2e8ec6aa45f0c9bccc6
 +            ret.lastTickStart = this.lastTickStart;
 +            ret.tickSchedule.setLastPeriod(this.tickSchedule.getLastPeriod());
 +            TickRegions.getScheduler().getSchedulerCallbacks().tryTransferPinningState(this, ret); // Canvas - region profiler
++            ret.getTickManager().inheritFrom(this.getTickManager()); // Canvas - keep tick state
 +
 +            return ret;
 +        }
@@ -18864,10 +19015,10 @@ index 8bacd793822528f2b96387b2264dbf42fab5d8f7..1081ea65a23c1a4ecf53c84a078a3df7
      }
  }
 diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
-index 299991905c24a7018f8ac60d0c16e56fa43cd710..e30bc561597914df25f55907085fb21d3f79f1ac 100644
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..a638e4c60c66e2ad73315132875dcf36cb6b6f0b 100644
 --- a/net/minecraft/server/commands/SaveAllCommand.java
 +++ b/net/minecraft/server/commands/SaveAllCommand.java
-@@ -24,12 +24,109 @@ public class SaveAllCommand {
+@@ -24,12 +24,110 @@ public class SaveAllCommand {
      private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
          source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
          MinecraftServer server = source.getServer();
@@ -18967,7 +19118,8 @@ index 299991905c24a7018f8ac60d0c16e56fa43cd710..e30bc561597914df25f55907085fb21d
 +                        new io.canvasmc.canvas.threadedregions.ticket.SaveAllTicket(callback, (Throwable thrown) -> {
 +                            source.sendFailure(Component.literal(ERROR_FAILED.create().getMessage()));
 +                            MinecraftServer.LOGGER.error(ERROR_FAILED.create().getMessage(), thrown);
-+                        }, flush)
++                        }, flush),
++                        io.canvasmc.canvas.threadedregions.ticket.SaveAllTicket::and
 +                    );
 +                });
 +            }

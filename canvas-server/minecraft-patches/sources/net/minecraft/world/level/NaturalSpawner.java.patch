@@ -214,12 +214,11 @@
  
      @VisibleForDebug
      public static void spawnCategoryForPosition(final MobCategory mobCategory, final ServerLevel level, final BlockPos start) {
-@@ -237,12 +_,32 @@
+@@ -237,12 +_,28 @@
          final NaturalSpawner.AfterSpawnCallback spawnCallback
      ) {
          // Paper start - Optional per player mob spawns
 -        spawnCategoryForPosition(mobCategory, level, chunk, start, extraTest, spawnCallback, Integer.MAX_VALUE, null);
--    }
 +        // Canvas start - region threading
 +        if (!(chunk instanceof LevelChunk levelChunk)) {
 +            return;
@@ -235,12 +234,8 @@
 +            null
 +        );
 +        // Canvas end - region threading
-+    }
+     }
 +    // Canvas start - optimize natural spawning
-+
-+    private static int clamp(final int val, final int min, final int max) {
-+        return Math.max(min, Math.min(val, max));
-+    }
 +
      public static void spawnCategoryForPosition(
          final MobCategory mobCategory,
@@ -251,18 +246,13 @@
          final BlockPos start,
          final NaturalSpawner.SpawnPredicate extraTest,
          final NaturalSpawner.AfterSpawnCallback spawnCallback,
-@@ -250,47 +_,72 @@
+@@ -250,11 +_,17 @@
          final @Nullable Consumer<Entity> trackEntity
      ) {
          // Paper end - Optional per player mob spawns
 +        final ServerLevel level = regionizedWorldData.world;
 +        final RandomSource fastRandom = regionizedWorldData.getCanvasWorldData().simpleUnsafeLocalRandom;
 +        final net.minecraft.world.level.border.WorldBorder border = level.getWorldBorder();
-+
-+        final int minX = chunk.getPos().getMinBlockX();
-+        final int minZ = chunk.getPos().getMinBlockZ();
-+        final int maxX = chunk.getPos().getMaxBlockX();
-+        final int maxZ = chunk.getPos().getMaxBlockZ();
 +
          StructureManager structureManager = level.structureManager();
          ChunkGenerator generator = level.getChunkSource().getGenerator();
@@ -276,11 +266,7 @@
              BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
              int clusterSize = 0;
  
-             for (int groupCount = 0; groupCount < 3; groupCount++) {
--                int x = start.getX();
--                int z = start.getZ();
-+                int centerX = start.getX(); // Canvas - rename
-+                int centerZ = start.getZ(); // Canvas - rename
+@@ -264,33 +_,42 @@
                  int ss = 6;
                  MobSpawnSettings.SpawnerData currentSpawnData = null;
                  SpawnGroupData groupData = null;
@@ -292,20 +278,15 @@
 -                    x += level.random.nextInt(6) - level.random.nextInt(6);
 -                    z += level.random.nextInt(6) - level.random.nextInt(6);
 +                    // Canvas start - optimize natural spawning
-+                    // this cuts random calls in half, which is def a micro-opt, but
-+                    // reduces possible random calls from 48 -> 24, while almost preserving
-+                    // the vanilla spread logic. the vanilla logic uses triangular
-+                    // distribution, and this one uses uniform distribution, meaning
-+                    // mob clusters will spawn slightly more spread out, rather than clustered
-+                    // more towards the center. barely noticeable, but worth mentioning
-+                    long randomPair = fastRandom.nextLong();
-+                    int x = centerX + (int)((randomPair & 0xFFFF) * 11L >> 16) - 5;
-+                    int z = centerZ + (int)(((randomPair >>> 32) & 0xFFFF) * 11L >> 16) - 5;
-+
-+                    // clamp to the chunk bounds, so we can reduce chunk lookup calls since
-+                    // all blocks will be within this chunk
-+                    x = clamp(x, minX, maxX);
-+                    z = clamp(z, minZ, maxZ);
++                    x += fastRandom.nextInt(6) - fastRandom.nextInt(6);
++                    z += fastRandom.nextInt(6) - fastRandom.nextInt(6);
++                    LevelChunk posChunk = chunk;
++                    if ((x >> 4) != chunk.locX || (z >> 4) != chunk.locZ) {
++                        posChunk = ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, x >> 4, z >> 4) ? level.getChunkIfLoaded(x >> 4, z >> 4) : null;
++                        if (posChunk == null) {
++                            continue;
++                        }
++                    }
 +                    // Canvas end - optimize natural spawning
                      pos.set(x, yStart, z);
                      double xx = x + 0.5;
@@ -318,7 +299,7 @@
                              if (currentSpawnData == null) {
                                  Optional<MobSpawnSettings.SpawnerData> nextSpawnData = getRandomSpawnMobAt(
 -                                    level, structureManager, generator, mobCategory, level.random, pos
-+                                    chunk, structureManager, generator, mobCategory, fastRandom, pos // Canvas - pass chunk and fast random
++                                    posChunk, structureManager, generator, mobCategory, fastRandom, pos // Canvas - pass chunk and fast random
                                  );
                                  if (nextSpawnData.isEmpty()) {
                                      break;
@@ -331,7 +312,7 @@
  
                              // Paper start - PreCreatureSpawnEvent
 -                            PreSpawnStatus doSpawning = isValidSpawnPostitionForType(level, mobCategory, structureManager, generator, currentSpawnData, pos, nearestPlayerDistanceSqr);
-+                            PreSpawnStatus doSpawning = isValidSpawnPostitionForType(level, mobCategory, structureManager, generator, currentSpawnData, pos, chunk, fastRandom, nearestPlayerDistanceSqr); // Canvas - pass chunk and random
++                            PreSpawnStatus doSpawning = isValidSpawnPostitionForType(level, mobCategory, structureManager, generator, currentSpawnData, pos, posChunk, fastRandom, nearestPlayerDistanceSqr); // Canvas - pass chunk and random
                              // Paper start - per player mob count backoff
                              if (doSpawning == PreSpawnStatus.ABORT || doSpawning == PreSpawnStatus.CANCELLED) {
                                  level.getChunkSource().chunkMap.updateFailurePlayerMobTypeMap(pos.getX() >> 4, pos.getZ() >> 4, mobCategory);
@@ -344,21 +325,6 @@
                                  if (isValidPositionForMob(level, mob, nearestPlayerDistanceSqr)) {
                                      groupData = mob.finalizeSpawn(
                                          level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.NATURAL, groupData
-@@ -355,8 +_,12 @@
-             return false;
-         }
- 
--        ChunkPos chunkPos = ChunkPos.containing(pos);
--        return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
-+        // Canvas start - optimize natural spawning
-+        // 'pos' is a mutable block pos clamped to the passed ChunkAccess, so this check is stupid
-+        // ChunkPos chunkPos = ChunkPos.containing(pos);
-+        // return Objects.equals(chunkPos, chunk.getPos()) || level.canSpawnEntitiesInChunk(chunkPos);
-+        return true;
-+        // Canvas end - optimize natural spawning
-     }
- 
-     // Paper start - PreCreatureSpawnEvent
 @@ -374,6 +_,8 @@
          final ChunkGenerator generator,
          final MobSpawnSettings.SpawnerData currentSpawnData,

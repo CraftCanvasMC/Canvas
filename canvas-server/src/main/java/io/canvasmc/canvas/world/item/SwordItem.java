@@ -3,8 +3,11 @@ package io.canvasmc.canvas.world.item;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -14,6 +17,7 @@ import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.equipment.Equippable;
 import net.minecraft.world.level.Level;
 import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 @NullMarked
 public class SwordItem extends Item {
@@ -65,10 +69,21 @@ public class SwordItem extends Item {
 
     @Override
     public boolean releaseUsing(final ItemStack stack, final Level level, final LivingEntity entity, final int timeLeft) {
-        if (level.canvasConfig().combat.imitateSwordBlocking && entity instanceof Player player && player.canvas$isTemporarilyBlocking) {
+        if (entity instanceof Player player && player.canvas$isTemporarilyBlocking) {
             stack.remove(DataComponents.BLOCKS_ATTACKS);
             player.canvas$isTemporarilyBlocking = false;
         }
         return super.releaseUsing(stack, level, entity, timeLeft);
+    }
+
+    @Override
+    public void inventoryTick(final ItemStack itemStack, final ServerLevel level, final Entity owner, final @Nullable EquipmentSlot slot) {
+        if (BLOCKS_ATTACKS.equals(itemStack.get(DataComponents.BLOCKS_ATTACKS)) && !(owner instanceof LivingEntity living && living.getUseItem() == itemStack)) {
+            itemStack.remove(DataComponents.BLOCKS_ATTACKS);
+            if (owner instanceof Player player && !player.isUsingItem()) {
+                player.canvas$isTemporarilyBlocking = false;
+            }
+        }
+        super.inventoryTick(itemStack, level, owner, slot);
     }
 }
