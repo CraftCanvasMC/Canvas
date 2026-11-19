@@ -41,8 +41,11 @@ public final class HandleTicks {
         return id;
     }
 
-    // TODO - call on runTick
     public synchronized void tickStart(final long nanoTime) {
+        if (finished) {
+            return;
+        }
+
         if (ticked) {
             close();
         }
@@ -58,14 +61,20 @@ public final class HandleTicks {
         openDuration = 0L;
     }
 
-    // TODO - call on runTick
     public synchronized void tickEnd(final long nanoTime) {
+        if (finished) {
+            return;
+        }
+
         openDuration = nanoTime - openStart;
         lastSeenNanos = nanoTime;
     }
 
-    // TODO - call on runTasks
     public synchronized void tasks(final long startNanoTime, final long endNanoTime) {
+        if (finished) {
+            return;
+        }
+
         pendingNanos += endNanoTime - startNanoTime;
         pendingRuns++;
         lastSeenNanos = endNanoTime;
