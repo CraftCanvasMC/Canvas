@@ -11811,10 +11811,10 @@ index 0000000000000000000000000000000000000000..4f7fcf24563293faa7dea0eeeca64dda
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 8424cf9d4617b4732d44cc460d25b04481068989..85744790cbbe58f8ea34f93c2fdf4582ae8806c1 100644
+index 8424cf9d4617b4732d44cc460d25b04481068989..27882279f248cd8b3bf4cc243fa5386b0d9d9ef8 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -1,10 +1,682 @@
+@@ -1,10 +1,756 @@
  package io.papermc.paper.threadedregions;
  
 -// placeholder class for Folia
@@ -11833,10 +11833,13 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..85744790cbbe58f8ea34f93c2fdf4582
 +import io.papermc.paper.configuration.GlobalConfiguration;
 +import it.unimi.dsi.fastutil.longs.Long2ReferenceMap;
 +import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
++import it.unimi.dsi.fastutil.objects.ObjectHeapPriorityQueue;
 +import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 +import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 +import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
++import java.util.Comparator;
 +import java.util.Iterator;
++import java.util.List;
 +import java.util.concurrent.CompletableFuture;
 +import java.util.concurrent.TimeUnit;
 +import java.util.concurrent.atomic.AtomicBoolean;
@@ -12169,6 +12172,8 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..85744790cbbe58f8ea34f93c2fdf4582
 +        private final AtomicBoolean hasPackets = new AtomicBoolean(false);
 +        // Canvas start - region threading
 +        public final TicketHolder<SaveAllTicket> canvas$saveAllTicket = new TicketHolder<>();
++        private final ObjectHeapPriorityQueue<PacketSource> sources = new ObjectHeapPriorityQueue<>(16, OLDEST_PACKET_FIRST);
++
 +        private long lastTickEndNanos;
 +        // Canvas end - region threading
 +
@@ -12189,41 +12194,110 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..85744790cbbe58f8ea34f93c2fdf4582
 +            }
 +        }
 +
-+        public boolean drainOnePacket() {
-+            if (!this.hasPackets.get()) {
++        // Canvas start - region threading
++        private static final Comparator<PacketSource> OLDEST_PACKET_FIRST = (a, b) -> Long.signum(a.arrivalNanos - b.arrivalNanos);
++
++        private static final class PacketSource {
++            private final ServerPlayer player;
++            private final PacketProcessor processor;
++
++            // note: we update this every iteration instead of building a new one
++            private long arrivalNanos;
++
++            private PacketSource(final ServerPlayer player, final PacketProcessor processor, final long arrivalNanos) {
++                this.player = player;
++                this.processor = processor;
++                this.arrivalNanos = arrivalNanos;
++            }
++        }
++
++        private boolean drainPackets(final List<ServerPlayer> players, final int max) {
++            final long cutoff = System.nanoTime();
++
++            for (final ServerPlayer player : players) {
++                final PacketProcessor packetProcessor = player.getBukkitEntity().packetProcessor;
++                final PacketProcessor.ListenerAndPacket<?> head = packetProcessor.peek();
++                if (head == null || head.arrivalNanos() - cutoff > 0L || !TickThread.isTickThreadFor(player)) {
++                    // no packets yet, or the player isnt in this region(anymore?)
++                    continue;
++                }
++
++                sources.enqueue(new PacketSource(player, packetProcessor, head.arrivalNanos()));
++            }
++
++            if (sources.isEmpty()) {
++                // no players and/or no packets to drain
 +                return false;
 +            }
 +
-+            final RegionizedWorldData worldData = this.world.getCurrentWorldData();
-+            boolean hasPacketsNew = false;
++            int remaining = max;
++            while (remaining > 0 && !sources.isEmpty()) {
++                // the first source is always the player with the oldest packet
++                final PacketSource source = sources.first();
++                if (!TickThread.isTickThreadFor(source.player) || !source.processor.executeSinglePacket()) {
 +
-+            for (final ServerPlayer player : worldData.getLocalPlayers()) {
-+                final PacketProcessor packetProcessor = player.getBukkitEntity().packetProcessor;
-+                if (!packetProcessor.hasPackets()) {
++                    // the player is out of region now or the player ran out of packets
++                    // there is nothing to do with this player, move to next source
++
++                    sources.dequeue();
 +                    continue;
 +                }
-+                if (!TickThread.isTickThreadFor(player)) {
++                --remaining;
++
++                final PacketProcessor.ListenerAndPacket<?> head = source.processor.peek();
++                if (head == null || head.arrivalNanos() - cutoff > 0L) {
++                    // nothing left in the queue that arrived before the cutoff, move to next source
++                    sources.dequeue();
 +                    continue;
 +                }
-+                if (packetProcessor.executeSinglePacket()) {
-+                    hasPacketsNew |= packetProcessor.hasPackets();
-+                }
++
++                // has more packets still, update arrival nanos in place
++                // this keeps the player first until another player has an older packet
++
++                source.arrivalNanos = head.arrivalNanos();
++                sources.changed();
 +            }
 +
-+            if (!hasPacketsNew) {
++            final boolean hasPackets = !sources.isEmpty();
++            sources.clear();
++
++            return hasPackets;
++        }
++
++        private void drainAndUpdatePackets(int max) {
++            final List<ServerPlayer> localPlayers = this.world.getCurrentWorldData().getLocalPlayers();
++            if (max == Integer.MIN_VALUE) {
++                max = Math.max(10, localPlayers.size());
++            }
++
++            if (!drainPackets(localPlayers, max)) {
 +                this.hasPackets.set(false);
 +
-+                // handle race condition: packet added during packet processing
-+                for (final ServerPlayer player : worldData.getLocalPlayers()) {
++                // handle race of packets being added during packet processing
++                for (final ServerPlayer player : localPlayers) {
 +                    if (player.getBukkitEntity().packetProcessor.hasPackets()) {
 +                        this.hasPackets.set(true);
 +                        break;
 +                    }
 +                }
 +            }
++        }
++
++        public void drainAllPackets() {
++            // use max val so that we drain absolutely everything
++            this.drainAndUpdatePackets(Integer.MAX_VALUE);
++        }
++
++        public boolean drainNextPackets() {
++            if (!this.hasPackets.get()) {
++                return false;
++            }
++
++            this.drainAndUpdatePackets(Integer.MIN_VALUE);
 +
 +            return true;
 +        }
++        // Canvas end - region threading
 +
 +        public RegionStats getRegionStats() {
 +            return this.regionStats;
@@ -12483,7 +12557,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..85744790cbbe58f8ea34f93c2fdf4582
 +                if (this.region.world.canvas$unloadTicket.isPresent()) return; // Canvas - region threading
 +                executeTickTask = queue.executeTickTask();
 +                executeChunkTask = queue.executeChunkTask();
-+                executePacketTask = this.region.drainOnePacket();
++                executePacketTask = this.region.drainNextPackets();
 +
 +                processedChunkTask |= executeChunkTask;
 +            } while ((executeChunkTask | executeTickTask | executePacketTask) && canContinue.getAsBoolean());
@@ -14668,23 +14742,28 @@ index e33ccb8d80c8e51596d107142e5d3aa1f353c8d7..9c83ad4d41a8b97331c94e3ea260e040
  
      private static final class InnerUtil { // Attempt to hide these methods from ProtocolLib, so it doesn't accidently pick them up.
 diff --git a/net/minecraft/network/PacketProcessor.java b/net/minecraft/network/PacketProcessor.java
-index 0cb104f0144f110b58645dcd64c0cd6f0bdadf93..109521f990fde0ae0ea5c7b10acbfcd99349c185 100644
+index 0cb104f0144f110b58645dcd64c0cd6f0bdadf93..8b4fc2d3d6afdd7fda97596b4896e99f754fd029 100644
 --- a/net/minecraft/network/PacketProcessor.java
 +++ b/net/minecraft/network/PacketProcessor.java
-@@ -19,6 +19,12 @@ public class PacketProcessor implements AutoCloseable {
+@@ -19,6 +19,17 @@ public class PacketProcessor implements AutoCloseable {
          this.runningThread = runningThread;
      }
  
-+    // Folia start - region threading
++    // Folia & Canvas start - region threading
 +    public boolean hasPackets() {
 +        return !this.packetsToBeHandled.isEmpty();
 +    }
 +
-+    // Folia end - region threading
++    @org.jspecify.annotations.Nullable
++    public ListenerAndPacket<?> peek() {
++        return this.closed ? null : this.packetsToBeHandled.peek();
++    }
++
++    // Folia & Canvas end - region threading
      // Paper start - improve tick loop
      public final boolean executeSinglePacket() {
          if (this.closed) {
-@@ -39,9 +45,9 @@ public class PacketProcessor implements AutoCloseable {
+@@ -39,9 +50,9 @@ public class PacketProcessor implements AutoCloseable {
          return Thread.currentThread() == this.runningThread;
      }
  
@@ -14696,7 +14775,7 @@ index 0cb104f0144f110b58645dcd64c0cd6f0bdadf93..109521f990fde0ae0ea5c7b10acbfcd9
          }
          // Paper start - improve tick loop
          // wake up main thread inbetween ticks to process packets
-@@ -52,9 +58,10 @@ public class PacketProcessor implements AutoCloseable {
+@@ -52,9 +63,10 @@ public class PacketProcessor implements AutoCloseable {
              // only unpark if we are the first packet OR are at the head of the queue
              // we unpark if we are at the head in case the main thread emptied the queue
              // immediately before we added but after checking isEmpty
@@ -14708,6 +14787,21 @@ index 0cb104f0144f110b58645dcd64c0cd6f0bdadf93..109521f990fde0ae0ea5c7b10acbfcd9
      }
  
      public void processQueuedPackets() {
+@@ -70,7 +82,13 @@ public class PacketProcessor implements AutoCloseable {
+         this.closed = true;
+     }
+ 
+-    private record ListenerAndPacket<T extends PacketListener>(T listener, Packet<T> packet) {
++    // Canvas start - region threading
++    public record ListenerAndPacket<T extends PacketListener>(T listener, Packet<T> packet, long arrivalNanos) {
++        private ListenerAndPacket(final T listener, final Packet<T> packet) {
++            this(listener, packet, System.nanoTime());
++        }
++
++    // Canvas end - region threading
+         public void handle() {
+             if (this.listener.shouldHandleMessage(this.packet)) {
+                 try {
 diff --git a/net/minecraft/network/protocol/PacketUtils.java b/net/minecraft/network/protocol/PacketUtils.java
 index 144c18c08bf8f03d907b97f968aa171a9fbf997f..be9fdca704391f8d77b87b4d75e67bb6597063c2 100644
 --- a/net/minecraft/network/protocol/PacketUtils.java
@@ -14732,7 +14826,7 @@ index 144c18c08bf8f03d907b97f968aa171a9fbf997f..be9fdca704391f8d77b87b4d75e67bb6
          }
      }
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d99648114d3218d7 100644
+index d037272004e2ff74c183748ec01e3e9f44684cac..2198d3410d525e90e57c2fec01b5d52131c32e64 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -216,7 +216,8 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -15166,7 +15260,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
              if (this.playerList.getPlayerCount() == 0 && !this.tickRateManager.isSprinting() && this.pluginsBlockingSleep.isEmpty()) { // Paper - API to allow/disallow tick sleeping
                  this.emptyTicks++;
              } else {
-@@ -1552,41 +1592,102 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1552,41 +1592,98 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
                      level.getChunkSource().tick(() -> true, false);
                  }
                  // Paper end - avoid issues with certain tasks not processing during sleep
@@ -15202,11 +15296,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
 +            region.getTaskQueueData().drainTasks();
 +
 +            // run all player packets
-+            for (final ServerPlayer player : new java.util.ArrayList<>(regionizedWorldData.getLocalPlayers())) {
-+                final PacketProcessor packetProcessor = player.getBukkitEntity().packetProcessor;
-+                //noinspection StatementWithEmptyBody
-+                while (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) && packetProcessor.executeSinglePacket());
-+            }
++            region.drainAllPackets();
 +
 +            // we process end credits players HERE
 +            for (final ServerPlayer player : new java.util.ArrayList<>(regionizedWorldData.endCreditsPlayers)) {
@@ -15281,7 +15371,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
                  }
              }
          } finally {
-@@ -1594,27 +1695,21 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1594,27 +1691,21 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          }
          // Paper end - Incremental chunk and player saving
  
@@ -15315,7 +15405,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
          // Paper start - rewrite chunk system
          final Throwable crash = this.chunkSystemCrash;
          if (crash != null) {
-@@ -1627,7 +1722,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1627,7 +1718,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      private void autoSave() {
@@ -15324,7 +15414,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
          LOGGER.debug("Autosave started");
          this.saveEverything(true, false, false);
          LOGGER.debug("Autosave finished");
-@@ -1639,30 +1734,22 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1639,30 +1730,22 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          }
      }
  
@@ -15363,7 +15453,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
      private ServerStatus buildServerStatus() {
          ServerStatus.Players players = this.buildPlayerStatus();
          return new ServerStatus(
-@@ -1675,7 +1762,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1675,7 +1758,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      private ServerStatus.Players buildPlayerStatus() {
@@ -15372,7 +15462,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
          int maxPlayers = this.getMaxPlayers();
          if (this.hidesOnlinePlayers()) {
              return new ServerStatus.Players(maxPlayers, players.size(), List.of());
-@@ -1694,13 +1781,20 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1694,13 +1777,20 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          return new ServerStatus.Players(maxPlayers, players.size(), sample);
      }
  
@@ -15398,7 +15488,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
          for (io.papermc.paper.threadedregions.EntityScheduler scheduler : this.entitySchedulerTickList.getAllSchedulers()) {
              if (scheduler.isRetired()) {
                  continue;
-@@ -1709,11 +1803,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1709,11 +1799,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              scheduler.executeTick();
          }
          // Paper end - optimise Folia entity scheduler
@@ -15415,7 +15505,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
              // Paper start - per-world time
              if (io.papermc.paper.configuration.GlobalConfiguration.get().time.affectsAllWorlds) {
                  this.clockManager.tick();
-@@ -1725,50 +1820,75 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1725,50 +1816,75 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
              // Paper end - per-world time
          }
  
@@ -15512,7 +15602,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
              player.connection.resumeFlushing();
          }
  
-@@ -1789,15 +1909,20 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -1789,15 +1905,20 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      public void forceGameTimeSynchronization() {
@@ -15538,7 +15628,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
      }
  
      protected void setId(final String serverId) {
-@@ -2074,11 +2199,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2074,11 +2195,13 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          int count = 0;
  
          for (ServerPlayer player : this.getPlayerList().getPlayers()) {
@@ -15554,7 +15644,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
              count++;
              // Paper end - Expand PlayerGameModeChangeEvent
          }
-@@ -2103,7 +2230,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2103,7 +2226,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      public int getTickCount() {
@@ -15563,7 +15653,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
      }
  
      public boolean isUnderSpawnProtection(final ServerLevel level, final BlockPos pos, final Player player) {
-@@ -2139,6 +2266,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2139,6 +2262,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      public void invalidateStatus() {
@@ -15579,7 +15669,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
          this.lastServerStatus = 0L;
      }
  
-@@ -2153,6 +2289,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2153,6 +2285,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
      @Override
      public void executeIfPossible(final Runnable command) {
@@ -15587,7 +15677,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
          if (this.isStopped()) {
              throw new io.papermc.paper.util.ServerStopRejectedExecutionException("Server already shutting down"); // Paper - do not prematurely disconnect players on stop
          }
-@@ -2476,6 +2613,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2476,6 +2609,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
      // Paper start - per-level WeatherData
      public void setWeatherParameters(final ServerLevel level, final int clearTime, final int rainTime, final boolean raining, final boolean thundering) {
@@ -15595,7 +15685,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
          WeatherData weatherData = level.getWeatherData();
          // Paper end - per-level WeatherData
          weatherData.setClearWeatherTime(clearTime);
-@@ -2515,7 +2653,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2515,7 +2649,12 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      public long getAverageTickTimeNanos() {
@@ -15609,7 +15699,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
      }
  
      public long[] getTickTimesNanos() {
-@@ -2924,7 +3067,16 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -2924,7 +3063,16 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
      }
  
      public ServerDebugSubscribers debugSubscribers() {
@@ -15627,7 +15717,7 @@ index d037272004e2ff74c183748ec01e3e9f44684cac..ae42829efa2238dee964abd9d9964811
      }
  
      public enum MultiplayerScope {
-@@ -3035,24 +3187,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+@@ -3035,24 +3183,15 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
  
      // Paper start - API to check if the server is sleeping
      public boolean isTickPaused() {
