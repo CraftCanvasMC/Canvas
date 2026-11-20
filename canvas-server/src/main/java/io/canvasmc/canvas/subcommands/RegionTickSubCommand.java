@@ -67,7 +67,7 @@ public class RegionTickSubCommand implements SubCommand {
     @Override
     public LiteralArgumentBuilder<CommandSourceStack> construct(final LiteralArgumentBuilder<CommandSourceStack> base, final CommandBuildContext buildContext) {
         return base
-            .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(0.0F)).executes((context) -> {
+            .then(literal("rate").then(argument("rate", FloatArgumentType.floatArg(TickRegionScheduler.MIN_TR, TickRegionScheduler.MAX_TR)).executes((context) -> {
                 TickRegionScheduler.setTickRate(FloatArgumentType.getFloat(context, "rate"));
                 return Command.SINGLE_SUCCESS;
             })))
