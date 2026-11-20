@@ -22,7 +22,7 @@ public class LockedReference<E> {
     private final ReentrantLock writeLock = new ReentrantLock(true);
 
     @UnknownNullability
-    private E value;
+    private volatile E value;
 
     public LockedReference(final @Nullable E default_) {
         this.value = default_;

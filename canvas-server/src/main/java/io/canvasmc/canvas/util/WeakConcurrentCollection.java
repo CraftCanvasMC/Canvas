@@ -5,7 +5,6 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import java.lang.ref.WeakReference;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -50,9 +49,8 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
 
     @Override
     public Iterator<E> iterator() {
-        final List<WeakReference<E>> snapshot = List.copyOf(backed);
         return new Iterator<>() {
-            private final Iterator<WeakReference<E>> it = snapshot.iterator();
+            private final Iterator<WeakReference<E>> it = backed.iterator();
             private @Nullable E next = null;
             private @Nullable E lastResolved = null;
 
@@ -184,8 +182,12 @@ public class WeakConcurrentCollection<E> implements Collection<E> {
     }
 
     private void compactIfNeeded() {
-        final int total = backed.size();
-        final int live = liveCount.get();
-        if (total > 0 && (total - live) * 4 >= total) compact();
+        int total = 0;
+        int dead = 0;
+        for (final WeakReference<E> weak : backed) {
+            total++;
+            if (weak.get() == null) dead++;
+        }
+        if (dead > 0 && dead * 4 >= total) compact();
     }
 }
