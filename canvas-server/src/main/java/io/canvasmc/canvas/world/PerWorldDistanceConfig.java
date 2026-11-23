@@ -19,11 +19,14 @@ import net.minecraft.server.dedicated.DedicatedServer;
 public record PerWorldDistanceConfig(
     LockedReference<Integer> viewDistance, LockedReference<Integer> simulationDistance
 ) {
-    public static PerWorldDistanceConfig DEFAULT = new PerWorldDistanceConfig(Optional.empty(), Optional.empty());
     public static final Codec<PerWorldDistanceConfig> CODEC = RecordCodecBuilder.create(i -> i.group(
         Codec.INT.optionalFieldOf("ViewDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::viewDistanceAsOptional),
         Codec.INT.optionalFieldOf("SimulationDistance").orElse(Optional.empty()).forGetter(PerWorldDistanceConfig::simulationDistanceAsOptional)
     ).apply(i, PerWorldDistanceConfig::new));
+
+    public static PerWorldDistanceConfig createDefault() {
+        return new PerWorldDistanceConfig(Optional.empty(), Optional.empty());
+    }
 
     // this is for the codec, nothing much else
     @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
